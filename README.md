@@ -2,6 +2,8 @@
 
 A prompt_toolkit extension that adds a "thinking box" above the prompt for displaying AI thinking/processing content with real-time streaming updates.
 
+![Demo](docs/demo.gif)
+
 ## Features
 
 - **Thinking Box**: A collapsible area above the prompt that shows processing/thinking content
