@@ -37,8 +37,6 @@ from .app_info import AppInfo
 from .styles import (
     ThinkingPromptStyles,
     DEFAULT_STYLES,
-    get_default_thinking_style,
-    merge_thinking_style,
 )
 from .types import (
     StreamingContent,
@@ -47,7 +45,7 @@ from .types import (
     InputHandler,
 )
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 __all__ = [
     # Main class
@@ -57,8 +55,6 @@ __all__ = [
     # Styles
     "ThinkingPromptStyles",
     "DEFAULT_STYLES",
-    "get_default_thinking_style",
-    "merge_thinking_style",
     # Type helpers
     "StreamingContent",
     "ContentCallback",

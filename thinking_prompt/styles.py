@@ -6,9 +6,8 @@ Provides ThinkingPromptStyles dataclass for clean style customization.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
 
-from prompt_toolkit.styles import Style, merge_styles
+from prompt_toolkit.styles import Style
 
 
 @dataclass
@@ -88,34 +87,3 @@ class ThinkingPromptStyles:
 
 # Default styles instance
 DEFAULT_STYLES = ThinkingPromptStyles()
-
-# For backward compatibility
-DEFAULT_THINKING_STYLE = DEFAULT_STYLES.to_style()
-
-
-def get_default_thinking_style() -> Style:
-    """
-    Get the default thinking box style.
-
-    Returns:
-        The default Style object.
-    """
-    return DEFAULT_THINKING_STYLE
-
-
-def merge_thinking_style(user_style: Optional[Style] = None) -> Style:
-    """
-    Merge user style with defaults.
-
-    The user style takes precedence over defaults.
-
-    Args:
-        user_style: Optional user-provided style to merge.
-
-    Returns:
-        Merged Style object.
-    """
-    if user_style is None:
-        return DEFAULT_THINKING_STYLE
-
-    return merge_styles([DEFAULT_THINKING_STYLE, user_style])

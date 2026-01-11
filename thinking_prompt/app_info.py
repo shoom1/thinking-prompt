@@ -130,28 +130,6 @@ class AppInfo:
         # Generate default welcome box
         return self._format_default_welcome()
 
-    def get_welcome_text(self) -> str:
-        """
-        Get the welcome text as a plain string.
-
-        For backward compatibility. Use get_welcome_content() for Rich support.
-
-        Returns:
-            The welcome text as a string.
-        """
-        content = self.get_welcome_content()
-
-        # If it's already a string, return it
-        if isinstance(content, str):
-            return content
-
-        # If it's FormattedText, extract the text
-        if isinstance(content, FormattedText):
-            return ''.join(item[1] if isinstance(item, tuple) else str(item) for item in content)
-
-        # For Rich renderables or other objects, convert to string
-        return str(content)
-
     def _format_default_welcome(self) -> str:
         """
         Format the default welcome box.

@@ -291,8 +291,7 @@ class Display:
             content: The welcome content (Rich renderable or string).
         """
         if _is_rich_renderable(content):
-            ansi_content = _rich_to_ansi(content)
-            self.raw(ansi_content)
+            self.rich(content)
         else:
             self.raw(str(content) + "\n")
 
@@ -309,6 +308,35 @@ class Display:
                 self._pending_output.append(('formatted', formatted_text))
         else:
             print_formatted_text(formatted_text, style=self._style)
+
+    def rich(self, renderable: Any) -> None:
+        """
+        Output a Rich renderable (Panel, Table, Text, etc.) to console and history.
+
+        Converts the renderable to ANSI-formatted string using Rich's Console.
+        Falls back to str() if Rich is not installed.
+
+        Args:
+            renderable: Any Rich renderable object (Panel, Table, Text, Tree, etc.).
+
+        Example:
+            from rich.panel import Panel
+            from rich.table import Table
+
+            display.rich(Panel("Hello World", title="Greeting"))
+
+            table = Table(title="Users")
+            table.add_column("Name")
+            table.add_row("Alice")
+            display.rich(table)
+        """
+        ansi_content = _rich_to_ansi(renderable)
+        self._history.append("", ansi_content)
+        if self._is_fullscreen():
+            with self._pending_lock:
+                self._pending_output.append(('raw', ansi_content))
+        else:
+            print_formatted_text(ANSI(ansi_content), style=self._style)
 
     def raw(self, content: str, style_class: str = "") -> None:
         """
@@ -336,8 +364,17 @@ class Display:
             print_formatted_text(ANSI(content), style=self._style)
 
     def clear(self) -> None:
-        """Clear the history buffer."""
+        """Clear the terminal screen and history buffer."""
+        # Clear terminal using ANSI escape codes
+        # \033[2J clears screen, \033[H moves cursor to home position
+        print("\033[2J\033[H", end="", flush=True)
+
+        # Clear history buffer
         self._history.clear()
+
+        # Clear any pending output
+        with self._pending_lock:
+            self._pending_output.clear()
 
     def flush_pending(self) -> None:
         """

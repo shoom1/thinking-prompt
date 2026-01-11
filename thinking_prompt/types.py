@@ -13,10 +13,8 @@ from typing import (
     Callable,
     List,
     Literal,
-    Protocol,
     Tuple,
     Union,
-    runtime_checkable,
 )
 
 from prompt_toolkit.formatted_text import FormattedText
@@ -68,28 +66,6 @@ def truncate_to_lines(content: str, max_lines: int, suffix: str = "...") -> str:
     if len(lines) > max_lines:
         return '\n'.join(lines[:max_lines]) + '\n' + suffix
     return content.rstrip()
-
-
-# =============================================================================
-# Protocols
-# =============================================================================
-
-@runtime_checkable
-class RichRenderable(Protocol):
-    """Protocol for Rich renderable objects."""
-
-    def __rich_console__(self, console: Any, options: Any) -> Any:
-        """Rich console protocol method."""
-        ...
-
-
-@runtime_checkable
-class RichAlternative(Protocol):
-    """Alternative Rich protocol using __rich__ method."""
-
-    def __rich__(self) -> Any:
-        """Return a Rich renderable."""
-        ...
 
 
 # =============================================================================

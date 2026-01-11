@@ -158,12 +158,9 @@ class ThinkingPromptSession:
         # Input history (for up/down arrow)
         self._input_history = history or InMemoryHistory()
 
-        # Input handler callback (can be set via @on_input decorator)
+        # Input handler callback (can be set via @on_input decorator or run_async)
         # Handler can be sync (returns None) or async (returns Coroutine)
         self._input_handler: Optional[
-            Callable[[str], Union[None, Coroutine[Any, Any, None]]]
-        ] = None
-        self._registered_handler: Optional[
             Callable[[str], Union[None, Coroutine[Any, Any, None]]]
         ] = None
 
@@ -598,15 +595,52 @@ class ThinkingPromptSession:
         """
         self._display.code(code, language)
 
-    def clear_history(self) -> None:
+    def add_rich(self, renderable: Any) -> None:
         """
-        Clear the history.
+        Add a Rich renderable (Panel, Table, Text, etc.) to history and console.
 
-        Note: This also triggers fullscreen mode since clearing history
-        means the console scrollback is no longer in sync.
+        Converts the renderable to ANSI-formatted output using Rich's Console.
+        Falls back to str() if Rich is not installed.
+
+        Args:
+            renderable: Any Rich renderable object (Panel, Table, Text, Tree, etc.).
+
+        Example:
+            from rich.panel import Panel
+            from rich.table import Table
+
+            # Display a panel
+            session.add_rich(Panel("Hello World", title="Greeting"))
+
+            # Display a table
+            table = Table(title="Users")
+            table.add_column("Name")
+            table.add_column("Role")
+            table.add_row("Alice", "Admin")
+            table.add_row("Bob", "User")
+            session.add_rich(table)
         """
+        self._display.rich(renderable)
+
+    def clear(self) -> None:
+        """
+        Clear the display and reset to startup state.
+
+        Clears the terminal screen and history buffer, re-prints the welcome
+        message, and returns to prompt mode.
+        """
+        # Exit fullscreen if active
+        with self._fullscreen_lock:
+            self._is_fullscreen = False
+
+        # Clear terminal and history
         self._display.clear()
-        self.switch_to_fullscreen()
+
+        # Re-print welcome message
+        self._print_welcome()
+
+        # Refresh UI
+        self._invalidate()
 
     # =========================================================================
     # UI State API
@@ -689,7 +723,7 @@ class ThinkingPromptSession:
         Returns:
             The handler function (unchanged).
         """
-        self._registered_handler = func
+        self._input_handler = func
         return func
 
     # =========================================================================
@@ -751,15 +785,13 @@ class ThinkingPromptSession:
         # Print welcome message once at startup
         self._print_welcome()
 
-        # Use provided handler or registered one
-        effective_handler = handler or self._registered_handler
+        # Use provided handler or previously registered one
+        effective_handler = handler or self._input_handler
         if effective_handler is None:
             raise ValueError(
                 "No handler provided. Either pass a handler to run_async() "
                 "or register one with @session.on_input decorator."
             )
-
-        self._input_handler = effective_handler
 
         async def input_loop():
             while True:
