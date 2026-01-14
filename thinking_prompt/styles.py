@@ -57,6 +57,14 @@ class ThinkingPromptStyles:
     prompt: str = ""  # Default terminal colors
     input_separator: str = "fg:#444444"  # Grey separator around input
 
+    # Dialog styles
+    dialog_title: str = "fg:#ffffff bold"  # White bold title
+    dialog_body: str = ""  # Default text color
+    dialog_border: str = "fg:#888888"  # Grey border
+    dialog_shadow: str = "bg:#000000"  # Black shadow/background
+    dialog_button: str = ""  # Default button style
+    dialog_button_focused: str = "bg:#0066cc fg:#ffffff"  # Blue background, white text
+
     def to_style(self) -> Style:
         """
         Convert to prompt_toolkit Style object.
@@ -82,6 +90,14 @@ class ThinkingPromptStyles:
             'history.success': self.success_message,
             'prompt': self.prompt,
             'input-separator': self.input_separator,
+            # Dialog styles
+            'dialog': '',
+            'dialog.body': self.dialog_body,
+            'dialog frame.label': self.dialog_title,
+            'dialog frame.border': self.dialog_border,
+            'dialog shadow': self.dialog_shadow,
+            'button': self.dialog_button,
+            'button.focused': self.dialog_button_focused,
         })
 
 

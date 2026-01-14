@@ -18,11 +18,13 @@ from typing import (
     Coroutine,
     Literal,
     Optional,
+    Sequence,
     Union,
 )
 
 if TYPE_CHECKING:
     from .types import ContentCallback, InputHandler, MessageRole
+    from .dialog import DialogConfig, BaseDialog, DialogManager
 
 from prompt_toolkit.application import Application
 from prompt_toolkit.buffer import Buffer
@@ -166,6 +168,9 @@ class ThinkingPromptSession:
 
         # Pending input future for async handling
         self._pending_input: Optional[asyncio.Future] = None
+
+        # Dialog manager (lazy initialization)
+        self._dialog_manager: Optional[DialogManager] = None
 
         # Create components
         self.default_buffer = self._create_default_buffer()
@@ -850,3 +855,167 @@ class ThinkingPromptSession:
         """Set the prompt message."""
         self._message = value
         self._invalidate()
+
+    # =========================================================================
+    # Dialog API
+    # =========================================================================
+
+    @property
+    def _dialogs(self) -> DialogManager:
+        """Get or create the dialog manager (lazy initialization)."""
+        if self._dialog_manager is None:
+            from .dialog import DialogManager
+            self._dialog_manager = DialogManager(self)
+        return self._dialog_manager
+
+    async def yes_no_dialog(
+        self,
+        title: str,
+        text: str,
+        yes_text: str = "Yes",
+        no_text: str = "No",
+    ) -> bool:
+        """
+        Show a Yes/No confirmation dialog.
+
+        Args:
+            title: Dialog title.
+            text: Dialog body text.
+            yes_text: Text for Yes button (default: "Yes").
+            no_text: Text for No button (default: "No").
+
+        Returns:
+            True if Yes was clicked, False if No or Escape.
+
+        Example:
+            if await session.yes_no_dialog("Confirm", "Delete this file?"):
+                delete_file()
+        """
+        from .dialog import create_yes_no_dialog
+        dialog = create_yes_no_dialog(title, text, yes_text, no_text)
+        return await self._dialogs.show(dialog)
+
+    async def message_dialog(
+        self,
+        title: str,
+        text: str,
+        ok_text: str = "OK",
+    ) -> None:
+        """
+        Show an informational message dialog.
+
+        Args:
+            title: Dialog title.
+            text: Dialog body text.
+            ok_text: Text for OK button (default: "OK").
+
+        Example:
+            await session.message_dialog("Info", "Operation completed.")
+        """
+        from .dialog import create_message_dialog
+        dialog = create_message_dialog(title, text, ok_text)
+        await self._dialogs.show(dialog)
+
+    async def choice_dialog(
+        self,
+        title: str,
+        text: str,
+        choices: Sequence[str],
+    ) -> Optional[str]:
+        """
+        Show a dialog with multiple choice buttons.
+
+        Args:
+            title: Dialog title.
+            text: Dialog body text.
+            choices: List of choice strings (each becomes a button).
+
+        Returns:
+            The selected choice string, or None if Escape was pressed.
+
+        Example:
+            action = await session.choice_dialog(
+                "Select Action",
+                "What would you like to do?",
+                ["Save", "Discard", "Cancel"],
+            )
+            if action == "Save":
+                save_file()
+        """
+        from .dialog import create_choice_dialog
+        dialog = create_choice_dialog(title, text, choices)
+        return await self._dialogs.show(dialog)
+
+    async def dropdown_dialog(
+        self,
+        title: str,
+        text: str,
+        options: Sequence[str],
+        default: Optional[str] = None,
+    ) -> Optional[str]:
+        """
+        Show a dialog with a dropdown/radio list selection.
+
+        Args:
+            title: Dialog title.
+            text: Dialog body text.
+            options: List of options to choose from.
+            default: Default selected option (optional).
+
+        Returns:
+            The selected option string, or None if cancelled.
+
+        Example:
+            theme = await session.dropdown_dialog(
+                "Select Theme",
+                "Choose a color theme:",
+                ["Light", "Dark", "System"],
+                default="System",
+            )
+        """
+        from .dialog import create_dropdown_dialog
+        dialog = create_dropdown_dialog(title, text, options, default)
+        return await self._dialogs.show(dialog)
+
+    async def show_dialog(
+        self,
+        dialog: Union[DialogConfig, BaseDialog],
+    ) -> Any:
+        """
+        Show a custom dialog.
+
+        Args:
+            dialog: Either a DialogConfig for simple dialogs,
+                   or a BaseDialog subclass for complex dialogs.
+
+        Returns:
+            The result value set by the dialog.
+
+        Example with DialogConfig:
+            from thinking_prompt.dialog import DialogConfig, ButtonConfig
+
+            config = DialogConfig(
+                title="Custom",
+                body="Choose an option:",
+                buttons=[
+                    ButtonConfig(text="Option A", result="a"),
+                    ButtonConfig(text="Option B", result="b"),
+                ],
+            )
+            result = await session.show_dialog(config)
+
+        Example with BaseDialog subclass:
+            from thinking_prompt.dialog import BaseDialog
+
+            class MyDialog(BaseDialog):
+                title = "My Dialog"
+
+                def build_body(self):
+                    return Label("Custom content")
+
+                def get_buttons(self):
+                    return [("OK", lambda: self.set_result(True))]
+
+            result = await session.show_dialog(MyDialog())
+        """
+        return await self._dialogs.show(dialog)

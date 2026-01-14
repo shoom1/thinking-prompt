@@ -44,6 +44,11 @@ from .types import (
     MessageRole,
     InputHandler,
 )
+from .dialog import (
+    DialogConfig,
+    ButtonConfig,
+    BaseDialog,
+)
 
 __version__ = "0.1.1"
 
@@ -60,4 +65,8 @@ __all__ = [
     "ContentCallback",
     "MessageRole",
     "InputHandler",
+    # Dialog
+    "DialogConfig",
+    "ButtonConfig",
+    "BaseDialog",
 ]
