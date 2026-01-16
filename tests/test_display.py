@@ -230,7 +230,7 @@ class TestDisplayUserInput:
         """Should cache output in fullscreen mode."""
         fullscreen_display.user_input(">>> ", "hello")
         assert len(fullscreen_display._pending_output) == 1
-        assert fullscreen_display._pending_output[0][0] == 'formatted'
+        assert isinstance(fullscreen_display._pending_output[0], FormattedText)
 
 
 class TestDisplayThinking:
@@ -345,15 +345,17 @@ class TestDisplayMarkdownAndCode:
 
     def test_markdown_caches_in_fullscreen(self, fullscreen_display: Display):
         """Markdown should cache in fullscreen mode."""
+        from prompt_toolkit.formatted_text import ANSI
         fullscreen_display.markdown("# Title")
         assert len(fullscreen_display._pending_output) == 1
-        assert fullscreen_display._pending_output[0][0] == 'raw'
+        assert isinstance(fullscreen_display._pending_output[0], ANSI)
 
     def test_code_caches_in_fullscreen(self, fullscreen_display: Display):
         """Code should cache in fullscreen mode."""
+        from prompt_toolkit.formatted_text import ANSI
         fullscreen_display.code("x = 1")
         assert len(fullscreen_display._pending_output) == 1
-        assert fullscreen_display._pending_output[0][0] == 'raw'
+        assert isinstance(fullscreen_display._pending_output[0], ANSI)
 
 
 class TestDisplayWelcome:
@@ -391,7 +393,7 @@ class TestDisplayFormatted:
         ft = FormattedText([("bold", "Hello")])
         fullscreen_display.formatted(ft)
         assert len(fullscreen_display._pending_output) == 1
-        assert fullscreen_display._pending_output[0][0] == 'formatted'
+        assert isinstance(fullscreen_display._pending_output[0], FormattedText)
 
 
 class TestDisplayRaw:
@@ -411,14 +413,15 @@ class TestDisplayRaw:
         assert "class:custom" in styles
 
     def test_caches_raw_in_fullscreen(self, fullscreen_display: Display):
-        """Raw without style should cache as raw."""
+        """Raw without style should cache as ANSI."""
+        from prompt_toolkit.formatted_text import ANSI
         fullscreen_display.raw("Content")
-        assert fullscreen_display._pending_output[0][0] == 'raw'
+        assert isinstance(fullscreen_display._pending_output[0], ANSI)
 
     def test_caches_formatted_in_fullscreen_with_style(self, fullscreen_display: Display):
-        """Raw with style should cache as formatted."""
+        """Raw with style should cache as FormattedText."""
         fullscreen_display.raw("Content", style_class="class:custom")
-        assert fullscreen_display._pending_output[0][0] == 'formatted'
+        assert isinstance(fullscreen_display._pending_output[0], FormattedText)
 
 
 class TestDisplayClear:

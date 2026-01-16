@@ -11,10 +11,10 @@ markdown, syntax highlighting, and Rich renderables.
 from __future__ import annotations
 
 import threading
-from typing import Any, Callable, List, Literal, Optional, Tuple, Union
+from typing import Any, Callable, List, Optional
 
 from prompt_toolkit import print_formatted_text
-from prompt_toolkit.formatted_text import ANSI, FormattedText
+from prompt_toolkit.formatted_text import ANSI, AnyFormattedText, FormattedText
 from prompt_toolkit.styles import Style
 
 from .history import FormattedTextHistory
@@ -100,9 +100,8 @@ class Display:
         self._style = style
         self._history = FormattedTextHistory()
         self._is_fullscreen = is_fullscreen
-        # Pending console output: ('formatted', FormattedText) or ('raw', str)
-        self._pending_output: List[Union[Tuple[Literal['formatted'], FormattedText], Tuple[Literal['raw'], str]]] = []
         self._pending_lock = threading.Lock()
+        self._pending_output: List[AnyFormattedText] = []
 
     @property
     def history(self) -> FormattedTextHistory:
@@ -118,14 +117,27 @@ class Display:
         """
         self._history.set_on_change(callback)
 
-    def _print_styled(self, text: str, style_class: str) -> None:
-        """Print styled text to console (cached in fullscreen mode)."""
-        formatted = FormattedText([(style_class, text)])
+    # =========================================================================
+    # Core Output Helpers
+    # =========================================================================
+
+    def _print_to_console(self, content: AnyFormattedText) -> None:
+        """Print to console or cache if in fullscreen mode."""
         if self._is_fullscreen():
             with self._pending_lock:
-                self._pending_output.append(('formatted', formatted))
-            return
-        print_formatted_text(formatted, style=self._style)
+                self._pending_output.append(content)
+        else:
+            print_formatted_text(content, style=self._style)
+
+    def _output_styled(self, style: str, text: str) -> None:
+        """Output styled text to history and console."""
+        self._history.append(style, text)
+        self._print_to_console(FormattedText([(style, text)]))
+
+    def _output_ansi(self, content: str) -> None:
+        """Output ANSI string to console and history."""
+        self._history.append("", content)
+        self._print_to_console(ANSI(content))
 
     # =========================================================================
     # Output Methods
@@ -139,20 +151,14 @@ class Display:
             prompt: The prompt string that was shown.
             text: The user's input text.
         """
-        # History: styled prompt + message
+        # Add to history as separate fragments
         self._history.append("class:history.user-prefix", prompt)
         self._history.append("class:history.user-message", f"{text}\n")
-
-        # Console: styled output (cached in fullscreen)
-        formatted = FormattedText([
+        # Print as single formatted output
+        self._print_to_console(FormattedText([
             ("class:history.user-prefix", prompt),
             ("class:history.user-message", f"{text}\n"),
-        ])
-        if self._is_fullscreen():
-            with self._pending_lock:
-                self._pending_output.append(('formatted', formatted))
-        else:
-            print_formatted_text(formatted, style=self._style)
+        ]))
 
     def thinking(
         self,
@@ -175,18 +181,19 @@ class Display:
         if not content.strip():
             return
 
-        # History: full content (if requested)
-        if add_to_history:
-            self._history.append("class:history.thinking", f"{content}\n")
+        style = "class:history.thinking"
 
-        # Console: optionally truncated (if echo enabled)
+        # History gets full content
+        if add_to_history:
+            self._history.append(style, f"{content}\n")
+
+        # Console gets possibly truncated content
         if echo_to_console:
             if truncate_lines is not None:
-                console_output = truncate_to_lines(content, truncate_lines)
+                console_text = truncate_to_lines(content, truncate_lines) + "\n"
             else:
-                console_output = content.rstrip()
-
-            self._print_styled(console_output + "\n", "class:history.thinking")
+                console_text = content.rstrip() + "\n"
+            self._print_to_console(FormattedText([(style, console_text)]))
 
     def response(self, content: str) -> None:
         """
@@ -195,9 +202,7 @@ class Display:
         Args:
             content: The response content.
         """
-        self._history.append("class:history.assistant-message", f"{content}\n")
-        if content.strip():
-            self._print_styled(content + "\n", "class:history.assistant-message")
+        self._output_styled("class:history.assistant-message", f"{content}\n")
 
     def system(self, content: str) -> None:
         """
@@ -206,9 +211,7 @@ class Display:
         Args:
             content: The system message content.
         """
-        self._history.append("class:history.system", f"{content}\n")
-        if content.strip():
-            self._print_styled(content + "\n", "class:history.system")
+        self._output_styled("class:history.system", f"{content}\n")
 
     def error(self, content: str) -> None:
         """
@@ -217,9 +220,7 @@ class Display:
         Args:
             content: The error message content.
         """
-        self._history.append("class:history.error", f"[ERROR] {content}\n")
-        if content.strip():
-            self._print_styled(f"[ERROR] {content}\n", "class:history.error")
+        self._output_styled("class:history.error", f"[ERROR] {content}\n")
 
     def warning(self, content: str) -> None:
         """
@@ -228,9 +229,7 @@ class Display:
         Args:
             content: The warning message content.
         """
-        self._history.append("class:history.warning", f"[WARN] {content}\n")
-        if content.strip():
-            self._print_styled(f"[WARN] {content}\n", "class:history.warning")
+        self._output_styled("class:history.warning", f"[WARN] {content}\n")
 
     def success(self, content: str) -> None:
         """
@@ -239,9 +238,7 @@ class Display:
         Args:
             content: The success message content.
         """
-        self._history.append("class:history.success", f"[OK] {content}\n")
-        if content.strip():
-            self._print_styled(f"[OK] {content}\n", "class:history.success")
+        self._output_styled("class:history.success", f"[OK] {content}\n")
 
     def markdown(self, content: str) -> None:
         """
@@ -252,14 +249,7 @@ class Display:
         Args:
             content: The markdown content.
         """
-        ansi_content = _markdown_to_ansi(content)
-        self._history.append("", ansi_content)
-        if self._is_fullscreen():
-            with self._pending_lock:
-                self._pending_output.append(('raw', ansi_content))
-        else:
-            # Use ANSI class to preserve escape codes with print_formatted_text
-            print_formatted_text(ANSI(ansi_content), style=self._style)
+        self._output_ansi(_markdown_to_ansi(content))
 
     def code(self, code: str, language: str = "python") -> None:
         """
@@ -271,14 +261,7 @@ class Display:
             code: The source code to highlight.
             language: The programming language (default: "python").
         """
-        highlighted = _highlight_code(code, language)
-        self._history.append("", highlighted)
-        if self._is_fullscreen():
-            with self._pending_lock:
-                self._pending_output.append(('raw', highlighted))
-        else:
-            # Use ANSI class to preserve escape codes with print_formatted_text
-            print_formatted_text(ANSI(highlighted), style=self._style)
+        self._output_ansi(_highlight_code(code, language))
 
     def welcome(self, content: Any) -> None:
         """
@@ -293,7 +276,7 @@ class Display:
         if _is_rich_renderable(content):
             self.rich(content)
         else:
-            self.raw(str(content) + "\n")
+            self._output_ansi(str(content) + "\n")
 
     def formatted(self, formatted_text: FormattedText) -> None:
         """
@@ -303,11 +286,7 @@ class Display:
             formatted_text: A FormattedText object with (style, text) pairs.
         """
         self._history.append_formatted(formatted_text)
-        if self._is_fullscreen():
-            with self._pending_lock:
-                self._pending_output.append(('formatted', formatted_text))
-        else:
-            print_formatted_text(formatted_text, style=self._style)
+        self._print_to_console(formatted_text)
 
     def rich(self, renderable: Any) -> None:
         """
@@ -330,13 +309,7 @@ class Display:
             table.add_row("Alice")
             display.rich(table)
         """
-        ansi_content = _rich_to_ansi(renderable)
-        self._history.append("", ansi_content)
-        if self._is_fullscreen():
-            with self._pending_lock:
-                self._pending_output.append(('raw', ansi_content))
-        else:
-            print_formatted_text(ANSI(ansi_content), style=self._style)
+        self._output_ansi(_rich_to_ansi(renderable))
 
     def raw(self, content: str, style_class: str = "") -> None:
         """
@@ -349,19 +322,10 @@ class Display:
             content: The content to output.
             style_class: Optional style class for the content.
         """
-        self._history.append(style_class, content)
-        if self._is_fullscreen():
-            with self._pending_lock:
-                if style_class:
-                    formatted = FormattedText([(style_class, content)])
-                    self._pending_output.append(('formatted', formatted))
-                else:
-                    self._pending_output.append(('raw', content))
-            return
         if style_class:
-            self._print_styled(content, style_class)
+            self._output_styled(style_class, content)
         else:
-            print_formatted_text(ANSI(content), style=self._style)
+            self._output_ansi(content)
 
     def clear(self) -> None:
         """Clear the terminal screen and history buffer."""
@@ -386,8 +350,5 @@ class Display:
         with self._pending_lock:
             pending = list(self._pending_output)
             self._pending_output.clear()
-        for item in pending:
-            if item[0] == 'formatted':
-                print_formatted_text(item[1], style=self._style)
-            elif item[0] == 'raw':
-                print_formatted_text(ANSI(item[1]), style=self._style)
+        for content in pending:
+            print_formatted_text(content, style=self._style)
