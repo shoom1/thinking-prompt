@@ -121,6 +121,36 @@ session.add_error("Connection failed")
 session.add_message("system", "Connecting to server...")
 ```
 
+### Dialogs
+
+```python
+# Yes/No confirmation
+result = await session.yes_no_dialog("Confirm", "Delete this item?")
+if result:
+    # User clicked Yes
+
+# Message dialog
+await session.message_dialog("Info", "Operation completed!")
+
+# Choice dialog (multiple buttons)
+action = await session.choice_dialog("Action", "What to do?", ["Save", "Discard", "Cancel"])
+
+# Dropdown selection
+theme = await session.dropdown_dialog("Theme", "Choose:", ["Light", "Dark", "System"])
+
+# Custom dialog
+from thinking_prompt import DialogConfig, ButtonConfig
+config = DialogConfig(
+    title="Custom",
+    body="Choose an option:",
+    buttons=[
+        ButtonConfig(text="Option A", result="a"),
+        ButtonConfig(text="Option B", result="b"),
+    ],
+)
+result = await session.show_dialog(config)
+```
+
 ### AppInfo Configuration
 
 ```python
@@ -155,6 +185,7 @@ See the `examples/` directory for complete demos:
 - `demo_progress_line.py` - In-place progress updates
 - `demo_messages_during_thinking.py` - Output messages during thinking
 - `demo_animated_separator.py` - Different animation configurations
+- `dialog_test.py` - Dialog system demo (yes/no, message, choice, dropdown)
 
 ## License
 

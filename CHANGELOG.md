@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2025-01-15
+
+### Added
+
+- **Dialog system** - Modal dialogs that integrate with the prompt session:
+  - `yes_no_dialog(title, text)` - Yes/No confirmation dialog
+  - `message_dialog(title, text)` - Simple message with OK button
+  - `choice_dialog(title, text, choices)` - Multiple button choices
+  - `dropdown_dialog(title, text, options)` - Radio list selection
+  - `show_dialog(config)` - Custom dialogs via `DialogConfig` or `BaseDialog`
+- New exports: `DialogConfig`, `ButtonConfig`, `BaseDialog`
+- `examples/dialog_test.py` - Comprehensive dialog system demo
+- Dialog commands in `demo_showcase.py` (confirm, info, action, theme)
+
+### Changed
+
+- Simplified `Display` class internals (refactored for maintainability)
+- Smaller welcome message in demo_showcase (reduced padding)
+
 ## [0.1.1] - 2025-01-10
 
 ### Added

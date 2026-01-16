@@ -31,41 +31,39 @@ except ImportError:
 
 def create_welcome_message():
     """Create a fancy welcome message with ASCII art."""
-    ascii_art = r"""
-  _____ _     _       _    _               ____
+    ascii_art = r"""  _____ _     _       _    _               ____
  |_   _| |__ (_)_ __ | | _(_)_ __   __ _  | __ )  _____  __
    | | | '_ \| | '_ \| |/ / | '_ \ / _` | |  _ \ / _ \ \/ /
    | | | | | | | | | |   <| | | | | (_| | | |_) | (_) >  <
    |_| |_| |_|_|_| |_|_|\_\_|_| |_|\__, | |____/ \___/_/\_\
-                                   |___/
-    """
+                                   |___/"""
 
     if RICH_AVAILABLE:
         title = Text(ascii_art, style="bold cyan")
         subtitle = Text.from_markup(
             "\n[dim]A [bold]prompt_toolkit[/bold] extension for AI thinking visualization[/dim]\n"
-            "\n[green]Features:[/green] Real-time streaming • Animated separator • Rich output\n"
-            "[yellow]Controls:[/yellow] [bold]Ctrl+T[/bold] expand • [bold]Ctrl+C[/bold] cancel • [bold]Ctrl+D[/bold] exit\n"
+            "[green]Features:[/green] Real-time streaming • Animated separator • Rich output\n"
+            "[yellow]Controls:[/yellow] [bold]Ctrl+T[/bold] expand • [bold]Ctrl+C[/bold] cancel • [bold]Ctrl+D[/bold] exit • [bold]help[/bold] for commands"
         )
         content = Group(Align.center(title), Align.center(subtitle))
         return Panel(
             content,
             border_style="blue",
-            padding=(1, 2),
+            padding=(0, 2),
         )
     else:
         return (
             ascii_art +
             "\n  A prompt_toolkit extension for AI thinking visualization\n"
-            "\n  Features: Real-time streaming • Animated separator • Rich output\n"
-            "  Controls: Ctrl+T expand • Ctrl+C cancel • Ctrl+D exit\n"
+            "  Features: Real-time streaming • Animated separator • Rich output\n"
+            "  Controls: Ctrl+T expand • Ctrl+C cancel • Ctrl+D exit • help for commands"
         )
 
 
 async def main():
     app_info = AppInfo(
         name="ThinkingBox",
-        version="0.1.1",
+        version="0.2.0",
         welcome_message=create_welcome_message,
         thinking_text="Processing",
         thinking_animation=("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"),
@@ -84,15 +82,62 @@ async def main():
         if not user_input.strip():
             return
 
+        cmd = user_input.strip().lower()
+
         # Special commands
-        if user_input.strip().lower() == "help":
+        if cmd == "help":
             session.add_response(
                 "## Available Commands\n\n"
                 "- **help** - Show this message\n"
-                "- **demo** - Run a quick demo\n"
+                "- **confirm** - Yes/No dialog demo\n"
+                "- **info** - Message dialog demo\n"
+                "- **action** - Choice dialog demo\n"
+                "- **theme** - Dropdown dialog demo\n"
                 "- *anything else* - Process with thinking visualization\n",
                 markdown=True
             )
+            return
+
+        # Dialog demonstrations
+        if cmd == "confirm":
+            result = await session.yes_no_dialog(
+                title="Confirmation",
+                text="Do you want to enable advanced mode?",
+            )
+            session.add_response(f"Advanced mode: **{'enabled' if result else 'disabled'}**", markdown=True)
+            return
+
+        if cmd == "info":
+            await session.message_dialog(
+                title="Information",
+                text="ThinkingBox is ready for action!\nAll systems operational.",
+            )
+            session.add_response("Message acknowledged ✓")
+            return
+
+        if cmd == "action":
+            result = await session.choice_dialog(
+                title="Select Action",
+                text="What would you like to do?",
+                choices=["Save", "Discard", "Cancel"],
+            )
+            if result:
+                session.add_response(f"Action selected: **{result}**", markdown=True)
+            else:
+                session.add_response("Action cancelled")
+            return
+
+        if cmd == "theme":
+            result = await session.dropdown_dialog(
+                title="Select Theme",
+                text="Choose your preferred theme:",
+                options=["Light", "Dark", "System", "High Contrast"],
+                default="System",
+            )
+            if result:
+                session.add_response(f"Theme set to: **{result}**", markdown=True)
+            else:
+                session.add_response("Theme selection cancelled")
             return
 
         # Use context manager for thinking
