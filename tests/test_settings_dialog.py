@@ -208,3 +208,12 @@ class TestSessionIntegration:
         assert CheckboxItem is not None
         assert TextItem is not None
         assert SettingsDialog is not None
+
+
+class TestShowSettingsDialog:
+    """Tests for session.show_settings_dialog method."""
+
+    def test_session_has_show_settings_dialog_method(self):
+        """ThinkingPromptSession has show_settings_dialog method."""
+        from thinking_prompt import ThinkingPromptSession
+        assert hasattr(ThinkingPromptSession, 'show_settings_dialog')

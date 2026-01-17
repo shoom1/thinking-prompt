@@ -25,6 +25,7 @@ from typing import (
 if TYPE_CHECKING:
     from .types import ContentCallback, InputHandler, MessageRole
     from .dialog import DialogConfig, BaseDialog, DialogManager
+    from .settings_dialog import SettingsItem
 
 from prompt_toolkit.application import Application
 from prompt_toolkit.buffer import Buffer
@@ -1018,4 +1019,44 @@ class ThinkingPromptSession:
 
             result = await session.show_dialog(MyDialog())
         """
+        return await self._dialogs.show(dialog)
+
+    async def show_settings_dialog(
+        self,
+        title: str,
+        items: list["SettingsItem"],
+        can_cancel: bool = True,
+        styles: dict | None = None,
+    ) -> dict[str, Any] | None:
+        """
+        Show a settings dialog and return changed values.
+
+        Args:
+            title: Dialog title.
+            items: List of SettingsItem objects defining the form.
+            can_cancel: If True (default), shows Save/Cancel buttons.
+                       If False, shows only Done button.
+            styles: Optional style overrides.
+
+        Returns:
+            Dictionary of changed values if saved, or None if cancelled.
+            An empty dict {} means no values were changed.
+
+        Example:
+            from thinking_prompt import DropdownItem, CheckboxItem
+
+            result = await session.show_settings_dialog(
+                title="Settings",
+                items=[
+                    DropdownItem(key="model", label="Model",
+                                options=["gpt-4", "gpt-3.5"], default="gpt-4"),
+                    CheckboxItem(key="stream", label="Stream Output", default=True),
+                ],
+            )
+            if result is not None:
+                for key, value in result.items():
+                    update_setting(key, value)
+        """
+        from .settings_dialog import SettingsDialog
+        dialog = SettingsDialog(title, items, can_cancel, styles)
         return await self._dialogs.show(dialog)
