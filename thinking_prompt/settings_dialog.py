@@ -160,6 +160,22 @@ class SettingsDialog(BaseDialog):
                 ("Done", self._on_save),
             ]
 
+    def _sync_values_from_controls(self) -> None:
+        """Read current values from all controls into _current_values."""
+        for item in self._items:
+            control = self._controls.get(item.key)
+            if control is None:
+                continue
+
+            if isinstance(item, DropdownItem):
+                self._current_values[item.key] = control.current_value
+            elif isinstance(item, CheckboxItem):
+                # CheckboxList stores checked items in current_values list
+                self._current_values[item.key] = item.key in control.current_values
+            elif isinstance(item, TextItem):
+                self._current_values[item.key] = control.text
+
     def _on_save(self) -> None:
-        """Handle save/done button - return changed values."""
+        """Handle save/done button - sync and return changed values."""
+        self._sync_values_from_controls()
         self.set_result(self._get_changed_values())

@@ -142,3 +142,49 @@ class TestSettingsDialogLayout:
         # HSplit should have children for each item
         assert hasattr(body, 'children')
         assert len(list(body.children)) == 3
+
+
+class TestSettingsDialogValueSync:
+    """Tests for syncing control values with dialog state."""
+
+    def test_sync_values_from_controls_dropdown(self):
+        """Dropdown value changes are reflected in current_values."""
+        items = [
+            DropdownItem(key="model", label="Model", options=["a", "b"], default="a"),
+        ]
+        dialog = SettingsDialog(title="Settings", items=items)
+        dialog.build_body()  # Creates controls
+
+        # Simulate user changing dropdown
+        dialog._controls["model"].current_value = "b"
+        dialog._sync_values_from_controls()
+
+        assert dialog._current_values["model"] == "b"
+
+    def test_sync_values_from_controls_checkbox(self):
+        """Checkbox value changes are reflected in current_values."""
+        items = [
+            CheckboxItem(key="stream", label="Stream", default=False),
+        ]
+        dialog = SettingsDialog(title="Settings", items=items)
+        dialog.build_body()
+
+        # Simulate user checking checkbox
+        dialog._controls["stream"].current_values = ["stream"]
+        dialog._sync_values_from_controls()
+
+        assert dialog._current_values["stream"] is True
+
+    def test_sync_values_from_controls_text(self):
+        """Text value changes are reflected in current_values."""
+        items = [
+            TextItem(key="name", label="Name", default=""),
+        ]
+        dialog = SettingsDialog(title="Settings", items=items)
+        dialog.build_body()
+
+        # Simulate user typing
+        dialog._controls["name"].text = "new value"
+        dialog._sync_values_from_controls()
+
+        assert dialog._current_values["name"] == "new value"
