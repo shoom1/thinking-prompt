@@ -120,6 +120,7 @@ class SettingsDialog(BaseDialog):
         label_width = 20  # Fixed label width
 
         # Create control based on item type
+        control: RadioList | CheckboxList | TextArea | Label
         if isinstance(item, DropdownItem):
             control = self._create_dropdown_control(item)
         elif isinstance(item, CheckboxItem):
