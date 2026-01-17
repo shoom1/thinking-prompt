@@ -49,6 +49,13 @@ from .dialog import (
     ButtonConfig,
     BaseDialog,
 )
+from .settings_dialog import (
+    SettingsItem,
+    DropdownItem,
+    CheckboxItem,
+    TextItem,
+    SettingsDialog,
+)
 
 __version__ = "0.2.0"
 
@@ -69,4 +76,10 @@ __all__ = [
     "DialogConfig",
     "ButtonConfig",
     "BaseDialog",
+    # Settings Dialog
+    "SettingsItem",
+    "DropdownItem",
+    "CheckboxItem",
+    "TextItem",
+    "SettingsDialog",
 ]

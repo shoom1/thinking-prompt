@@ -188,3 +188,23 @@ class TestSettingsDialogValueSync:
         dialog._sync_values_from_controls()
 
         assert dialog._current_values["name"] == "new value"
+
+
+class TestSessionIntegration:
+    """Tests for session.show_settings_dialog integration."""
+
+    def test_settings_items_exported(self):
+        """Settings item classes are exported from package."""
+        from thinking_prompt import (
+            SettingsItem,
+            DropdownItem,
+            CheckboxItem,
+            TextItem,
+            SettingsDialog,
+        )
+        # Just check they're importable
+        assert SettingsItem is not None
+        assert DropdownItem is not None
+        assert CheckboxItem is not None
+        assert TextItem is not None
+        assert SettingsDialog is not None
