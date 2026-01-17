@@ -1,11 +1,9 @@
 """Tests for the settings dialog system."""
 from __future__ import annotations
 
-import pytest
 from thinking_prompt.settings_dialog import (
-    SettingsItem,
-    DropdownItem,
     CheckboxItem,
+    DropdownItem,
     TextItem,
 )
 

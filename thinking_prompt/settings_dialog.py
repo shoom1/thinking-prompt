@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from abc import ABC
 from dataclasses import dataclass, field
-from typing import Any, List
+from typing import Any
 
 
 @dataclass
@@ -20,7 +20,7 @@ class SettingsItem(ABC):
 @dataclass
 class DropdownItem(SettingsItem):
     """Select from a list of options."""
-    options: List[str] = field(default_factory=list)
+    options: list[str] = field(default_factory=list)
     default: Any = None
 
 
