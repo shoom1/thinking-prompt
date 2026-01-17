@@ -218,7 +218,7 @@ class BaseDialog(ABC):
             title=self.title,
             body=body,
             buttons=buttons,
-            with_background=True,
+            with_background=False,  # Use styled dialog, no light overlay
         )
         return self._widget
 

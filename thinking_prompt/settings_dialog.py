@@ -9,11 +9,96 @@ from abc import ABC
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+from prompt_toolkit.filters import Condition
+from prompt_toolkit.formatted_text import FormattedText
+from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.layout import Container, HSplit, VSplit, Window, WindowAlign
-from prompt_toolkit.layout.controls import FormattedTextControl
-from prompt_toolkit.widgets import CheckboxList, Label, RadioList, TextArea
+from prompt_toolkit.layout.controls import FormattedTextControl, UIContent, UIControl
+from prompt_toolkit.widgets import CheckboxList, Label, TextArea
 
 from .dialog import BaseDialog
+
+
+class CompactSelect(UIControl):
+    """
+    A compact single-line select control that cycles through options.
+
+    Displays as: [selected_value ▼]
+    Use Up/Down arrows or Enter to cycle through options.
+    """
+
+    def __init__(self, options: list[str], default: str | None = None) -> None:
+        self.options = options
+        self._selected_index = 0
+
+        # Set default selection
+        if default and default in options:
+            self._selected_index = options.index(default)
+
+    @property
+    def current_value(self) -> str | None:
+        """Get the currently selected value."""
+        if self.options:
+            return self.options[self._selected_index]
+        return None
+
+    @current_value.setter
+    def current_value(self, value: str) -> None:
+        """Set the currently selected value."""
+        if value in self.options:
+            self._selected_index = self.options.index(value)
+
+    def _next(self) -> None:
+        """Select next option."""
+        if self.options:
+            self._selected_index = (self._selected_index + 1) % len(self.options)
+
+    def _prev(self) -> None:
+        """Select previous option."""
+        if self.options:
+            self._selected_index = (self._selected_index - 1) % len(self.options)
+
+    def create_content(self, width: int, height: int) -> UIContent:
+        """Create the visual content."""
+        if self.options:
+            value = self.options[self._selected_index]
+            # Show as: [value ▼]
+            text = FormattedText([
+                ("", "["),
+                ("class:select-value", value),
+                ("class:select-arrow", " ▼"),
+                ("", "]"),
+            ])
+        else:
+            text = FormattedText([("class:select-empty", "[No options]")])
+
+        def get_line(i: int) -> FormattedText:
+            if i == 0:
+                return text
+            return FormattedText([])
+
+        return UIContent(get_line=get_line, line_count=1)
+
+    def is_focusable(self) -> bool:
+        return True
+
+    def get_key_bindings(self) -> KeyBindings:
+        """Key bindings for navigation."""
+        kb = KeyBindings()
+
+        @kb.add("up")
+        @kb.add("left")
+        def _prev(event: Any) -> None:
+            self._prev()
+
+        @kb.add("down")
+        @kb.add("right")
+        @kb.add("enter")
+        @kb.add("space")
+        def _next(event: Any) -> None:
+            self._next()
+
+        return kb
 
 
 @dataclass
@@ -90,12 +175,9 @@ class SettingsDialog(BaseDialog):
                 changed[key] = value
         return changed
 
-    def _create_dropdown_control(self, item: DropdownItem) -> RadioList:
-        """Create a RadioList control for dropdown item."""
-        values = [(opt, opt) for opt in item.options]
-        control = RadioList(values=values)
-        if item.default and item.default in item.options:
-            control.current_value = item.default
+    def _create_dropdown_control(self, item: DropdownItem) -> CompactSelect:
+        """Create a compact select control for dropdown item."""
+        control = CompactSelect(options=item.options, default=item.default)
         return control
 
     def _create_checkbox_control(self, item: CheckboxItem) -> CheckboxList:
@@ -120,7 +202,7 @@ class SettingsDialog(BaseDialog):
         label_width = 20  # Fixed label width
 
         # Create control based on item type
-        control: RadioList | CheckboxList | TextArea | Label
+        control: CompactSelect | CheckboxList | TextArea | Label
         if isinstance(item, DropdownItem):
             control = self._create_dropdown_control(item)
         elif isinstance(item, CheckboxItem):
@@ -132,6 +214,12 @@ class SettingsDialog(BaseDialog):
 
         self._controls[item.key] = control
 
+        # Wrap UIControl in Window, widgets are already containers
+        if isinstance(control, CompactSelect):
+            control_container = Window(control, height=1)
+        else:
+            control_container = control
+
         # Create row: Label | Control
         return VSplit([
             Window(
@@ -140,7 +228,7 @@ class SettingsDialog(BaseDialog):
                 align=WindowAlign.RIGHT,
             ),
             Window(width=2),  # Spacer
-            control,
+            control_container,
         ])
 
     def build_body(self) -> Container:

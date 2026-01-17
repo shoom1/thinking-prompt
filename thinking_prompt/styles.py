@@ -57,13 +57,23 @@ class ThinkingPromptStyles:
     prompt: str = ""  # Default terminal colors
     input_separator: str = "fg:#444444"  # Grey separator around input
 
-    # Dialog styles
+    # Dialog styles (dark theme to match terminal)
+    dialog: str = "bg:#2a2a2a"  # Dark grey background
     dialog_title: str = "fg:#ffffff bold"  # White bold title
-    dialog_body: str = ""  # Default text color
+    dialog_body: str = "bg:#2a2a2a fg:#e0e0e0"  # Dark bg, light text
     dialog_border: str = "fg:#888888"  # Grey border
     dialog_shadow: str = "bg:#000000"  # Black shadow/background
-    dialog_button: str = ""  # Default button style
-    dialog_button_focused: str = "bg:#0066cc fg:#ffffff"  # Blue background, white text
+    dialog_button: str = "bg:#404040 fg:#e0e0e0"  # Dark button
+    dialog_button_focused: str = "bg:#0066cc fg:#ffffff bold"  # Blue focused
+
+    # Form control styles (for settings dialog)
+    radio_list: str = "bg:#2a2a2a fg:#e0e0e0"  # Dark background
+    radio_selected: str = "fg:#88c0d0 bold"  # Cyan selected item
+    checkbox_list: str = "bg:#2a2a2a fg:#e0e0e0"  # Dark background
+    checkbox_selected: str = "fg:#88c0d0 bold"  # Cyan selected
+    text_area: str = "bg:#3a3a3a fg:#ffffff"  # Slightly lighter input bg
+    select_value: str = "fg:#88c0d0"  # Cyan for selected value
+    select_arrow: str = "fg:#888888"  # Grey arrow indicator
 
     def to_style(self) -> Style:
         """
@@ -91,13 +101,21 @@ class ThinkingPromptStyles:
             'prompt': self.prompt,
             'input-separator': self.input_separator,
             # Dialog styles
-            'dialog': '',
+            'dialog': self.dialog,
             'dialog.body': self.dialog_body,
             'dialog frame.label': self.dialog_title,
             'dialog frame.border': self.dialog_border,
             'dialog shadow': self.dialog_shadow,
             'button': self.dialog_button,
             'button.focused': self.dialog_button_focused,
+            # Form controls
+            'radio-list': self.radio_list,
+            'radio-selected': self.radio_selected,
+            'checkbox-list': self.checkbox_list,
+            'checkbox-selected': self.checkbox_selected,
+            'text-area': self.text_area,
+            'select-value': self.select_value,
+            'select-arrow': self.select_arrow,
         })
 
 
