@@ -7,8 +7,9 @@ from __future__ import annotations
 
 from abc import ABC
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 
+from prompt_toolkit.layout import Container
 from prompt_toolkit.widgets import Label
 
 from .dialog import BaseDialog
@@ -19,6 +20,7 @@ class SettingsItem(ABC):
     """Base class for all settings items."""
     key: str          # Unique identifier, used as dict key in result
     label: str        # Display label
+    default: Any = None
 
 
 @dataclass
@@ -83,11 +85,11 @@ class SettingsDialog(BaseDialog):
                 changed[key] = value
         return changed
 
-    def build_body(self):
+    def build_body(self) -> Container:
         """Build the dialog body (placeholder for now)."""
         return Label("Settings form (TODO)")
 
-    def get_buttons(self):
+    def get_buttons(self) -> list[tuple[str, Callable[[], None]]]:
         """Return dialog buttons based on can_cancel mode."""
         if self._can_cancel:
             return [
