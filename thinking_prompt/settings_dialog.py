@@ -9,8 +9,9 @@ from abc import ABC
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from prompt_toolkit.layout import Container
-from prompt_toolkit.widgets import Label
+from prompt_toolkit.layout import Container, HSplit, VSplit, Window, WindowAlign
+from prompt_toolkit.layout.controls import FormattedTextControl
+from prompt_toolkit.widgets import CheckboxList, Label, RadioList, TextArea
 
 from .dialog import BaseDialog
 
@@ -66,6 +67,10 @@ class SettingsDialog(BaseDialog):
         # State management
         self._original_values: dict[str, Any] = {}
         self._current_values: dict[str, Any] = {}
+
+        # Control references for value access
+        self._controls: dict[str, Any] = {}
+
         self._init_values()
 
         # Escape behavior depends on can_cancel
@@ -85,9 +90,62 @@ class SettingsDialog(BaseDialog):
                 changed[key] = value
         return changed
 
+    def _create_dropdown_control(self, item: DropdownItem) -> RadioList:
+        """Create a RadioList control for dropdown item."""
+        values = [(opt, opt) for opt in item.options]
+        control = RadioList(values=values)
+        if item.default and item.default in item.options:
+            control.current_value = item.default
+        return control
+
+    def _create_checkbox_control(self, item: CheckboxItem) -> CheckboxList:
+        """Create a checkbox control for checkbox item."""
+        control = CheckboxList(values=[(item.key, "")])
+        if item.default:
+            control.current_values = [item.key]
+        return control
+
+    def _create_text_control(self, item: TextItem) -> TextArea:
+        """Create a TextArea control for text item."""
+        control = TextArea(
+            text=item.default,
+            multiline=False,
+            password=item.password,
+            height=1,
+        )
+        return control
+
+    def _build_row(self, item: SettingsItem) -> VSplit:
+        """Build a form row with label and control."""
+        label_width = 20  # Fixed label width
+
+        # Create control based on item type
+        if isinstance(item, DropdownItem):
+            control = self._create_dropdown_control(item)
+        elif isinstance(item, CheckboxItem):
+            control = self._create_checkbox_control(item)
+        elif isinstance(item, TextItem):
+            control = self._create_text_control(item)
+        else:
+            control = Label("Unknown item type")
+
+        self._controls[item.key] = control
+
+        # Create row: Label | Control
+        return VSplit([
+            Window(
+                FormattedTextControl(f"{item.label}:"),
+                width=label_width,
+                align=WindowAlign.RIGHT,
+            ),
+            Window(width=2),  # Spacer
+            control,
+        ])
+
     def build_body(self) -> Container:
-        """Build the dialog body (placeholder for now)."""
-        return Label("Settings form (TODO)")
+        """Build the dialog body with form rows."""
+        rows = [self._build_row(item) for item in self._items]
+        return HSplit(rows)
 
     def get_buttons(self) -> list[tuple[str, Callable[[], None]]]:
         """Return dialog buttons based on can_cancel mode."""

@@ -1,6 +1,8 @@
 """Tests for the settings dialog system."""
 from __future__ import annotations
 
+from prompt_toolkit.layout import HSplit
+
 from thinking_prompt.settings_dialog import (
     CheckboxItem,
     DropdownItem,
@@ -110,3 +112,33 @@ class TestSettingsDialogState:
         """SettingsDialog can disable cancel."""
         dialog = SettingsDialog(title="Settings", items=[], can_cancel=False)
         assert dialog._can_cancel is False
+
+
+class TestSettingsDialogLayout:
+    """Tests for SettingsDialog layout."""
+
+    def test_build_body_returns_container(self):
+        """build_body returns a proper container."""
+        items = [
+            DropdownItem(key="model", label="Model", options=["a", "b"], default="a"),
+            CheckboxItem(key="stream", label="Stream", default=True),
+        ]
+        dialog = SettingsDialog(title="Settings", items=items)
+        body = dialog.build_body()
+
+        # Should be a vertical layout of rows
+        assert isinstance(body, HSplit)
+
+    def test_build_body_creates_row_per_item(self):
+        """Each item gets its own row in the form."""
+        items = [
+            DropdownItem(key="model", label="Model", options=["a", "b"], default="a"),
+            CheckboxItem(key="stream", label="Stream", default=True),
+            TextItem(key="name", label="Name", default="test"),
+        ]
+        dialog = SettingsDialog(title="Settings", items=items)
+        body = dialog.build_body()
+
+        # HSplit should have children for each item
+        assert hasattr(body, 'children')
+        assert len(list(body.children)) == 3
