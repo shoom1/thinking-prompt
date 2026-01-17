@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "thinking-prompt"
-version = "0.2.0"
+version = "0.2.1"
 description = "A prompt_toolkit extension that adds a thinking box above the prompt"
 readme = "README.md"
 license = "MIT"

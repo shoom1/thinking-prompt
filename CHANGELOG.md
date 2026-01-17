@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-01-17
+
+### Added
+
+- **Settings Dialog** - Form-based dialog for configuring multiple settings:
+  - `SettingsDialog` - Form dialog with vertical layout
+  - `DropdownItem` - Select from list of options (RadioList)
+  - `CheckboxItem` - Boolean toggle
+  - `TextItem` - Text input with optional password masking
+  - `session.show_settings_dialog(title, items)` - Convenience method
+- New exports: `SettingsItem`, `DropdownItem`, `CheckboxItem`, `TextItem`, `SettingsDialog`
+- `examples/settings_dialog_demo.py` - Settings dialog demo
+
 ## [0.2.0] - 2025-01-15
 
 ### Added
