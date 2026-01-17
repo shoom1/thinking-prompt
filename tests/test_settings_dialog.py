@@ -4,6 +4,7 @@ from __future__ import annotations
 from thinking_prompt.settings_dialog import (
     CheckboxItem,
     DropdownItem,
+    SettingsDialog,
     TextItem,
 )
 
@@ -58,3 +59,54 @@ class TestSettingsItems:
         item = TextItem(key="name", label="Name")
         assert item.default == ""
         assert item.password is False
+
+
+class TestSettingsDialogState:
+    """Tests for SettingsDialog state management."""
+
+    def test_settings_dialog_init_values(self):
+        """SettingsDialog initializes original and current values from items."""
+        items = [
+            DropdownItem(key="model", label="Model", options=["a", "b"], default="a"),
+            CheckboxItem(key="stream", label="Stream", default=True),
+            TextItem(key="name", label="Name", default="test"),
+        ]
+        dialog = SettingsDialog(title="Settings", items=items)
+
+        assert dialog._original_values == {"model": "a", "stream": True, "name": "test"}
+        assert dialog._current_values == {"model": "a", "stream": True, "name": "test"}
+
+    def test_settings_dialog_get_changed_values_empty(self):
+        """No changes returns empty dict."""
+        items = [
+            DropdownItem(key="model", label="Model", options=["a", "b"], default="a"),
+        ]
+        dialog = SettingsDialog(title="Settings", items=items)
+
+        changed = dialog._get_changed_values()
+        assert changed == {}
+
+    def test_settings_dialog_get_changed_values_with_changes(self):
+        """Changed values are returned correctly."""
+        items = [
+            DropdownItem(key="model", label="Model", options=["a", "b"], default="a"),
+            CheckboxItem(key="stream", label="Stream", default=True),
+        ]
+        dialog = SettingsDialog(title="Settings", items=items)
+
+        # Simulate changes
+        dialog._current_values["model"] = "b"  # Changed
+        # stream unchanged
+
+        changed = dialog._get_changed_values()
+        assert changed == {"model": "b"}
+
+    def test_settings_dialog_can_cancel_default_true(self):
+        """SettingsDialog has can_cancel=True by default."""
+        dialog = SettingsDialog(title="Settings", items=[])
+        assert dialog._can_cancel is True
+
+    def test_settings_dialog_can_cancel_false(self):
+        """SettingsDialog can disable cancel."""
+        dialog = SettingsDialog(title="Settings", items=[], can_cancel=False)
+        assert dialog._can_cancel is False
