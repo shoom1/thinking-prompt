@@ -2,6 +2,7 @@
 Settings dialog for ThinkingPromptSession.
 
 Provides a form-based dialog for configuring multiple settings at once.
+Navigation: Up/Down to move between rows, Left/Right or Space to change values.
 """
 from __future__ import annotations
 
@@ -9,12 +10,11 @@ from abc import ABC
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from prompt_toolkit.filters import Condition
 from prompt_toolkit.formatted_text import FormattedText
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.layout import Container, HSplit, VSplit, Window, WindowAlign
 from prompt_toolkit.layout.controls import FormattedTextControl, UIContent, UIControl
-from prompt_toolkit.widgets import CheckboxList, Label, TextArea
+from prompt_toolkit.widgets import Label, TextArea
 
 from .dialog import BaseDialog
 
@@ -24,7 +24,7 @@ class CompactSelect(UIControl):
     A compact single-line select control that cycles through options.
 
     Displays as: [selected_value ▼]
-    Use Up/Down arrows or Enter to cycle through options.
+    Use Left/Right arrows or Space to cycle through options.
     """
 
     def __init__(self, options: list[str], default: str | None = None) -> None:
@@ -83,20 +83,73 @@ class CompactSelect(UIControl):
         return True
 
     def get_key_bindings(self) -> KeyBindings:
-        """Key bindings for navigation."""
+        """Key bindings for cycling options (left/right/space only)."""
         kb = KeyBindings()
 
-        @kb.add("up")
         @kb.add("left")
         def _prev(event: Any) -> None:
             self._prev()
 
-        @kb.add("down")
         @kb.add("right")
-        @kb.add("enter")
         @kb.add("space")
         def _next(event: Any) -> None:
             self._next()
+
+        return kb
+
+
+class CompactCheckbox(UIControl):
+    """
+    A compact single-line checkbox control.
+
+    Displays as: [x] when checked, [ ] when unchecked.
+    Use Space or Enter to toggle.
+    """
+
+    def __init__(self, checked: bool = False) -> None:
+        self._checked = checked
+
+    @property
+    def checked(self) -> bool:
+        """Get checked state."""
+        return self._checked
+
+    @checked.setter
+    def checked(self, value: bool) -> None:
+        """Set checked state."""
+        self._checked = value
+
+    def _toggle(self) -> None:
+        """Toggle the checkbox."""
+        self._checked = not self._checked
+
+    def create_content(self, width: int, height: int) -> UIContent:
+        """Create the visual content."""
+        mark = "x" if self._checked else " "
+        text = FormattedText([
+            ("", "["),
+            ("class:checkbox-mark", mark),
+            ("", "]"),
+        ])
+
+        def get_line(i: int) -> FormattedText:
+            if i == 0:
+                return text
+            return FormattedText([])
+
+        return UIContent(get_line=get_line, line_count=1)
+
+    def is_focusable(self) -> bool:
+        return True
+
+    def get_key_bindings(self) -> KeyBindings:
+        """Key bindings for toggling."""
+        kb = KeyBindings()
+
+        @kb.add("space")
+        @kb.add("enter")
+        def _toggle(event: Any) -> None:
+            self._toggle()
 
         return kb
 
@@ -133,6 +186,11 @@ class SettingsDialog(BaseDialog):
     """
     A dialog that displays a vertical form of configurable items.
 
+    Navigation:
+    - Up/Down: Move between settings rows
+    - Left/Right or Space: Change value (for dropdowns and checkboxes)
+    - Tab: Move to buttons
+
     Returns a dictionary of changed values when closed, or None if cancelled.
     """
 
@@ -155,8 +213,9 @@ class SettingsDialog(BaseDialog):
         self._original_values: dict[str, Any] = {}
         self._current_values: dict[str, Any] = {}
 
-        # Control references for value access
+        # Control references for value access and focus management
         self._controls: dict[str, Any] = {}
+        self._control_windows: list[Window] = []  # Ordered list for focus nav
 
         self._init_values()
 
@@ -182,11 +241,9 @@ class SettingsDialog(BaseDialog):
         control = CompactSelect(options=item.options, default=item.default)
         return control
 
-    def _create_checkbox_control(self, item: CheckboxItem) -> CheckboxList:
-        """Create a checkbox control for checkbox item."""
-        control = CheckboxList(values=[(item.key, "")])
-        if item.default:
-            control.current_values = [item.key]
+    def _create_checkbox_control(self, item: CheckboxItem) -> CompactCheckbox:
+        """Create a compact checkbox control."""
+        control = CompactCheckbox(checked=item.default)
         return control
 
     def _create_text_control(self, item: TextItem) -> TextArea:
@@ -204,7 +261,7 @@ class SettingsDialog(BaseDialog):
         label_width = 20  # Fixed label width
 
         # Create control based on item type
-        control: CompactSelect | CheckboxList | TextArea | Label
+        control: CompactSelect | CompactCheckbox | TextArea | Label
         if isinstance(item, DropdownItem):
             control = self._create_dropdown_control(item)
         elif isinstance(item, CheckboxItem):
@@ -216,9 +273,15 @@ class SettingsDialog(BaseDialog):
 
         self._controls[item.key] = control
 
-        # Wrap UIControl in Window, widgets are already containers
-        if isinstance(control, CompactSelect):
-            control_container = Window(control, height=1)
+        # Wrap UIControl in Window, TextArea is already a container
+        if isinstance(control, (CompactSelect, CompactCheckbox)):
+            control_window = Window(control, height=1)
+            self._control_windows.append(control_window)
+            control_container = control_window
+        elif isinstance(control, TextArea):
+            # TextArea has its own window internally
+            self._control_windows.append(control.window)
+            control_container = control
         else:
             control_container = control
 
@@ -233,10 +296,48 @@ class SettingsDialog(BaseDialog):
             control_container,
         ])
 
+    def _get_form_key_bindings(self) -> KeyBindings:
+        """Create key bindings for up/down navigation between rows."""
+        kb = KeyBindings()
+
+        def get_current_index() -> int:
+            """Find which control window is currently focused."""
+            if not self._manager or not self._manager._session:
+                return 0
+            app = self._manager._session.app
+            current = app.layout.current_window
+            for i, window in enumerate(self._control_windows):
+                if window == current:
+                    return i
+            return 0
+
+        def focus_row(index: int) -> None:
+            """Focus the control at the given row index."""
+            if not self._control_windows or not self._manager:
+                return
+            index = max(0, min(index, len(self._control_windows) - 1))
+            window = self._control_windows[index]
+            self._manager._session.app.layout.focus(window)
+
+        @kb.add("up")
+        def _move_up(event: Any) -> None:
+            current = get_current_index()
+            if current > 0:
+                focus_row(current - 1)
+
+        @kb.add("down")
+        def _move_down(event: Any) -> None:
+            current = get_current_index()
+            if current < len(self._control_windows) - 1:
+                focus_row(current + 1)
+
+        return kb
+
     def build_body(self) -> Container:
         """Build the dialog body with form rows."""
+        self._control_windows = []  # Reset for rebuild
         rows = [self._build_row(item) for item in self._items]
-        return HSplit(rows)
+        return HSplit(rows, key_bindings=self._get_form_key_bindings())
 
     def get_buttons(self) -> list[tuple[str, Callable[[], None]]]:
         """Return dialog buttons based on can_cancel mode."""
@@ -260,8 +361,7 @@ class SettingsDialog(BaseDialog):
             if isinstance(item, DropdownItem):
                 self._current_values[item.key] = control.current_value
             elif isinstance(item, CheckboxItem):
-                # CheckboxList stores checked items in current_values list
-                self._current_values[item.key] = item.key in control.current_values
+                self._current_values[item.key] = control.checked
             elif isinstance(item, TextItem):
                 self._current_values[item.key] = control.text
 

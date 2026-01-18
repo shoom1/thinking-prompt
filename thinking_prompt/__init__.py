@@ -55,6 +55,8 @@ from .settings_dialog import (
     CheckboxItem,
     TextItem,
     SettingsDialog,
+    CompactSelect,
+    CompactCheckbox,
 )
 
 __version__ = "0.2.1"
@@ -82,4 +84,6 @@ __all__ = [
     "CheckboxItem",
     "TextItem",
     "SettingsDialog",
+    "CompactSelect",
+    "CompactCheckbox",
 ]

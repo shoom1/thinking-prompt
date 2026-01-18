@@ -74,6 +74,7 @@ class ThinkingPromptStyles:
     text_area: str = "bg:#3a3a3a fg:#ffffff"  # Slightly lighter input bg
     select_value: str = "fg:#88c0d0"  # Cyan for selected value
     select_arrow: str = "fg:#888888"  # Grey arrow indicator
+    checkbox_mark: str = "fg:#88c0d0"  # Cyan for checkbox mark
 
     def to_style(self) -> Style:
         """
@@ -116,6 +117,7 @@ class ThinkingPromptStyles:
             'text-area': self.text_area,
             'select-value': self.select_value,
             'select-arrow': self.select_arrow,
+            'checkbox-mark': self.checkbox_mark,
         })
 
 

@@ -169,8 +169,8 @@ class TestSettingsDialogValueSync:
         dialog = SettingsDialog(title="Settings", items=items)
         dialog.build_body()
 
-        # Simulate user checking checkbox
-        dialog._controls["stream"].current_values = ["stream"]
+        # Simulate user checking checkbox (CompactCheckbox uses .checked property)
+        dialog._controls["stream"].checked = True
         dialog._sync_values_from_controls()
 
         assert dialog._current_values["stream"] is True
