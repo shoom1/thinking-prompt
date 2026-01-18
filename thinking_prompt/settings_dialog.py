@@ -3,6 +3,7 @@ Settings dialog for ThinkingPromptSession.
 
 Provides a form-based dialog for configuring multiple settings at once.
 Navigation: Up/Down to move between rows, Left/Right or Space to change values.
+For text items: Enter to edit, Enter/Escape to confirm/cancel.
 """
 from __future__ import annotations
 
@@ -10,10 +11,20 @@ from abc import ABC
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+from prompt_toolkit.buffer import Buffer
+from prompt_toolkit.filters import Condition
 from prompt_toolkit.formatted_text import FormattedText
 from prompt_toolkit.key_binding import KeyBindings
-from prompt_toolkit.layout import Container, HSplit, Window
-from prompt_toolkit.layout.controls import UIContent, UIControl
+from prompt_toolkit.layout import (
+    BufferControl,
+    ConditionalContainer,
+    Container,
+    HSplit,
+    VSplit,
+    Window,
+    WindowAlign,
+)
+from prompt_toolkit.layout.controls import FormattedTextControl, UIContent, UIControl
 
 from .dialog import BaseDialog
 
@@ -56,15 +67,16 @@ class SettingsListControl(UIControl):
         Description text here (optional)
 
     Navigation: Up/Down to move, Left/Right/Space to change values.
+    For text items: Enter to edit.
     """
 
     def __init__(
         self,
         items: list[SettingsItem],
-        on_save: Callable[[], None] | None = None,
+        on_edit_text: Callable[[int], None] | None = None,
     ) -> None:
         self._items = items
-        self._on_save = on_save
+        self._on_edit_text = on_edit_text
         self._selected_index = 0
 
         # Current values (start with defaults)
@@ -76,6 +88,18 @@ class SettingsListControl(UIControl):
     def values(self) -> dict[str, Any]:
         """Get current values."""
         return self._values.copy()
+
+    @property
+    def selected_index(self) -> int:
+        """Get currently selected index."""
+        return self._selected_index
+
+    @property
+    def selected_item(self) -> SettingsItem | None:
+        """Get currently selected item."""
+        if 0 <= self._selected_index < len(self._items):
+            return self._items[self._selected_index]
+        return None
 
     def _format_value(self, item: SettingsItem, is_selected: bool) -> tuple[str, str]:
         """Format value for display. Returns (text, style_class)."""
@@ -95,7 +119,10 @@ class SettingsListControl(UIControl):
             style = "class:setting-value-selected" if is_selected else "class:setting-value"
             if item.password and value:
                 return ("••••••", style)
-            return (str(value) if value else "", style)
+            text = str(value) if value else "(empty)"
+            if not value:
+                style = "class:setting-desc" if not is_selected else "class:setting-desc-selected"
+            return (text, style)
         style = "class:setting-value-selected" if is_selected else "class:setting-value"
         return (str(value), style)
 
@@ -132,6 +159,10 @@ class SettingsListControl(UIControl):
 
             label_style = "class:setting-label-selected" if is_selected else "class:setting-label"
             value_text, value_style = self._format_value(item, is_selected)
+
+            # Add hint for text items
+            if isinstance(item, TextItem) and is_selected:
+                value_text = value_text + " [Enter]"
 
             # Calculate padding to right-align value
             label_text = item.label
@@ -192,6 +223,13 @@ class SettingsListControl(UIControl):
         def _next_value(event: Any) -> None:
             self._change_value(1)
 
+        @kb.add("enter")
+        def _handle_enter(event: Any) -> None:
+            # For text items, trigger edit mode
+            item = self.selected_item
+            if isinstance(item, TextItem) and self._on_edit_text:
+                self._on_edit_text(self._selected_index)
+
         return kb
 
 
@@ -201,9 +239,10 @@ class SettingsDialog(BaseDialog):
 
     Navigation:
     - Up/Down (or j/k): Move between settings
-    - Left/Right (or h/l) or Space: Change value
+    - Left/Right (or h/l) or Space: Change value (dropdown/checkbox)
+    - Enter: Edit text item / toggle checkbox
     - Tab: Move to buttons
-    - Enter on button: Execute action
+    - Escape: Cancel
 
     Returns a dictionary of changed values when closed, or None if cancelled.
     """
@@ -233,6 +272,12 @@ class SettingsDialog(BaseDialog):
         # The list control will be created in build_body
         self._list_control: SettingsListControl | None = None
 
+        # Text editing state
+        self._editing_text = False
+        self._edit_buffer: Buffer | None = None
+        self._edit_window: Window | None = None
+        self._list_window: Window | None = None
+
         # Escape behavior
         self.escape_result = None if can_cancel else "close"
 
@@ -250,20 +295,130 @@ class SettingsDialog(BaseDialog):
         """Handle save - return changed values."""
         self.set_result(self._get_changed_values())
 
+    def _start_text_edit(self, index: int) -> None:
+        """Start editing a text item."""
+        if not self._list_control or not self._edit_buffer:
+            return
+
+        item = self._items[index]
+        if not isinstance(item, TextItem):
+            return
+
+        # Set buffer text to current value
+        current_value = self._list_control._values[item.key] or ""
+        self._edit_buffer.text = current_value
+        self._edit_buffer.cursor_position = len(current_value)
+
+        # Enter edit mode
+        self._editing_text = True
+
+        # Focus the edit window
+        if self._manager and self._edit_window:
+            self._manager._session.app.layout.focus(self._edit_window)
+
+    def _confirm_text_edit(self) -> None:
+        """Confirm text edit and return to list."""
+        if not self._list_control or not self._edit_buffer:
+            return
+
+        item = self._list_control.selected_item
+        if isinstance(item, TextItem):
+            # Save the edited value
+            self._list_control._values[item.key] = self._edit_buffer.text
+
+        self._editing_text = False
+
+        # Return focus to list
+        if self._manager and self._list_window:
+            self._manager._session.app.layout.focus(self._list_window)
+
+    def _cancel_text_edit(self) -> None:
+        """Cancel text edit and return to list."""
+        self._editing_text = False
+
+        # Return focus to list
+        if self._manager and self._list_window:
+            self._manager._session.app.layout.focus(self._list_window)
+
+    def _get_edit_label(self) -> str:
+        """Get the label for the text being edited."""
+        if self._list_control:
+            item = self._list_control.selected_item
+            if item:
+                return f"  {item.label}: "
+        return "  Edit: "
+
     def build_body(self) -> Container:
-        """Build the dialog body."""
+        """Build the dialog body with list and text edit area."""
         self._list_control = SettingsListControl(
             items=self._items,
-            on_save=self._on_save,
+            on_edit_text=self._start_text_edit,
         )
 
         # Calculate height based on items (label + optional description)
         total_lines = sum(2 if item.description else 1 for item in self._items)
 
-        return Window(
+        self._list_window = Window(
             self._list_control,
             height=total_lines,
         )
+
+        # Create text edit buffer and window
+        self._edit_buffer = Buffer(
+            multiline=False,
+            on_text_changed=lambda _: None,
+        )
+
+        # Key bindings for edit buffer
+        edit_kb = KeyBindings()
+
+        @edit_kb.add("enter")
+        def _confirm(event: Any) -> None:
+            self._confirm_text_edit()
+
+        @edit_kb.add("escape")
+        def _cancel(event: Any) -> None:
+            self._cancel_text_edit()
+
+        edit_control = BufferControl(
+            buffer=self._edit_buffer,
+            key_bindings=edit_kb,
+        )
+
+        self._edit_window = Window(
+            edit_control,
+            height=1,
+        )
+
+        # Edit row: label + input field
+        edit_row = ConditionalContainer(
+            content=VSplit([
+                Window(
+                    FormattedTextControl(self._get_edit_label),
+                    width=20,
+                    align=WindowAlign.RIGHT,
+                    style="class:setting-label-selected",
+                ),
+                self._edit_window,
+            ]),
+            filter=Condition(lambda: self._editing_text),
+        )
+
+        # Hint text when editing
+        hint_row = ConditionalContainer(
+            content=Window(
+                FormattedTextControl("  Enter to confirm, Escape to cancel"),
+                height=1,
+                style="class:setting-desc",
+            ),
+            filter=Condition(lambda: self._editing_text),
+        )
+
+        return HSplit([
+            self._list_window,
+            edit_row,
+            hint_row,
+        ])
 
     def get_buttons(self) -> list[tuple[str, Callable[[], None]]]:
         """Return dialog buttons."""

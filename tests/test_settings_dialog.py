@@ -1,7 +1,7 @@
 """Tests for the settings dialog system."""
 from __future__ import annotations
 
-from prompt_toolkit.layout import Window
+from prompt_toolkit.layout import HSplit, Window
 
 from thinking_prompt.settings_dialog import (
     CheckboxItem,
@@ -192,8 +192,8 @@ class TestSettingsDialogState:
 class TestSettingsDialogLayout:
     """Tests for SettingsDialog layout."""
 
-    def test_build_body_returns_window(self):
-        """build_body returns a Window containing SettingsListControl."""
+    def test_build_body_returns_hsplit(self):
+        """build_body returns an HSplit containing list and edit area."""
         items = [
             DropdownItem(key="model", label="Model", options=["a", "b"], default="a"),
             CheckboxItem(key="stream", label="Stream", default=True),
@@ -201,8 +201,8 @@ class TestSettingsDialogLayout:
         dialog = SettingsDialog(title="Settings", items=items)
         body = dialog.build_body()
 
-        # Should be a Window containing the list control
-        assert isinstance(body, Window)
+        # Should be an HSplit with list window and conditional edit areas
+        assert isinstance(body, HSplit)
 
     def test_build_body_creates_list_control(self):
         """build_body creates the SettingsListControl."""
