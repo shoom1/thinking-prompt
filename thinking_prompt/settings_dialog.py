@@ -12,153 +12,18 @@ from typing import Any, Callable
 
 from prompt_toolkit.formatted_text import FormattedText
 from prompt_toolkit.key_binding import KeyBindings
-from prompt_toolkit.layout import Container, HSplit, VSplit, Window, WindowAlign
-from prompt_toolkit.layout.controls import FormattedTextControl, UIContent, UIControl
-from prompt_toolkit.widgets import Label, TextArea
+from prompt_toolkit.layout import Container, HSplit, Window
+from prompt_toolkit.layout.controls import UIContent, UIControl
 
 from .dialog import BaseDialog
-
-
-class CompactSelect(UIControl):
-    """
-    A compact single-line select control that cycles through options.
-
-    Displays as: [selected_value ▼]
-    Use Left/Right arrows or Space to cycle through options.
-    """
-
-    def __init__(self, options: list[str], default: str | None = None) -> None:
-        self.options = options
-        self._selected_index = 0
-
-        # Set default selection
-        if default and default in options:
-            self._selected_index = options.index(default)
-
-    @property
-    def current_value(self) -> str | None:
-        """Get the currently selected value."""
-        if self.options:
-            return self.options[self._selected_index]
-        return None
-
-    @current_value.setter
-    def current_value(self, value: str) -> None:
-        """Set the currently selected value."""
-        if value in self.options:
-            self._selected_index = self.options.index(value)
-
-    def _next(self) -> None:
-        """Select next option."""
-        if self.options:
-            self._selected_index = (self._selected_index + 1) % len(self.options)
-
-    def _prev(self) -> None:
-        """Select previous option."""
-        if self.options:
-            self._selected_index = (self._selected_index - 1) % len(self.options)
-
-    def create_content(self, width: int, height: int) -> UIContent:
-        """Create the visual content."""
-        if self.options:
-            value = self.options[self._selected_index]
-            # Show as: [value ▼]
-            text = FormattedText([
-                ("", "["),
-                ("class:select-value", value),
-                ("class:select-arrow", " ▼"),
-                ("", "]"),
-            ])
-        else:
-            text = FormattedText([("class:select-empty", "[No options]")])
-
-        def get_line(i: int) -> FormattedText:
-            if i == 0:
-                return text
-            return FormattedText([])
-
-        return UIContent(get_line=get_line, line_count=1)
-
-    def is_focusable(self) -> bool:
-        return True
-
-    def get_key_bindings(self) -> KeyBindings:
-        """Key bindings for cycling options (left/right/space only)."""
-        kb = KeyBindings()
-
-        @kb.add("left")
-        def _prev(event: Any) -> None:
-            self._prev()
-
-        @kb.add("right")
-        @kb.add("space")
-        def _next(event: Any) -> None:
-            self._next()
-
-        return kb
-
-
-class CompactCheckbox(UIControl):
-    """
-    A compact single-line checkbox control.
-
-    Displays as: [x] when checked, [ ] when unchecked.
-    Use Space or Enter to toggle.
-    """
-
-    def __init__(self, checked: bool = False) -> None:
-        self._checked = checked
-
-    @property
-    def checked(self) -> bool:
-        """Get checked state."""
-        return self._checked
-
-    @checked.setter
-    def checked(self, value: bool) -> None:
-        """Set checked state."""
-        self._checked = value
-
-    def _toggle(self) -> None:
-        """Toggle the checkbox."""
-        self._checked = not self._checked
-
-    def create_content(self, width: int, height: int) -> UIContent:
-        """Create the visual content."""
-        mark = "x" if self._checked else " "
-        text = FormattedText([
-            ("", "["),
-            ("class:checkbox-mark", mark),
-            ("", "]"),
-        ])
-
-        def get_line(i: int) -> FormattedText:
-            if i == 0:
-                return text
-            return FormattedText([])
-
-        return UIContent(get_line=get_line, line_count=1)
-
-    def is_focusable(self) -> bool:
-        return True
-
-    def get_key_bindings(self) -> KeyBindings:
-        """Key bindings for toggling."""
-        kb = KeyBindings()
-
-        @kb.add("space")
-        @kb.add("enter")
-        def _toggle(event: Any) -> None:
-            self._toggle()
-
-        return kb
 
 
 @dataclass
 class SettingsItem(ABC):
     """Base class for all settings items."""
-    key: str          # Unique identifier, used as dict key in result
-    label: str        # Display label
+    key: str              # Unique identifier, used as dict key in result
+    label: str            # Display label
+    description: str = "" # Optional description shown below label
     default: Any = None
 
 
@@ -182,14 +47,163 @@ class TextItem(SettingsItem):
     password: bool = False
 
 
+class SettingsListControl(UIControl):
+    """
+    A clean settings list control with focus indicator and right-aligned values.
+
+    Displays settings as:
+      › Label                                    value
+        Description text here (optional)
+
+    Navigation: Up/Down to move, Left/Right/Space to change values.
+    """
+
+    def __init__(
+        self,
+        items: list[SettingsItem],
+        on_save: Callable[[], None] | None = None,
+    ) -> None:
+        self._items = items
+        self._on_save = on_save
+        self._selected_index = 0
+
+        # Current values (start with defaults)
+        self._values: dict[str, Any] = {}
+        for item in items:
+            self._values[item.key] = item.default
+
+    @property
+    def values(self) -> dict[str, Any]:
+        """Get current values."""
+        return self._values.copy()
+
+    def _format_value(self, item: SettingsItem, is_selected: bool) -> tuple[str, str]:
+        """Format value for display. Returns (text, style_class)."""
+        value = self._values[item.key]
+
+        if isinstance(item, CheckboxItem):
+            if value:
+                style = "class:setting-value-true-selected" if is_selected else "class:setting-value-true"
+                return ("true", style)
+            else:
+                style = "class:setting-value-false-selected" if is_selected else "class:setting-value-false"
+                return ("false", style)
+        elif isinstance(item, DropdownItem):
+            style = "class:setting-value-selected" if is_selected else "class:setting-value"
+            return (str(value) if value else "", style)
+        elif isinstance(item, TextItem):
+            style = "class:setting-value-selected" if is_selected else "class:setting-value"
+            if item.password and value:
+                return ("••••••", style)
+            return (str(value) if value else "", style)
+        style = "class:setting-value-selected" if is_selected else "class:setting-value"
+        return (str(value), style)
+
+    def _change_value(self, delta: int) -> None:
+        """Change the current item's value."""
+        if not self._items:
+            return
+        item = self._items[self._selected_index]
+
+        if isinstance(item, CheckboxItem):
+            # Toggle boolean
+            self._values[item.key] = not self._values[item.key]
+        elif isinstance(item, DropdownItem):
+            # Cycle through options
+            if item.options:
+                current = self._values[item.key]
+                try:
+                    idx = item.options.index(current)
+                except ValueError:
+                    idx = 0
+                new_idx = (idx + delta) % len(item.options)
+                self._values[item.key] = item.options[new_idx]
+
+    def create_content(self, width: int, height: int) -> UIContent:
+        """Create the visual content."""
+        lines: list[FormattedText] = []
+
+        for i, item in enumerate(self._items):
+            is_selected = (i == self._selected_index)
+
+            # Build the main row: [indicator] [label] ... [value]
+            indicator = "› " if is_selected else "  "
+            indicator_style = "class:setting-indicator" if is_selected else ""
+
+            label_style = "class:setting-label-selected" if is_selected else "class:setting-label"
+            value_text, value_style = self._format_value(item, is_selected)
+
+            # Calculate padding to right-align value
+            label_text = item.label
+            available = width - len(indicator) - len(label_text) - len(value_text) - 1
+            padding = max(1, available)
+
+            row: list[tuple[str, str]] = [
+                (indicator_style, indicator),
+                (label_style, label_text),
+                ("", " " * padding),
+                (value_style, value_text),
+            ]
+            lines.append(FormattedText(row))
+
+            # Add description line if present
+            if item.description:
+                desc_style = "class:setting-desc-selected" if is_selected else "class:setting-desc"
+                desc_row: list[tuple[str, str]] = [
+                    ("", "  "),  # Indent to align with label
+                    (desc_style, item.description),
+                ]
+                lines.append(FormattedText(desc_row))
+
+        def get_line(i: int) -> FormattedText:
+            if i < len(lines):
+                return lines[i]
+            return FormattedText([])
+
+        return UIContent(get_line=get_line, line_count=len(lines))
+
+    def is_focusable(self) -> bool:
+        return True
+
+    def get_key_bindings(self) -> KeyBindings:
+        """Key bindings for navigation and value changes."""
+        kb = KeyBindings()
+
+        @kb.add("up")
+        @kb.add("k")  # vim-style
+        def _move_up(event: Any) -> None:
+            if self._selected_index > 0:
+                self._selected_index -= 1
+
+        @kb.add("down")
+        @kb.add("j")  # vim-style
+        def _move_down(event: Any) -> None:
+            if self._selected_index < len(self._items) - 1:
+                self._selected_index += 1
+
+        @kb.add("left")
+        @kb.add("h")  # vim-style
+        def _prev_value(event: Any) -> None:
+            self._change_value(-1)
+
+        @kb.add("right")
+        @kb.add("l")  # vim-style
+        @kb.add("space")
+        def _next_value(event: Any) -> None:
+            self._change_value(1)
+
+        return kb
+
+
 class SettingsDialog(BaseDialog):
     """
-    A dialog that displays a vertical form of configurable items.
+    A settings dialog with clean list styling.
 
     Navigation:
-    - Up/Down: Move between settings rows
-    - Left/Right or Space: Change value (for dropdowns and checkboxes)
+    - Up/Down (or j/k): Move between settings
+    - Left/Right (or h/l) or Space: Change value
     - Tab: Move to buttons
+    - Enter on button: Execute action
 
     Returns a dictionary of changed values when closed, or None if cancelled.
     """
@@ -200,174 +214,175 @@ class SettingsDialog(BaseDialog):
         items: list[SettingsItem],
         can_cancel: bool = True,
         styles: dict | None = None,
-        width: int | None = 60,  # Default min width of 60 for settings dialogs
-        top: int | None = None,  # None=center, 0+=from top, negative=from bottom
+        width: int | None = 60,
+        top: int | None = None,
     ) -> None:
         super().__init__()
         self.title = title
         self._items = items
         self._can_cancel = can_cancel
         self._styles = styles or {}
-        self.width = width  # None/0=auto, >0=min width, -1=max width
-        self.top = top  # Vertical position
+        self.width = width
+        self.top = top
 
-        # State management
+        # Original values for change detection
         self._original_values: dict[str, Any] = {}
-        self._current_values: dict[str, Any] = {}
-
-        # Control references for value access and focus management
-        self._controls: dict[str, Any] = {}
-        self._control_windows: list[Window] = []  # Ordered list for focus nav
-
-        self._init_values()
-
-        # Escape behavior depends on can_cancel
-        self.escape_result = None if can_cancel else "close"
-
-    def _init_values(self) -> None:
-        """Initialize original and current values from items."""
-        for item in self._items:
+        for item in items:
             self._original_values[item.key] = item.default
-            self._current_values[item.key] = item.default
+
+        # The list control will be created in build_body
+        self._list_control: SettingsListControl | None = None
+
+        # Escape behavior
+        self.escape_result = None if can_cancel else "close"
 
     def _get_changed_values(self) -> dict[str, Any]:
         """Return only values that differ from original."""
+        if not self._list_control:
+            return {}
         changed = {}
-        for key, value in self._current_values.items():
-            if value != self._original_values[key]:
+        for key, value in self._list_control.values.items():
+            if value != self._original_values.get(key):
                 changed[key] = value
         return changed
 
-    def _create_dropdown_control(self, item: DropdownItem) -> CompactSelect:
-        """Create a compact select control for dropdown item."""
-        control = CompactSelect(options=item.options, default=item.default)
-        return control
-
-    def _create_checkbox_control(self, item: CheckboxItem) -> CompactCheckbox:
-        """Create a compact checkbox control."""
-        control = CompactCheckbox(checked=item.default)
-        return control
-
-    def _create_text_control(self, item: TextItem) -> TextArea:
-        """Create a TextArea control for text item."""
-        control = TextArea(
-            text=item.default,
-            multiline=False,
-            password=item.password,
-            height=1,
-        )
-        return control
-
-    def _build_row(self, item: SettingsItem) -> VSplit:
-        """Build a form row with label and control."""
-        label_width = 20  # Fixed label width
-
-        # Create control based on item type
-        control: CompactSelect | CompactCheckbox | TextArea | Label
-        if isinstance(item, DropdownItem):
-            control = self._create_dropdown_control(item)
-        elif isinstance(item, CheckboxItem):
-            control = self._create_checkbox_control(item)
-        elif isinstance(item, TextItem):
-            control = self._create_text_control(item)
-        else:
-            control = Label("Unknown item type")
-
-        self._controls[item.key] = control
-
-        # Wrap UIControl in Window, TextArea is already a container
-        if isinstance(control, (CompactSelect, CompactCheckbox)):
-            control_window = Window(control, height=1)
-            self._control_windows.append(control_window)
-            control_container = control_window
-        elif isinstance(control, TextArea):
-            # TextArea has its own window internally
-            self._control_windows.append(control.window)
-            control_container = control
-        else:
-            control_container = control
-
-        # Create row: Label | Control
-        return VSplit([
-            Window(
-                FormattedTextControl(f"{item.label}:"),
-                width=label_width,
-                align=WindowAlign.RIGHT,
-            ),
-            Window(width=2),  # Spacer
-            control_container,
-        ])
-
-    def _get_form_key_bindings(self) -> KeyBindings:
-        """Create key bindings for up/down navigation between rows."""
-        kb = KeyBindings()
-
-        def get_current_index() -> int:
-            """Find which control window is currently focused."""
-            if not self._manager or not self._manager._session:
-                return 0
-            app = self._manager._session.app
-            current = app.layout.current_window
-            for i, window in enumerate(self._control_windows):
-                if window == current:
-                    return i
-            return 0
-
-        def focus_row(index: int) -> None:
-            """Focus the control at the given row index."""
-            if not self._control_windows or not self._manager:
-                return
-            index = max(0, min(index, len(self._control_windows) - 1))
-            window = self._control_windows[index]
-            self._manager._session.app.layout.focus(window)
-
-        @kb.add("up")
-        def _move_up(event: Any) -> None:
-            current = get_current_index()
-            if current > 0:
-                focus_row(current - 1)
-
-        @kb.add("down")
-        def _move_down(event: Any) -> None:
-            current = get_current_index()
-            if current < len(self._control_windows) - 1:
-                focus_row(current + 1)
-
-        return kb
+    def _on_save(self) -> None:
+        """Handle save - return changed values."""
+        self.set_result(self._get_changed_values())
 
     def build_body(self) -> Container:
-        """Build the dialog body with form rows."""
-        self._control_windows = []  # Reset for rebuild
-        rows = [self._build_row(item) for item in self._items]
-        return HSplit(rows, key_bindings=self._get_form_key_bindings())
+        """Build the dialog body."""
+        self._list_control = SettingsListControl(
+            items=self._items,
+            on_save=self._on_save,
+        )
+
+        # Calculate height based on items (label + optional description)
+        total_lines = sum(2 if item.description else 1 for item in self._items)
+
+        return Window(
+            self._list_control,
+            height=total_lines,
+        )
 
     def get_buttons(self) -> list[tuple[str, Callable[[], None]]]:
-        """Return dialog buttons based on can_cancel mode."""
+        """Return dialog buttons."""
         if self._can_cancel:
             return [
                 ("Save", self._on_save),
                 ("Cancel", self.cancel),
             ]
         else:
-            return [
-                ("Done", self._on_save),
-            ]
+            return [("Done", self._on_save)]
 
-    def _sync_values_from_controls(self) -> None:
-        """Read current values from all controls into _current_values."""
-        for item in self._items:
-            control = self._controls.get(item.key)
-            if control is None:
-                continue
 
-            if isinstance(item, DropdownItem):
-                self._current_values[item.key] = control.current_value
-            elif isinstance(item, CheckboxItem):
-                self._current_values[item.key] = control.checked
-            elif isinstance(item, TextItem):
-                self._current_values[item.key] = control.text
+# Keep these for backward compatibility and standalone use
+class CompactSelect(UIControl):
+    """
+    A compact single-line select control that cycles through options.
+    Displays as: [selected_value ▼]
+    """
 
-    def _on_save(self) -> None:
-        """Handle save/done button - sync and return changed values."""
-        self._sync_values_from_controls()
-        self.set_result(self._get_changed_values())
+    def __init__(self, options: list[str], default: str | None = None) -> None:
+        self.options = options
+        self._selected_index = 0
+        if default and default in options:
+            self._selected_index = options.index(default)
+
+    @property
+    def current_value(self) -> str | None:
+        if self.options:
+            return self.options[self._selected_index]
+        return None
+
+    @current_value.setter
+    def current_value(self, value: str) -> None:
+        if value in self.options:
+            self._selected_index = self.options.index(value)
+
+    def _next(self) -> None:
+        if self.options:
+            self._selected_index = (self._selected_index + 1) % len(self.options)
+
+    def _prev(self) -> None:
+        if self.options:
+            self._selected_index = (self._selected_index - 1) % len(self.options)
+
+    def create_content(self, width: int, height: int) -> UIContent:
+        if self.options:
+            value = self.options[self._selected_index]
+            text = FormattedText([
+                ("", "["),
+                ("class:select-value", value),
+                ("class:select-arrow", " ▼"),
+                ("", "]"),
+            ])
+        else:
+            text = FormattedText([("class:select-empty", "[No options]")])
+
+        def get_line(i: int) -> FormattedText:
+            return text if i == 0 else FormattedText([])
+        return UIContent(get_line=get_line, line_count=1)
+
+    def is_focusable(self) -> bool:
+        return True
+
+    def get_key_bindings(self) -> KeyBindings:
+        kb = KeyBindings()
+
+        @kb.add("left")
+        def _prev(event: Any) -> None:
+            self._prev()
+
+        @kb.add("right")
+        @kb.add("space")
+        def _next(event: Any) -> None:
+            self._next()
+
+        return kb
+
+
+class CompactCheckbox(UIControl):
+    """
+    A compact single-line checkbox control.
+    Displays as: [x] when checked, [ ] when unchecked.
+    """
+
+    def __init__(self, checked: bool = False) -> None:
+        self._checked = checked
+
+    @property
+    def checked(self) -> bool:
+        return self._checked
+
+    @checked.setter
+    def checked(self, value: bool) -> None:
+        self._checked = value
+
+    def _toggle(self) -> None:
+        self._checked = not self._checked
+
+    def create_content(self, width: int, height: int) -> UIContent:
+        mark = "x" if self._checked else " "
+        text = FormattedText([
+            ("", "["),
+            ("class:checkbox-mark", mark),
+            ("", "]"),
+        ])
+
+        def get_line(i: int) -> FormattedText:
+            return text if i == 0 else FormattedText([])
+        return UIContent(get_line=get_line, line_count=1)
+
+    def is_focusable(self) -> bool:
+        return True
+
+    def get_key_bindings(self) -> KeyBindings:
+        kb = KeyBindings()
+
+        @kb.add("space")
+        @kb.add("enter")
+        def _toggle(event: Any) -> None:
+            self._toggle()
+
+        return kb

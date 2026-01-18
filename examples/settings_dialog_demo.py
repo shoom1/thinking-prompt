@@ -43,17 +43,20 @@ async def main():
                     DropdownItem(
                         key="model",
                         label="Model",
+                        description="Select the AI model to use",
                         options=["gpt-4", "gpt-4-turbo", "gpt-3.5-turbo"],
                         default=current_settings["model"],
                     ),
                     CheckboxItem(
                         key="stream",
                         label="Stream Output",
+                        description="Enable streaming for real-time responses",
                         default=current_settings["stream"],
                     ),
                     TextItem(
                         key="api_key",
                         label="API Key",
+                        description="Your OpenAI API key (stored securely)",
                         default=current_settings["api_key"],
                         password=True,
                     ),

@@ -55,6 +55,7 @@ from .settings_dialog import (
     CheckboxItem,
     TextItem,
     SettingsDialog,
+    SettingsListControl,
     CompactSelect,
     CompactCheckbox,
 )
@@ -84,6 +85,7 @@ __all__ = [
     "CheckboxItem",
     "TextItem",
     "SettingsDialog",
+    "SettingsListControl",
     "CompactSelect",
     "CompactCheckbox",
 ]

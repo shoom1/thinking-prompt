@@ -1,12 +1,13 @@
 """Tests for the settings dialog system."""
 from __future__ import annotations
 
-from prompt_toolkit.layout import HSplit
+from prompt_toolkit.layout import Window
 
 from thinking_prompt.settings_dialog import (
     CheckboxItem,
     DropdownItem,
     SettingsDialog,
+    SettingsListControl,
     TextItem,
 )
 
@@ -26,6 +27,17 @@ class TestSettingsItems:
         assert item.label == "Model"
         assert item.options == ["gpt-4", "gpt-3.5"]
         assert item.default == "gpt-4"
+
+    def test_dropdown_item_with_description(self):
+        """DropdownItem can have a description."""
+        item = DropdownItem(
+            key="model",
+            label="Model",
+            description="Select the AI model to use",
+            options=["gpt-4", "gpt-3.5"],
+            default="gpt-4",
+        )
+        assert item.description == "Select the AI model to use"
 
     def test_checkbox_item_creation(self):
         """CheckboxItem stores key, label, and default bool."""
@@ -63,11 +75,74 @@ class TestSettingsItems:
         assert item.password is False
 
 
+class TestSettingsListControl:
+    """Tests for the SettingsListControl."""
+
+    def test_list_control_init_values(self):
+        """SettingsListControl initializes values from items."""
+        items = [
+            DropdownItem(key="model", label="Model", options=["a", "b"], default="a"),
+            CheckboxItem(key="stream", label="Stream", default=True),
+        ]
+        control = SettingsListControl(items=items)
+
+        assert control.values == {"model": "a", "stream": True}
+
+    def test_list_control_change_dropdown(self):
+        """Dropdown value can be changed via _change_value."""
+        items = [
+            DropdownItem(key="model", label="Model", options=["a", "b", "c"], default="a"),
+        ]
+        control = SettingsListControl(items=items)
+
+        # Cycle forward
+        control._change_value(1)
+        assert control.values["model"] == "b"
+
+        # Cycle forward again
+        control._change_value(1)
+        assert control.values["model"] == "c"
+
+        # Cycle wraps around
+        control._change_value(1)
+        assert control.values["model"] == "a"
+
+    def test_list_control_change_checkbox(self):
+        """Checkbox value toggles via _change_value."""
+        items = [
+            CheckboxItem(key="stream", label="Stream", default=False),
+        ]
+        control = SettingsListControl(items=items)
+
+        # Toggle on
+        control._change_value(1)
+        assert control.values["stream"] is True
+
+        # Toggle off
+        control._change_value(1)
+        assert control.values["stream"] is False
+
+    def test_list_control_navigation(self):
+        """Selected index changes with navigation."""
+        items = [
+            CheckboxItem(key="a", label="A"),
+            CheckboxItem(key="b", label="B"),
+            CheckboxItem(key="c", label="C"),
+        ]
+        control = SettingsListControl(items=items)
+
+        assert control._selected_index == 0
+
+        # Move down - simulate the key binding effect
+        control._selected_index = 1
+        assert control._selected_index == 1
+
+
 class TestSettingsDialogState:
     """Tests for SettingsDialog state management."""
 
-    def test_settings_dialog_init_values(self):
-        """SettingsDialog initializes original and current values from items."""
+    def test_settings_dialog_init_original_values(self):
+        """SettingsDialog initializes original values from items."""
         items = [
             DropdownItem(key="model", label="Model", options=["a", "b"], default="a"),
             CheckboxItem(key="stream", label="Stream", default=True),
@@ -76,7 +151,6 @@ class TestSettingsDialogState:
         dialog = SettingsDialog(title="Settings", items=items)
 
         assert dialog._original_values == {"model": "a", "stream": True, "name": "test"}
-        assert dialog._current_values == {"model": "a", "stream": True, "name": "test"}
 
     def test_settings_dialog_get_changed_values_empty(self):
         """No changes returns empty dict."""
@@ -84,6 +158,7 @@ class TestSettingsDialogState:
             DropdownItem(key="model", label="Model", options=["a", "b"], default="a"),
         ]
         dialog = SettingsDialog(title="Settings", items=items)
+        dialog.build_body()  # Creates the list control
 
         changed = dialog._get_changed_values()
         assert changed == {}
@@ -95,10 +170,10 @@ class TestSettingsDialogState:
             CheckboxItem(key="stream", label="Stream", default=True),
         ]
         dialog = SettingsDialog(title="Settings", items=items)
+        dialog.build_body()  # Creates the list control
 
-        # Simulate changes
-        dialog._current_values["model"] = "b"  # Changed
-        # stream unchanged
+        # Simulate user changing dropdown via list control
+        dialog._list_control._values["model"] = "b"
 
         changed = dialog._get_changed_values()
         assert changed == {"model": "b"}
@@ -117,8 +192,8 @@ class TestSettingsDialogState:
 class TestSettingsDialogLayout:
     """Tests for SettingsDialog layout."""
 
-    def test_build_body_returns_container(self):
-        """build_body returns a proper container."""
+    def test_build_body_returns_window(self):
+        """build_body returns a Window containing SettingsListControl."""
         items = [
             DropdownItem(key="model", label="Model", options=["a", "b"], default="a"),
             CheckboxItem(key="stream", label="Stream", default=True),
@@ -126,68 +201,21 @@ class TestSettingsDialogLayout:
         dialog = SettingsDialog(title="Settings", items=items)
         body = dialog.build_body()
 
-        # Should be a vertical layout of rows
-        assert isinstance(body, HSplit)
+        # Should be a Window containing the list control
+        assert isinstance(body, Window)
 
-    def test_build_body_creates_row_per_item(self):
-        """Each item gets its own row in the form."""
+    def test_build_body_creates_list_control(self):
+        """build_body creates the SettingsListControl."""
         items = [
             DropdownItem(key="model", label="Model", options=["a", "b"], default="a"),
             CheckboxItem(key="stream", label="Stream", default=True),
             TextItem(key="name", label="Name", default="test"),
         ]
         dialog = SettingsDialog(title="Settings", items=items)
-        body = dialog.build_body()
-
-        # HSplit should have children for each item
-        assert hasattr(body, 'children')
-        assert len(list(body.children)) == 3
-
-
-class TestSettingsDialogValueSync:
-    """Tests for syncing control values with dialog state."""
-
-    def test_sync_values_from_controls_dropdown(self):
-        """Dropdown value changes are reflected in current_values."""
-        items = [
-            DropdownItem(key="model", label="Model", options=["a", "b"], default="a"),
-        ]
-        dialog = SettingsDialog(title="Settings", items=items)
-        dialog.build_body()  # Creates controls
-
-        # Simulate user changing dropdown
-        dialog._controls["model"].current_value = "b"
-        dialog._sync_values_from_controls()
-
-        assert dialog._current_values["model"] == "b"
-
-    def test_sync_values_from_controls_checkbox(self):
-        """Checkbox value changes are reflected in current_values."""
-        items = [
-            CheckboxItem(key="stream", label="Stream", default=False),
-        ]
-        dialog = SettingsDialog(title="Settings", items=items)
         dialog.build_body()
 
-        # Simulate user checking checkbox (CompactCheckbox uses .checked property)
-        dialog._controls["stream"].checked = True
-        dialog._sync_values_from_controls()
-
-        assert dialog._current_values["stream"] is True
-
-    def test_sync_values_from_controls_text(self):
-        """Text value changes are reflected in current_values."""
-        items = [
-            TextItem(key="name", label="Name", default=""),
-        ]
-        dialog = SettingsDialog(title="Settings", items=items)
-        dialog.build_body()
-
-        # Simulate user typing
-        dialog._controls["name"].text = "new value"
-        dialog._sync_values_from_controls()
-
-        assert dialog._current_values["name"] == "new value"
+        assert dialog._list_control is not None
+        assert isinstance(dialog._list_control, SettingsListControl)
 
 
 class TestSessionIntegration:

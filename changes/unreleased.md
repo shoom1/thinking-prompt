@@ -6,22 +6,20 @@ Run `git log --oneline <last-tag>..HEAD` to see commits for reference.
 -->
 
 ### Added
+- `SettingsListControl` - clean settings list with focus indicator and right-aligned values
+- `description` field on SettingsItem for optional help text below labels
 - `CompactSelect` widget - compact single-line dropdown that cycles with left/right keys
 - `CompactCheckbox` widget - compact single-line checkbox `[x]`/`[ ]` toggle
 - Dialog width control: `width` parameter on BaseDialog and SettingsDialog
-  - `None` or `0`: auto-size to content
-  - positive int: minimum width (default 60 for SettingsDialog)
-  - `-1`: maximum width (stretch to fill)
 - Dialog vertical positioning: `top` parameter on BaseDialog and SettingsDialog
-  - `None`: center (default)
-  - `0` or positive: offset from top
-  - negative: offset from bottom (e.g., `-1` = 1 row from bottom)
+- Settings list styles: indicator, label, value, description with selected states
+- Vim-style keybindings (j/k/h/l) for settings navigation
 
 ### Changed
+- SettingsDialog now uses clean list with `›` focus indicator and right-aligned values
 - Dialog background now uses dark theme (`bg:#2a2a2a`) to match terminal
-- DropdownItem now renders as compact `[value ▼]` instead of full RadioList
-- CheckboxItem now renders as compact `[x]`/`[ ]` instead of CheckboxList
-- SettingsDialog navigation: Up/Down moves between rows, Left/Right changes values
+- Checkbox values display as `true`/`false` text with green/grey styling
+- SettingsDialog navigation: Up/Down (j/k) moves rows, Left/Right (h/l) changes values
 - Removed light background overlay from dialogs (`with_background=False`)
 
 ### Fixed

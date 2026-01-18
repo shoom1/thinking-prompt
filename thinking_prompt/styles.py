@@ -76,6 +76,19 @@ class ThinkingPromptStyles:
     select_arrow: str = "fg:#888888"  # Grey arrow indicator
     checkbox_mark: str = "fg:#88c0d0"  # Cyan for checkbox mark
 
+    # Settings list styles (clean list with focus indicator)
+    setting_indicator: str = "fg:#88c0d0"  # Cyan focus indicator (›)
+    setting_label: str = "fg:#e0e0e0"  # Light grey label
+    setting_label_selected: str = "fg:#88c0d0"  # Cyan when selected
+    setting_value: str = "fg:#888888"  # Grey value
+    setting_value_selected: str = "fg:#88c0d0 italic"  # Cyan italic when selected
+    setting_value_true: str = "fg:#a3be8c"  # Green for true
+    setting_value_true_selected: str = "fg:#a3be8c italic"  # Green italic
+    setting_value_false: str = "fg:#888888"  # Grey for false
+    setting_value_false_selected: str = "fg:#888888 italic"  # Grey italic
+    setting_desc: str = "fg:#666666"  # Dimmed description
+    setting_desc_selected: str = "fg:#888888"  # Slightly brighter when selected
+
     def to_style(self) -> Style:
         """
         Convert to prompt_toolkit Style object.
@@ -118,6 +131,18 @@ class ThinkingPromptStyles:
             'select-value': self.select_value,
             'select-arrow': self.select_arrow,
             'checkbox-mark': self.checkbox_mark,
+            # Settings list
+            'setting-indicator': self.setting_indicator,
+            'setting-label': self.setting_label,
+            'setting-label-selected': self.setting_label_selected,
+            'setting-value': self.setting_value,
+            'setting-value-selected': self.setting_value_selected,
+            'setting-value-true': self.setting_value_true,
+            'setting-value-true-selected': self.setting_value_true_selected,
+            'setting-value-false': self.setting_value_false,
+            'setting-value-false-selected': self.setting_value_false_selected,
+            'setting-desc': self.setting_desc,
+            'setting-desc-selected': self.setting_desc_selected,
         })
 
 
