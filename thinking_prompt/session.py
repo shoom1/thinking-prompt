@@ -1028,6 +1028,7 @@ class ThinkingPromptSession:
         can_cancel: bool = True,
         styles: dict | None = None,
         width: int | None = 60,
+        top: int | None = None,
     ) -> dict[str, Any] | None:
         """
         Show a settings dialog and return changed values.
@@ -1042,6 +1043,10 @@ class ThinkingPromptSession:
                    - None or 0: auto-size to content
                    - positive int: minimum width (default 60)
                    - -1: maximum width (stretch to fill)
+            top: Vertical position:
+                   - None: center (default)
+                   - 0 or positive: offset from top
+                   - negative: offset from bottom (e.g., -1 = 1 row from bottom)
 
         Returns:
             Dictionary of changed values if saved, or None if cancelled.
@@ -1063,5 +1068,5 @@ class ThinkingPromptSession:
                     update_setting(key, value)
         """
         from .settings_dialog import SettingsDialog
-        dialog = SettingsDialog(title, items, can_cancel, styles, width)
+        dialog = SettingsDialog(title, items, can_cancel, styles, width, top)
         return await self._dialogs.show(dialog)

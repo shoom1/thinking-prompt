@@ -201,6 +201,7 @@ class SettingsDialog(BaseDialog):
         can_cancel: bool = True,
         styles: dict | None = None,
         width: int | None = 60,  # Default min width of 60 for settings dialogs
+        top: int | None = None,  # None=center, 0+=from top, negative=from bottom
     ) -> None:
         super().__init__()
         self.title = title
@@ -208,6 +209,7 @@ class SettingsDialog(BaseDialog):
         self._can_cancel = can_cancel
         self._styles = styles or {}
         self.width = width  # None/0=auto, >0=min width, -1=max width
+        self.top = top  # Vertical position
 
         # State management
         self._original_values: dict[str, Any] = {}

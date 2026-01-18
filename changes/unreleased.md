@@ -12,6 +12,10 @@ Run `git log --oneline <last-tag>..HEAD` to see commits for reference.
   - `None` or `0`: auto-size to content
   - positive int: minimum width (default 60 for SettingsDialog)
   - `-1`: maximum width (stretch to fill)
+- Dialog vertical positioning: `top` parameter on BaseDialog and SettingsDialog
+  - `None`: center (default)
+  - `0` or positive: offset from top
+  - negative: offset from bottom (e.g., `-1` = 1 row from bottom)
 
 ### Changed
 - Dialog background now uses dark theme (`bg:#2a2a2a`) to match terminal

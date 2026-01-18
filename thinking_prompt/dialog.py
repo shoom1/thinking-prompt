@@ -157,6 +157,8 @@ class BaseDialog(ABC):
     title: str = "Dialog"
     escape_result: Any = None
     width: Optional[int] = None  # None/0=auto, >0=min width, -1=max width
+    # Vertical position: None=center, 0+=from top, negative=from bottom
+    top: Optional[int] = None
 
     def __init__(self) -> None:
         self._result_future: Optional[asyncio.Future] = None
@@ -431,6 +433,24 @@ class DialogManager:
 
         return kb
 
+    def _get_dialog_top(self) -> Optional[int]:
+        """Get top position for current dialog (None=center, 0+=from top)."""
+        if self._current_dialog and self._current_dialog.top is not None:
+            top = self._current_dialog.top
+            if top >= 0:
+                return top
+            # Negative values not directly supported, treat as center
+            return None
+        return None  # Center by default
+
+    def _get_dialog_bottom(self) -> Optional[int]:
+        """Get bottom position for current dialog (negative top = from bottom)."""
+        if self._current_dialog and self._current_dialog.top is not None:
+            top = self._current_dialog.top
+            if top < 0:
+                return abs(top)  # Convert negative to bottom offset
+        return None
+
     def _inject_float_container(self) -> None:
         """Inject FloatContainer into session layout (one-time)."""
         if self._injected:
@@ -446,6 +466,8 @@ class DialogManager:
                         content=self._dialog_container,
                         filter=Condition(lambda: self._visible),
                     ),
+                    top=self._get_dialog_top,
+                    bottom=self._get_dialog_bottom,
                 ),
             ],
         )
