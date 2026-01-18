@@ -142,12 +142,14 @@ class SettingsDialog(BaseDialog):
         items: list[SettingsItem],
         can_cancel: bool = True,
         styles: dict | None = None,
+        width: int | None = 60,  # Default min width of 60 for settings dialogs
     ) -> None:
         super().__init__()
         self.title = title
         self._items = items
         self._can_cancel = can_cancel
         self._styles = styles or {}
+        self.width = width  # None/0=auto, >0=min width, -1=max width
 
         # State management
         self._original_values: dict[str, Any] = {}

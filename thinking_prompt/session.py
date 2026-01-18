@@ -1027,6 +1027,7 @@ class ThinkingPromptSession:
         items: list["SettingsItem"],
         can_cancel: bool = True,
         styles: dict | None = None,
+        width: int | None = 60,
     ) -> dict[str, Any] | None:
         """
         Show a settings dialog and return changed values.
@@ -1037,6 +1038,10 @@ class ThinkingPromptSession:
             can_cancel: If True (default), shows Save/Cancel buttons.
                        If False, shows only Done button.
             styles: Optional style overrides.
+            width: Dialog width control:
+                   - None or 0: auto-size to content
+                   - positive int: minimum width (default 60)
+                   - -1: maximum width (stretch to fill)
 
         Returns:
             Dictionary of changed values if saved, or None if cancelled.
@@ -1058,5 +1063,5 @@ class ThinkingPromptSession:
                     update_setting(key, value)
         """
         from .settings_dialog import SettingsDialog
-        dialog = SettingsDialog(title, items, can_cancel, styles)
+        dialog = SettingsDialog(title, items, can_cancel, styles, width)
         return await self._dialogs.show(dialog)

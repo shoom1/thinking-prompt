@@ -63,6 +63,7 @@ from prompt_toolkit.layout import (
     Window,
 )
 from prompt_toolkit.layout.controls import FormattedTextControl
+from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.widgets import Button, Dialog, Label, RadioList
 
 if TYPE_CHECKING:
@@ -155,11 +156,27 @@ class BaseDialog(ABC):
 
     title: str = "Dialog"
     escape_result: Any = None
+    width: Optional[int] = None  # None/0=auto, >0=min width, -1=max width
 
     def __init__(self) -> None:
         self._result_future: Optional[asyncio.Future] = None
         self._widget: Optional[Dialog] = None
         self._manager: Optional[DialogManager] = None
+
+    def _get_width_dimension(self) -> Optional[Dimension]:
+        """Convert width setting to prompt_toolkit Dimension.
+
+        Returns:
+            None for auto-size, Dimension for min/max width.
+        """
+        if self.width is None or self.width == 0:
+            return None  # Auto-size
+        elif self.width == -1:
+            # Max width - use large preferred with no max constraint
+            return Dimension(preferred=9999)
+        else:
+            # Minimum width
+            return Dimension(min=self.width)
 
     @abstractmethod
     def build_body(self) -> Container:
@@ -218,6 +235,7 @@ class BaseDialog(ABC):
             title=self.title,
             body=body,
             buttons=buttons,
+            width=self._get_width_dimension(),
             with_background=False,  # Use styled dialog, no light overlay
         )
         return self._widget
