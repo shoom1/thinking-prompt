@@ -410,6 +410,7 @@ class DialogManager:
         self._current_dialog: Optional[BaseDialog] = None
         self._injected = False
         self._dialog_container = DynamicContainer(self._get_dialog_content)
+        self._dialog_float: Optional[Float] = None
 
         # Create and register key bindings
         self._key_bindings = self._create_key_bindings()
@@ -433,24 +434,6 @@ class DialogManager:
 
         return kb
 
-    def _get_dialog_top(self) -> Optional[int]:
-        """Get top position for current dialog (None=center, 0+=from top)."""
-        if self._current_dialog and self._current_dialog.top is not None:
-            top = self._current_dialog.top
-            if top >= 0:
-                return top
-            # Negative values not directly supported, treat as center
-            return None
-        return None  # Center by default
-
-    def _get_dialog_bottom(self) -> Optional[int]:
-        """Get bottom position for current dialog (negative top = from bottom)."""
-        if self._current_dialog and self._current_dialog.top is not None:
-            top = self._current_dialog.top
-            if top < 0:
-                return abs(top)  # Convert negative to bottom offset
-        return None
-
     def _inject_float_container(self) -> None:
         """Inject FloatContainer into session layout (one-time)."""
         if self._injected:
@@ -458,18 +441,17 @@ class DialogManager:
 
         original_container = self._session.app.layout.container
 
+        # Create initial Float with no positioning (centered)
+        self._dialog_float = Float(
+            content=ConditionalContainer(
+                content=self._dialog_container,
+                filter=Condition(lambda: self._visible),
+            ),
+        )
+
         float_container = FloatContainer(
             content=original_container,
-            floats=[
-                Float(
-                    content=ConditionalContainer(
-                        content=self._dialog_container,
-                        filter=Condition(lambda: self._visible),
-                    ),
-                    top=self._get_dialog_top,
-                    bottom=self._get_dialog_bottom,
-                ),
-            ],
+            floats=[self._dialog_float],
         )
 
         self._session.app.layout.container = float_container
@@ -507,6 +489,21 @@ class DialogManager:
         self._current_dialog = dialog
         future = dialog._prepare(self)
         dialog._build_widget()
+
+        # Update Float positioning based on dialog's top attribute
+        if self._dialog_float:
+            if dialog.top is None:
+                # Center: no top or bottom constraint
+                self._dialog_float.top = None
+                self._dialog_float.bottom = None
+            elif dialog.top >= 0:
+                # Offset from top
+                self._dialog_float.top = dialog.top
+                self._dialog_float.bottom = None
+            else:
+                # Negative = offset from bottom
+                self._dialog_float.top = None
+                self._dialog_float.bottom = abs(dialog.top)
 
         # Show dialog
         self._visible = True
