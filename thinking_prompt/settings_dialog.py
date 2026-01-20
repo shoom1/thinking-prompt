@@ -271,6 +271,23 @@ class TextControl(SettingControl):
         self._original_value: str = item.default
         self._buffer = Buffer(multiline=False)
 
+    def enter_edit_mode(self) -> None:
+        """Enter edit mode - populate buffer with current value."""
+        self._original_value = self._value
+        self._buffer.text = self._value or ""
+        self._buffer.cursor_position = len(self._buffer.text)
+        self._editing = True
+
+    def confirm_edit(self) -> None:
+        """Confirm edit - save buffer to value."""
+        self._value = self._buffer.text
+        self._editing = False
+
+    def cancel_edit(self) -> None:
+        """Cancel edit - restore original value."""
+        self._value = self._original_value
+        self._editing = False
+
     def create_content(self, width: int, height: int) -> UIContent:
         """Render the text row in view mode."""
         if self._editing:

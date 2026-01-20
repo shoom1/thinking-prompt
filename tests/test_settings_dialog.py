@@ -338,6 +338,46 @@ class TestDropdownControl:
 class TestTextControl:
     """Tests for TextControl."""
 
+    def test_text_control_enter_edit_mode(self):
+        """TextControl enters edit mode and populates buffer."""
+        from thinking_prompt.settings_dialog import TextControl
+
+        item = TextItem(key="name", label="Name", default="Alice")
+        control = TextControl(item)
+
+        assert control.is_editing is False
+        control.enter_edit_mode()
+        assert control.is_editing is True
+        assert control._buffer.text == "Alice"
+
+    def test_text_control_confirm_edit(self):
+        """TextControl confirm saves buffer value."""
+        from thinking_prompt.settings_dialog import TextControl
+
+        item = TextItem(key="name", label="Name", default="Alice")
+        control = TextControl(item)
+
+        control.enter_edit_mode()
+        control._buffer.text = "Bob"
+        control.confirm_edit()
+
+        assert control.is_editing is False
+        assert control.value == "Bob"
+
+    def test_text_control_cancel_edit(self):
+        """TextControl cancel restores original value."""
+        from thinking_prompt.settings_dialog import TextControl
+
+        item = TextItem(key="name", label="Name", default="Alice")
+        control = TextControl(item)
+
+        control.enter_edit_mode()
+        control._buffer.text = "Bob"
+        control.cancel_edit()
+
+        assert control.is_editing is False
+        assert control.value == "Alice"  # restored
+
     def test_text_control_renders_value(self):
         """TextControl renders label and value in view mode."""
         from thinking_prompt.settings_dialog import TextControl
