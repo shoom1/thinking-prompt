@@ -500,6 +500,9 @@ class SettingsDialog(BaseDialog):
     def _focus_control(self, index: int, app: Any) -> None:
         """Focus the control at the given index."""
         if 0 <= index < len(self._controls):
+            # Update focus indicators on all controls
+            for i, control in enumerate(self._controls):
+                control.set_has_focus(i == index)
             self._selected_index = index
             # Focus the control's container
             container = self._control_containers[index]
@@ -523,6 +526,9 @@ class SettingsDialog(BaseDialog):
 
         @kb.add("tab", filter=Condition(lambda: not self._any_editing()))
         def _jump_to_buttons(event: Any) -> None:
+            # Clear focus indicators when leaving controls
+            for control in self._controls:
+                control.set_has_focus(False)
             # Jump from current position to buttons
             steps = len(self._controls) - self._selected_index
             for _ in range(steps):
@@ -530,9 +536,10 @@ class SettingsDialog(BaseDialog):
 
         @kb.add("s-tab", filter=Condition(lambda: not self._any_editing()))
         def _jump_back_to_controls(event: Any) -> None:
-            # Return to last position in controls
+            # Go to last control and update index
+            last_index = len(self._controls) - 1
             if self._controls:
-                self._focus_control(self._selected_index, event.app)
+                self._focus_control(last_index, event.app)
 
         return kb
 
@@ -553,6 +560,9 @@ class SettingsDialog(BaseDialog):
         """Build the dialog body with individual control containers."""
         if not self._controls:
             return Window(height=1)
+
+        # Set initial focus indicator on first control
+        self._controls[0].set_has_focus(True)
 
         # Store containers for focus management
         self._control_containers = [control.get_container() for control in self._controls]
