@@ -265,6 +265,9 @@ class TextControl(SettingControl):
         super().__init__(item)
         self._original_value: str = item.default
         self._buffer = Buffer(multiline=False)
+        # Cache view-mode window for stable focus target
+        height = 2 if item.description else 1
+        self._view_window = Window(self, height=height)
 
     def enter_edit_mode(self) -> None:
         """Enter edit mode - populate buffer with current value."""
@@ -340,12 +343,10 @@ class TextControl(SettingControl):
 
     def _get_current_container(self) -> Container:
         """Return appropriate container based on edit state."""
-        height = 2 if self._item.description else 1
-
         if self._editing:
             return self._build_edit_container()
         else:
-            return Window(self, height=height)
+            return self._view_window
 
     def _build_edit_container(self) -> Container:
         """Build the edit mode container with buffer input."""
@@ -444,6 +445,9 @@ class SettingsDialog(BaseDialog):
             control = self._create_control(item)
             self._controls.append(control)
 
+        # Navigation state
+        self._selected_index = 0
+
         # Escape behavior
         self.escape_result = None if can_cancel else "close"
 
@@ -462,6 +466,14 @@ class SettingsDialog(BaseDialog):
         """Check if any control is in edit mode."""
         return any(c.is_editing for c in self._controls)
 
+    def _focus_control(self, index: int, app: Any) -> None:
+        """Focus the control at the given index."""
+        if 0 <= index < len(self._controls):
+            self._selected_index = index
+            # Focus the control's container
+            container = self._control_containers[index]
+            app.layout.focus(container)
+
     def _get_navigation_key_bindings(self) -> KeyBindings:
         """Key bindings for navigating between settings."""
         kb = KeyBindings()
@@ -469,12 +481,14 @@ class SettingsDialog(BaseDialog):
         @kb.add("up", filter=Condition(lambda: not self._any_editing()))
         @kb.add("k", filter=Condition(lambda: not self._any_editing()))
         def _move_up(event: Any) -> None:
-            event.app.layout.focus_previous()
+            if self._selected_index > 0:
+                self._focus_control(self._selected_index - 1, event.app)
 
         @kb.add("down", filter=Condition(lambda: not self._any_editing()))
         @kb.add("j", filter=Condition(lambda: not self._any_editing()))
         def _move_down(event: Any) -> None:
-            event.app.layout.focus_next()
+            if self._selected_index < len(self._controls) - 1:
+                self._focus_control(self._selected_index + 1, event.app)
 
         return kb
 
@@ -496,10 +510,11 @@ class SettingsDialog(BaseDialog):
         if not self._controls:
             return Window(height=1)
 
-        rows = [control.get_container() for control in self._controls]
+        # Store containers for focus management
+        self._control_containers = [control.get_container() for control in self._controls]
 
         # Create container with navigation bindings
-        container = HSplit(rows, key_bindings=self._get_navigation_key_bindings())
+        container = HSplit(self._control_containers, key_bindings=self._get_navigation_key_bindings())
         return container
 
     def get_buttons(self) -> list[tuple[str, Callable[[], None]]]:
