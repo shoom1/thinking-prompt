@@ -262,6 +262,80 @@ class DropdownControl(SettingControl):
         return kb
 
 
+class TextControl(SettingControl):
+    """Text input control with view/edit modes."""
+
+    def __init__(self, item: TextItem) -> None:
+        super().__init__(item)
+        self._has_focus = False
+        self._original_value: str = item.default
+        self._buffer = Buffer(multiline=False)
+
+    def create_content(self, width: int, height: int) -> UIContent:
+        """Render the text row in view mode."""
+        if self._editing:
+            # Edit mode handled by get_container's DynamicContainer
+            return UIContent(get_line=lambda i: FormattedText([]), line_count=0)
+
+        is_selected = self._has_focus
+
+        indicator = "> " if is_selected else "  "
+        indicator_style = "class:setting-indicator" if is_selected else ""
+        label_style = "class:setting-label-selected" if is_selected else "class:setting-label"
+
+        # Format value
+        if self._item.password and self._value:
+            value_text = "••••••"
+        elif self._value:
+            value_text = str(self._value)
+        else:
+            value_text = "(empty)"
+
+        if not self._value:
+            value_style = "class:setting-desc-selected" if is_selected else "class:setting-desc"
+        else:
+            value_style = "class:setting-value-selected" if is_selected else "class:setting-value"
+
+        label_text = self._item.label
+        available = width - len(indicator) - len(label_text) - len(value_text) - 1
+        padding = max(1, available)
+
+        row: list[tuple[str, str]] = [
+            (indicator_style, indicator),
+            (label_style, label_text),
+            ("", " " * padding),
+            (value_style, value_text),
+        ]
+
+        lines = [FormattedText(row)]
+
+        if self._item.description:
+            desc_style = "class:setting-desc-selected" if is_selected else "class:setting-desc"
+            desc_row: list[tuple[str, str]] = [
+                ("", "  "),
+                (desc_style, self._item.description),
+            ]
+            lines.append(FormattedText(desc_row))
+
+        def get_line(i: int) -> FormattedText:
+            return lines[i] if i < len(lines) else FormattedText([])
+
+        return UIContent(get_line=get_line, line_count=len(lines))
+
+    def get_container(self) -> Container:
+        height = 2 if self._item.description else 1
+        return Window(self, height=height)
+
+    def get_key_bindings(self) -> KeyBindings:
+        kb = KeyBindings()
+
+        @kb.add("enter", filter=Condition(lambda: not self._editing))
+        def _enter_edit(event: Any) -> None:
+            self.enter_edit_mode()
+
+        return kb
+
+
 class SettingsDialog(BaseDialog):
     """
     A settings dialog with clean list styling and in-place text editing.

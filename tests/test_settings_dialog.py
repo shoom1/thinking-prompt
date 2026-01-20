@@ -335,6 +335,51 @@ class TestDropdownControl:
         assert "gpt-4" in text
 
 
+class TestTextControl:
+    """Tests for TextControl."""
+
+    def test_text_control_renders_value(self):
+        """TextControl renders label and value in view mode."""
+        from thinking_prompt.settings_dialog import TextControl
+
+        item = TextItem(key="name", label="Name", default="Alice")
+        control = TextControl(item)
+
+        content = control.create_content(width=50, height=1)
+        line = content.get_line(0)
+        text = "".join(t[1] for t in line)
+
+        assert "Name" in text
+        assert "Alice" in text
+
+    def test_text_control_renders_empty_placeholder(self):
+        """TextControl shows (empty) for empty value."""
+        from thinking_prompt.settings_dialog import TextControl
+
+        item = TextItem(key="name", label="Name", default="")
+        control = TextControl(item)
+
+        content = control.create_content(width=50, height=1)
+        line = content.get_line(0)
+        text = "".join(t[1] for t in line)
+
+        assert "(empty)" in text
+
+    def test_text_control_renders_password_masked(self):
+        """TextControl masks password values."""
+        from thinking_prompt.settings_dialog import TextControl
+
+        item = TextItem(key="api_key", label="API Key", default="sk-secret", password=True)
+        control = TextControl(item)
+
+        content = control.create_content(width=50, height=1)
+        line = content.get_line(0)
+        text = "".join(t[1] for t in line)
+
+        assert "sk-secret" not in text
+        assert "••••••" in text
+
+
 class TestShowSettingsDialog:
     """Tests for session.show_settings_dialog method."""
 
