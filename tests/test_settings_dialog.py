@@ -1,7 +1,7 @@
 """Tests for the settings dialog system."""
 from __future__ import annotations
 
-from prompt_toolkit.layout import HSplit, Window
+from prompt_toolkit.layout import FloatContainer, HSplit, Window
 
 from thinking_prompt.settings_dialog import (
     CheckboxItem,
@@ -192,8 +192,8 @@ class TestSettingsDialogState:
 class TestSettingsDialogLayout:
     """Tests for SettingsDialog layout."""
 
-    def test_build_body_returns_hsplit(self):
-        """build_body returns an HSplit containing list and edit area."""
+    def test_build_body_returns_float_container(self):
+        """build_body returns a FloatContainer for in-place editing overlay."""
         items = [
             DropdownItem(key="model", label="Model", options=["a", "b"], default="a"),
             CheckboxItem(key="stream", label="Stream", default=True),
@@ -201,8 +201,8 @@ class TestSettingsDialogLayout:
         dialog = SettingsDialog(title="Settings", items=items)
         body = dialog.build_body()
 
-        # Should be an HSplit with list window and conditional edit areas
-        assert isinstance(body, HSplit)
+        # Should be a FloatContainer with list window and edit overlay
+        assert isinstance(body, FloatContainer)
 
     def test_build_body_creates_list_control(self):
         """build_body creates the SettingsListControl."""
@@ -236,6 +236,29 @@ class TestSessionIntegration:
         assert CheckboxItem is not None
         assert TextItem is not None
         assert SettingsDialog is not None
+
+
+class TestSettingControl:
+    """Tests for the SettingControl base class."""
+
+    def test_setting_control_stores_item_and_value(self):
+        """SettingControl stores item reference and initial value."""
+        from thinking_prompt.settings_dialog import CheckboxControl
+
+        item = CheckboxItem(key="stream", label="Stream", default=True)
+        control = CheckboxControl(item)
+
+        assert control.item is item
+        assert control.value is True
+
+    def test_setting_control_is_not_editing_by_default(self):
+        """SettingControl starts in view mode."""
+        from thinking_prompt.settings_dialog import CheckboxControl
+
+        item = CheckboxItem(key="stream", label="Stream", default=False)
+        control = CheckboxControl(item)
+
+        assert control.is_editing is False
 
 
 class TestShowSettingsDialog:
