@@ -419,6 +419,18 @@ class TestTextControl:
         assert "sk-secret" not in text
         assert "••••••" in text
 
+    def test_text_control_container_switches_in_edit_mode(self):
+        """TextControl container returns different content in edit mode."""
+        from thinking_prompt.settings_dialog import TextControl
+        from prompt_toolkit.layout import DynamicContainer
+
+        item = TextItem(key="name", label="Name", default="Alice")
+        control = TextControl(item)
+
+        container = control.get_container()
+        # Should be a DynamicContainer
+        assert isinstance(container, DynamicContainer)
+
 
 class TestShowSettingsDialog:
     """Tests for session.show_settings_dialog method."""

@@ -19,6 +19,7 @@ from prompt_toolkit.layout import (
     BufferControl,
     ConditionalContainer,
     Container,
+    DynamicContainer,
     HSplit,
     VSplit,
     Window,
@@ -340,8 +341,62 @@ class TextControl(SettingControl):
         return UIContent(get_line=get_line, line_count=len(lines))
 
     def get_container(self) -> Container:
+        """Return container that switches between view/edit modes."""
+        return DynamicContainer(self._get_current_container)
+
+    def _get_current_container(self) -> Container:
+        """Return appropriate container based on edit state."""
         height = 2 if self._item.description else 1
-        return Window(self, height=height)
+
+        if self._editing:
+            return self._build_edit_container()
+        else:
+            return Window(self, height=height)
+
+    def _build_edit_container(self) -> Container:
+        """Build the edit mode container with buffer input."""
+        # Label on left, input field on right
+        label_text = f"> {self._item.label}"
+        label_width = len(label_text) + 2
+
+        edit_kb = KeyBindings()
+
+        @edit_kb.add("enter")
+        def _confirm(event: Any) -> None:
+            self.confirm_edit()
+
+        @edit_kb.add("escape")
+        def _cancel(event: Any) -> None:
+            self.cancel_edit()
+
+        buffer_control = BufferControl(
+            buffer=self._buffer,
+            key_bindings=edit_kb,
+        )
+
+        row = VSplit([
+            Window(
+                FormattedTextControl(lambda: FormattedText([
+                    ("class:setting-indicator", "> "),
+                    ("class:setting-label-selected", self._item.label),
+                ])),
+                width=label_width,
+            ),
+            Window(width=1),
+            Window(buffer_control, style="class:setting-input"),
+        ])
+
+        if self._item.description:
+            desc_row = Window(
+                FormattedTextControl(lambda: FormattedText([
+                    ("", "  "),
+                    ("class:setting-desc-selected", self._item.description),
+                ])),
+                height=1,
+            )
+            return HSplit([row, desc_row])
+
+        return row
 
     def get_key_bindings(self) -> KeyBindings:
         kb = KeyBindings()
