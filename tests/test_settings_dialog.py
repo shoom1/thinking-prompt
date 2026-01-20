@@ -270,6 +270,21 @@ class TestSettingControl:
 class TestCheckboxControl:
     """Tests for CheckboxControl."""
 
+    def test_checkbox_control_tracks_focus(self):
+        """CheckboxControl updates _has_focus based on actual focus."""
+        from thinking_prompt.settings_dialog import CheckboxControl
+
+        item = CheckboxItem(key="stream", label="Stream", default=False)
+        control = CheckboxControl(item)
+
+        # Simulate gaining focus
+        control.set_has_focus(True)
+        assert control._has_focus is True
+
+        # Simulate losing focus
+        control.set_has_focus(False)
+        assert control._has_focus is False
+
     def test_checkbox_toggle(self):
         """Checkbox toggles value."""
         from thinking_prompt.settings_dialog import CheckboxControl

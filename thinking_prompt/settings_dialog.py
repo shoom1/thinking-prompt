@@ -66,6 +66,7 @@ class SettingControl(UIControl, ABC):
         self._item = item
         self._value: Any = item.default
         self._editing = False
+        self._has_focus = False
 
     @property
     def item(self) -> SettingsItem:
@@ -98,6 +99,10 @@ class SettingControl(UIControl, ABC):
     def cancel_edit(self) -> None:
         """Cancel and exit edit mode. Override in subclasses."""
         self._editing = False
+
+    def set_has_focus(self, has_focus: bool) -> None:
+        """Update focus state (called by parent container)."""
+        self._has_focus = has_focus
 
     @abstractmethod
     def create_content(self, width: int, height: int) -> UIContent:
