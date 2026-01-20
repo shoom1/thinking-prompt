@@ -410,7 +410,7 @@ class TextControl(SettingControl):
 
 class SettingsDialog(BaseDialog):
     """
-    A settings dialog with clean list styling and in-place text editing.
+    A settings dialog using individual controls per setting type.
 
     Navigation:
     - Up/Down (or j/k): Move between settings
@@ -444,263 +444,50 @@ class SettingsDialog(BaseDialog):
         for item in items:
             self._original_values[item.key] = item.default
 
-        # Current values
-        self._values: dict[str, Any] = {}
+        # Create controls
+        self._controls: list[SettingControl] = []
         for item in items:
-            self._values[item.key] = item.default
-
-        # Navigation state
-        self._selected_index = 0
-        self._editing_index: int | None = None
-
-        # Text edit buffer
-        self._edit_buffer: Buffer | None = None
-        self._edit_window: Window | None = None
-        self._list_window: Window | None = None
-        self._list_control: SettingsListControl | None = None
+            control = self._create_control(item)
+            self._controls.append(control)
 
         # Escape behavior
         self.escape_result = None if can_cancel else "close"
 
-    def _get_selected_index(self) -> int:
-        return self._selected_index
+    def _create_control(self, item: SettingsItem) -> SettingControl:
+        """Create the appropriate control for a settings item."""
+        if isinstance(item, CheckboxItem):
+            return CheckboxControl(item)
+        elif isinstance(item, DropdownItem):
+            return DropdownControl(item)
+        elif isinstance(item, TextItem):
+            return TextControl(item)
+        else:
+            raise ValueError(f"Unknown settings item type: {type(item)}")
 
-    def _get_editing_index(self) -> int | None:
-        return self._editing_index
+    def _any_editing(self) -> bool:
+        """Check if any control is in edit mode."""
+        return any(c.is_editing for c in self._controls)
 
     def _get_changed_values(self) -> dict[str, Any]:
         """Return only values that differ from original."""
         changed = {}
-        for key, value in self._values.items():
-            if value != self._original_values.get(key):
-                changed[key] = value
+        for control in self._controls:
+            key = control.item.key
+            if control.value != self._original_values.get(key):
+                changed[key] = control.value
         return changed
 
     def _on_save(self) -> None:
         """Handle save - return changed values."""
         self.set_result(self._get_changed_values())
 
-    def _change_value(self, delta: int) -> None:
-        """Change the current item's value."""
-        if not self._items or self._editing_index is not None:
-            return
-        item = self._items[self._selected_index]
-
-        if isinstance(item, CheckboxItem):
-            self._values[item.key] = not self._values[item.key]
-        elif isinstance(item, DropdownItem):
-            if item.options:
-                current = self._values[item.key]
-                try:
-                    idx = item.options.index(current)
-                except ValueError:
-                    idx = 0
-                new_idx = (idx + delta) % len(item.options)
-                self._values[item.key] = item.options[new_idx]
-
-    def _start_text_edit(self, app: Any = None) -> None:
-        """Start editing the current text item in-place."""
-        if self._editing_index is not None:
-            return
-        item = self._items[self._selected_index]
-        if not isinstance(item, TextItem):
-            return
-        if not self._edit_buffer:
-            return
-
-        # Set buffer to current value
-        current_value = self._values[item.key] or ""
-        self._edit_buffer.text = current_value
-        self._edit_buffer.cursor_position = len(current_value)
-
-        self._editing_index = self._selected_index
-
-        # Focus the edit window - use provided app or fall back to manager
-        if self._edit_window:
-            if app:
-                app.layout.focus(self._edit_window)
-            elif self._manager:
-                self._manager._session.app.layout.focus(self._edit_window)
-
-    def _confirm_text_edit(self, app: Any = None) -> None:
-        """Confirm text edit."""
-        if self._editing_index is None or not self._edit_buffer:
-            return
-
-        item = self._items[self._editing_index]
-        if isinstance(item, TextItem):
-            self._values[item.key] = self._edit_buffer.text
-
-        self._editing_index = None
-
-        # Return focus to list
-        if self._list_window:
-            if app:
-                app.layout.focus(self._list_window)
-            elif self._manager:
-                self._manager._session.app.layout.focus(self._list_window)
-
-    def _cancel_text_edit(self, app: Any = None) -> None:
-        """Cancel text edit."""
-        self._editing_index = None
-
-        # Return focus to list
-        if self._list_window:
-            if app:
-                app.layout.focus(self._list_window)
-            elif self._manager:
-                self._manager._session.app.layout.focus(self._list_window)
-
-    def _get_list_key_bindings(self) -> KeyBindings:
-        """Key bindings for list navigation."""
-        kb = KeyBindings()
-
-        @kb.add("up", filter=Condition(lambda: self._editing_index is None))
-        @kb.add("k", filter=Condition(lambda: self._editing_index is None))
-        def _move_up(event: Any) -> None:
-            if self._selected_index > 0:
-                self._selected_index -= 1
-
-        @kb.add("down", filter=Condition(lambda: self._editing_index is None))
-        @kb.add("j", filter=Condition(lambda: self._editing_index is None))
-        def _move_down(event: Any) -> None:
-            if self._selected_index < len(self._items) - 1:
-                self._selected_index += 1
-
-        @kb.add("left", filter=Condition(lambda: self._editing_index is None))
-        @kb.add("h", filter=Condition(lambda: self._editing_index is None))
-        def _prev_value(event: Any) -> None:
-            self._change_value(-1)
-
-        @kb.add("right", filter=Condition(lambda: self._editing_index is None))
-        @kb.add("l", filter=Condition(lambda: self._editing_index is None))
-        @kb.add("space", filter=Condition(lambda: self._editing_index is None))
-        def _next_value(event: Any) -> None:
-            self._change_value(1)
-
-        @kb.add("enter", filter=Condition(lambda: self._editing_index is None))
-        def _handle_enter(event: Any) -> None:
-            item = self._items[self._selected_index]
-            if isinstance(item, TextItem):
-                self._start_text_edit(app=event.app)
-
-        return kb
-
-    def _calculate_edit_position(self) -> int:
-        """Calculate the line number where the edit field should appear."""
-        if self._editing_index is None:
-            return 0
-        line = 0
-        for i, item in enumerate(self._items):
-            if i == self._editing_index:
-                return line
-            line += 1
-            if item.description:
-                line += 1
-        return line
-
-    def _get_label_width(self) -> int:
-        """Get the width needed for labels."""
-        return max(len(item.label) for item in self._items) + 4  # +4 for "› " and ": "
-
     def build_body(self) -> Container:
-        """Build the dialog body with in-place text editing."""
-        from prompt_toolkit.layout import FloatContainer, Float
-        from prompt_toolkit.layout.dimension import Dimension
+        """Build the dialog body with individual control containers."""
+        if not self._controls:
+            return Window(height=1)
 
-        # Create the list control with key bindings
-        self._list_control = SettingsListControl(
-            items=self._items,
-            values=self._values,
-            get_selected_index=self._get_selected_index,
-            get_editing_index=self._get_editing_index,
-        )
-
-        # Add key bindings to control
-        list_kb = self._get_list_key_bindings()
-        original_get_kb = self._list_control.get_key_bindings
-
-        def merged_key_bindings() -> KeyBindings:
-            from prompt_toolkit.key_binding import merge_key_bindings
-            return merge_key_bindings([original_get_kb(), list_kb])
-
-        self._list_control.get_key_bindings = merged_key_bindings
-
-        # Calculate total lines
-        total_lines = sum(2 if item.description else 1 for item in self._items)
-
-        self._list_window = Window(
-            self._list_control,
-            height=total_lines,
-        )
-
-        # Create text edit buffer with key bindings
-        self._edit_buffer = Buffer(multiline=False)
-
-        edit_kb = KeyBindings()
-
-        @edit_kb.add("enter")
-        def _confirm(event: Any) -> None:
-            self._confirm_text_edit(app=event.app)
-
-        @edit_kb.add("escape")
-        def _cancel(event: Any) -> None:
-            self._cancel_text_edit(app=event.app)
-
-        edit_control = BufferControl(
-            buffer=self._edit_buffer,
-            key_bindings=edit_kb,
-        )
-
-        self._edit_window = Window(
-            edit_control,
-            height=1,
-            style="class:setting-input",
-        )
-
-        # Create the edit overlay container
-        label_width = self._get_label_width()
-
-        def get_edit_label() -> FormattedText:
-            """Get the label for the edit row."""
-            if self._editing_index is None:
-                return FormattedText([])
-            item = self._items[self._editing_index]
-            return FormattedText([("class:setting-indicator", "› "), ("class:setting-label-selected", item.label)])
-
-        edit_overlay = VSplit([
-            Window(FormattedTextControl(get_edit_label), width=label_width),
-            Window(width=1),
-            self._edit_window,
-        ], height=1)
-
-        # Use a dynamic container for the float that updates position
-        class DynamicFloat(Float):
-            """Float with dynamic top position."""
-            def __init__(self, content: Container, get_top: Callable[[], int]) -> None:
-                super().__init__(content=content, left=0, top=0)
-                self._get_top = get_top
-
-            @property  # type: ignore[override]
-            def top(self) -> int:
-                return self._get_top()
-
-            @top.setter
-            def top(self, value: int) -> None:
-                pass  # Ignore setter, we use dynamic getter
-
-        return FloatContainer(
-            content=self._list_window,
-            floats=[
-                DynamicFloat(
-                    content=ConditionalContainer(
-                        content=edit_overlay,
-                        filter=Condition(lambda: self._editing_index is not None),
-                    ),
-                    get_top=self._calculate_edit_position,
-                ),
-            ],
-        )
+        rows = [control.get_container() for control in self._controls]
+        return HSplit(rows)
 
     def get_buttons(self) -> list[tuple[str, Callable[[], None]]]:
         """Return dialog buttons."""

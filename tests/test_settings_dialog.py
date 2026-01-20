@@ -1,7 +1,7 @@
 """Tests for the settings dialog system."""
 from __future__ import annotations
 
-from prompt_toolkit.layout import FloatContainer, HSplit, Window
+from prompt_toolkit.layout import HSplit, Window
 
 from thinking_prompt.settings_dialog import (
     CheckboxItem,
@@ -170,10 +170,10 @@ class TestSettingsDialogState:
             CheckboxItem(key="stream", label="Stream", default=True),
         ]
         dialog = SettingsDialog(title="Settings", items=items)
-        dialog.build_body()  # Creates the list control
+        dialog.build_body()  # Creates the controls
 
-        # Simulate user changing dropdown via list control
-        dialog._list_control._values["model"] = "b"
+        # Simulate user changing dropdown via control
+        dialog._controls[0].value = "b"
 
         changed = dialog._get_changed_values()
         assert changed == {"model": "b"}
@@ -192,8 +192,8 @@ class TestSettingsDialogState:
 class TestSettingsDialogLayout:
     """Tests for SettingsDialog layout."""
 
-    def test_build_body_returns_float_container(self):
-        """build_body returns a FloatContainer for in-place editing overlay."""
+    def test_build_body_returns_hsplit(self):
+        """build_body returns an HSplit of control containers."""
         items = [
             DropdownItem(key="model", label="Model", options=["a", "b"], default="a"),
             CheckboxItem(key="stream", label="Stream", default=True),
@@ -201,11 +201,15 @@ class TestSettingsDialogLayout:
         dialog = SettingsDialog(title="Settings", items=items)
         body = dialog.build_body()
 
-        # Should be a FloatContainer with list window and edit overlay
-        assert isinstance(body, FloatContainer)
+        # Should be an HSplit of control containers
+        assert isinstance(body, HSplit)
 
-    def test_build_body_creates_list_control(self):
-        """build_body creates the SettingsListControl."""
+    def test_build_body_creates_controls(self):
+        """build_body creates individual SettingControl instances."""
+        from thinking_prompt.settings_dialog import (
+            CheckboxControl, DropdownControl, TextControl
+        )
+
         items = [
             DropdownItem(key="model", label="Model", options=["a", "b"], default="a"),
             CheckboxItem(key="stream", label="Stream", default=True),
@@ -214,8 +218,10 @@ class TestSettingsDialogLayout:
         dialog = SettingsDialog(title="Settings", items=items)
         dialog.build_body()
 
-        assert dialog._list_control is not None
-        assert isinstance(dialog._list_control, SettingsListControl)
+        assert len(dialog._controls) == 3
+        assert isinstance(dialog._controls[0], DropdownControl)
+        assert isinstance(dialog._controls[1], CheckboxControl)
+        assert isinstance(dialog._controls[2], TextControl)
 
 
 class TestSessionIntegration:
@@ -439,3 +445,36 @@ class TestShowSettingsDialog:
         """ThinkingPromptSession has show_settings_dialog method."""
         from thinking_prompt import ThinkingPromptSession
         assert hasattr(ThinkingPromptSession, 'show_settings_dialog')
+
+
+class TestSettingsDialogRefactored:
+    """Tests for refactored SettingsDialog using individual controls."""
+
+    def test_settings_dialog_creates_controls(self):
+        """SettingsDialog creates SettingControl instances."""
+        from thinking_prompt.settings_dialog import (
+            CheckboxControl, DropdownControl, TextControl
+        )
+
+        items = [
+            CheckboxItem(key="stream", label="Stream", default=True),
+            DropdownItem(key="model", label="Model", options=["a", "b"], default="a"),
+            TextItem(key="name", label="Name", default="test"),
+        ]
+        dialog = SettingsDialog(title="Settings", items=items)
+        dialog.build_body()
+
+        assert len(dialog._controls) == 3
+        assert isinstance(dialog._controls[0], CheckboxControl)
+        assert isinstance(dialog._controls[1], DropdownControl)
+        assert isinstance(dialog._controls[2], TextControl)
+
+    def test_settings_dialog_build_body_returns_hsplit(self):
+        """build_body returns HSplit of control containers."""
+        items = [
+            CheckboxItem(key="stream", label="Stream", default=True),
+        ]
+        dialog = SettingsDialog(title="Settings", items=items)
+        body = dialog.build_body()
+
+        assert isinstance(body, HSplit)
