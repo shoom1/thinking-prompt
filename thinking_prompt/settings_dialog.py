@@ -119,10 +119,6 @@ class SettingControl(UIControl, ABC):
 class CheckboxControl(SettingControl):
     """Checkbox control that toggles on Space/Enter."""
 
-    def __init__(self, item: CheckboxItem) -> None:
-        super().__init__(item)
-        self._has_focus = False
-
     def toggle(self) -> None:
         """Toggle the checkbox value."""
         self._value = not self._value
@@ -191,10 +187,6 @@ class CheckboxControl(SettingControl):
 
 class DropdownControl(SettingControl):
     """Dropdown control that cycles through options."""
-
-    def __init__(self, item: DropdownItem) -> None:
-        super().__init__(item)
-        self._has_focus = False
 
     def cycle(self, delta: int) -> None:
         """Cycle through options by delta (+1 or -1)."""
@@ -271,7 +263,6 @@ class TextControl(SettingControl):
 
     def __init__(self, item: TextItem) -> None:
         super().__init__(item)
-        self._has_focus = False
         self._original_value: str = item.default
         self._buffer = Buffer(multiline=False)
 
