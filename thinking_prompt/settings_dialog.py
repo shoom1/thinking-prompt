@@ -265,26 +265,42 @@ class TextControl(SettingControl):
         super().__init__(item)
         self._original_value: str = item.default
         self._buffer = Buffer(multiline=False)
+        self._app_ref = None  # Store app reference for focus management
         # Cache view-mode window for stable focus target
         height = 2 if item.description else 1
         self._view_window = Window(self, height=height)
+        # Cache edit container for stable focus
+        self._edit_container = None
+        self._buffer_window = None
 
-    def enter_edit_mode(self) -> None:
+    def enter_edit_mode(self, app: Any = None) -> None:
         """Enter edit mode - populate buffer with current value."""
         self._original_value = self._value
         self._buffer.text = self._value or ""
         self._buffer.cursor_position = len(self._buffer.text)
         self._editing = True
+        self._app_ref = app
+        # Build edit container (creates _buffer_window if not exists)
+        self._build_edit_container()
+        # Focus the buffer window
+        if app and self._buffer_window:
+            app.layout.focus(self._buffer_window)
 
     def confirm_edit(self) -> None:
         """Confirm edit - save buffer to value."""
         self._value = self._buffer.text
         self._editing = False
+        # Restore focus to view window
+        if self._app_ref:
+            self._app_ref.layout.focus(self._view_window)
 
     def cancel_edit(self) -> None:
         """Cancel edit - restore original value."""
         self._value = self._original_value
         self._editing = False
+        # Restore focus to view window
+        if self._app_ref:
+            self._app_ref.layout.focus(self._view_window)
 
     def create_content(self, width: int, height: int) -> UIContent:
         """Render the text row in view mode."""
@@ -349,7 +365,10 @@ class TextControl(SettingControl):
             return self._view_window
 
     def _build_edit_container(self) -> Container:
-        """Build the edit mode container with buffer input."""
+        """Build the edit mode container with buffer input (cached)."""
+        if self._edit_container is not None:
+            return self._edit_container
+
         # Label on left, input field on right
         label_text = f"> {self._item.label}"
         label_width = len(label_text) + 2
@@ -369,6 +388,9 @@ class TextControl(SettingControl):
             key_bindings=edit_kb,
         )
 
+        # Cache the buffer window for focus management
+        self._buffer_window = Window(buffer_control, style="class:setting-input")
+
         row = VSplit([
             Window(
                 FormattedTextControl(lambda: FormattedText([
@@ -378,7 +400,7 @@ class TextControl(SettingControl):
                 width=label_width,
             ),
             Window(width=1),
-            Window(buffer_control, style="class:setting-input"),
+            self._buffer_window,
         ])
 
         if self._item.description:
@@ -389,16 +411,19 @@ class TextControl(SettingControl):
                 ])),
                 height=1,
             )
-            return HSplit([row, desc_row])
+            self._edit_container = HSplit([row, desc_row])
+        else:
+            self._edit_container = row
 
-        return row
+        return self._edit_container
 
     def get_key_bindings(self) -> KeyBindings:
+        """Key bindings for view mode (Enter to edit)."""
         kb = KeyBindings()
 
         @kb.add("enter", filter=Condition(lambda: not self._editing))
         def _enter_edit(event: Any) -> None:
-            self.enter_edit_mode()
+            self.enter_edit_mode(event.app)
 
         return kb
 
