@@ -113,16 +113,76 @@ class SettingControl(UIControl, ABC):
 
 
 class CheckboxControl(SettingControl):
-    """Checkbox control - placeholder for now."""
+    """Checkbox control that toggles on Space/Enter."""
 
     def __init__(self, item: CheckboxItem) -> None:
         super().__init__(item)
+        self._has_focus = False
+
+    def toggle(self) -> None:
+        """Toggle the checkbox value."""
+        self._value = not self._value
 
     def create_content(self, width: int, height: int) -> UIContent:
-        return UIContent(get_line=lambda i: FormattedText([]), line_count=1)
+        """Render the checkbox row."""
+        is_selected = self._has_focus
+
+        # Build the row: [indicator] [label] ... [value]
+        indicator = "> " if is_selected else "  "
+        indicator_style = "class:setting-indicator" if is_selected else ""
+        label_style = "class:setting-label-selected" if is_selected else "class:setting-label"
+
+        if self._value:
+            value_text = "true"
+            value_style = "class:setting-value-true-selected" if is_selected else "class:setting-value-true"
+        else:
+            value_text = "false"
+            value_style = "class:setting-value-false-selected" if is_selected else "class:setting-value-false"
+
+        label_text = self._item.label
+        available = width - len(indicator) - len(label_text) - len(value_text) - 1
+        padding = max(1, available)
+
+        row: list[tuple[str, str]] = [
+            (indicator_style, indicator),
+            (label_style, label_text),
+            ("", " " * padding),
+            (value_style, value_text),
+        ]
+
+        lines = [FormattedText(row)]
+
+        # Add description if present
+        if self._item.description:
+            desc_style = "class:setting-desc-selected" if is_selected else "class:setting-desc"
+            desc_row: list[tuple[str, str]] = [
+                ("", "  "),
+                (desc_style, self._item.description),
+            ]
+            lines.append(FormattedText(desc_row))
+
+        def get_line(i: int) -> FormattedText:
+            return lines[i] if i < len(lines) else FormattedText([])
+
+        return UIContent(get_line=get_line, line_count=len(lines))
 
     def get_container(self) -> Container:
-        return Window(self, height=1)
+        """Return window containing this control."""
+        height = 2 if self._item.description else 1
+        return Window(self, height=height)
+
+    def get_key_bindings(self) -> KeyBindings:
+        """Key bindings for checkbox."""
+        kb = KeyBindings()
+
+        @kb.add("space")
+        @kb.add("enter")
+        @kb.add("left")
+        @kb.add("right")
+        def _toggle(event: Any) -> None:
+            self.toggle()
+
+        return kb
 
 
 class SettingsDialog(BaseDialog):

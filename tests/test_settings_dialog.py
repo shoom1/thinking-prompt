@@ -261,6 +261,37 @@ class TestSettingControl:
         assert control.is_editing is False
 
 
+class TestCheckboxControl:
+    """Tests for CheckboxControl."""
+
+    def test_checkbox_toggle(self):
+        """Checkbox toggles value."""
+        from thinking_prompt.settings_dialog import CheckboxControl
+
+        item = CheckboxItem(key="stream", label="Stream", default=False)
+        control = CheckboxControl(item)
+
+        assert control.value is False
+        control.toggle()
+        assert control.value is True
+        control.toggle()
+        assert control.value is False
+
+    def test_checkbox_renders_label_and_value(self):
+        """Checkbox renders label and true/false value."""
+        from thinking_prompt.settings_dialog import CheckboxControl
+
+        item = CheckboxItem(key="stream", label="Stream Output", default=True)
+        control = CheckboxControl(item)
+
+        content = control.create_content(width=50, height=1)
+        line = content.get_line(0)
+        text = "".join(t[1] for t in line)
+
+        assert "Stream Output" in text
+        assert "true" in text
+
+
 class TestShowSettingsDialog:
     """Tests for session.show_settings_dialog method."""
 
