@@ -292,6 +292,49 @@ class TestCheckboxControl:
         assert "true" in text
 
 
+class TestDropdownControl:
+    """Tests for DropdownControl."""
+
+    def test_dropdown_cycle_forward(self):
+        """Dropdown cycles through options forward."""
+        from thinking_prompt.settings_dialog import DropdownControl
+
+        item = DropdownItem(key="model", label="Model", options=["a", "b", "c"], default="a")
+        control = DropdownControl(item)
+
+        assert control.value == "a"
+        control.cycle(1)
+        assert control.value == "b"
+        control.cycle(1)
+        assert control.value == "c"
+        control.cycle(1)
+        assert control.value == "a"  # wraps
+
+    def test_dropdown_cycle_backward(self):
+        """Dropdown cycles through options backward."""
+        from thinking_prompt.settings_dialog import DropdownControl
+
+        item = DropdownItem(key="model", label="Model", options=["a", "b", "c"], default="a")
+        control = DropdownControl(item)
+
+        control.cycle(-1)
+        assert control.value == "c"  # wraps backward
+
+    def test_dropdown_renders_label_and_value(self):
+        """Dropdown renders label and current option."""
+        from thinking_prompt.settings_dialog import DropdownControl
+
+        item = DropdownItem(key="model", label="Model", options=["gpt-4", "gpt-3.5"], default="gpt-4")
+        control = DropdownControl(item)
+
+        content = control.create_content(width=50, height=1)
+        line = content.get_line(0)
+        text = "".join(t[1] for t in line)
+
+        assert "Model" in text
+        assert "gpt-4" in text
+
+
 class TestShowSettingsDialog:
     """Tests for session.show_settings_dialog method."""
 
