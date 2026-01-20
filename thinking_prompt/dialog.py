@@ -169,7 +169,7 @@ class BaseDialog(ABC):
         """Convert width setting to prompt_toolkit Dimension.
 
         Returns:
-            None for auto-size, Dimension for min/max width.
+            None for auto-size, Dimension for preferred width.
         """
         if self.width is None or self.width == 0:
             return None  # Auto-size
@@ -177,8 +177,8 @@ class BaseDialog(ABC):
             # Max width - use large preferred with no max constraint
             return Dimension(preferred=9999)
         else:
-            # Minimum width
-            return Dimension(min=self.width)
+            # Preferred width (allows shrinking if terminal is smaller)
+            return Dimension(preferred=self.width)
 
     @abstractmethod
     def build_body(self) -> Container:
@@ -447,6 +447,7 @@ class DialogManager:
                 content=self._dialog_container,
                 filter=Condition(lambda: self._visible),
             ),
+            allow_cover_cursor=True,
         )
 
         float_container = FloatContainer(
