@@ -12,6 +12,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+from prompt_toolkit.application.current import get_app
 from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.filters import Condition
 from prompt_toolkit.formatted_text import FormattedText
@@ -121,13 +122,27 @@ class SettingControl(UIControl, ABC):
 class CheckboxControl(SettingControl):
     """Checkbox control that toggles on Space/Enter."""
 
+    def __init__(self, item: CheckboxItem) -> None:
+        super().__init__(item)
+        # Cache window for focus detection
+        height = 2 if item.description else 1
+        self._window = Window(self, height=height)
+
     def toggle(self) -> None:
         """Toggle the checkbox value."""
         self._value = not self._value
 
+    def _check_focus(self) -> bool:
+        """Check if this control has focus (for rendering)."""
+        try:
+            app = get_app()
+            return app.layout.has_focus(self._window)
+        except Exception:
+            return self._has_focus
+
     def create_content(self, width: int, height: int) -> UIContent:
         """Render the checkbox row."""
-        is_selected = self._has_focus
+        is_selected = self._check_focus()
 
         # Build the row: [indicator] [label] ... [value]
         indicator = "> " if is_selected else "  "
@@ -169,9 +184,8 @@ class CheckboxControl(SettingControl):
         return UIContent(get_line=get_line, line_count=len(lines))
 
     def get_container(self) -> Container:
-        """Return window containing this control."""
-        height = 2 if self._item.description else 1
-        return Window(self, height=height)
+        """Return cached window containing this control."""
+        return self._window
 
     def get_key_bindings(self) -> KeyBindings:
         """Key bindings for checkbox."""
@@ -190,6 +204,20 @@ class CheckboxControl(SettingControl):
 class DropdownControl(SettingControl):
     """Dropdown control that cycles through options."""
 
+    def __init__(self, item: DropdownItem) -> None:
+        super().__init__(item)
+        # Cache window for focus detection
+        height = 2 if item.description else 1
+        self._window = Window(self, height=height)
+
+    def _check_focus(self) -> bool:
+        """Check if this control has focus (for rendering)."""
+        try:
+            app = get_app()
+            return app.layout.has_focus(self._window)
+        except Exception:
+            return self._has_focus
+
     def cycle(self, delta: int) -> None:
         """Cycle through options by delta (+1 or -1)."""
         options = self._item.options
@@ -204,7 +232,7 @@ class DropdownControl(SettingControl):
 
     def create_content(self, width: int, height: int) -> UIContent:
         """Render the dropdown row."""
-        is_selected = self._has_focus
+        is_selected = self._check_focus()
 
         indicator = "> " if is_selected else "  "
         indicator_style = "class:setting-indicator" if is_selected else ""
@@ -240,8 +268,8 @@ class DropdownControl(SettingControl):
         return UIContent(get_line=get_line, line_count=len(lines))
 
     def get_container(self) -> Container:
-        height = 2 if self._item.description else 1
-        return Window(self, height=height)
+        """Return cached window containing this control."""
+        return self._window
 
     def get_key_bindings(self) -> KeyBindings:
         kb = KeyBindings()
@@ -302,13 +330,21 @@ class TextControl(SettingControl):
         if self._app_ref:
             self._app_ref.layout.focus(self._view_window)
 
+    def _check_focus(self) -> bool:
+        """Check if this control has focus (for rendering)."""
+        try:
+            app = get_app()
+            return app.layout.has_focus(self._view_window)
+        except Exception:
+            return self._has_focus
+
     def create_content(self, width: int, height: int) -> UIContent:
         """Render the text row in view mode."""
         if self._editing:
             # Edit mode handled by get_container's DynamicContainer
             return UIContent(get_line=lambda i: FormattedText([]), line_count=0)
 
-        is_selected = self._has_focus
+        is_selected = self._check_focus()
 
         indicator = "> " if is_selected else "  "
         indicator_style = "class:setting-indicator" if is_selected else ""
@@ -497,6 +533,13 @@ class SettingsDialog(BaseDialog):
         """Check if any control is in edit mode."""
         return any(c.is_editing for c in self._controls)
 
+    def _sync_focus_index(self, app: Any) -> None:
+        """Sync _focus_index with actual focus (for when focus changes externally)."""
+        for i, container in enumerate(self._control_containers):
+            if app.layout.has_focus(container):
+                self._focus_index = i
+                return
+
     def _focus_control(self, index: int, app: Any) -> None:
         """Focus the control at the given index and update indicators."""
         if 0 <= index < len(self._controls):
@@ -520,34 +563,35 @@ class SettingsDialog(BaseDialog):
         # Up/Down: navigate within controls only, stop at boundaries
         @kb.add("up", filter=Condition(lambda: not self._any_editing()))
         def _move_up(event: Any) -> None:
+            self._sync_focus_index(event.app)  # Sync in case focus changed externally
             if self._focus_index > 0:
                 self._focus_control(self._focus_index - 1, event.app)
 
         @kb.add("down", filter=Condition(lambda: not self._any_editing()))
         def _move_down(event: Any) -> None:
+            self._sync_focus_index(event.app)  # Sync in case focus changed externally
             if self._focus_index < len(self._controls) - 1:
                 self._focus_control(self._focus_index + 1, event.app)
 
-        # Tab/Shift-Tab: navigate through everything (controls + buttons)
+        # Tab/Shift-Tab: navigate through controls + buttons (no wrapping)
         @kb.add("tab", filter=Condition(lambda: not self._any_editing()))
         def _tab_next(event: Any) -> None:
+            self._sync_focus_index(event.app)  # Sync in case focus changed externally
             if self._focus_index < len(self._controls) - 1:
                 # Move to next control
                 self._focus_control(self._focus_index + 1, event.app)
             else:
-                # At last control, move to buttons
+                # At last control, move to buttons (no wrap back)
                 self._clear_focus_indicators()
                 event.app.layout.focus_next()
 
         @kb.add("s-tab", filter=Condition(lambda: not self._any_editing()))
         def _tab_prev(event: Any) -> None:
+            self._sync_focus_index(event.app)  # Sync in case focus changed externally
             if self._focus_index > 0:
                 # Move to previous control
                 self._focus_control(self._focus_index - 1, event.app)
-            else:
-                # At first control, wrap to buttons (via focus_previous)
-                self._clear_focus_indicators()
-                event.app.layout.focus_previous()
+            # At first control: do nothing (no wrap to buttons)
 
         @kb.add("c-s", filter=Condition(lambda: not self._any_editing()))
         def _save(event: Any) -> None:
