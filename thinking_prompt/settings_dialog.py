@@ -315,13 +315,17 @@ class TextControl(SettingControl):
         indicator_style = "class:setting-indicator" if is_selected else ""
         label_style = "class:setting-label-selected" if is_selected else "class:setting-label"
 
-        # Format value
+        # Format value (right-aligned within edit_width)
         if self._item.password and self._value:
             value_text = "••••••"
         elif self._value:
             value_text = str(self._value)
         else:
             value_text = "(empty)"
+
+        # Right-align value within edit_width for consistent layout with edit mode
+        edit_width = self._item.edit_width
+        value_text = value_text.rjust(edit_width)
 
         if not self._value:
             value_style = "class:setting-desc-selected" if is_selected else "class:setting-desc"
@@ -401,7 +405,7 @@ class TextControl(SettingControl):
                 ])),
                 width=label_width,
             ),
-            Window(width=1),
+            Window(),  # Flexible padding - expands to fill available space
             self._buffer_window,
         ])
 
