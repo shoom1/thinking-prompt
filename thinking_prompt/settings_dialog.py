@@ -473,6 +473,22 @@ class SettingsDialog(BaseDialog):
         """Check if any control is in edit mode."""
         return any(c.is_editing for c in self._controls)
 
+    def _get_navigation_key_bindings(self) -> KeyBindings:
+        """Key bindings for navigating between settings."""
+        kb = KeyBindings()
+
+        @kb.add("up", filter=Condition(lambda: not self._any_editing()))
+        @kb.add("k", filter=Condition(lambda: not self._any_editing()))
+        def _move_up(event: Any) -> None:
+            event.app.layout.focus_previous()
+
+        @kb.add("down", filter=Condition(lambda: not self._any_editing()))
+        @kb.add("j", filter=Condition(lambda: not self._any_editing()))
+        def _move_down(event: Any) -> None:
+            event.app.layout.focus_next()
+
+        return kb
+
     def _get_changed_values(self) -> dict[str, Any]:
         """Return only values that differ from original."""
         changed = {}
@@ -492,7 +508,10 @@ class SettingsDialog(BaseDialog):
             return Window(height=1)
 
         rows = [control.get_container() for control in self._controls]
-        return HSplit(rows)
+
+        # Create container with navigation bindings
+        container = HSplit(rows, key_bindings=self._get_navigation_key_bindings())
+        return container
 
     def get_buttons(self) -> list[tuple[str, Callable[[], None]]]:
         """Return dialog buttons."""
