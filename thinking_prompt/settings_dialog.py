@@ -2,8 +2,8 @@
 Settings dialog for ThinkingPromptSession.
 
 Provides a form-based dialog for configuring multiple settings at once.
-Navigation: Up/Down or Tab/Shift-Tab to navigate, Left/Right or Space to change values.
-For text items: Enter to edit in-place, Enter/Escape to confirm/cancel.
+Navigation: Up/Down within controls, Tab/Shift-Tab through all elements.
+Left/Right or Space to change values. Enter to edit text in-place.
 Ctrl+S saves, Escape cancels.
 """
 from __future__ import annotations
@@ -438,7 +438,8 @@ class SettingsDialog(BaseDialog):
     A settings dialog using individual controls per setting type.
 
     Navigation:
-    - Up/Down or Tab/Shift-Tab: Navigate through settings and buttons
+    - Up/Down: Navigate within settings controls (stops at boundaries)
+    - Tab/Shift-Tab: Navigate through all elements (controls + buttons)
     - Left/Right or Space: Change value (dropdown/checkbox)
     - Enter: Edit text item in-place
     - Ctrl+S: Save and close
@@ -475,6 +476,9 @@ class SettingsDialog(BaseDialog):
             control = self._create_control(item)
             self._controls.append(control)
 
+        # Navigation state
+        self._focus_index = 0
+
         # Escape behavior
         self.escape_result = None if can_cancel else "close"
 
@@ -493,27 +497,57 @@ class SettingsDialog(BaseDialog):
         """Check if any control is in edit mode."""
         return any(c.is_editing for c in self._controls)
 
-    def _update_focus_indicators(self, app: Any) -> None:
-        """Update focus indicators based on actual focus."""
-        for i, container in enumerate(self._control_containers):
-            has_focus = app.layout.has_focus(container)
-            self._controls[i].set_has_focus(has_focus)
+    def _focus_control(self, index: int, app: Any) -> None:
+        """Focus the control at the given index and update indicators."""
+        if 0 <= index < len(self._controls):
+            self._focus_index = index
+            # Update focus indicators
+            for i, control in enumerate(self._controls):
+                control.set_has_focus(i == index)
+            # Focus the control's container
+            container = self._control_containers[index]
+            app.layout.focus(container)
+
+    def _clear_focus_indicators(self) -> None:
+        """Clear all focus indicators (when leaving controls area)."""
+        for control in self._controls:
+            control.set_has_focus(False)
 
     def _get_navigation_key_bindings(self) -> KeyBindings:
-        """Key bindings for navigating through all elements."""
+        """Key bindings for navigation."""
         kb = KeyBindings()
 
+        # Up/Down: navigate within controls only, stop at boundaries
         @kb.add("up", filter=Condition(lambda: not self._any_editing()))
-        @kb.add("s-tab", filter=Condition(lambda: not self._any_editing()))
-        def _move_prev(event: Any) -> None:
-            event.app.layout.focus_previous()
-            self._update_focus_indicators(event.app)
+        def _move_up(event: Any) -> None:
+            if self._focus_index > 0:
+                self._focus_control(self._focus_index - 1, event.app)
 
         @kb.add("down", filter=Condition(lambda: not self._any_editing()))
+        def _move_down(event: Any) -> None:
+            if self._focus_index < len(self._controls) - 1:
+                self._focus_control(self._focus_index + 1, event.app)
+
+        # Tab/Shift-Tab: navigate through everything (controls + buttons)
         @kb.add("tab", filter=Condition(lambda: not self._any_editing()))
-        def _move_next(event: Any) -> None:
-            event.app.layout.focus_next()
-            self._update_focus_indicators(event.app)
+        def _tab_next(event: Any) -> None:
+            if self._focus_index < len(self._controls) - 1:
+                # Move to next control
+                self._focus_control(self._focus_index + 1, event.app)
+            else:
+                # At last control, move to buttons
+                self._clear_focus_indicators()
+                event.app.layout.focus_next()
+
+        @kb.add("s-tab", filter=Condition(lambda: not self._any_editing()))
+        def _tab_prev(event: Any) -> None:
+            if self._focus_index > 0:
+                # Move to previous control
+                self._focus_control(self._focus_index - 1, event.app)
+            else:
+                # At first control, wrap to buttons (via focus_previous)
+                self._clear_focus_indicators()
+                event.app.layout.focus_previous()
 
         @kb.add("c-s", filter=Condition(lambda: not self._any_editing()))
         def _save(event: Any) -> None:
