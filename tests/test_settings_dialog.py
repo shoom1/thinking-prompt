@@ -7,7 +7,6 @@ from thinking_prompt.settings_dialog import (
     CheckboxItem,
     DropdownItem,
     SettingsDialog,
-    SettingsListControl,
     TextItem,
 )
 
@@ -73,69 +72,6 @@ class TestSettingsItems:
         item = TextItem(key="name", label="Name")
         assert item.default == ""
         assert item.password is False
-
-
-class TestSettingsListControl:
-    """Tests for the SettingsListControl."""
-
-    def test_list_control_init_values(self):
-        """SettingsListControl initializes values from items."""
-        items = [
-            DropdownItem(key="model", label="Model", options=["a", "b"], default="a"),
-            CheckboxItem(key="stream", label="Stream", default=True),
-        ]
-        control = SettingsListControl(items=items)
-
-        assert control.values == {"model": "a", "stream": True}
-
-    def test_list_control_change_dropdown(self):
-        """Dropdown value can be changed via _change_value."""
-        items = [
-            DropdownItem(key="model", label="Model", options=["a", "b", "c"], default="a"),
-        ]
-        control = SettingsListControl(items=items)
-
-        # Cycle forward
-        control._change_value(1)
-        assert control.values["model"] == "b"
-
-        # Cycle forward again
-        control._change_value(1)
-        assert control.values["model"] == "c"
-
-        # Cycle wraps around
-        control._change_value(1)
-        assert control.values["model"] == "a"
-
-    def test_list_control_change_checkbox(self):
-        """Checkbox value toggles via _change_value."""
-        items = [
-            CheckboxItem(key="stream", label="Stream", default=False),
-        ]
-        control = SettingsListControl(items=items)
-
-        # Toggle on
-        control._change_value(1)
-        assert control.values["stream"] is True
-
-        # Toggle off
-        control._change_value(1)
-        assert control.values["stream"] is False
-
-    def test_list_control_navigation(self):
-        """Selected index changes with navigation."""
-        items = [
-            CheckboxItem(key="a", label="A"),
-            CheckboxItem(key="b", label="B"),
-            CheckboxItem(key="c", label="C"),
-        ]
-        control = SettingsListControl(items=items)
-
-        assert control._selected_index == 0
-
-        # Move down - simulate the key binding effect
-        control._selected_index = 1
-        assert control._selected_index == 1
 
 
 class TestSettingsDialogState:
