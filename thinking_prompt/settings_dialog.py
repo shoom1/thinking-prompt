@@ -521,6 +521,19 @@ class SettingsDialog(BaseDialog):
             if self._selected_index < len(self._controls) - 1:
                 self._focus_control(self._selected_index + 1, event.app)
 
+        @kb.add("tab", filter=Condition(lambda: not self._any_editing()))
+        def _jump_to_buttons(event: Any) -> None:
+            # Jump from current position to buttons
+            steps = len(self._controls) - self._selected_index
+            for _ in range(steps):
+                event.app.layout.focus_next()
+
+        @kb.add("s-tab", filter=Condition(lambda: not self._any_editing()))
+        def _jump_back_to_controls(event: Any) -> None:
+            # Return to last position in controls
+            if self._controls:
+                self._focus_control(self._selected_index, event.app)
+
         return kb
 
     def _get_changed_values(self) -> dict[str, Any]:
