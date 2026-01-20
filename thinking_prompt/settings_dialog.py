@@ -55,6 +55,7 @@ class TextItem(SettingsItem):
     """Free text input."""
     default: str = ""
     password: bool = False
+    edit_width: int = 15  # Width of text input field in edit mode
 
 
 class SettingControl(UIControl, ABC):
@@ -389,7 +390,8 @@ class TextControl(SettingControl):
         )
 
         # Cache the buffer window for focus management
-        self._buffer_window = Window(buffer_control, style="class:setting-input")
+        edit_width = self._item.edit_width
+        self._buffer_window = Window(buffer_control, width=edit_width, style="class:setting-input")
 
         row = VSplit([
             Window(
