@@ -344,10 +344,18 @@ class DropdownControl(SettingControl):
         self._ensure_visible()
         self._editing = True
         self._app_ref = app
-        # Build edit container and focus it
+        # Build edit container (creates _list_window)
         self._build_edit_container()
+        # Schedule focus after layout updates
         if app and self._list_window:
-            app.layout.focus(self._list_window)
+            app.invalidate()
+            # Use call_soon to focus after the layout has been updated
+            def focus_list():
+                try:
+                    app.layout.focus(self._list_window)
+                except ValueError:
+                    pass  # Window may not be in layout yet
+            app.loop.call_soon(focus_list)
 
     def confirm_edit(self) -> None:
         """Confirm edit - save selected value."""
@@ -434,7 +442,10 @@ class DropdownControl(SettingControl):
         return self._view_window
 
     def _build_edit_container(self) -> Container:
-        """Build the edit mode container with dropdown list."""
+        """Build the edit mode container with dropdown list (cached)."""
+        if self._edit_container is not None:
+            return self._edit_container
+
         # Create list control for dropdown options (with key bindings)
         list_control = _DropdownListControl(self)
 
