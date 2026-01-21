@@ -14,6 +14,7 @@ from typing import Any, Callable
 
 from prompt_toolkit.application.current import get_app
 from prompt_toolkit.buffer import Buffer
+from prompt_toolkit.data_structures import Point
 from prompt_toolkit.filters import Condition
 from prompt_toolkit.formatted_text import FormattedText
 from prompt_toolkit.key_binding import KeyBindings
@@ -25,10 +26,12 @@ from prompt_toolkit.layout import (
     Float,
     FloatContainer,
     HSplit,
+    ScrollablePane,
     VSplit,
     Window,
 )
 from prompt_toolkit.layout.controls import FormattedTextControl, UIContent, UIControl
+from prompt_toolkit.layout.margins import ScrollbarMargin
 
 from .dialog import BaseDialog
 
@@ -433,11 +436,19 @@ class DropdownControl(SettingControl):
         """Return container with floating dropdown menu."""
         if self._float_container is None:
             dropdown_width = self._get_dropdown_width()
+            num_options = len(self._item.options)
+            visible_height = min(num_options, self._item.height)
+            needs_scrollbar = num_options > self._item.height
+
+            # Add scrollbar margin if needed
+            right_margins = [ScrollbarMargin(display_arrows=False)] if needs_scrollbar else []
+
             self._menu_window = Window(
                 self._menu_control,
                 width=dropdown_width,
-                height=self._item.height,
+                height=visible_height,
                 style="class:setting-dropdown",
+                right_margins=right_margins,
             )
 
             self._float_container = FloatContainer(
@@ -448,8 +459,8 @@ class DropdownControl(SettingControl):
                             content=self._menu_window,
                             filter=Condition(lambda: self._editing),
                         ),
-                        xcursor=True,
-                        ycursor=True,
+                        right=0,  # Align to right edge
+                        top=1,    # Position below current row
                     ),
                 ],
             )
@@ -491,16 +502,13 @@ class _DropdownMenuControl(UIControl):
         self._dropdown = dropdown
 
     def create_content(self, width: int, height: int) -> UIContent:
-        """Render the visible portion of the dropdown menu."""
+        """Render all dropdown options (Window handles scrolling)."""
         dropdown = self._dropdown
         options = dropdown._item.options
         selected = dropdown._selected_index
-        offset = dropdown._scroll_offset
-        visible_height = dropdown._item.height
 
         lines = []
-        for i in range(offset, min(offset + visible_height, len(options))):
-            opt = options[i]
+        for i, opt in enumerate(options):
             is_selected = (i == selected)
             if is_selected:
                 style = "class:setting-dropdown-selected"
@@ -514,7 +522,12 @@ class _DropdownMenuControl(UIControl):
         def get_line(i: int) -> FormattedText:
             return lines[i] if i < len(lines) else FormattedText([])
 
-        return UIContent(get_line=get_line, line_count=len(lines))
+        # Return all lines with cursor at selected position for scrolling
+        return UIContent(
+            get_line=get_line,
+            line_count=len(lines),
+            cursor_position=Point(x=0, y=selected),
+        )
 
     def is_focusable(self) -> bool:
         return False  # Menu is not focusable, control handles keys
