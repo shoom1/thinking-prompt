@@ -435,28 +435,8 @@ class DropdownControl(SettingControl):
 
     def _build_edit_container(self) -> Container:
         """Build the edit mode container with dropdown list."""
-        # Create list control for dropdown options
+        # Create list control for dropdown options (with key bindings)
         list_control = _DropdownListControl(self)
-
-        # Key bindings for list navigation
-        edit_kb = KeyBindings()
-
-        @edit_kb.add("up")
-        def _up(event: Any) -> None:
-            self._move_selection(-1)
-
-        @edit_kb.add("down")
-        def _down(event: Any) -> None:
-            self._move_selection(1)
-
-        @edit_kb.add("enter")
-        @edit_kb.add("space")
-        def _confirm(event: Any) -> None:
-            self.confirm_edit()
-
-        @edit_kb.add("escape")
-        def _cancel(event: Any) -> None:
-            self.cancel_edit()
 
         dropdown_width = self._get_dropdown_width()
         self._list_window = Window(
@@ -464,7 +444,6 @@ class DropdownControl(SettingControl):
             height=self._item.height,
             width=dropdown_width,
             style="class:setting-dropdown",
-            key_bindings=edit_kb,
         )
 
         # Label on left, dropdown on right
@@ -511,6 +490,29 @@ class _DropdownListControl(UIControl):
 
     def __init__(self, dropdown: DropdownControl) -> None:
         self._dropdown = dropdown
+
+    def get_key_bindings(self) -> KeyBindings:
+        """Key bindings for dropdown list navigation."""
+        kb = KeyBindings()
+
+        @kb.add("up")
+        def _up(event: Any) -> None:
+            self._dropdown._move_selection(-1)
+
+        @kb.add("down")
+        def _down(event: Any) -> None:
+            self._dropdown._move_selection(1)
+
+        @kb.add("enter")
+        @kb.add("space")
+        def _confirm(event: Any) -> None:
+            self._dropdown.confirm_edit()
+
+        @kb.add("escape")
+        def _cancel(event: Any) -> None:
+            self._dropdown.cancel_edit()
+
+        return kb
 
     def create_content(self, width: int, height: int) -> UIContent:
         """Render the visible portion of the dropdown list."""
