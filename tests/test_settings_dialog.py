@@ -6,6 +6,7 @@ from prompt_toolkit.layout import HSplit, Window
 from thinking_prompt.settings_dialog import (
     CheckboxItem,
     DropdownItem,
+    InlineSelectItem,
     SettingsDialog,
     TextItem,
 )
@@ -14,9 +15,9 @@ from thinking_prompt.settings_dialog import (
 class TestSettingsItems:
     """Tests for settings item types."""
 
-    def test_dropdown_item_creation(self):
-        """DropdownItem stores key, label, options, and default."""
-        item = DropdownItem(
+    def test_inline_select_item_creation(self):
+        """InlineSelectItem stores key, label, options, and default."""
+        item = InlineSelectItem(
             key="model",
             label="Model",
             options=["gpt-4", "gpt-3.5"],
@@ -27,9 +28,9 @@ class TestSettingsItems:
         assert item.options == ["gpt-4", "gpt-3.5"]
         assert item.default == "gpt-4"
 
-    def test_dropdown_item_with_description(self):
-        """DropdownItem can have a description."""
-        item = DropdownItem(
+    def test_inline_select_item_with_description(self):
+        """InlineSelectItem can have a description."""
+        item = InlineSelectItem(
             key="model",
             label="Model",
             description="Select the AI model to use",
@@ -80,7 +81,7 @@ class TestSettingsDialogState:
     def test_settings_dialog_init_original_values(self):
         """SettingsDialog initializes original values from items."""
         items = [
-            DropdownItem(key="model", label="Model", options=["a", "b"], default="a"),
+            InlineSelectItem(key="model", label="Model", options=["a", "b"], default="a"),
             CheckboxItem(key="stream", label="Stream", default=True),
             TextItem(key="name", label="Name", default="test"),
         ]
@@ -91,7 +92,7 @@ class TestSettingsDialogState:
     def test_settings_dialog_get_changed_values_empty(self):
         """No changes returns empty dict."""
         items = [
-            DropdownItem(key="model", label="Model", options=["a", "b"], default="a"),
+            InlineSelectItem(key="model", label="Model", options=["a", "b"], default="a"),
         ]
         dialog = SettingsDialog(title="Settings", items=items)
         dialog.build_body()  # Creates the list control
@@ -102,7 +103,7 @@ class TestSettingsDialogState:
     def test_settings_dialog_get_changed_values_with_changes(self):
         """Changed values are returned correctly."""
         items = [
-            DropdownItem(key="model", label="Model", options=["a", "b"], default="a"),
+            InlineSelectItem(key="model", label="Model", options=["a", "b"], default="a"),
             CheckboxItem(key="stream", label="Stream", default=True),
         ]
         dialog = SettingsDialog(title="Settings", items=items)
@@ -131,7 +132,7 @@ class TestSettingsDialogLayout:
     def test_build_body_returns_hsplit(self):
         """build_body returns an HSplit of control containers."""
         items = [
-            DropdownItem(key="model", label="Model", options=["a", "b"], default="a"),
+            InlineSelectItem(key="model", label="Model", options=["a", "b"], default="a"),
             CheckboxItem(key="stream", label="Stream", default=True),
         ]
         dialog = SettingsDialog(title="Settings", items=items)
@@ -143,11 +144,11 @@ class TestSettingsDialogLayout:
     def test_build_body_creates_controls(self):
         """build_body creates individual SettingControl instances."""
         from thinking_prompt.settings_dialog import (
-            CheckboxControl, DropdownControl, TextControl
+            CheckboxControl, InlineSelectControl, TextControl
         )
 
         items = [
-            DropdownItem(key="model", label="Model", options=["a", "b"], default="a"),
+            InlineSelectItem(key="model", label="Model", options=["a", "b"], default="a"),
             CheckboxItem(key="stream", label="Stream", default=True),
             TextItem(key="name", label="Name", default="test"),
         ]
@@ -155,7 +156,7 @@ class TestSettingsDialogLayout:
         dialog.build_body()
 
         assert len(dialog._controls) == 3
-        assert isinstance(dialog._controls[0], DropdownControl)
+        assert isinstance(dialog._controls[0], InlineSelectControl)
         assert isinstance(dialog._controls[1], CheckboxControl)
         assert isinstance(dialog._controls[2], TextControl)
 
@@ -168,6 +169,7 @@ class TestSessionIntegration:
         from thinking_prompt import (
             SettingsItem,
             DropdownItem,
+            InlineSelectItem,
             CheckboxItem,
             TextItem,
             SettingsDialog,
@@ -175,6 +177,7 @@ class TestSessionIntegration:
         # Just check they're importable
         assert SettingsItem is not None
         assert DropdownItem is not None
+        assert InlineSelectItem is not None
         assert CheckboxItem is not None
         assert TextItem is not None
         assert SettingsDialog is not None
@@ -249,15 +252,15 @@ class TestCheckboxControl:
         assert "true" in text
 
 
-class TestDropdownControl:
-    """Tests for DropdownControl."""
+class TestInlineSelectControl:
+    """Tests for InlineSelectControl."""
 
-    def test_dropdown_cycle_forward(self):
-        """Dropdown cycles through options forward."""
-        from thinking_prompt.settings_dialog import DropdownControl
+    def test_inline_select_cycle_forward(self):
+        """InlineSelect cycles through options forward."""
+        from thinking_prompt.settings_dialog import InlineSelectControl
 
-        item = DropdownItem(key="model", label="Model", options=["a", "b", "c"], default="a")
-        control = DropdownControl(item)
+        item = InlineSelectItem(key="model", label="Model", options=["a", "b", "c"], default="a")
+        control = InlineSelectControl(item)
 
         assert control.value == "a"
         control.cycle(1)
@@ -267,22 +270,22 @@ class TestDropdownControl:
         control.cycle(1)
         assert control.value == "a"  # wraps
 
-    def test_dropdown_cycle_backward(self):
-        """Dropdown cycles through options backward."""
-        from thinking_prompt.settings_dialog import DropdownControl
+    def test_inline_select_cycle_backward(self):
+        """InlineSelect cycles through options backward."""
+        from thinking_prompt.settings_dialog import InlineSelectControl
 
-        item = DropdownItem(key="model", label="Model", options=["a", "b", "c"], default="a")
-        control = DropdownControl(item)
+        item = InlineSelectItem(key="model", label="Model", options=["a", "b", "c"], default="a")
+        control = InlineSelectControl(item)
 
         control.cycle(-1)
         assert control.value == "c"  # wraps backward
 
-    def test_dropdown_renders_label_and_value(self):
-        """Dropdown renders label and current option."""
-        from thinking_prompt.settings_dialog import DropdownControl
+    def test_inline_select_renders_label_and_value(self):
+        """InlineSelect renders label and current option."""
+        from thinking_prompt.settings_dialog import InlineSelectControl
 
-        item = DropdownItem(key="model", label="Model", options=["gpt-4", "gpt-3.5"], default="gpt-4")
-        control = DropdownControl(item)
+        item = InlineSelectItem(key="model", label="Model", options=["gpt-4", "gpt-3.5"], default="gpt-4")
+        control = InlineSelectControl(item)
 
         content = control.create_content(width=50, height=1)
         line = content.get_line(0)
@@ -404,12 +407,12 @@ class TestSettingsDialogRefactored:
     def test_settings_dialog_creates_controls(self):
         """SettingsDialog creates SettingControl instances."""
         from thinking_prompt.settings_dialog import (
-            CheckboxControl, DropdownControl, TextControl
+            CheckboxControl, InlineSelectControl, TextControl
         )
 
         items = [
             CheckboxItem(key="stream", label="Stream", default=True),
-            DropdownItem(key="model", label="Model", options=["a", "b"], default="a"),
+            InlineSelectItem(key="model", label="Model", options=["a", "b"], default="a"),
             TextItem(key="name", label="Name", default="test"),
         ]
         dialog = SettingsDialog(title="Settings", items=items)
@@ -417,7 +420,7 @@ class TestSettingsDialogRefactored:
 
         assert len(dialog._controls) == 3
         assert isinstance(dialog._controls[0], CheckboxControl)
-        assert isinstance(dialog._controls[1], DropdownControl)
+        assert isinstance(dialog._controls[1], InlineSelectControl)
         assert isinstance(dialog._controls[2], TextControl)
 
     def test_settings_dialog_build_body_returns_hsplit(self):

@@ -52,6 +52,7 @@ from .dialog import (
 from .settings_dialog import (
     SettingsItem,
     DropdownItem,
+    InlineSelectItem,
     CheckboxItem,
     TextItem,
     SettingsDialog,
@@ -79,6 +80,7 @@ __all__ = [
     # Settings Dialog
     "SettingsItem",
     "DropdownItem",
+    "InlineSelectItem",
     "CheckboxItem",
     "TextItem",
     "SettingsDialog",

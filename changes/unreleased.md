@@ -6,11 +6,10 @@ Run `git log --oneline <last-tag>..HEAD` to see commits for reference.
 -->
 
 ### Added
-- `SettingsListControl` - clean settings list with focus indicator and right-aligned values
+- `DropdownItem`/`DropdownControl` - true dropdown with scrollable list in edit mode
+- `InlineSelectItem`/`InlineSelectControl` - inline select that cycles with Left/Right keys
 - `description` field on SettingsItem for optional help text below labels
-- TextItem in-place editing: Enter to edit value in-place (overlay), Enter/Escape to confirm/cancel
-- `CompactSelect` widget - compact single-line dropdown that cycles with left/right keys
-- `CompactCheckbox` widget - compact single-line checkbox `[x]`/`[ ]` toggle
+- TextItem in-place editing: Enter to edit value in-place, Enter/Escape to confirm/cancel
 - Dialog width control: `width` parameter on BaseDialog and SettingsDialog
 - Dialog vertical positioning: `top` parameter on BaseDialog and SettingsDialog
 - Settings list styles: indicator, label, value, description with selected states

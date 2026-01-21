@@ -40,10 +40,20 @@ class SettingsItem(ABC):
 
 
 @dataclass
-class DropdownItem(SettingsItem):
-    """Select from a list of options."""
+class InlineSelectItem(SettingsItem):
+    """Inline select that cycles through options with Left/Right keys."""
     options: list[str] = field(default_factory=list)
     default: Any = None
+
+
+@dataclass
+class DropdownItem(SettingsItem):
+    """Dropdown select with edit mode showing a scrollable list."""
+    options: list[str] = field(default_factory=list)
+    default: Any = None
+    height: int = 4  # Number of visible items in dropdown
+    width: int | None = 15  # Fixed width, or None for auto
+    max_width: int | None = None  # Max width when auto-sizing
 
 
 @dataclass
@@ -201,10 +211,10 @@ class CheckboxControl(SettingControl):
         return kb
 
 
-class DropdownControl(SettingControl):
-    """Dropdown control that cycles through options."""
+class InlineSelectControl(SettingControl):
+    """Inline select control that cycles through options with Left/Right keys."""
 
-    def __init__(self, item: DropdownItem) -> None:
+    def __init__(self, item: InlineSelectItem) -> None:
         super().__init__(item)
         # Cache window for focus detection
         height = 2 if item.description else 1
@@ -284,6 +294,254 @@ class DropdownControl(SettingControl):
             self.cycle(1)
 
         return kb
+
+
+class DropdownControl(SettingControl):
+    """Dropdown control with edit mode showing a scrollable list."""
+
+    def __init__(self, item: DropdownItem) -> None:
+        super().__init__(item)
+        self._original_value: Any = item.default
+        self._selected_index = 0  # Index in dropdown list during edit
+        self._scroll_offset = 0  # For scrolling long lists
+        self._app_ref = None
+        # Cache view-mode window for stable focus target
+        height = 2 if item.description else 1
+        self._view_window = Window(self, height=height)
+        # Edit mode containers (built lazily)
+        self._edit_container = None
+        self._list_window = None
+
+    def _check_focus(self) -> bool:
+        """Check if this control has focus (for rendering)."""
+        try:
+            app = get_app()
+            return app.layout.has_focus(self._view_window)
+        except Exception:
+            return self._has_focus
+
+    def _get_dropdown_width(self) -> int:
+        """Calculate dropdown width based on settings."""
+        item = self._item
+        if item.width is not None:
+            return item.width
+        # Auto-size based on longest option
+        max_opt = max((len(opt) for opt in item.options), default=10)
+        width = max_opt + 4  # Add padding for indicator
+        if item.max_width is not None:
+            width = min(width, item.max_width)
+        return width
+
+    def enter_edit_mode(self, app: Any = None) -> None:
+        """Enter edit mode - show dropdown list."""
+        self._original_value = self._value
+        # Set selected index to current value
+        try:
+            self._selected_index = self._item.options.index(self._value)
+        except (ValueError, IndexError):
+            self._selected_index = 0
+        self._scroll_offset = 0
+        self._ensure_visible()
+        self._editing = True
+        self._app_ref = app
+        # Build edit container and focus it
+        self._build_edit_container()
+        if app and self._list_window:
+            app.layout.focus(self._list_window)
+
+    def confirm_edit(self) -> None:
+        """Confirm edit - save selected value."""
+        if self._item.options and 0 <= self._selected_index < len(self._item.options):
+            self._value = self._item.options[self._selected_index]
+        self._editing = False
+        if self._app_ref:
+            self._app_ref.layout.focus(self._view_window)
+
+    def cancel_edit(self) -> None:
+        """Cancel edit - restore original value."""
+        self._value = self._original_value
+        self._editing = False
+        if self._app_ref:
+            self._app_ref.layout.focus(self._view_window)
+
+    def _ensure_visible(self) -> None:
+        """Ensure selected index is visible in the scroll window."""
+        height = self._item.height
+        if self._selected_index < self._scroll_offset:
+            self._scroll_offset = self._selected_index
+        elif self._selected_index >= self._scroll_offset + height:
+            self._scroll_offset = self._selected_index - height + 1
+
+    def _move_selection(self, delta: int) -> None:
+        """Move selection by delta, clamping to bounds."""
+        new_index = self._selected_index + delta
+        new_index = max(0, min(new_index, len(self._item.options) - 1))
+        self._selected_index = new_index
+        self._ensure_visible()
+
+    def create_content(self, width: int, height: int) -> UIContent:
+        """Render the dropdown row in view mode."""
+        if self._editing:
+            return UIContent(get_line=lambda i: FormattedText([]), line_count=0)
+
+        is_selected = self._check_focus()
+
+        indicator = "> " if is_selected else "  "
+        indicator_style = "class:setting-indicator" if is_selected else ""
+        label_style = "class:setting-label-selected" if is_selected else "class:setting-label"
+        value_style = "class:setting-value-selected" if is_selected else "class:setting-value"
+
+        label_text = self._item.label
+        value_text = str(self._value) if self._value else ""
+
+        # Right-align value within dropdown width
+        dropdown_width = self._get_dropdown_width()
+        value_text = value_text.rjust(dropdown_width)
+
+        available = width - len(indicator) - len(label_text) - len(value_text) - 1
+        padding = max(1, available)
+
+        row: list[tuple[str, str]] = [
+            (indicator_style, indicator),
+            (label_style, label_text),
+            ("", " " * padding),
+            (value_style, value_text),
+        ]
+
+        lines = [FormattedText(row)]
+
+        if self._item.description:
+            desc_style = "class:setting-desc-selected" if is_selected else "class:setting-desc"
+            desc_row: list[tuple[str, str]] = [
+                ("", "  "),
+                (desc_style, self._item.description),
+            ]
+            lines.append(FormattedText(desc_row))
+
+        def get_line(i: int) -> FormattedText:
+            return lines[i] if i < len(lines) else FormattedText([])
+
+        return UIContent(get_line=get_line, line_count=len(lines))
+
+    def get_container(self) -> Container:
+        """Return container that switches between view/edit modes."""
+        return DynamicContainer(self._get_current_container)
+
+    def _get_current_container(self) -> Container:
+        """Return appropriate container based on edit state."""
+        if self._editing:
+            return self._build_edit_container()
+        return self._view_window
+
+    def _build_edit_container(self) -> Container:
+        """Build the edit mode container with dropdown list."""
+        # Create list control for dropdown options
+        list_control = _DropdownListControl(self)
+
+        # Key bindings for list navigation
+        edit_kb = KeyBindings()
+
+        @edit_kb.add("up")
+        def _up(event: Any) -> None:
+            self._move_selection(-1)
+
+        @edit_kb.add("down")
+        def _down(event: Any) -> None:
+            self._move_selection(1)
+
+        @edit_kb.add("enter")
+        @edit_kb.add("space")
+        def _confirm(event: Any) -> None:
+            self.confirm_edit()
+
+        @edit_kb.add("escape")
+        def _cancel(event: Any) -> None:
+            self.cancel_edit()
+
+        dropdown_width = self._get_dropdown_width()
+        self._list_window = Window(
+            list_control,
+            height=self._item.height,
+            width=dropdown_width,
+            style="class:setting-dropdown",
+            key_bindings=edit_kb,
+        )
+
+        # Label on left, dropdown on right
+        label_text = f"> {self._item.label}"
+        label_width = len(label_text) + 2
+
+        row = VSplit([
+            Window(
+                FormattedTextControl(lambda: FormattedText([
+                    ("class:setting-indicator", "> "),
+                    ("class:setting-label-selected", self._item.label),
+                ])),
+                width=label_width,
+            ),
+            Window(),  # Flexible padding
+            self._list_window,
+        ])
+
+        if self._item.description:
+            desc_row = Window(
+                FormattedTextControl(lambda: FormattedText([
+                    ("", "  "),
+                    ("class:setting-desc-selected", self._item.description),
+                ])),
+                height=1,
+            )
+            return HSplit([row, desc_row])
+        return row
+
+    def get_key_bindings(self) -> KeyBindings:
+        """Key bindings for view mode (Enter to edit)."""
+        kb = KeyBindings()
+
+        @kb.add("enter", filter=Condition(lambda: not self._editing))
+        @kb.add("space", filter=Condition(lambda: not self._editing))
+        def _enter_edit(event: Any) -> None:
+            self.enter_edit_mode(event.app)
+
+        return kb
+
+
+class _DropdownListControl(UIControl):
+    """Internal UIControl for rendering dropdown list options."""
+
+    def __init__(self, dropdown: DropdownControl) -> None:
+        self._dropdown = dropdown
+
+    def create_content(self, width: int, height: int) -> UIContent:
+        """Render the visible portion of the dropdown list."""
+        dropdown = self._dropdown
+        options = dropdown._item.options
+        selected = dropdown._selected_index
+        offset = dropdown._scroll_offset
+        visible_height = dropdown._item.height
+
+        lines = []
+        for i in range(offset, min(offset + visible_height, len(options))):
+            opt = options[i]
+            is_selected = (i == selected)
+            if is_selected:
+                style = "class:setting-dropdown-selected"
+                indicator = "> "
+            else:
+                style = "class:setting-dropdown-item"
+                indicator = "  "
+            # Truncate if needed
+            max_text = width - 2
+            text = opt[:max_text] if len(opt) > max_text else opt
+            lines.append(FormattedText([(style, indicator + text)]))
+
+        def get_line(i: int) -> FormattedText:
+            return lines[i] if i < len(lines) else FormattedText([])
+
+        return UIContent(get_line=get_line, line_count=len(lines))
+
+    def is_focusable(self) -> bool:
+        return True
 
 
 class TextControl(SettingControl):
@@ -524,6 +782,8 @@ class SettingsDialog(BaseDialog):
             return CheckboxControl(item)
         elif isinstance(item, DropdownItem):
             return DropdownControl(item)
+        elif isinstance(item, InlineSelectItem):
+            return InlineSelectControl(item)
         elif isinstance(item, TextItem):
             return TextControl(item)
         else:
