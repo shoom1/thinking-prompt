@@ -19,8 +19,11 @@ from prompt_toolkit.formatted_text import FormattedText
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.layout import (
     BufferControl,
+    ConditionalContainer,
     Container,
     DynamicContainer,
+    Float,
+    FloatContainer,
     HSplit,
     VSplit,
     Window,
@@ -297,7 +300,7 @@ class InlineSelectControl(SettingControl):
 
 
 class DropdownControl(SettingControl):
-    """Dropdown control with edit mode showing a scrollable list."""
+    """Dropdown control with floating menu in edit mode."""
 
     def __init__(self, item: DropdownItem) -> None:
         super().__init__(item)
@@ -308,15 +311,21 @@ class DropdownControl(SettingControl):
         # Cache view-mode window for stable focus target
         height = 2 if item.description else 1
         self._view_window = Window(self, height=height)
-        # Edit mode containers (built lazily)
-        self._edit_container = None
-        self._list_window = None
+        # Floating menu components
+        self._menu_control = _DropdownMenuControl(self)
+        self._menu_window = None
+        self._float_container = None
 
     def _check_focus(self) -> bool:
         """Check if this control has focus (for rendering)."""
         try:
             app = get_app()
-            return app.layout.has_focus(self._view_window)
+            # Check if view window or menu has focus
+            if app.layout.has_focus(self._view_window):
+                return True
+            if self._menu_window and app.layout.has_focus(self._menu_window):
+                return True
+            return False
         except Exception:
             return self._has_focus
 
@@ -333,7 +342,7 @@ class DropdownControl(SettingControl):
         return width
 
     def enter_edit_mode(self, app: Any = None) -> None:
-        """Enter edit mode - show dropdown list."""
+        """Enter edit mode - show floating dropdown menu."""
         self._original_value = self._value
         # Set selected index to current value
         try:
@@ -344,18 +353,8 @@ class DropdownControl(SettingControl):
         self._ensure_visible()
         self._editing = True
         self._app_ref = app
-        # Build edit container (creates _list_window)
-        self._build_edit_container()
-        # Schedule focus after layout updates
-        if app and self._list_window:
+        if app:
             app.invalidate()
-            # Use call_soon to focus after the layout has been updated
-            def focus_list():
-                try:
-                    app.layout.focus(self._list_window)
-                except ValueError:
-                    pass  # Window may not be in layout yet
-            app.loop.call_soon(focus_list)
 
     def confirm_edit(self) -> None:
         """Confirm edit - save selected value."""
@@ -364,6 +363,7 @@ class DropdownControl(SettingControl):
         self._editing = False
         if self._app_ref:
             self._app_ref.layout.focus(self._view_window)
+            self._app_ref.invalidate()
 
     def cancel_edit(self) -> None:
         """Cancel edit - restore original value."""
@@ -371,6 +371,7 @@ class DropdownControl(SettingControl):
         self._editing = False
         if self._app_ref:
             self._app_ref.layout.focus(self._view_window)
+            self._app_ref.invalidate()
 
     def _ensure_visible(self) -> None:
         """Ensure selected index is visible in the scroll window."""
@@ -388,10 +389,7 @@ class DropdownControl(SettingControl):
         self._ensure_visible()
 
     def create_content(self, width: int, height: int) -> UIContent:
-        """Render the dropdown row in view mode."""
-        if self._editing:
-            return UIContent(get_line=lambda i: FormattedText([]), line_count=0)
-
+        """Render the dropdown row."""
         is_selected = self._check_focus()
 
         indicator = "> " if is_selected else "  "
@@ -432,60 +430,33 @@ class DropdownControl(SettingControl):
         return UIContent(get_line=get_line, line_count=len(lines))
 
     def get_container(self) -> Container:
-        """Return container that switches between view/edit modes."""
-        return DynamicContainer(self._get_current_container)
-
-    def _get_current_container(self) -> Container:
-        """Return appropriate container based on edit state."""
-        if self._editing:
-            return self._build_edit_container()
-        return self._view_window
-
-    def _build_edit_container(self) -> Container:
-        """Build the edit mode container with dropdown list (cached)."""
-        if self._edit_container is not None:
-            return self._edit_container
-
-        # Create list control for dropdown options (with key bindings)
-        list_control = _DropdownListControl(self)
-
-        dropdown_width = self._get_dropdown_width()
-        self._list_window = Window(
-            list_control,
-            height=self._item.height,
-            width=dropdown_width,
-            style="class:setting-dropdown",
-        )
-
-        # Label on left, dropdown on right
-        label_text = f"> {self._item.label}"
-        label_width = len(label_text) + 2
-
-        row = VSplit([
-            Window(
-                FormattedTextControl(lambda: FormattedText([
-                    ("class:setting-indicator", "> "),
-                    ("class:setting-label-selected", self._item.label),
-                ])),
-                width=label_width,
-            ),
-            Window(),  # Flexible padding
-            self._list_window,
-        ])
-
-        if self._item.description:
-            desc_row = Window(
-                FormattedTextControl(lambda: FormattedText([
-                    ("", "  "),
-                    ("class:setting-desc-selected", self._item.description),
-                ])),
-                height=1,
+        """Return container with floating dropdown menu."""
+        if self._float_container is None:
+            dropdown_width = self._get_dropdown_width()
+            self._menu_window = Window(
+                self._menu_control,
+                width=dropdown_width,
+                height=self._item.height,
+                style="class:setting-dropdown",
             )
-            return HSplit([row, desc_row])
-        return row
+
+            self._float_container = FloatContainer(
+                content=self._view_window,
+                floats=[
+                    Float(
+                        content=ConditionalContainer(
+                            content=self._menu_window,
+                            filter=Condition(lambda: self._editing),
+                        ),
+                        xcursor=True,
+                        ycursor=True,
+                    ),
+                ],
+            )
+        return self._float_container
 
     def get_key_bindings(self) -> KeyBindings:
-        """Key bindings for view mode (Enter to edit)."""
+        """Key bindings for dropdown control."""
         kb = KeyBindings()
 
         @kb.add("enter", filter=Condition(lambda: not self._editing))
@@ -493,40 +464,34 @@ class DropdownControl(SettingControl):
         def _enter_edit(event: Any) -> None:
             self.enter_edit_mode(event.app)
 
+        # Edit mode bindings (active when editing)
+        @kb.add("up", filter=Condition(lambda: self._editing))
+        def _up(event: Any) -> None:
+            self._move_selection(-1)
+
+        @kb.add("down", filter=Condition(lambda: self._editing))
+        def _down(event: Any) -> None:
+            self._move_selection(1)
+
+        @kb.add("enter", filter=Condition(lambda: self._editing))
+        def _confirm(event: Any) -> None:
+            self.confirm_edit()
+
+        @kb.add("escape", filter=Condition(lambda: self._editing))
+        def _cancel(event: Any) -> None:
+            self.cancel_edit()
+
         return kb
 
 
-class _DropdownListControl(UIControl):
-    """Internal UIControl for rendering dropdown list options."""
+class _DropdownMenuControl(UIControl):
+    """Internal UIControl for rendering floating dropdown menu."""
 
     def __init__(self, dropdown: DropdownControl) -> None:
         self._dropdown = dropdown
 
-    def get_key_bindings(self) -> KeyBindings:
-        """Key bindings for dropdown list navigation."""
-        kb = KeyBindings()
-
-        @kb.add("up")
-        def _up(event: Any) -> None:
-            self._dropdown._move_selection(-1)
-
-        @kb.add("down")
-        def _down(event: Any) -> None:
-            self._dropdown._move_selection(1)
-
-        @kb.add("enter")
-        @kb.add("space")
-        def _confirm(event: Any) -> None:
-            self._dropdown.confirm_edit()
-
-        @kb.add("escape")
-        def _cancel(event: Any) -> None:
-            self._dropdown.cancel_edit()
-
-        return kb
-
     def create_content(self, width: int, height: int) -> UIContent:
-        """Render the visible portion of the dropdown list."""
+        """Render the visible portion of the dropdown menu."""
         dropdown = self._dropdown
         options = dropdown._item.options
         selected = dropdown._selected_index
@@ -539,14 +504,12 @@ class _DropdownListControl(UIControl):
             is_selected = (i == selected)
             if is_selected:
                 style = "class:setting-dropdown-selected"
-                indicator = "> "
             else:
                 style = "class:setting-dropdown-item"
-                indicator = "  "
             # Truncate if needed
-            max_text = width - 2
-            text = opt[:max_text] if len(opt) > max_text else opt
-            lines.append(FormattedText([(style, indicator + text)]))
+            max_text = width
+            text = opt[:max_text] if len(opt) > max_text else opt.ljust(max_text)
+            lines.append(FormattedText([(style, text)]))
 
         def get_line(i: int) -> FormattedText:
             return lines[i] if i < len(lines) else FormattedText([])
@@ -554,7 +517,7 @@ class _DropdownListControl(UIControl):
         return UIContent(get_line=get_line, line_count=len(lines))
 
     def is_focusable(self) -> bool:
-        return True
+        return False  # Menu is not focusable, control handles keys
 
 
 class TextControl(SettingControl):
