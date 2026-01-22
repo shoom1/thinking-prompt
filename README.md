@@ -2,7 +2,7 @@
 
 A prompt_toolkit extension that adds a "thinking box" above the prompt for displaying AI thinking/processing content with real-time streaming updates.
 
-![Demo](docs/demo.gif)
+![Demo](img/demo.gif)
 
 ## Features
 
@@ -151,6 +151,70 @@ config = DialogConfig(
 result = await session.show_dialog(config)
 ```
 
+### Settings Dialog
+
+A form-based dialog for configuring multiple settings at once:
+
+```python
+from thinking_prompt.settings_dialog import (
+    SettingsDialog,
+    DropdownItem,
+    InlineSelectItem,
+    TextItem,
+    CheckboxItem,
+)
+
+items = [
+    DropdownItem(
+        key="theme",
+        label="Theme",
+        description="Application color scheme",
+        options=["Light", "Dark", "System"],
+        default="System",
+    ),
+    InlineSelectItem(
+        key="font_size",
+        label="Font Size",
+        options=["Small", "Medium", "Large"],
+        default="Medium",
+    ),
+    TextItem(
+        key="username",
+        label="Username",
+        default="Guest",
+    ),
+    TextItem(
+        key="api_key",
+        label="API Key",
+        password=True,
+    ),
+    CheckboxItem(
+        key="notifications",
+        label="Enable Notifications",
+        description="Show desktop notifications",
+        default=True,
+    ),
+]
+
+dialog = SettingsDialog(title="Settings", items=items)
+result = await session.show_dialog(dialog)
+
+if result:
+    # result is a dict of changed values only
+    for key, value in result.items():
+        print(f"{key}: {value}")
+```
+
+**Control Types:**
+| Control | Description | Navigation |
+|---------|-------------|------------|
+| `DropdownItem` | Expandable dropdown list with `▼` indicator | Enter to open, Up/Down to select, Enter to confirm |
+| `InlineSelectItem` | Inline cycling with `◀`/`▶` indicators | Left/Right to cycle through options |
+| `TextItem` | Text input (optional password masking) | Enter to edit, Enter/Escape to confirm/cancel |
+| `CheckboxItem` | Boolean toggle (`true`/`false`) | Space/Enter/Left/Right to toggle |
+
+**Navigation:** Up/Down moves between controls, Tab cycles through controls and buttons, Ctrl+S saves.
+
 ### AppInfo Configuration
 
 ```python
@@ -186,6 +250,8 @@ See the `examples/` directory for complete demos:
 - `demo_messages_during_thinking.py` - Output messages during thinking
 - `demo_animated_separator.py` - Different animation configurations
 - `dialog_test.py` - Dialog system demo (yes/no, message, choice, dropdown)
+- `settings_dialog_demo.py` - Settings dialog with all control types
+- `demo_showcase.py` - Feature showcase for demos and screenshots
 
 ## License
 

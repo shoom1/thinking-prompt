@@ -58,7 +58,7 @@ from .settings_dialog import (
     SettingsDialog,
 )
 
-__version__ = "0.2.1"
+__version__ = "0.2.2"
 
 __all__ = [
     # Main class

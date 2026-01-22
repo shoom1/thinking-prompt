@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - 2026-01-21
+
+### Added
+
+- `DropdownItem`/`DropdownControl` - true dropdown with framed, scrollable list in edit mode
+- `InlineSelectItem`/`InlineSelectControl` - inline select that cycles with Left/Right keys
+- Arrow indicators: DropdownControl shows `▼`, InlineSelectControl shows `◀`/`▶` based on position
+- Settings dialog demo in `demo_showcase.py` showcasing all control types
+- `description` field on SettingsItem for optional help text below labels
+- TextItem in-place editing: Enter to edit value in-place, Enter/Escape to confirm/cancel
+- Dialog width control: `width` parameter on BaseDialog and SettingsDialog
+- Dialog vertical positioning: `top` parameter on BaseDialog and SettingsDialog
+- Settings list styles: indicator, label, value, description with selected states
+
+### Changed
+
+- SettingsDialog now uses clean list with `›` focus indicator and right-aligned values
+- Dialog background now uses dark theme (`bg:#2a2a2a`) to match terminal
+- Checkbox values display as `true`/`false` text with green/grey styling
+- SettingsDialog navigation: Up/Down or Tab/Shift-Tab navigates all elements, Ctrl+S saves
+- Removed light background overlay from dialogs (`with_background=False`)
+
+### Fixed
+
+- Dialog styling now consistent with dark terminal themes
+
 ## [0.2.1] - 2026-01-17
 
 ### Added
