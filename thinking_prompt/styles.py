@@ -89,6 +89,12 @@ class ThinkingPromptStyles:
     setting_desc: str = "fg:#666666"  # Dimmed description
     setting_desc_selected: str = "fg:#888888"  # Slightly brighter when selected
 
+    # Dropdown menu styles
+    setting_dropdown: str = "bg:#333333"  # Dark background for dropdown
+    setting_dropdown_border: str = "fg:#888888 bg:#333333"  # Grey border on dark bg
+    setting_dropdown_item: str = "fg:#e0e0e0 bg:#333333"  # Light text on dark
+    setting_dropdown_selected: str = "fg:#ffffff bg:#0066cc"  # White on blue for selected
+
     def to_style(self) -> Style:
         """
         Convert to prompt_toolkit Style object.
@@ -143,6 +149,11 @@ class ThinkingPromptStyles:
             'setting-value-false-selected': self.setting_value_false_selected,
             'setting-desc': self.setting_desc,
             'setting-desc-selected': self.setting_desc_selected,
+            # Dropdown menu
+            'setting-dropdown': self.setting_dropdown,
+            'setting-dropdown-border': self.setting_dropdown_border,
+            'setting-dropdown-item': self.setting_dropdown_item,
+            'setting-dropdown-selected': self.setting_dropdown_selected,
         })
 
 

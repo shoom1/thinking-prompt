@@ -6,8 +6,10 @@ Run `git log --oneline <last-tag>..HEAD` to see commits for reference.
 -->
 
 ### Added
-- `DropdownItem`/`DropdownControl` - true dropdown with scrollable list in edit mode
+- `DropdownItem`/`DropdownControl` - true dropdown with framed, scrollable list in edit mode
 - `InlineSelectItem`/`InlineSelectControl` - inline select that cycles with Left/Right keys
+- Arrow indicators: DropdownControl shows `▼`, InlineSelectControl shows `◀`/`▶` based on position
+- Settings dialog demo in `demo_showcase.py` showcasing all control types
 - `description` field on SettingsItem for optional help text below labels
 - TextItem in-place editing: Enter to edit value in-place, Enter/Escape to confirm/cancel
 - Dialog width control: `width` parameter on BaseDialog and SettingsDialog

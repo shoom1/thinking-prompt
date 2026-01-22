@@ -17,6 +17,13 @@ Run:
 import asyncio
 
 from thinking_prompt import ThinkingPromptSession, AppInfo
+from thinking_prompt.settings_dialog import (
+    SettingsDialog,
+    DropdownItem,
+    InlineSelectItem,
+    TextItem,
+    CheckboxItem,
+)
 
 # Check if rich is available for fancy welcome
 try:
@@ -93,6 +100,7 @@ async def main():
                 "- **info** - Message dialog demo\n"
                 "- **action** - Choice dialog demo\n"
                 "- **theme** - Dropdown dialog demo\n"
+                "- **settings** - Settings dialog demo\n"
                 "- *anything else* - Process with thinking visualization\n",
                 markdown=True
             )
@@ -138,6 +146,63 @@ async def main():
                 session.add_response(f"Theme set to: **{result}**", markdown=True)
             else:
                 session.add_response("Theme selection cancelled")
+            return
+
+        if cmd == "settings":
+            settings_items = [
+                DropdownItem(
+                    key="theme",
+                    label="Theme",
+                    description="Application color scheme",
+                    options=["Light", "Dark", "System", "Solarized", "Nord"],
+                    default="System",
+                ),
+                InlineSelectItem(
+                    key="font_size",
+                    label="Font Size",
+                    options=["Small", "Medium", "Large", "Extra Large"],
+                    default="Medium",
+                ),
+                TextItem(
+                    key="username",
+                    label="Username",
+                    description="Your display name",
+                    default="Guest",
+                    edit_width=20,
+                ),
+                TextItem(
+                    key="api_key",
+                    label="API Key",
+                    description="Your secret API key",
+                    default="",
+                    password=True,
+                    edit_width=20,
+                ),
+                CheckboxItem(
+                    key="notifications",
+                    label="Enable Notifications",
+                    description="Show desktop notifications",
+                    default=True,
+                ),
+                CheckboxItem(
+                    key="auto_save",
+                    label="Auto Save",
+                    default=False,
+                ),
+            ]
+            dialog = SettingsDialog(
+                title="Settings",
+                items=settings_items,
+            )
+            result = await session.show_dialog(dialog)
+            if result:
+                changes = [f"- **{k}**: {v}" for k, v in result.items()]
+                session.add_response(
+                    "## Settings Updated\n\n" + "\n".join(changes),
+                    markdown=True
+                )
+            else:
+                session.add_response("Settings cancelled")
             return
 
         # Use context manager for thinking
