@@ -11,7 +11,7 @@ markdown, syntax highlighting, and Rich renderables.
 from __future__ import annotations
 
 import threading
-from typing import Any, Callable, List, Optional
+from typing import TYPE_CHECKING, Any, Callable, List, Optional
 
 from prompt_toolkit import print_formatted_text
 from prompt_toolkit.formatted_text import ANSI, AnyFormattedText, FormattedText
@@ -19,6 +19,9 @@ from prompt_toolkit.styles import Style
 
 from .history import FormattedTextHistory
 from .types import truncate_to_lines
+
+if TYPE_CHECKING:
+    from .styles import ThinkingPromptStyles
 
 
 # =============================================================================
@@ -30,20 +33,53 @@ def _is_rich_renderable(obj: Any) -> bool:
     return hasattr(obj, '__rich_console__') or hasattr(obj, '__rich__')
 
 
-def _rich_to_ansi(renderable: Any) -> str:
+def _rich_to_ansi(renderable: Any, theme: Any = None) -> str:
     """Convert a Rich renderable to an ANSI-formatted string."""
     try:
         from rich.console import Console
         from io import StringIO
         file = StringIO()
-        console = Console(file=file, force_terminal=True)
+        console = Console(file=file, force_terminal=True, theme=theme)
         console.print(renderable)
         return file.getvalue()
     except ImportError:
         return str(renderable)
 
 
-def _markdown_to_ansi(content: str) -> str:
+def _setup_simple_heading() -> None:
+    """Patch Rich's Markdown to use left-aligned headings with H1 underlined."""
+    try:
+        from rich.console import Console, ConsoleOptions, RenderResult
+        from rich.markdown import Markdown, Heading
+        from rich.text import Text
+
+        class SimpleHeading(Heading):
+            """Heading that renders left-aligned, bold, with H1 underlined."""
+
+            def __rich_console__(
+                self, console: Console, options: ConsoleOptions
+            ) -> RenderResult:
+                text = self.text
+                text.justify = 'left'
+
+                if self.tag == 'h1':
+                    yield text
+                    yield Text('─' * len(text.plain), style='markdown.h1.border')
+                else:
+                    if self.tag == 'h2':
+                        yield Text('')
+                    yield text
+
+        Markdown.elements['heading_open'] = SimpleHeading
+    except ImportError:
+        pass
+
+
+# Apply the simple heading patch at module load
+_setup_simple_heading()
+
+
+def _markdown_to_ansi(content: str, theme: Any = None) -> str:
     """Convert markdown to ANSI-formatted string using Rich."""
     try:
         from rich.console import Console
@@ -51,7 +87,7 @@ def _markdown_to_ansi(content: str) -> str:
         from io import StringIO
 
         file = StringIO()
-        console = Console(file=file, force_terminal=True)
+        console = Console(file=file, force_terminal=True, theme=theme)
         console.print(Markdown(content))
         return file.getvalue()
     except ImportError:
@@ -88,6 +124,7 @@ class Display:
         self,
         style: Style,
         is_fullscreen: Callable[[], bool] = lambda: False,
+        thinking_styles: Optional[ThinkingPromptStyles] = None,
     ) -> None:
         """
         Initialize the Display.
@@ -96,12 +133,26 @@ class Display:
             style: The prompt_toolkit Style for rendering output.
             is_fullscreen: Callback that returns True if fullscreen mode is active.
                           Console output is cached in fullscreen mode.
+            thinking_styles: Optional ThinkingPromptStyles for markdown rendering.
         """
         self._style = style
         self._history = FormattedTextHistory()
         self._is_fullscreen = is_fullscreen
         self._pending_lock = threading.Lock()
         self._pending_output: List[AnyFormattedText] = []
+        self._rich_theme = self._create_rich_theme(thinking_styles)
+
+    def _create_rich_theme(self, thinking_styles: Optional[ThinkingPromptStyles]) -> Any:
+        """Create a Rich Theme from ThinkingPromptStyles."""
+        try:
+            from rich.theme import Theme
+            if thinking_styles:
+                return Theme(thinking_styles.to_rich_theme_dict())
+            # Default simple theme with no colors
+            from .styles import DEFAULT_STYLES
+            return Theme(DEFAULT_STYLES.to_rich_theme_dict())
+        except ImportError:
+            return None
 
     @property
     def history(self) -> FormattedTextHistory:
@@ -249,7 +300,7 @@ class Display:
         Args:
             content: The markdown content.
         """
-        self._output_ansi(_markdown_to_ansi(content))
+        self._output_ansi(_markdown_to_ansi(content, theme=self._rich_theme))
 
     def code(self, code: str, language: str = "python") -> None:
         """
@@ -309,7 +360,7 @@ class Display:
             table.add_row("Alice")
             display.rich(table)
         """
-        self._output_ansi(_rich_to_ansi(renderable))
+        self._output_ansi(_rich_to_ansi(renderable, theme=self._rich_theme))
 
     def raw(self, content: str, style_class: str = "") -> None:
         """

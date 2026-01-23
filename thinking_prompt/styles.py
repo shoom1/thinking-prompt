@@ -104,6 +104,23 @@ class ThinkingPromptStyles:
     scrollbar_background: str = "bg:#333333"  # Scrollbar track
     scrollbar_button: str = "bg:#666666"  # Scrollbar thumb
 
+    # Markdown styles (for Rich rendering)
+    markdown_h1: str = "bold"
+    markdown_h1_border: str = "dim"  # Underline below H1
+    markdown_h2: str = "bold"
+    markdown_h3: str = "bold"
+    markdown_h4: str = "bold"
+    markdown_h5: str = "bold"
+    markdown_h6: str = "bold"
+    markdown_code: str = "bold"
+    markdown_code_block: str = ""
+    markdown_item_bullet: str = "bold"
+    markdown_item_number: str = "bold"
+    markdown_link: str = ""
+    markdown_link_url: str = "underline"
+    markdown_hr: str = "dim"
+    markdown_block_quote: str = "italic"
+
     def to_style(self) -> Style:
         """
         Convert to prompt_toolkit Style object.
@@ -172,6 +189,38 @@ class ThinkingPromptStyles:
             'scrollbar.background': self.scrollbar_background,
             'scrollbar.button': self.scrollbar_button,
         })
+
+    def to_rich_theme_dict(self) -> dict[str, str]:
+        """
+        Convert markdown styles to a Rich Theme dict.
+
+        Returns:
+            A dict suitable for rich.theme.Theme().
+        """
+        return {
+            'markdown.h1': self.markdown_h1,
+            'markdown.h1.border': self.markdown_h1_border,
+            'markdown.h2': self.markdown_h2,
+            'markdown.h3': self.markdown_h3,
+            'markdown.h4': self.markdown_h4,
+            'markdown.h5': self.markdown_h5,
+            'markdown.h6': self.markdown_h6,
+            'markdown.code': self.markdown_code,
+            'markdown.code_block': self.markdown_code_block or 'none',
+            'markdown.item.bullet': self.markdown_item_bullet,
+            'markdown.item.number': self.markdown_item_number,
+            'markdown.link': self.markdown_link or 'none',
+            'markdown.link_url': self.markdown_link_url,
+            'markdown.hr': self.markdown_hr,
+            'markdown.block_quote': self.markdown_block_quote,
+            'markdown.list': 'none',
+            'markdown.paragraph': 'none',
+            'markdown.text': 'none',
+            'markdown.strong': 'bold',
+            'markdown.em': 'italic',
+            'markdown.emph': 'italic',
+            'markdown.s': 'strike',
+        }
 
 
 # Default styles instance

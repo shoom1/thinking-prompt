@@ -149,6 +149,7 @@ class ThinkingPromptSession:
         self._display = Display(
             style=self._style,
             is_fullscreen=lambda: self.is_fullscreen,  # Use property for thread safety
+            thinking_styles=self._styles,
         )
 
         # Get key bindings and feature flags from app_info or use defaults
