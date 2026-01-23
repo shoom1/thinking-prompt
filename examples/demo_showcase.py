@@ -8,6 +8,7 @@ This demo combines multiple features:
 - Progress indicators in the thinking box
 - Console messages during thinking
 - Markdown and code output
+- Slash command completion dropdown
 
 Perfect for creating demo GIFs and screenshots.
 
@@ -15,6 +16,9 @@ Run:
     python examples/demo_showcase.py
 """
 import asyncio
+
+from prompt_toolkit.completion import Completer, Completion
+from prompt_toolkit.document import Document
 
 from thinking_prompt import ThinkingPromptSession, AppInfo
 from thinking_prompt.settings_dialog import (
@@ -36,6 +40,38 @@ except ImportError:
     RICH_AVAILABLE = False
 
 
+class SlashCommandCompleter(Completer):
+    """Completer that triggers for slash commands."""
+
+    COMMANDS = {
+        "help": "Show available commands",
+        "confirm": "Yes/No dialog demo",
+        "info": "Message dialog demo",
+        "action": "Choice dialog demo",
+        "theme": "Dropdown dialog demo",
+        "settings": "Settings dialog demo",
+        "clear": "Clear the screen",
+    }
+
+    def get_completions(self, document: Document, complete_event):
+        """Yield completions when text starts with /."""
+        text = document.text_before_cursor
+
+        if not text.startswith("/"):
+            return
+
+        partial = text[1:].lower()
+
+        for cmd, desc in self.COMMANDS.items():
+            if cmd.startswith(partial):
+                yield Completion(
+                    text=f"/{cmd}",
+                    start_position=-len(text),
+                    display=f"/{cmd}",
+                    display_meta=desc,
+                )
+
+
 def create_welcome_message():
     """Create a fancy welcome message with ASCII art."""
     ascii_art = r"""  _____ _     _       _    _               ____
@@ -50,7 +86,7 @@ def create_welcome_message():
         subtitle = Text.from_markup(
             "\n[dim]A [bold]prompt_toolkit[/bold] extension for AI thinking visualization[/dim]\n"
             "[green]Features:[/green] Real-time streaming • Animated separator • Rich output\n"
-            "[yellow]Controls:[/yellow] [bold]Ctrl+T[/bold] expand • [bold]Ctrl+C[/bold] cancel • [bold]Ctrl+D[/bold] exit • [bold]help[/bold] for commands"
+            "[yellow]Controls:[/yellow] [bold]Ctrl+T[/bold] expand • [bold]Ctrl+C[/bold] cancel • [bold]Ctrl+D[/bold] exit • [bold]/[/bold] for commands"
         )
         content = Group(Align.center(title), Align.center(subtitle))
         return Panel(
@@ -63,14 +99,14 @@ def create_welcome_message():
             ascii_art +
             "\n  A prompt_toolkit extension for AI thinking visualization\n"
             "  Features: Real-time streaming • Animated separator • Rich output\n"
-            "  Controls: Ctrl+T expand • Ctrl+C cancel • Ctrl+D exit • help for commands"
+            "  Controls: Ctrl+T expand • Ctrl+C cancel • Ctrl+D exit • / for commands"
         )
 
 
 async def main():
     app_info = AppInfo(
         name="ThinkingBox",
-        version="0.2.1",
+        version="0.2.3",
         welcome_message=create_welcome_message,
         thinking_text="Processing",
         thinking_animation=("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"),
@@ -81,6 +117,9 @@ async def main():
         app_info=app_info,
         message=">>> ",
         max_thinking_height=12,
+        completer=SlashCommandCompleter(),
+        complete_while_typing=True,
+        completions_menu_height=5,
     )
 
     @session.on_input
@@ -89,21 +128,33 @@ async def main():
         if not user_input.strip():
             return
 
-        cmd = user_input.strip().lower()
+        text = user_input.strip()
+
+        # Handle slash commands
+        if text.startswith("/"):
+            cmd = text[1:].lower()
+        else:
+            cmd = text.lower()
 
         # Special commands
         if cmd == "help":
             session.add_response(
                 "## Available Commands\n\n"
-                "- **help** - Show this message\n"
-                "- **confirm** - Yes/No dialog demo\n"
-                "- **info** - Message dialog demo\n"
-                "- **action** - Choice dialog demo\n"
-                "- **theme** - Dropdown dialog demo\n"
-                "- **settings** - Settings dialog demo\n"
+                "Type `/` to see the completion menu, or use these commands:\n\n"
+                "- **/help** - Show this message\n"
+                "- **/confirm** - Yes/No dialog demo\n"
+                "- **/info** - Message dialog demo\n"
+                "- **/action** - Choice dialog demo\n"
+                "- **/theme** - Dropdown dialog demo\n"
+                "- **/settings** - Settings dialog demo\n"
+                "- **/clear** - Clear the screen\n"
                 "- *anything else* - Process with thinking visualization\n",
                 markdown=True
             )
+            return
+
+        if cmd == "clear":
+            session.clear()
             return
 
         # Dialog demonstrations
