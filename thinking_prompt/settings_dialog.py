@@ -935,7 +935,12 @@ class SettingsDialog(BaseDialog):
         self._control_containers = [control.get_container() for control in self._controls]
 
         # Create HSplit with navigation bindings
-        controls_container = HSplit(self._control_containers, key_bindings=self._get_navigation_key_bindings())
+        # Use empty window_too_small to suppress brief "Window too small" message during layout
+        controls_container = HSplit(
+            self._control_containers,
+            key_bindings=self._get_navigation_key_bindings(),
+            window_too_small=Window(),
+        )
 
         # Collect floats from dropdown controls (so they can overlay the entire dialog)
         floats = []
