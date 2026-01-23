@@ -268,7 +268,7 @@ class TestInlineSelectControl:
         control.cycle(1)
         assert control.value == "c"
         control.cycle(1)
-        assert control.value == "a"  # wraps
+        assert control.value == "c"  # clamped at end
 
     def test_inline_select_cycle_backward(self):
         """InlineSelect cycles through options backward."""
@@ -278,7 +278,7 @@ class TestInlineSelectControl:
         control = InlineSelectControl(item)
 
         control.cycle(-1)
-        assert control.value == "c"  # wraps backward
+        assert control.value == "a"  # clamped at start
 
     def test_inline_select_renders_label_and_value(self):
         """InlineSelect renders label and current option."""

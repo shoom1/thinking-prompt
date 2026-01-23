@@ -237,7 +237,7 @@ class InlineSelectControl(SettingControl):
             return self._has_focus
 
     def cycle(self, delta: int) -> None:
-        """Cycle through options by delta (+1 or -1)."""
+        """Move through options by delta (+1 or -1), clamped to boundaries."""
         options = self._item.options
         if not options:
             return
@@ -245,7 +245,7 @@ class InlineSelectControl(SettingControl):
             idx = options.index(self._value)
         except ValueError:
             idx = 0
-        new_idx = (idx + delta) % len(options)
+        new_idx = max(0, min(len(options) - 1, idx + delta))
         self._value = options[new_idx]
 
     def create_content(self, width: int, height: int) -> UIContent:
