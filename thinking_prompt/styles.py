@@ -95,6 +95,15 @@ class ThinkingPromptStyles:
     setting_dropdown_item: str = "fg:#e0e0e0 bg:#333333"  # Light text on dark
     setting_dropdown_selected: str = "fg:#ffffff bg:#0066cc"  # White on blue for selected
 
+    # Completion menu styles (for input autocompletion)
+    completion_menu: str = "bg:#333333 fg:#e0e0e0"  # Dark background
+    completion_menu_completion: str = "bg:#333333 fg:#e0e0e0"  # Normal item
+    completion_menu_completion_current: str = "bg:#0066cc fg:#ffffff"  # Selected item
+    completion_menu_meta: str = "bg:#333333 fg:#888888"  # Meta/description text
+    completion_menu_meta_current: str = "bg:#0066cc fg:#cccccc"  # Meta when selected
+    scrollbar_background: str = "bg:#333333"  # Scrollbar track
+    scrollbar_button: str = "bg:#666666"  # Scrollbar thumb
+
     def to_style(self) -> Style:
         """
         Convert to prompt_toolkit Style object.
@@ -154,6 +163,14 @@ class ThinkingPromptStyles:
             'setting-dropdown-border': self.setting_dropdown_border,
             'setting-dropdown-item': self.setting_dropdown_item,
             'setting-dropdown-selected': self.setting_dropdown_selected,
+            # Completion menu
+            'completion-menu': self.completion_menu,
+            'completion-menu.completion': self.completion_menu_completion,
+            'completion-menu.completion.current': self.completion_menu_completion_current,
+            'completion-menu.meta': self.completion_menu_meta,
+            'completion-menu.meta.current': self.completion_menu_meta_current,
+            'scrollbar.background': self.scrollbar_background,
+            'scrollbar.button': self.scrollbar_button,
         })
 
 

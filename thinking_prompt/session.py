@@ -95,6 +95,8 @@ class ThinkingPromptSession:
         styles: Optional[ThinkingPromptStyles] = None,
         history: Optional[History] = None,
         completer: Optional[Completer] = None,
+        complete_while_typing: bool = False,
+        completions_menu_height: int = 5,
         editing_mode: EditingMode = EditingMode.EMACS,
         max_thinking_height: int = 15,
         enable_status_bar: bool = True,
@@ -110,6 +112,8 @@ class ThinkingPromptSession:
             styles: Custom styles for the session.
             history: History object for input history.
             completer: Completer for input autocompletion.
+            complete_while_typing: Show completions automatically while typing.
+            completions_menu_height: Maximum height of completions dropdown menu.
             editing_mode: Editing mode (EMACS or VI).
             max_thinking_height: Max lines for collapsed thinking box (must be >= 2).
             enable_status_bar: Whether to show status bar.
@@ -131,6 +135,8 @@ class ThinkingPromptSession:
         self._editing_mode = editing_mode
         self._echo_input = echo_input
         self._completer = completer
+        self._complete_while_typing = complete_while_typing
+        self._completions_menu_height = completions_menu_height
 
         # Fullscreen state (thread-safe)
         self._is_fullscreen: bool = False
@@ -220,6 +226,7 @@ class ThinkingPromptSession:
             name=DEFAULT_BUFFER,
             history=self._input_history,
             completer=self._completer,
+            complete_while_typing=self._complete_while_typing,
             accept_handler=accept_handler,
             multiline=False,
         )
@@ -245,6 +252,7 @@ class ThinkingPromptSession:
             get_status_text=lambda: self._status_text,
             is_status_bar_enabled=lambda: self._enable_status_bar,
             separator=separator,
+            completions_menu_height=self._completions_menu_height,
         )
 
     def _create_application(self) -> Application:

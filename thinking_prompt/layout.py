@@ -12,6 +12,7 @@ from __future__ import annotations
 import time
 from typing import TYPE_CHECKING, Callable, Literal, Tuple
 
+from prompt_toolkit.application.current import get_app
 from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.data_structures import Point
 from prompt_toolkit.filters import Condition
@@ -335,6 +336,7 @@ def create_layout(
     get_status_text: Callable[[], AnyFormattedText],
     is_status_bar_enabled: Callable[[], bool],
     separator: ThinkingSeparator | None = None,
+    completions_menu_height: int = 5,
 ) -> Layout:
     """
     Create the layout with chat history, thinking box, and input.
@@ -349,6 +351,7 @@ def create_layout(
         get_status_text: Callable that returns status bar text.
         is_status_bar_enabled: Callable that returns status bar visibility.
         separator: Optional ThinkingSeparator for animated separator line.
+        completions_menu_height: Maximum height of the completions dropdown menu.
 
     Returns:
         The complete Layout.
@@ -375,10 +378,18 @@ def create_layout(
         dont_extend_height=True,
     )
 
-    # Input window - sizes naturally based on content
+    # Dynamic height function that reserves space for completion menu
+    def get_input_height() -> D:
+        if completions_menu_height > 0 and not get_app().is_done:
+            # Reserve space only when completions menu is actually visible
+            if default_buffer.complete_state is not None:
+                return D(min=completions_menu_height)
+        return D()
+
+    # Input window - sizes naturally, but reserves space for completions menu
     input_window = Window(
         content=buffer_control,
-        height=D(),  # No constraints - sizes to content
+        height=get_input_height,
         wrap_lines=True,
     )
 
@@ -407,18 +418,6 @@ def create_layout(
         separator_bottom,
     ])
 
-    main_input_container = FloatContainer(
-        content=input_with_separators,
-        floats=[
-            Float(
-                xcursor=True,
-                ycursor=True,
-                transparent=True,
-                content=CompletionsMenu(max_height=8),
-            ),
-        ],
-    )
-
     # Chat history (visible in full-screen mode) - looks like normal console
     history_window = create_history_window(
         history=history,
@@ -438,14 +437,25 @@ def create_layout(
         is_enabled=is_status_bar_enabled,
     )
 
-    # Build the layout
-    layout_children = [
-        history_window,    # Only visible in full-screen
-        thinking_box,      # Only visible when thinking
-        main_input_container,  # Always visible
-        status_bar,        # Status bar at bottom
-    ]
+    # Build the main layout
+    main_layout = HSplit([
+        history_window,        # Only visible in full-screen
+        thinking_box,          # Only visible when thinking
+        input_with_separators, # Always visible
+        status_bar,            # Status bar at bottom
+    ])
 
-    root = HSplit(layout_children)
+    # Wrap in FloatContainer at root level so completions menu can expand
+    root = FloatContainer(
+        content=main_layout,
+        floats=[
+            Float(
+                xcursor=True,
+                ycursor=True,
+                transparent=True,
+                content=CompletionsMenu(max_height=completions_menu_height),
+            ),
+        ],
+    )
 
     return Layout(root, focused_element=default_buffer)
