@@ -68,7 +68,7 @@ class SlashCommandCompleter(Completer):
                     text=f"/{cmd}",
                     start_position=-len(text),
                     display=f"/{cmd}",
-                    display_meta=desc,
+                    display_meta=f" - {desc}",
                 )
 
 

@@ -166,13 +166,13 @@ class ThinkingPromptStyles:
         if not self.menu_item:
             self.menu_item = f"fg:{self.color_text} bg:{self.color_bg_dark}"
         if not self.menu_item_selected:
-            self.menu_item_selected = f"fg:{self.color_text_bright} bg:{self.color_accent_button}"
+            self.menu_item_selected = f"fg:{self.color_accent} bg:#454545 noreverse"
         if not self.menu_border:
             self.menu_border = f"fg:{self.color_text_muted} bg:{self.color_bg_dark}"
         if not self.menu_meta:
-            self.menu_meta = f"fg:{self.color_text_muted} bg:{self.color_bg_dark}"
+            self.menu_meta = f"fg:{self.color_text} bg:{self.color_bg_dark}"
         if not self.menu_meta_selected:
-            self.menu_meta_selected = f"fg:#cccccc bg:{self.color_accent_button}"
+            self.menu_meta_selected = f"fg:{self.color_accent} bg:#454545 noreverse"
 
         # Chat history
         if not self.user_prefix:
@@ -321,6 +321,8 @@ class ThinkingPromptStyles:
             'completion-menu.completion.current': self.menu_item_selected,
             'completion-menu.meta': self.menu_meta,
             'completion-menu.meta.current': self.menu_meta_selected,
+            'completion-menu.meta.completion': self.menu_meta,
+            'completion-menu.meta.completion.current': self.menu_meta_selected,
             'scrollbar.background': self.scrollbar_background,
             'scrollbar.button': self.scrollbar_button,
         })
