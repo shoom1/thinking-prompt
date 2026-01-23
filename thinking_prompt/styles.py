@@ -20,91 +20,128 @@ class ThinkingPromptStyles:
     - Attributes: 'bold', 'italic', 'underline', 'reverse'
     - Combine with spaces: 'bg:#1a1a2e fg:#e0e0e0 italic'
 
+    Base theme colors control the overall appearance:
+    - Customize `menu_*` styles to change both dropdown and completion menus
+    - Customize `color_*` properties to change colors throughout
+
     Example:
         styles = ThinkingPromptStyles(
-            thinking_box="bg:#333333 #ffffff",
-            status_bar="bg:blue white bold",
+            color_accent="#ff6600",  # Orange accent instead of cyan
+            menu_selected="bg:#ff6600 fg:#ffffff",  # Orange selection
         )
         session = ThinkingPromptSession(styles=styles)
     """
 
+    # ==========================================================================
+    # Base theme colors - customize these to change colors throughout
+    # ==========================================================================
+    color_accent: str = "#88c0d0"  # Cyan - primary accent (selection, indicators)
+    color_accent_button: str = "#0066cc"  # Blue - button/menu selection highlight
+    color_success: str = "#a3be8c"  # Green - success states
+    color_warning: str = "#ebcb8b"  # Amber - warnings, system messages
+    color_error: str = "#bf616a"  # Red - errors
+    color_text: str = "#e0e0e0"  # Light grey - primary text
+    color_text_bright: str = "#ffffff"  # White - emphasized text
+    color_text_muted: str = "#888888"  # Grey - secondary/muted text
+    color_text_dim: str = "#666666"  # Dark grey - very dim text
+    color_bg_dark: str = "#333333"  # Dark - menus, dropdowns
+    color_bg_dialog: str = "#2a2a2a"  # Darker - dialog background
+    color_bg_input: str = "#3a3a3a"  # Medium - input fields, highlights
+
+    # ==========================================================================
+    # Shared menu styles - used by both dropdown and completion menus
+    # ==========================================================================
+    menu_bg: str = ""  # Defaults to color_bg_dark
+    menu_item: str = ""  # Defaults to color_text on color_bg_dark
+    menu_item_selected: str = ""  # Defaults to color_text_bright on color_accent_button
+    menu_border: str = ""  # Defaults to color_text_muted on color_bg_dark
+    menu_meta: str = ""  # Defaults to color_text_muted on color_bg_dark
+    menu_meta_selected: str = ""  # Defaults to slightly dimmed on color_accent_button
+
+    # ==========================================================================
     # Thinking box styles
-    thinking_box: str = "fg:#a0a0a0 italic"  # Light grey italic
+    # ==========================================================================
+    thinking_box: str = "fg:#a0a0a0 italic"
     thinking_box_border: str = "fg:#606060"
     thinking_box_hint: str = "fg:#707070 italic"
 
+    # ==========================================================================
     # Status bar
+    # ==========================================================================
     status_bar: str = "bg:#202040 fg:#808090"
 
-    # Chat history (in fullscreen mode)
-    history: str = ""  # Default terminal colors
+    # ==========================================================================
+    # Chat history
+    # ==========================================================================
+    history: str = ""
+    user_prefix: str = ""  # Defaults to color_accent on color_bg_input
+    user_message: str = ""  # Defaults to color_text_bright on color_bg_input italic
+    user_separator: str = ""  # Defaults to color_text_muted
+    assistant_prefix: str = "fg:cyan bold"
+    assistant_message: str = ""  # Defaults to color_text_bright
+    thinking_message: str = "fg:#a0a0a0 italic"
+    system_message: str = ""  # Defaults to color_warning
 
-    # Message styles (for chat history)
-    user_prefix: str = "fg:#88c0d0 bg:#3a3a3a"  # Light blue on dark grey
-    user_message: str = "fg:#ffffff bg:#3a3a3a italic"  # White italic on dark grey
-    user_separator: str = "fg:#888888"  # Grey separator lines
-    assistant_prefix: str = "fg:cyan bold"  # Cyan bold
-    assistant_message: str = "fg:#ffffff"  # White
-    thinking_message: str = "fg:#a0a0a0 italic"  # Light grey italic
-    system_message: str = "fg:#ebcb8b"  # Amber/yellow - system notices
+    # ==========================================================================
+    # Status messages
+    # ==========================================================================
+    error_message: str = ""  # Defaults to color_error bold
+    warning_message: str = ""  # Defaults to color_warning
+    success_message: str = ""  # Defaults to color_success
 
-    # Status message styles
-    error_message: str = "fg:#bf616a bold"  # Red bold
-    warning_message: str = "fg:#ebcb8b"  # Amber/yellow
-    success_message: str = "fg:#a3be8c"  # Green
-
+    # ==========================================================================
     # Input prompt
-    prompt: str = ""  # Default terminal colors
-    input_separator: str = "fg:#444444"  # Grey separator around input
+    # ==========================================================================
+    prompt: str = ""
+    input_separator: str = "fg:#444444"
 
-    # Dialog styles (dark theme to match terminal)
-    dialog: str = "bg:#2a2a2a"  # Dark grey background
-    dialog_title: str = "fg:#ffffff bold"  # White bold title
-    dialog_body: str = "bg:#2a2a2a fg:#e0e0e0"  # Dark bg, light text
-    dialog_border: str = "fg:#888888"  # Grey border
-    dialog_shadow: str = "bg:#000000"  # Black shadow/background
-    dialog_button: str = "bg:#404040 fg:#e0e0e0"  # Dark button
-    dialog_button_focused: str = "bg:#0066cc fg:#ffffff bold"  # Blue focused
+    # ==========================================================================
+    # Dialog styles
+    # ==========================================================================
+    dialog: str = ""  # Defaults to bg:color_bg_dialog
+    dialog_title: str = ""  # Defaults to color_text_bright bold
+    dialog_body: str = ""  # Defaults to color_text on color_bg_dialog
+    dialog_border: str = ""  # Defaults to color_text_muted
+    dialog_shadow: str = "bg:#000000"
+    dialog_button: str = ""  # Defaults to color_text on #404040
+    dialog_button_focused: str = ""  # Defaults to color_text_bright on color_accent_button bold
 
-    # Form control styles (for settings dialog)
-    radio_list: str = "bg:#2a2a2a fg:#e0e0e0"  # Dark background
-    radio_selected: str = "fg:#88c0d0 bold"  # Cyan selected item
-    checkbox_list: str = "bg:#2a2a2a fg:#e0e0e0"  # Dark background
-    checkbox_selected: str = "fg:#88c0d0 bold"  # Cyan selected
-    text_area: str = "bg:#3a3a3a fg:#ffffff"  # Slightly lighter input bg
-    select_value: str = "fg:#88c0d0"  # Cyan for selected value
-    select_arrow: str = "fg:#888888"  # Grey arrow indicator
-    checkbox_mark: str = "fg:#88c0d0"  # Cyan for checkbox mark
+    # ==========================================================================
+    # Form controls
+    # ==========================================================================
+    radio_list: str = ""  # Defaults to color_text on color_bg_dialog
+    radio_selected: str = ""  # Defaults to color_accent bold
+    checkbox_list: str = ""  # Defaults to color_text on color_bg_dialog
+    checkbox_selected: str = ""  # Defaults to color_accent bold
+    text_area: str = ""  # Defaults to color_text_bright on color_bg_input
+    select_value: str = ""  # Defaults to color_accent
+    select_arrow: str = ""  # Defaults to color_text_muted
+    checkbox_mark: str = ""  # Defaults to color_accent
 
-    # Settings list styles (clean list with focus indicator)
-    setting_indicator: str = "fg:#88c0d0"  # Cyan focus indicator (›)
-    setting_label: str = "fg:#e0e0e0"  # Light grey label
-    setting_label_selected: str = "fg:#88c0d0"  # Cyan when selected
-    setting_value: str = "fg:#888888"  # Grey value
-    setting_value_selected: str = "fg:#88c0d0 italic"  # Cyan italic when selected
-    setting_value_true: str = "fg:#a3be8c"  # Green for true
-    setting_value_true_selected: str = "fg:#a3be8c italic"  # Green italic
-    setting_value_false: str = "fg:#888888"  # Grey for false
-    setting_value_false_selected: str = "fg:#888888 italic"  # Grey italic
-    setting_desc: str = "fg:#666666"  # Dimmed description
-    setting_desc_selected: str = "fg:#888888"  # Slightly brighter when selected
+    # ==========================================================================
+    # Settings list
+    # ==========================================================================
+    setting_indicator: str = ""  # Defaults to color_accent
+    setting_label: str = ""  # Defaults to color_text
+    setting_label_selected: str = ""  # Defaults to color_accent
+    setting_value: str = ""  # Defaults to color_text_muted
+    setting_value_selected: str = ""  # Defaults to color_accent italic
+    setting_value_true: str = ""  # Defaults to color_success
+    setting_value_true_selected: str = ""  # Defaults to color_success italic
+    setting_value_false: str = ""  # Defaults to color_text_muted
+    setting_value_false_selected: str = ""  # Defaults to color_text_muted italic
+    setting_desc: str = ""  # Defaults to color_text_dim
+    setting_desc_selected: str = ""  # Defaults to color_text_muted
 
-    # Dropdown menu styles
-    setting_dropdown: str = "bg:#333333"  # Dark background for dropdown
-    setting_dropdown_border: str = "fg:#888888 bg:#333333"  # Grey border on dark bg
-    setting_dropdown_item: str = "fg:#e0e0e0 bg:#333333"  # Light text on dark
-    setting_dropdown_selected: str = "fg:#ffffff bg:#0066cc"  # White on blue for selected
+    # ==========================================================================
+    # Scrollbar
+    # ==========================================================================
+    scrollbar_background: str = ""  # Defaults to color_bg_dark
+    scrollbar_button: str = ""  # Defaults to color_text_dim
 
-    # Completion menu styles (for input autocompletion)
-    completion_menu: str = "bg:#333333 fg:#e0e0e0"  # Dark background
-    completion_menu_completion: str = "bg:#333333 fg:#e0e0e0"  # Normal item
-    completion_menu_completion_current: str = "bg:#0066cc fg:#ffffff"  # Selected item
-    completion_menu_meta: str = "bg:#333333 fg:#888888"  # Meta/description text
-    completion_menu_meta_current: str = "bg:#0066cc fg:#cccccc"  # Meta when selected
-    scrollbar_background: str = "bg:#333333"  # Scrollbar track
-    scrollbar_button: str = "bg:#666666"  # Scrollbar thumb
-
+    # ==========================================================================
     # Markdown styles (for Rich rendering)
+    # ==========================================================================
     markdown_h1: str = "bold"
     markdown_h1_border: str = "dim"  # Underline below H1
     markdown_h2: str = "bold"
@@ -120,6 +157,104 @@ class ThinkingPromptStyles:
     markdown_link_url: str = "underline"
     markdown_hr: str = "dim"
     markdown_block_quote: str = "italic"
+
+    def __post_init__(self) -> None:
+        """Apply default values based on base theme colors."""
+        # Menu styles
+        if not self.menu_bg:
+            self.menu_bg = f"bg:{self.color_bg_dark}"
+        if not self.menu_item:
+            self.menu_item = f"fg:{self.color_text} bg:{self.color_bg_dark}"
+        if not self.menu_item_selected:
+            self.menu_item_selected = f"fg:{self.color_text_bright} bg:{self.color_accent_button}"
+        if not self.menu_border:
+            self.menu_border = f"fg:{self.color_text_muted} bg:{self.color_bg_dark}"
+        if not self.menu_meta:
+            self.menu_meta = f"fg:{self.color_text_muted} bg:{self.color_bg_dark}"
+        if not self.menu_meta_selected:
+            self.menu_meta_selected = f"fg:#cccccc bg:{self.color_accent_button}"
+
+        # Chat history
+        if not self.user_prefix:
+            self.user_prefix = f"fg:{self.color_accent} bg:{self.color_bg_input}"
+        if not self.user_message:
+            self.user_message = f"fg:{self.color_text_bright} bg:{self.color_bg_input} italic"
+        if not self.user_separator:
+            self.user_separator = f"fg:{self.color_text_muted}"
+        if not self.assistant_message:
+            self.assistant_message = f"fg:{self.color_text_bright}"
+        if not self.system_message:
+            self.system_message = f"fg:{self.color_warning}"
+
+        # Status messages
+        if not self.error_message:
+            self.error_message = f"fg:{self.color_error} bold"
+        if not self.warning_message:
+            self.warning_message = f"fg:{self.color_warning}"
+        if not self.success_message:
+            self.success_message = f"fg:{self.color_success}"
+
+        # Dialog
+        if not self.dialog:
+            self.dialog = f"bg:{self.color_bg_dialog}"
+        if not self.dialog_title:
+            self.dialog_title = f"fg:{self.color_text_bright} bold"
+        if not self.dialog_body:
+            self.dialog_body = f"bg:{self.color_bg_dialog} fg:{self.color_text}"
+        if not self.dialog_border:
+            self.dialog_border = f"fg:{self.color_text_muted}"
+        if not self.dialog_button:
+            self.dialog_button = f"bg:#404040 fg:{self.color_text}"
+        if not self.dialog_button_focused:
+            self.dialog_button_focused = f"bg:{self.color_accent_button} fg:{self.color_text_bright} bold"
+
+        # Form controls
+        if not self.radio_list:
+            self.radio_list = f"bg:{self.color_bg_dialog} fg:{self.color_text}"
+        if not self.radio_selected:
+            self.radio_selected = f"fg:{self.color_accent} bold"
+        if not self.checkbox_list:
+            self.checkbox_list = f"bg:{self.color_bg_dialog} fg:{self.color_text}"
+        if not self.checkbox_selected:
+            self.checkbox_selected = f"fg:{self.color_accent} bold"
+        if not self.text_area:
+            self.text_area = f"bg:{self.color_bg_input} fg:{self.color_text_bright}"
+        if not self.select_value:
+            self.select_value = f"fg:{self.color_accent}"
+        if not self.select_arrow:
+            self.select_arrow = f"fg:{self.color_text_muted}"
+        if not self.checkbox_mark:
+            self.checkbox_mark = f"fg:{self.color_accent}"
+
+        # Settings list
+        if not self.setting_indicator:
+            self.setting_indicator = f"fg:{self.color_accent}"
+        if not self.setting_label:
+            self.setting_label = f"fg:{self.color_text}"
+        if not self.setting_label_selected:
+            self.setting_label_selected = f"fg:{self.color_accent}"
+        if not self.setting_value:
+            self.setting_value = f"fg:{self.color_text_muted}"
+        if not self.setting_value_selected:
+            self.setting_value_selected = f"fg:{self.color_accent} italic"
+        if not self.setting_value_true:
+            self.setting_value_true = f"fg:{self.color_success}"
+        if not self.setting_value_true_selected:
+            self.setting_value_true_selected = f"fg:{self.color_success} italic"
+        if not self.setting_value_false:
+            self.setting_value_false = f"fg:{self.color_text_muted}"
+        if not self.setting_value_false_selected:
+            self.setting_value_false_selected = f"fg:{self.color_text_muted} italic"
+        if not self.setting_desc:
+            self.setting_desc = f"fg:{self.color_text_dim}"
+        if not self.setting_desc_selected:
+            self.setting_desc_selected = f"fg:{self.color_text_muted}"
+
+        # Scrollbar
+        if not self.scrollbar_background:
+            self.scrollbar_background = f"bg:{self.color_bg_dark}"
+        if not self.scrollbar_button:
+            self.scrollbar_button = f"bg:{self.color_text_dim}"
 
     def to_style(self) -> Style:
         """
@@ -175,17 +310,17 @@ class ThinkingPromptStyles:
             'setting-value-false-selected': self.setting_value_false_selected,
             'setting-desc': self.setting_desc,
             'setting-desc-selected': self.setting_desc_selected,
-            # Dropdown menu
-            'setting-dropdown': self.setting_dropdown,
-            'setting-dropdown-border': self.setting_dropdown_border,
-            'setting-dropdown-item': self.setting_dropdown_item,
-            'setting-dropdown-selected': self.setting_dropdown_selected,
-            # Completion menu
-            'completion-menu': self.completion_menu,
-            'completion-menu.completion': self.completion_menu_completion,
-            'completion-menu.completion.current': self.completion_menu_completion_current,
-            'completion-menu.meta': self.completion_menu_meta,
-            'completion-menu.meta.current': self.completion_menu_meta_current,
+            # Dropdown menu (uses shared menu styles)
+            'setting-dropdown': self.menu_bg,
+            'setting-dropdown-border': self.menu_border,
+            'setting-dropdown-item': self.menu_item,
+            'setting-dropdown-selected': self.menu_item_selected,
+            # Completion menu (uses shared menu styles)
+            'completion-menu': self.menu_bg,
+            'completion-menu.completion': self.menu_item,
+            'completion-menu.completion.current': self.menu_item_selected,
+            'completion-menu.meta': self.menu_meta,
+            'completion-menu.meta.current': self.menu_meta_selected,
             'scrollbar.background': self.scrollbar_background,
             'scrollbar.button': self.scrollbar_button,
         })
