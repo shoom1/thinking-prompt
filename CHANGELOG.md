@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.3] - 2026-01-23
+
+### Added
+
+- `complete_while_typing` parameter for ThinkingPromptSession - shows completions automatically while typing
+- `completions_menu_height` parameter for ThinkingPromptSession - controls dropdown menu height and reserved space (default: 5)
+- Completion menu styles matching dark terminal theme (dark background, blue selection)
+- `completer_demo.py` example showing slash-command autocompletion
+
+### Changed
+
+- Consolidated theme with base colors and shared menu styles
+- Added configurable markdown styles with simplified theme
+- Refactored SettingControl base class to extract shared methods (`_check_focus`, `_build_setting_row`)
+
+### Fixed
+
+- Completion menu theme now properly matches dark mode
+- Suppress brief "Window too small" message on dialog open
+- Inline select now stops at boundaries instead of wrapping
+
 ## [0.2.2] - 2026-01-21
 
 ### Added
