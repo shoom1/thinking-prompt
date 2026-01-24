@@ -136,43 +136,35 @@ class SettingControl(UIControl, ABC):
     def is_focusable(self) -> bool:
         return True
 
-
-class CheckboxControl(SettingControl):
-    """Checkbox control that toggles on Space/Enter."""
-
-    def __init__(self, item: CheckboxItem) -> None:
-        super().__init__(item)
-        # Cache window for focus detection
-        height = 2 if item.description else 1
-        self._window = Window(self, height=height)
-
-    def toggle(self) -> None:
-        """Toggle the checkbox value."""
-        self._value = not self._value
-
     def _check_focus(self) -> bool:
-        """Check if this control has focus (for rendering)."""
+        """Check if this control has focus (for rendering).
+
+        Default implementation checks self._window. Subclasses with
+        multiple focusable windows should override this method.
+        """
         try:
             app = get_app()
-            return app.layout.has_focus(self._window)
+            window = getattr(self, "_window", None) or getattr(self, "_view_window", None)
+            if window:
+                return app.layout.has_focus(window)
+            return self._has_focus
         except Exception:
             return self._has_focus
 
-    def create_content(self, width: int, height: int) -> UIContent:
-        """Render the checkbox row."""
-        is_selected = self._check_focus()
+    def _build_setting_row(
+        self,
+        width: int,
+        value_text: str,
+        value_style: str,
+        is_selected: bool,
+    ) -> list[FormattedText]:
+        """Build the standard setting row with optional description.
 
-        # Build the row: [indicator] [label] ... [value]
+        Returns a list of FormattedText lines (1 or 2 depending on description).
+        """
         indicator = "> " if is_selected else "  "
         indicator_style = "class:setting-indicator" if is_selected else ""
         label_style = "class:setting-label-selected" if is_selected else "class:setting-label"
-
-        if self._value:
-            value_text = "true"
-            value_style = "class:setting-value-true-selected" if is_selected else "class:setting-value-true"
-        else:
-            value_text = "false"
-            value_style = "class:setting-value-false-selected" if is_selected else "class:setting-value-false"
 
         label_text = self._item.label
         available = width - len(indicator) - len(label_text) - len(value_text) - 1
@@ -187,7 +179,6 @@ class CheckboxControl(SettingControl):
 
         lines = [FormattedText(row)]
 
-        # Add description if present
         if self._item.description:
             desc_style = "class:setting-desc-selected" if is_selected else "class:setting-desc"
             desc_row: list[tuple[str, str]] = [
@@ -195,6 +186,34 @@ class CheckboxControl(SettingControl):
                 (desc_style, self._item.description),
             ]
             lines.append(FormattedText(desc_row))
+
+        return lines
+
+
+class CheckboxControl(SettingControl):
+    """Checkbox control that toggles on Space/Enter."""
+
+    def __init__(self, item: CheckboxItem) -> None:
+        super().__init__(item)
+        height = 2 if item.description else 1
+        self._window = Window(self, height=height)
+
+    def toggle(self) -> None:
+        """Toggle the checkbox value."""
+        self._value = not self._value
+
+    def create_content(self, width: int, height: int) -> UIContent:
+        """Render the checkbox row."""
+        is_selected = self._check_focus()
+
+        if self._value:
+            value_text = "true"
+            value_style = "class:setting-value-true-selected" if is_selected else "class:setting-value-true"
+        else:
+            value_text = "false"
+            value_style = "class:setting-value-false-selected" if is_selected else "class:setting-value-false"
+
+        lines = self._build_setting_row(width, value_text, value_style, is_selected)
 
         def get_line(i: int) -> FormattedText:
             return lines[i] if i < len(lines) else FormattedText([])
@@ -224,17 +243,8 @@ class InlineSelectControl(SettingControl):
 
     def __init__(self, item: InlineSelectItem) -> None:
         super().__init__(item)
-        # Cache window for focus detection
         height = 2 if item.description else 1
         self._window = Window(self, height=height)
-
-    def _check_focus(self) -> bool:
-        """Check if this control has focus (for rendering)."""
-        try:
-            app = get_app()
-            return app.layout.has_focus(self._window)
-        except Exception:
-            return self._has_focus
 
     def cycle(self, delta: int) -> None:
         """Move through options by delta (+1 or -1), clamped to boundaries."""
@@ -251,13 +261,8 @@ class InlineSelectControl(SettingControl):
     def create_content(self, width: int, height: int) -> UIContent:
         """Render the inline select row with left/right arrows."""
         is_selected = self._check_focus()
-
-        indicator = "> " if is_selected else "  "
-        indicator_style = "class:setting-indicator" if is_selected else ""
-        label_style = "class:setting-label-selected" if is_selected else "class:setting-label"
         value_style = "class:setting-value-selected" if is_selected else "class:setting-value"
 
-        label_text = self._item.label
         value_text = str(self._value) if self._value else ""
 
         # Get current index to determine arrow visibility
@@ -267,34 +272,11 @@ class InlineSelectControl(SettingControl):
         except ValueError:
             idx = 0
 
-        is_first = idx == 0
-        is_last = idx == len(options) - 1
-
-        left_arrow = "  " if is_first else "◀ "
-        right_arrow = "  " if is_last else " ▶"
-
-        # Build value with arrows: "◀ value ▶"
+        left_arrow = "  " if idx == 0 else "◀ "
+        right_arrow = "  " if idx == len(options) - 1 else " ▶"
         value_with_arrows = f"{left_arrow}{value_text}{right_arrow}"
 
-        available = width - len(indicator) - len(label_text) - len(value_with_arrows) - 1
-        padding = max(1, available)
-
-        row: list[tuple[str, str]] = [
-            (indicator_style, indicator),
-            (label_style, label_text),
-            ("", " " * padding),
-            (value_style, value_with_arrows),
-        ]
-
-        lines = [FormattedText(row)]
-
-        if self._item.description:
-            desc_style = "class:setting-desc-selected" if is_selected else "class:setting-desc"
-            desc_row: list[tuple[str, str]] = [
-                ("", "  "),
-                (desc_style, self._item.description),
-            ]
-            lines.append(FormattedText(desc_row))
+        lines = self._build_setting_row(width, value_with_arrows, value_style, is_selected)
 
         def get_line(i: int) -> FormattedText:
             return lines[i] if i < len(lines) else FormattedText([])
@@ -424,41 +406,13 @@ class DropdownControl(SettingControl):
     def create_content(self, width: int, height: int) -> UIContent:
         """Render the dropdown row with down arrow indicator."""
         is_selected = self._check_focus()
-
-        indicator = "> " if is_selected else "  "
-        indicator_style = "class:setting-indicator" if is_selected else ""
-        label_style = "class:setting-label-selected" if is_selected else "class:setting-label"
         value_style = "class:setting-value-selected" if is_selected else "class:setting-value"
 
-        label_text = self._item.label
         value_text = str(self._value) if self._value else ""
+        # Right-align value within dropdown width, add dropdown indicator
+        value_with_arrow = f"{value_text.rjust(self._get_dropdown_width())} ▼"
 
-        # Right-align value within dropdown width
-        dropdown_width = self._get_dropdown_width()
-        value_text = value_text.rjust(dropdown_width)
-
-        # Add dropdown indicator
-        value_with_arrow = f"{value_text} ▼"
-
-        available = width - len(indicator) - len(label_text) - len(value_with_arrow) - 1
-        padding = max(1, available)
-
-        row: list[tuple[str, str]] = [
-            (indicator_style, indicator),
-            (label_style, label_text),
-            ("", " " * padding),
-            (value_style, value_with_arrow),
-        ]
-
-        lines = [FormattedText(row)]
-
-        if self._item.description:
-            desc_style = "class:setting-desc-selected" if is_selected else "class:setting-desc"
-            desc_row: list[tuple[str, str]] = [
-                ("", "  "),
-                (desc_style, self._item.description),
-            ]
-            lines.append(FormattedText(desc_row))
+        lines = self._build_setting_row(width, value_with_arrow, value_style, is_selected)
 
         def get_line(i: int) -> FormattedText:
             return lines[i] if i < len(lines) else FormattedText([])
@@ -619,14 +573,6 @@ class TextControl(SettingControl):
         if self._app_ref:
             self._app_ref.layout.focus(self._view_window)
 
-    def _check_focus(self) -> bool:
-        """Check if this control has focus (for rendering)."""
-        try:
-            app = get_app()
-            return app.layout.has_focus(self._view_window)
-        except Exception:
-            return self._has_focus
-
     def create_content(self, width: int, height: int) -> UIContent:
         """Render the text row in view mode."""
         if self._editing:
@@ -635,10 +581,6 @@ class TextControl(SettingControl):
 
         is_selected = self._check_focus()
 
-        indicator = "> " if is_selected else "  "
-        indicator_style = "class:setting-indicator" if is_selected else ""
-        label_style = "class:setting-label-selected" if is_selected else "class:setting-label"
-
         # Format value (right-aligned within edit_width)
         if self._item.password and self._value:
             value_text = "••••••"
@@ -646,36 +588,14 @@ class TextControl(SettingControl):
             value_text = str(self._value)
         else:
             value_text = "(empty)"
-
-        # Right-align value within edit_width for consistent layout with edit mode
-        edit_width = self._item.edit_width
-        value_text = value_text.rjust(edit_width)
+        value_text = value_text.rjust(self._item.edit_width)
 
         if not self._value:
             value_style = "class:setting-desc-selected" if is_selected else "class:setting-desc"
         else:
             value_style = "class:setting-value-selected" if is_selected else "class:setting-value"
 
-        label_text = self._item.label
-        available = width - len(indicator) - len(label_text) - len(value_text) - 1
-        padding = max(1, available)
-
-        row: list[tuple[str, str]] = [
-            (indicator_style, indicator),
-            (label_style, label_text),
-            ("", " " * padding),
-            (value_style, value_text),
-        ]
-
-        lines = [FormattedText(row)]
-
-        if self._item.description:
-            desc_style = "class:setting-desc-selected" if is_selected else "class:setting-desc"
-            desc_row: list[tuple[str, str]] = [
-                ("", "  "),
-                (desc_style, self._item.description),
-            ]
-            lines.append(FormattedText(desc_row))
+        lines = self._build_setting_row(width, value_text, value_style, is_selected)
 
         def get_line(i: int) -> FormattedText:
             return lines[i] if i < len(lines) else FormattedText([])
