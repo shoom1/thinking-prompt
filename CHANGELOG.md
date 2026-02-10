@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.4] - 2026-02-09
+
+### Added
+
+- `set_status()` method on ThinkingPromptSession — set status bar text at runtime, accepts plain text, FormattedText, or Rich renderables
+- `ThinkingContext` class — returned by `thinking()` context manager, combines content accumulation with separator title control
+- `ThinkingContext.set_title()` — dynamically update the thinking box separator title during a thinking session
+- `StreamingContent.set_line()` — in-place line editing with negative index support for progress bar updates
+- `thinking()` and `start_thinking()` accept optional `title=` parameter
+- `/thinking` slash command in demo_showcase.py demonstrating dynamic titles and line editing
+
 ## [0.2.3] - 2026-01-23
 
 ### Added
