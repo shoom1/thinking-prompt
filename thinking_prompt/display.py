@@ -362,6 +362,25 @@ class Display:
         """
         self._output_ansi(_rich_to_ansi(renderable, theme=self._rich_theme))
 
+    def to_ansi(self, renderable: Any) -> ANSI:
+        """
+        Convert a Rich renderable to a prompt_toolkit ANSI object.
+
+        Uses the Display's Rich theme for consistent styling.
+
+        Args:
+            renderable: Any Rich renderable object.
+
+        Returns:
+            An ANSI object with trailing newlines stripped.
+        """
+        ansi_str = _rich_to_ansi(renderable, theme=self._rich_theme)
+        return ANSI(ansi_str.rstrip("\n"))
+
+    def is_rich_renderable(self, obj: Any) -> bool:
+        """Check if an object is a Rich renderable."""
+        return _is_rich_renderable(obj)
+
     def raw(self, content: str, style_class: str = "") -> None:
         """
         Output raw content with optional style.

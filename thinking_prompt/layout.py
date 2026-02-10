@@ -308,8 +308,14 @@ def create_status_bar(
     Returns:
         A ConditionalContainer with the status bar.
     """
+    def _resolve_status_text() -> AnyFormattedText:
+        text = get_status_text()
+        if isinstance(text, str):
+            return FormattedText([("class:status", text)])
+        return text
+
     control = FormattedTextControl(
-        text=lambda: FormattedText([("class:status", str(get_status_text()))]),
+        text=_resolve_status_text,
         focusable=False,
     )
 

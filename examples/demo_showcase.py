@@ -120,6 +120,8 @@ async def main():
         completer=SlashCommandCompleter(),
         complete_while_typing=True,
         completions_menu_height=5,
+        enable_status_bar=True,
+        status_text="Ready",
     )
 
     @session.on_input
@@ -259,6 +261,7 @@ async def main():
         # Use context manager for thinking
         async with session.thinking() as content:
             # Phase 1: Initialization with spinner effect
+            session.set_status("Phase 1/3: Initializing…")
             content.append("Initialization\n")
 
             steps = ["Loading modules", "Parsing input", "Allocating memory"]
@@ -271,12 +274,21 @@ async def main():
             await asyncio.sleep(0.5)
 
             # Phase 2: Processing with progress bar
+            session.set_status("Phase 2/3: Processing…")
             total = 15
             for i in range(total + 1):
                 bar_width = 30
                 filled = int(bar_width * i / total)
                 bar = "█" * filled + "░" * (bar_width - filled)
                 percent = i * 100 // total
+
+                # Update status bar with progress percentage
+                if RICH_AVAILABLE:
+                    session.set_status(Text.from_markup(
+                        f"[bold]Phase 2/3:[/bold] Processing \\[{bar}] {percent:3d}%"
+                    ))
+                else:
+                    session.set_status(f"Phase 2/3: Processing [{bar}] {percent:3d}%")
 
                 # Update progress line in place
                 if i > 0:
@@ -294,6 +306,7 @@ async def main():
             await asyncio.sleep(0.5)
 
             # Phase 3: Analysis
+            session.set_status("Phase 3/3: Analyzing…")
             content.append("Analysis\n")
             findings = [
                 f"Input length: {len(user_input)} characters",
@@ -307,6 +320,9 @@ async def main():
                 await asyncio.sleep(0.4)
 
             await asyncio.sleep(0.3)
+
+        # Reset status bar after thinking
+        session.set_status("Ready")
 
         # Final output with markdown
         session.add_response(
