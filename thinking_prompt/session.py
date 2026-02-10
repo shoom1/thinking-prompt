@@ -42,7 +42,7 @@ from .history import FormattedTextHistory
 from .thinking import ThinkingBoxControl
 from .styles import ThinkingPromptStyles, DEFAULT_STYLES
 from .app_info import AppInfo
-from .types import StreamingContent
+from .types import StreamingContent, ThinkingContext
 from .display import Display
 
 
@@ -234,10 +234,15 @@ class ThinkingPromptSession:
 
     def _create_session_layout(self):
         """Create the layout using the layout module."""
+        # Store default thinking text for reset after finish_thinking
+        self._default_thinking_text = (
+            self._app_info.thinking_text if self._app_info else "Thinking"
+        )
+
         # Create separator from app_info config
-        separator = None
+        self._thinking_separator: Optional[ThinkingSeparator] = None
         if self._app_info:
-            separator = ThinkingSeparator(
+            self._thinking_separator = ThinkingSeparator(
                 text=self._app_info.thinking_text,
                 frames=self._app_info.thinking_animation,
                 position=self._app_info.thinking_animation_position,
@@ -252,7 +257,7 @@ class ThinkingPromptSession:
             is_fullscreen=lambda: self._is_fullscreen,
             get_status_text=lambda: self._status_text,
             is_status_bar_enabled=lambda: self._enable_status_bar,
-            separator=separator,
+            separator=self._thinking_separator,
             completions_menu_height=self._completions_menu_height,
         )
 
@@ -345,10 +350,26 @@ class ThinkingPromptSession:
         self._display.welcome(content)
 
     # =========================================================================
+    # Thinking Title Helpers
+    # =========================================================================
+
+    def _set_thinking_title(self, text: str) -> None:
+        """Set thinking separator title."""
+        if self._thinking_separator:
+            self._thinking_separator.text = str(text)
+            self._invalidate()
+
+    def _get_thinking_title(self) -> str:
+        """Get current thinking separator title."""
+        if self._thinking_separator:
+            return self._thinking_separator.text
+        return self._default_thinking_text
+
+    # =========================================================================
     # Thinking API
     # =========================================================================
 
-    def start_thinking(self, content_callback: Callable[[], str]) -> None:
+    def start_thinking(self, content_callback: Callable[[], str], *, title: Optional[str] = None) -> ThinkingContext:
         """
         Start the thinking state with a content callback.
 
@@ -359,6 +380,10 @@ class ThinkingPromptSession:
 
         Args:
             content_callback: Callable that returns the current thinking content.
+            title: Optional title to set on the thinking separator.
+
+        Returns:
+            ThinkingContext for title control (content is None in low-level API).
 
         Example:
             content = ""
@@ -366,17 +391,25 @@ class ThinkingPromptSession:
             def get_content():
                 return content
 
-            session.start_thinking(get_content)
+            ctx = session.start_thinking(get_content, title="Processing")
 
             # Update content dynamically
             content += "Processing...\\n"
             await asyncio.sleep(0.5)
+            ctx.set_title("Finishing")
             content += "Done!\\n"
 
             session.finish_thinking()
         """
+        if title is not None:
+            self._set_thinking_title(title)
         self._thinking_control.start(content_callback)
         self._invalidate()
+        return ThinkingContext(
+            content=None,  # Low-level API: caller manages their own content
+            set_title=self._set_thinking_title,
+            get_title=self._get_thinking_title,
+        )
 
     def finish_thinking(
         self,
@@ -406,6 +439,10 @@ class ThinkingPromptSession:
         # Finish thinking
         self._thinking_control.finish()
 
+        # Reset separator title to default
+        if self._thinking_separator:
+            self._thinking_separator.text = self._default_thinking_text
+
         # Resolve echo_to_console: None means use default from AppInfo
         should_echo = echo_to_console if echo_to_console is not None else self._echo_thinking
 
@@ -430,52 +467,65 @@ class ThinkingPromptSession:
     async def thinking(
         self,
         *,
+        title: Optional[str] = None,
         add_to_history: bool = True,
         echo_to_console: Optional[bool] = None,
-    ) -> AsyncIterator[StreamingContent]:
+    ) -> AsyncIterator[ThinkingContext]:
         """
         Context manager for thinking operations.
 
         Provides a more Pythonic way to manage thinking state with automatic
-        cleanup. Returns a StreamingContent object for accumulating content.
+        cleanup. Returns a ThinkingContext for content accumulation and
+        title control.
 
         Args:
+            title: Optional title for the thinking separator.
             add_to_history: If True, add thinking content to chat history
                 when exiting the context.
             echo_to_console: If True, print thinking content to console.
                             If None (default), uses AppInfo.echo_thinking setting.
 
         Yields:
-            StreamingContent: Thread-safe content accumulator.
+            ThinkingContext: Content accumulator with title control.
 
         Example:
-            async with session.thinking() as content:
-                content.append("Processing...\\n")
+            async with session.thinking(title="Processing") as ctx:
+                ctx.append("Working...\\n")
                 await asyncio.sleep(1)
-                content.append("Done!\\n")
+                ctx.set_title("Finishing")
+                ctx.append("Done!\\n")
 
             # Thinking is automatically finished when exiting the context
 
         Example with streaming LLM:
-            async with session.thinking() as content:
+            async with session.thinking() as ctx:
                 async for chunk in llm.stream(prompt):
-                    content.append(chunk)
+                    ctx.append(chunk)
 
             session.add_response("Here's my analysis...")
 
-        Example suppressing console output:
-            async with session.thinking(echo_to_console=False) as content:
-                content.append("Internal processing...")
-            # Nothing printed to console, but added to history
+        Example with in-place line updates:
+            async with session.thinking(title="Processing") as ctx:
+                ctx.append("[░░░░░░░░░░]   0%\\n")
+                for i in range(1, 101):
+                    bar = "█" * (i // 10) + "░" * (10 - i // 10)
+                    ctx.set_line(-1, f"[{bar}] {i:3d}%")
+                    await asyncio.sleep(0.05)
 
         Note:
             If an exception occurs within the context, thinking is still
             finished properly but content is not added to history.
+            The separator title is reset to default on exit.
         """
         content = StreamingContent()
-        self.start_thinking(content.get_content)
+        self.start_thinking(content.get_content, title=title)
+        ctx = ThinkingContext(
+            content=content,
+            set_title=self._set_thinking_title,
+            get_title=self._get_thinking_title,
+        )
         try:
-            yield content
+            yield ctx
             self.finish_thinking(add_to_history=add_to_history, echo_to_console=echo_to_console)
         except BaseException:
             # Finish thinking without adding to history or echoing on error
