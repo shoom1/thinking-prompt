@@ -866,6 +866,29 @@ class ThinkingPromptSession:
         self._message = value
         self._invalidate()
 
+    @property
+    def status_text(self) -> AnyFormattedText:
+        """Get the current status bar text."""
+        return self._status_text
+
+    @status_text.setter
+    def status_text(self, value: AnyFormattedText) -> None:
+        """Set the status bar text (str or FormattedText)."""
+        self._status_text = value
+        self._invalidate()
+
+    def set_status(self, text: Any) -> None:
+        """
+        Set the status bar text.
+
+        Accepts plain text, FormattedText, or Rich renderables.
+        """
+        if self._display.is_rich_renderable(text):
+            self._status_text = self._display.to_ansi(text)
+        else:
+            self._status_text = text
+        self._invalidate()
+
     # =========================================================================
     # Dialog API
     # =========================================================================
