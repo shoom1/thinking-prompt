@@ -45,6 +45,7 @@ class SlashCommandCompleter(Completer):
 
     COMMANDS = {
         "help": "Show available commands",
+        "thinking": "Dynamic title + line editing demo",
         "confirm": "Yes/No dialog demo",
         "info": "Message dialog demo",
         "action": "Choice dialog demo",
@@ -144,6 +145,7 @@ async def main():
                 "## Available Commands\n\n"
                 "Type `/` to see the completion menu, or use these commands:\n\n"
                 "- **/help** - Show this message\n"
+                "- **/thinking** - Dynamic title + line editing demo\n"
                 "- **/confirm** - Yes/No dialog demo\n"
                 "- **/info** - Message dialog demo\n"
                 "- **/action** - Choice dialog demo\n"
@@ -157,6 +159,50 @@ async def main():
 
         if cmd == "clear":
             session.clear()
+            return
+
+        if cmd == "thinking":
+            # Dedicated demo: ctx.set_title() and ctx.set_line()
+            async with session.thinking(title="Connecting") as ctx:
+                # Phase 1 — connection steps
+                endpoints = ["Auth service", "Data store", "Cache layer"]
+                for ep in endpoints:
+                    ctx.append(f"  ✓ {ep}\n")
+                    await asyncio.sleep(0.4)
+
+                await asyncio.sleep(0.3)
+
+                # Phase 2 — downloading with a progress bar
+                ctx.set_title("Downloading")
+                total = 20
+                bar_width = 30
+                ctx.append(f"  [{'░' * bar_width}]   0%\n")
+                for i in range(1, total + 1):
+                    filled = int(bar_width * i / total)
+                    bar = "█" * filled + "░" * (bar_width - filled)
+                    percent = i * 100 // total
+                    ctx.set_line(-1, f"  [{bar}] {percent:3d}%")
+                    await asyncio.sleep(0.08)
+
+                await asyncio.sleep(0.3)
+
+                # Phase 3 — validating results (overwrite last status line)
+                ctx.set_title("Validating")
+                checks = ["Schema", "Integrity", "Permissions", "Signatures"]
+                ctx.append(f"  ⏳ {checks[0]}…\n")
+                for i, check in enumerate(checks):
+                    ctx.set_line(-1, f"  ✓ {check}")
+                    await asyncio.sleep(0.4)
+                    if i + 1 < len(checks):
+                        ctx.append(f"  ⏳ {checks[i + 1]}…\n")
+
+                await asyncio.sleep(0.3)
+
+            session.add_response(
+                "**Demo complete** — used `ctx.set_title()` for separator changes "
+                "and `ctx.set_line(-1, ...)` for in-place updates.",
+                markdown=True,
+            )
             return
 
         # Dialog demonstrations
@@ -259,14 +305,14 @@ async def main():
             return
 
         # Use context manager for thinking
-        async with session.thinking() as content:
+        async with session.thinking(title="Initializing") as ctx:
             # Phase 1: Initialization with spinner effect
             session.set_status("Phase 1/3: Initializing…")
-            content.append("Initialization\n")
+            ctx.append("Initialization\n")
 
             steps = ["Loading modules", "Parsing input", "Allocating memory"]
             for i, step in enumerate(steps):
-                content.append(f"  ✓ {step}\n")
+                ctx.append(f"  ✓ {step}\n")
                 await asyncio.sleep(0.5)
 
             # Console message
@@ -274,10 +320,12 @@ async def main():
             await asyncio.sleep(0.5)
 
             # Phase 2: Processing with progress bar
+            ctx.set_title("Processing")
             session.set_status("Phase 2/3: Processing…")
             total = 15
-            for i in range(total + 1):
-                bar_width = 30
+            bar_width = 30
+            ctx.append(f"  [{'░' * bar_width}]   0%\n")
+            for i in range(1, total + 1):
                 filled = int(bar_width * i / total)
                 bar = "█" * filled + "░" * (bar_width - filled)
                 percent = i * 100 // total
@@ -291,14 +339,7 @@ async def main():
                     session.set_status(f"Phase 2/3: Processing [{bar}] {percent:3d}%")
 
                 # Update progress line in place
-                if i > 0:
-                    # Remove previous progress line
-                    lines = content.text.split('\n')
-                    lines = lines[:-2]  # Remove last line (progress) and empty
-                    content.clear()
-                    content.append('\n'.join(lines) + '\n')
-
-                content.append(f"  [{bar}] {percent:3d}%\n")
+                ctx.set_line(-1, f"  [{bar}] {percent:3d}%")
                 await asyncio.sleep(0.1)
 
             # Console success message
@@ -306,8 +347,9 @@ async def main():
             await asyncio.sleep(0.5)
 
             # Phase 3: Analysis
+            ctx.set_title("Analyzing")
             session.set_status("Phase 3/3: Analyzing…")
-            content.append("Analysis\n")
+            ctx.append("Analysis\n")
             findings = [
                 f"Input length: {len(user_input)} characters",
                 f"Word count: {len(user_input.split())} words",
@@ -316,7 +358,7 @@ async def main():
             ]
 
             for finding in findings:
-                content.append(f"  • {finding:<40}\n")
+                ctx.append(f"  • {finding:<40}\n")
                 await asyncio.sleep(0.4)
 
             await asyncio.sleep(0.3)

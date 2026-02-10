@@ -40,6 +40,7 @@ from .styles import (
 )
 from .types import (
     StreamingContent,
+    ThinkingContext,
     ContentCallback,
     MessageRole,
     InputHandler,
@@ -58,7 +59,7 @@ from .settings_dialog import (
     SettingsDialog,
 )
 
-__version__ = "0.2.3"
+__version__ = "0.2.4"
 
 __all__ = [
     # Main class
@@ -70,6 +71,7 @@ __all__ = [
     "DEFAULT_STYLES",
     # Type helpers
     "StreamingContent",
+    "ThinkingContext",
     "ContentCallback",
     "MessageRole",
     "InputHandler",
