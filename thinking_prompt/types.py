@@ -13,6 +13,7 @@ from typing import (
     Callable,
     List,
     Literal,
+    Optional,
     Tuple,
     Union,
 )
@@ -113,7 +114,101 @@ class StreamingContent:
         with self._lock:
             return len(self._chunks)
 
+    def set_line(self, index: int, text: str) -> None:
+        """Set the content of a specific line (thread-safe).
+
+        Supports negative indices (-1 is last non-empty line).
+        If index is beyond current line count, extends with empty lines.
+        """
+        with self._lock:
+            current = "".join(self._chunks)
+            # Split preserving trailing newline awareness
+            has_trailing_newline = current.endswith("\n")
+            lines = current.split("\n")
+            # Remove trailing empty string from split if content ended with \n
+            if has_trailing_newline and lines and lines[-1] == "":
+                lines.pop()
+
+            # Handle negative indices
+            if index < 0:
+                index = len(lines) + index
+
+            # Extend if needed
+            while index >= len(lines):
+                lines.append("")
+
+            lines[index] = text
+
+            self._chunks.clear()
+            self._chunks.append("\n".join(lines) + ("\n" if has_trailing_newline else ""))
+
     @property
     def text(self) -> str:
         """Alias for get_content() for convenience."""
         return self.get_content()
+
+
+class ThinkingContext:
+    """Context for a thinking session — content accumulation + title control.
+
+    Wraps an optional StreamingContent with title control callbacks.
+    When used via the ``thinking()`` context manager, content is wired up
+    automatically.  When used via ``start_thinking()`` (low-level API),
+    content is None and content methods raise AttributeError.
+    """
+
+    def __init__(
+        self,
+        content: Optional[StreamingContent],
+        set_title: Callable[[str], None],
+        get_title: Callable[[], str],
+    ) -> None:
+        self._content = content
+        self._set_title = set_title
+        self._get_title = get_title
+
+    # -- StreamingContent delegation ------------------------------------------
+
+    def _require_content(self) -> StreamingContent:
+        if self._content is None:
+            raise AttributeError(
+                "ThinkingContext has no content — use the thinking() "
+                "context manager for automatic content management."
+            )
+        return self._content
+
+    def append(self, chunk: str) -> None:
+        """Append a chunk of content (thread-safe)."""
+        self._require_content().append(chunk)
+
+    def get_content(self) -> str:
+        """Get the accumulated content (thread-safe)."""
+        return self._require_content().get_content()
+
+    def clear(self) -> None:
+        """Clear all accumulated content (thread-safe)."""
+        self._require_content().clear()
+
+    def set_line(self, index: int, text: str) -> None:
+        """Set the content of a specific line (thread-safe)."""
+        self._require_content().set_line(index, text)
+
+    def __len__(self) -> int:
+        """Return the number of chunks."""
+        return len(self._require_content())
+
+    @property
+    def text(self) -> str:
+        """Get the accumulated content as a string."""
+        return self._require_content().text
+
+    # -- Title control --------------------------------------------------------
+
+    def set_title(self, text: str) -> None:
+        """Set the thinking separator title."""
+        self._set_title(text)
+
+    @property
+    def title(self) -> str:
+        """Get the current separator title."""
+        return self._get_title()

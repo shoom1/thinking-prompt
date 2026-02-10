@@ -40,6 +40,7 @@ from .styles import (
 )
 from .types import (
     StreamingContent,
+    ThinkingContext,
     ContentCallback,
     MessageRole,
     InputHandler,
@@ -70,6 +71,7 @@ __all__ = [
     "DEFAULT_STYLES",
     # Type helpers
     "StreamingContent",
+    "ThinkingContext",
     "ContentCallback",
     "MessageRole",
     "InputHandler",

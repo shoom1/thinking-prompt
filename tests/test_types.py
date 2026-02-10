@@ -135,6 +135,116 @@ class TestStreamingContentThreadSafety:
         assert len(content) >= 0
 
 
+class TestStreamingContentSetLine:
+    """Test set_line() method of StreamingContent."""
+
+    def test_set_line_positive_index(self):
+        """Set a specific line by positive index."""
+        content = StreamingContent()
+        content.append("line0\nline1\nline2\n")
+        content.set_line(1, "REPLACED")
+        assert content.text == "line0\nREPLACED\nline2\n"
+
+    def test_set_line_negative_index(self):
+        """Negative index -1 should target the last non-empty line."""
+        content = StreamingContent()
+        content.append("line0\nline1\nline2\n")
+        content.set_line(-1, "LAST")
+        assert content.text == "line0\nline1\nLAST\n"
+
+    def test_set_line_negative_index_minus_two(self):
+        """Negative index -2 should target the second-to-last line."""
+        content = StreamingContent()
+        content.append("a\nb\nc\n")
+        content.set_line(-2, "B")
+        assert content.text == "a\nB\nc\n"
+
+    def test_set_line_extends_with_empty_lines(self):
+        """Index beyond current count extends with empty lines."""
+        content = StreamingContent()
+        content.append("line0\n")
+        content.set_line(3, "line3")
+        assert content.text == "line0\n\n\nline3\n"
+
+    def test_set_line_preserves_trailing_newline(self):
+        """Trailing newline should be preserved after set_line."""
+        content = StreamingContent()
+        content.append("hello\nworld\n")
+        content.set_line(0, "HELLO")
+        assert content.text == "HELLO\nworld\n"
+        assert content.text.endswith("\n")
+
+    def test_set_line_no_trailing_newline(self):
+        """Content without trailing newline should stay that way."""
+        content = StreamingContent()
+        content.append("hello\nworld")
+        content.set_line(0, "HELLO")
+        assert content.text == "HELLO\nworld"
+        assert not content.text.endswith("\n")
+
+    def test_set_line_single_line_with_newline(self):
+        """Single line with trailing newline."""
+        content = StreamingContent()
+        content.append("only\n")
+        content.set_line(0, "ONLY")
+        assert content.text == "ONLY\n"
+
+    def test_set_line_single_line_without_newline(self):
+        """Single line without trailing newline."""
+        content = StreamingContent()
+        content.append("only")
+        content.set_line(0, "ONLY")
+        assert content.text == "ONLY"
+
+    def test_set_line_first_line_index_zero(self):
+        """Index 0 should set the first line."""
+        content = StreamingContent()
+        content.append("first\nsecond\n")
+        content.set_line(0, "FIRST")
+        assert content.text == "FIRST\nsecond\n"
+
+    def test_set_line_thread_safe(self):
+        """set_line should be thread-safe with concurrent appends."""
+        content = StreamingContent()
+        content.append("line0\nline1\nline2\n")
+
+        errors = []
+
+        def updater():
+            try:
+                for i in range(100):
+                    content.set_line(-1, f"update-{i}")
+            except Exception as e:
+                errors.append(e)
+
+        def appender():
+            try:
+                for i in range(100):
+                    content.append("")  # No-op append to exercise locking
+            except Exception as e:
+                errors.append(e)
+
+        t1 = threading.Thread(target=updater)
+        t2 = threading.Thread(target=appender)
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
+
+        assert not errors, f"Thread safety errors: {errors}"
+
+    def test_set_line_multiple_chunks(self):
+        """set_line should work correctly when content is in multiple chunks."""
+        content = StreamingContent()
+        content.append("line0\n")
+        content.append("line1\n")
+        content.append("line2\n")
+        content.set_line(1, "REPLACED")
+        assert content.text == "line0\nREPLACED\nline2\n"
+        # After set_line, chunks are consolidated into one
+        assert len(content) == 1
+
+
 class TestStreamingContentWithThinkingControl:
     """Test StreamingContent integration with ThinkingBoxControl."""
 
