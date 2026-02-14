@@ -8,17 +8,13 @@ from __future__ import annotations
 
 import threading
 from typing import (
-    Any,
     Awaitable,
     Callable,
     List,
     Literal,
     Optional,
-    Tuple,
     Union,
 )
-
-from prompt_toolkit.formatted_text import FormattedText
 
 
 # =============================================================================
@@ -35,16 +31,6 @@ ContentCallback = Callable[[], str]
 SyncInputHandler = Callable[[str], None]
 AsyncInputHandler = Callable[[str], Awaitable[None]]
 InputHandler = Union[SyncInputHandler, AsyncInputHandler]
-
-# Style fragment tuple (style_class, text)
-StyleFragment = Tuple[str, str]
-
-# List of style fragments
-StyleFragments = List[StyleFragment]
-
-# Welcome message types
-WelcomeContent = Union[str, FormattedText, Any]  # Any for Rich renderables
-WelcomeMessage = Union[WelcomeContent, Callable[[], WelcomeContent], None]
 
 
 # =============================================================================

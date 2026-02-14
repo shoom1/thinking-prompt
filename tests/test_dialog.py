@@ -25,10 +25,6 @@ from thinking_prompt.dialog import (
     _MessageDialog,
     _ChoiceDialog,
     _DropdownDialog,
-    create_yes_no_dialog,
-    create_message_dialog,
-    create_choice_dialog,
-    create_dropdown_dialog,
 )
 
 
@@ -217,7 +213,7 @@ class TestYesNoDialog:
 
     def test_yes_no_dialog_creation(self):
         """Yes/No dialog is created correctly."""
-        dialog = create_yes_no_dialog("Confirm", "Are you sure?")
+        dialog = _YesNoDialog("Confirm", "Are you sure?")
         assert dialog.title == "Confirm"
         assert dialog.escape_result is False
 
@@ -245,7 +241,7 @@ class TestMessageDialog:
 
     def test_message_dialog_creation(self):
         """Message dialog is created correctly."""
-        dialog = create_message_dialog("Info", "Done!")
+        dialog = _MessageDialog("Info", "Done!")
         assert dialog.title == "Info"
         assert dialog.escape_result is None
 
@@ -261,7 +257,7 @@ class TestChoiceDialog:
 
     def test_choice_dialog_creation(self):
         """Choice dialog is created correctly."""
-        dialog = create_choice_dialog("Action", "Choose:", ["A", "B", "C"])
+        dialog = _ChoiceDialog("Action", "Choose:", ["A", "B", "C"])
         assert dialog.title == "Action"
         buttons = dialog.get_buttons()
         assert len(buttons) == 3
@@ -280,7 +276,7 @@ class TestDropdownDialog:
 
     def test_dropdown_dialog_creation(self):
         """Dropdown dialog is created correctly."""
-        dialog = create_dropdown_dialog(
+        dialog = _DropdownDialog(
             "Theme",
             "Select:",
             ["Light", "Dark", "System"],

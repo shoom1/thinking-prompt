@@ -43,7 +43,7 @@ from .thinking import ThinkingBoxControl
 from .styles import ThinkingPromptStyles, DEFAULT_STYLES
 from .app_info import AppInfo
 from .types import StreamingContent, ThinkingContext
-from .display import Display
+from .display import Display, _is_rich_renderable
 
 
 class ThinkingPromptSession:
@@ -933,7 +933,7 @@ class ThinkingPromptSession:
 
         Accepts plain text, FormattedText, or Rich renderables.
         """
-        if self._display.is_rich_renderable(text):
+        if _is_rich_renderable(text):
             self._status_text = self._display.to_ansi(text)
         else:
             self._status_text = text
@@ -974,8 +974,8 @@ class ThinkingPromptSession:
             if await session.yes_no_dialog("Confirm", "Delete this file?"):
                 delete_file()
         """
-        from .dialog import create_yes_no_dialog
-        dialog = create_yes_no_dialog(title, text, yes_text, no_text)
+        from .dialog import _YesNoDialog
+        dialog = _YesNoDialog(title, text, yes_text, no_text)
         return await self._dialogs.show(dialog)
 
     async def message_dialog(
@@ -995,8 +995,8 @@ class ThinkingPromptSession:
         Example:
             await session.message_dialog("Info", "Operation completed.")
         """
-        from .dialog import create_message_dialog
-        dialog = create_message_dialog(title, text, ok_text)
+        from .dialog import _MessageDialog
+        dialog = _MessageDialog(title, text, ok_text)
         await self._dialogs.show(dialog)
 
     async def choice_dialog(
@@ -1025,8 +1025,8 @@ class ThinkingPromptSession:
             if action == "Save":
                 save_file()
         """
-        from .dialog import create_choice_dialog
-        dialog = create_choice_dialog(title, text, choices)
+        from .dialog import _ChoiceDialog
+        dialog = _ChoiceDialog(title, text, choices)
         return await self._dialogs.show(dialog)
 
     async def dropdown_dialog(
@@ -1056,8 +1056,8 @@ class ThinkingPromptSession:
                 default="System",
             )
         """
-        from .dialog import create_dropdown_dialog
-        dialog = create_dropdown_dialog(title, text, options, default)
+        from .dialog import _DropdownDialog
+        dialog = _DropdownDialog(title, text, options, default)
         return await self._dialogs.show(dialog)
 
     async def show_dialog(

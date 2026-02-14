@@ -377,10 +377,6 @@ class Display:
         ansi_str = _rich_to_ansi(renderable, theme=self._rich_theme)
         return ANSI(ansi_str.rstrip("\n"))
 
-    def is_rich_renderable(self, obj: Any) -> bool:
-        """Check if an object is a Rich renderable."""
-        return _is_rich_renderable(obj)
-
     def raw(self, content: str, style_class: str = "") -> None:
         """
         Output raw content with optional style.
