@@ -50,6 +50,7 @@ class SlashCommandCompleter(Completer):
         "info": "Message dialog demo",
         "action": "Choice dialog demo",
         "theme": "Dropdown dialog demo",
+        "tasks": "Rich-styled task progress demo",
         "settings": "Settings dialog demo",
         "clear": "Clear the screen",
     }
@@ -150,6 +151,7 @@ async def main():
                 "- **/info** - Message dialog demo\n"
                 "- **/action** - Choice dialog demo\n"
                 "- **/theme** - Dropdown dialog demo\n"
+                "- **/tasks** - Rich-styled task progress demo\n"
                 "- **/settings** - Settings dialog demo\n"
                 "- **/clear** - Clear the screen\n"
                 "- *anything else* - Process with thinking visualization\n",
@@ -201,6 +203,34 @@ async def main():
             session.add_response(
                 "**Demo complete** — used `ctx.set_title()` for separator changes "
                 "and `ctx.set_line(-1, ...)` for in-place updates.",
+                markdown=True,
+            )
+            return
+
+        if cmd == "tasks":
+            # Dedicated demo: ctx.append_rich() and ctx.set_line_rich()
+            steps = [
+                ("Scanning files", 0.6),
+                ("Parsing AST", 0.8),
+                ("Running checks", 1.0),
+                ("Generating report", 0.5),
+            ]
+
+            async with session.thinking(title="Processing") as ctx:
+                # Render all steps as dim/pending
+                for label, _ in steps:
+                    ctx.append_rich(f"[dim]  ○ {label}[/dim]\n")
+
+                # Process each step
+                for i, (label, duration) in enumerate(steps):
+                    ctx.set_line_rich(i, f"[bold cyan]  ⟳ {label}…[/bold cyan]")
+                    ctx.set_title(label)
+                    await asyncio.sleep(duration)
+                    ctx.set_line_rich(i, f"[green]  ✓ {label}[/green]")
+
+            session.add_response(
+                "**Demo complete** — used `ctx.append_rich()` for Rich-styled pending items "
+                "and `ctx.set_line_rich()` for colored in-place updates.",
                 markdown=True,
             )
             return
