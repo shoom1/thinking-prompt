@@ -11,6 +11,7 @@ A prompt_toolkit extension that adds a "thinking box" above the prompt for displ
 - **Fullscreen Mode**: Optional fullscreen mode with chat history (disabled by default)
 - **Animated Separator**: Configurable animated indicator showing thinking is in progress
 - **Rich Output**: Support for markdown rendering and syntax-highlighted code blocks
+- **Rich/ANSI in Thinking Box**: Use Rich markup for styled, in-place-updating content inside the thinking box
 - **Customizable Styles**: Full control over colors and styling
 
 ## Installation
@@ -75,6 +76,8 @@ session = ThinkingPromptSession(
     max_thinking_height=15,      # Max lines when collapsed
     enable_status_bar=True,      # Show status bar
     echo_input=True,             # Echo user input to console
+    complete_while_typing=True,  # Show completions as you type
+    completions_menu_height=6,   # Max rows in completions popup
 )
 ```
 
@@ -102,6 +105,39 @@ await asyncio.sleep(0.5)
 session.finish_thinking(add_to_history=True, echo_to_console=True)
 ```
 
+### Rich/ANSI Content in Thinking Box
+
+Use `append_rich()` and `set_line_rich()` for styled content with [Rich markup](https://rich.readthedocs.io/):
+
+```python
+async with session.thinking(title="Processing") as ctx:
+    ctx.append_rich("[dim]  ○ Load data[/dim]\n")
+    ctx.append_rich("[dim]  ○ Transform[/dim]\n")
+
+    ctx.set_line_rich(0, "[bold cyan]  ⟳ Load data…[/bold cyan]")
+    ctx.set_title("Loading")
+    await asyncio.sleep(1)
+    ctx.set_line_rich(0, "[green]  ✓ Load data[/green]")
+
+    ctx.set_line_rich(1, "[bold cyan]  ⟳ Transform…[/bold cyan]")
+    ctx.set_title("Transforming")
+    await asyncio.sleep(1)
+    ctx.set_line_rich(1, "[green]  ✓ Transform[/green]")
+```
+
+### Dynamic Titles & In-Place Updates
+
+Use `set_title()` to change the thinking box title and `set_line()` to update lines in place:
+
+```python
+async with session.thinking(title="Downloading") as ctx:
+    ctx.append("Progress: 0%\n")
+    for i in range(1, 101):
+        ctx.set_line(-1, f"Progress: {i}%")
+        ctx.set_title(f"Downloading {i}%")
+        await asyncio.sleep(0.02)
+```
+
 ### Output Methods
 
 ```python
@@ -113,6 +149,10 @@ session.add_response("# Title\n- Item 1\n- Item 2", markdown=True)
 
 # Syntax-highlighted code (requires pygments)
 session.add_code("def hello(): return 'world'", language="python")
+
+# Status bar text
+session.set_status("Ready")                    # Plain text
+session.set_status("[bold]Processing[/bold]")  # Rich markup
 
 # Status messages
 session.add_success("Operation completed")
@@ -252,6 +292,7 @@ See the `examples/` directory for complete demos:
 - `dialog_test.py` - Dialog system demo (yes/no, message, choice, dropdown)
 - `settings_dialog_demo.py` - Settings dialog with all control types
 - `demo_showcase.py` - Feature showcase for demos and screenshots
+- `demo_task_progress.py` - Rich-styled task progress with in-place status updates
 - `completer_demo.py` - Slash-command autocompletion (like Claude Code)
 
 ## License
