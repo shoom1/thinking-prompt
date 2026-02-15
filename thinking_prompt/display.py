@@ -18,7 +18,7 @@ from prompt_toolkit.formatted_text import ANSI, AnyFormattedText, FormattedText
 from prompt_toolkit.styles import Style
 
 from .history import FormattedTextHistory
-from .types import ContentFormat, truncate_to_lines
+from .types import ContentFormat, truncate_ansi_to_lines, truncate_to_lines
 
 if TYPE_CHECKING:
     from .styles import ThinkingPromptStyles
@@ -298,11 +298,7 @@ class Display:
         # Console gets possibly truncated content
         if echo_to_console:
             if truncate_lines is not None:
-                lines = content.split('\n')
-                if len(lines) > truncate_lines:
-                    console_content = '\n'.join(lines[:truncate_lines]) + '\n\033[0m...\n'
-                else:
-                    console_content = content.rstrip() + '\n'
+                console_content = truncate_ansi_to_lines(content, truncate_lines) + '\n'
             else:
                 console_content = content.rstrip() + '\n'
             self._print_to_console(ANSI(console_content))

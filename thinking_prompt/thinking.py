@@ -14,7 +14,7 @@ from prompt_toolkit.formatted_text import ANSI, FormattedText, to_formatted_text
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.layout.controls import FormattedTextControl
 
-from .types import ContentFormat, truncate_to_lines
+from .types import ContentFormat, truncate_ansi_to_lines, truncate_to_lines
 
 logger = logging.getLogger(__name__)
 
@@ -174,6 +174,11 @@ class ThinkingBoxControl(FormattedTextControl):
                 return self._format_ansi(content)
             return self._format_plain(content)
 
+    def _expand_hint(self, total_lines: int) -> str:
+        """Build the expand hint shown when content is truncated."""
+        hidden = total_lines - (self._max_collapsed_lines - 1)
+        return f"+{hidden} lines... {_format_key_for_display(self._expand_key)} to expand"
+
     def _format_plain(self, content: str) -> FormattedText:
         """Format content as plain styled text."""
         lines = content.split('\n')
@@ -184,7 +189,7 @@ class ThinkingBoxControl(FormattedTextControl):
 
             fragments: List[Tuple[str, str]] = [
                 (self._box_style, truncated_content + '\n'),
-                ("class:thinking-box.hint", f"+{len(lines) - (self._max_collapsed_lines - 1)} lines... {_format_key_for_display(self._expand_key)} to expand"),
+                ("class:thinking-box.hint", self._expand_hint(len(lines))),
             ]
         else:
             fragments = [(self._box_style, content)]
@@ -201,7 +206,7 @@ class ThinkingBoxControl(FormattedTextControl):
 
             ansi_fragments = list(to_formatted_text(ANSI(truncated_content)))
             ansi_fragments.append(
-                ("class:thinking-box.hint", f"+{len(lines) - (self._max_collapsed_lines - 1)} lines... {_format_key_for_display(self._expand_key)} to expand")
+                ("class:thinking-box.hint", self._expand_hint(len(lines)))
             )
             return FormattedText(ansi_fragments)
 
@@ -319,17 +324,10 @@ class ThinkingBoxControl(FormattedTextControl):
                 return content.rstrip()
 
             if self._content_format == "ansi":
-                return self._truncate_ansi(content, self._max_collapsed_lines - 1)
+                return truncate_ansi_to_lines(content, self._max_collapsed_lines - 1)
 
             # Same logic as _get_formatted_text: max_height - 1 lines + "..."
             return truncate_to_lines(content, self._max_collapsed_lines - 1)
-
-    def _truncate_ansi(self, content: str, max_lines: int) -> str:
-        """Truncate ANSI content by lines, with reset to prevent style leakage."""
-        lines = content.split('\n')
-        if len(lines) > max_lines:
-            return '\n'.join(lines[:max_lines]) + '\n\033[0m...'
-        return content.rstrip()
 
     def get_line_count(self, width: int = 80) -> int:
         """

@@ -59,6 +59,27 @@ def truncate_to_lines(content: str, max_lines: int, suffix: str = "...") -> str:
     return content.rstrip()
 
 
+def truncate_ansi_to_lines(content: str, max_lines: int) -> str:
+    """
+    Truncate ANSI-formatted content to max_lines with a reset suffix.
+
+    Inserts an ANSI reset (``\\033[0m``) before the ``...`` suffix to
+    prevent style leakage into subsequent output.
+
+    Args:
+        content: The ANSI-formatted content to truncate.
+        max_lines: Maximum number of lines to keep.
+
+    Returns:
+        Truncated content with ANSI reset + ``...`` if over limit,
+        otherwise content.rstrip().
+    """
+    lines = content.split('\n')
+    if len(lines) > max_lines:
+        return '\n'.join(lines[:max_lines]) + '\n\033[0m...'
+    return content.rstrip()
+
+
 # =============================================================================
 # Helper Classes
 # =============================================================================
