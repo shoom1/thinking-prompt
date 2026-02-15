@@ -29,12 +29,13 @@ class TestThinkingBoxControlBasics:
         assert thinking_control.content == "hello world"
 
     def test_finish_returns_content_and_state(self, thinking_control: ThinkingBoxControl):
-        """Finishing should return content and expansion state."""
+        """Finishing should return content, expansion state, and format."""
         thinking_control.start(lambda: "test content")
-        content, was_expanded = thinking_control.finish()
+        content, was_expanded, fmt = thinking_control.finish()
 
         assert content == "test content"
         assert not was_expanded
+        assert fmt == "plain"
 
     def test_finish_resets_state(self, thinking_control: ThinkingBoxControl):
         """Finishing should reset the control to inactive state."""
@@ -49,7 +50,7 @@ class TestThinkingBoxControlBasics:
         """Finishing should return True for was_expanded if expanded."""
         thinking_control.start(lambda: "test")
         thinking_control.expand()
-        content, was_expanded = thinking_control.finish()
+        content, was_expanded, fmt = thinking_control.finish()
 
         assert was_expanded
 
@@ -282,3 +283,91 @@ class TestThinkingBoxControlKeyBindings:
         assert not thinking_control.is_expanded
         thinking_control.toggle_expanded()
         assert thinking_control.is_expanded
+
+
+class TestThinkingBoxControlAnsiFormat:
+    """Test ANSI format rendering in ThinkingBoxControl."""
+
+    def test_default_format_is_plain(self, thinking_control: ThinkingBoxControl):
+        """Default content format should be plain."""
+        assert thinking_control.content_format == "plain"
+
+    def test_start_with_ansi_format(self, thinking_control: ThinkingBoxControl):
+        """Starting with ansi format should set the format."""
+        thinking_control.start(lambda: "test", content_format="ansi")
+        assert thinking_control.content_format == "ansi"
+
+    def test_set_content_format(self, thinking_control: ThinkingBoxControl):
+        """set_content_format should change the format dynamically."""
+        thinking_control.start(lambda: "test")
+        assert thinking_control.content_format == "plain"
+        thinking_control.set_content_format("ansi")
+        assert thinking_control.content_format == "ansi"
+
+    def test_finish_resets_format_to_plain(self, thinking_control: ThinkingBoxControl):
+        """Finishing should reset content format to plain."""
+        thinking_control.start(lambda: "test", content_format="ansi")
+        _, _, fmt = thinking_control.finish()
+        assert fmt == "ansi"
+        assert thinking_control.content_format == "plain"
+
+    def test_ansi_formatted_text_parses_escape_codes(self, thinking_control: ThinkingBoxControl):
+        """ANSI format should parse escape codes in formatted text."""
+        # \033[32m = green, \033[0m = reset
+        ansi_content = "\033[32m✓ Step 1\033[0m\n"
+        thinking_control.start(lambda: ansi_content, content_format="ansi")
+        formatted = thinking_control._get_formatted_text()
+
+        # Should have fragments (ANSI parsed into styled fragments)
+        assert len(formatted) > 0
+        text = "".join(frag[1] for frag in formatted)
+        assert "✓ Step 1" in text
+
+    def test_ansi_truncation_with_hint(self, small_thinking_control: ThinkingBoxControl):
+        """ANSI content should be truncated with hint when overflowing."""
+        lines = [f"\033[32mLine {i}\033[0m" for i in range(20)]
+        content = "\n".join(lines)
+        small_thinking_control.start(lambda: content, content_format="ansi")
+        formatted = small_thinking_control._get_formatted_text()
+
+        text = "".join(frag[1] for frag in formatted)
+        assert "ctrl-t to expand" in text
+
+    def test_ansi_no_truncation_when_expanded(self, small_thinking_control: ThinkingBoxControl):
+        """ANSI content should show fully when expanded."""
+        lines = [f"\033[32mLine {i}\033[0m" for i in range(20)]
+        content = "\n".join(lines)
+        small_thinking_control.start(lambda: content, content_format="ansi")
+        small_thinking_control.expand()
+        formatted = small_thinking_control._get_formatted_text()
+
+        text = "".join(frag[1] for frag in formatted)
+        assert "Line 19" in text
+        assert "to expand" not in text
+
+    def test_ansi_console_output_truncated(self, small_thinking_control: ThinkingBoxControl):
+        """ANSI console output should be truncated when collapsed."""
+        lines = [f"\033[32mLine {i}\033[0m" for i in range(20)]
+        content = "\n".join(lines)
+        small_thinking_control.start(lambda: content, content_format="ansi")
+        output = small_thinking_control.get_console_output()
+
+        assert output.endswith("...")
+
+    def test_ansi_console_output_full_when_expanded(self, small_thinking_control: ThinkingBoxControl):
+        """ANSI console output should be full when expanded."""
+        lines = [f"\033[32mLine {i}\033[0m" for i in range(20)]
+        content = "\n".join(lines)
+        small_thinking_control.start(lambda: content, content_format="ansi")
+        small_thinking_control.expand()
+        output = small_thinking_control.get_console_output()
+
+        assert "Line 19" in output
+        assert not output.endswith("...")
+
+    def test_plain_format_unchanged(self, thinking_control: ThinkingBoxControl):
+        """Plain format should work exactly as before."""
+        thinking_control.start(lambda: "Hello World")
+        formatted = thinking_control._get_formatted_text()
+        assert len(formatted) == 1
+        assert formatted[0] == ("class:thinking-box", "Hello World")

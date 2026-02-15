@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import threading
 from typing import (
+    Any,
     Awaitable,
     Callable,
     List,
@@ -23,6 +24,9 @@ from typing import (
 
 # Message roles supported by add_message()
 MessageRole = Literal["user", "assistant", "thinking", "system"]
+
+# Content format for thinking box rendering
+ContentFormat = Literal["plain", "ansi"]
 
 # Content callback type for thinking box
 ContentCallback = Callable[[], str]
@@ -128,6 +132,28 @@ class StreamingContent:
             self._chunks.clear()
             self._chunks.append("\n".join(lines) + ("\n" if has_trailing_newline else ""))
 
+    def append_rich(self, renderable: Any, *, theme: Any = None) -> None:
+        """Append a Rich renderable or markup string, converted to ANSI.
+
+        Args:
+            renderable: Rich markup string or Rich renderable object.
+            theme: Optional Rich Theme for styling.
+        """
+        from .display import _renderable_to_ansi
+        self.append(_renderable_to_ansi(renderable, theme=theme))
+
+    def set_line_rich(self, index: int, renderable: Any, *, theme: Any = None) -> None:
+        """Set a line from a Rich renderable or markup string.
+
+        Args:
+            index: Line index (supports negative indices).
+            renderable: Rich markup string or Rich renderable object.
+            theme: Optional Rich Theme for styling.
+        """
+        from .display import _renderable_to_ansi
+        ansi = _renderable_to_ansi(renderable, theme=theme)
+        self.set_line(index, ansi.split('\n')[0])
+
     @property
     def text(self) -> str:
         """Alias for get_content() for convenience."""
@@ -148,10 +174,14 @@ class ThinkingContext:
         content: Optional[StreamingContent],
         set_title: Callable[[str], None],
         get_title: Callable[[], str],
+        set_format: Optional[Callable[[str], None]] = None,
+        rich_theme: Any = None,
     ) -> None:
         self._content = content
         self._set_title = set_title
         self._get_title = get_title
+        self._set_format = set_format
+        self._rich_theme = rich_theme
 
     # -- StreamingContent delegation ------------------------------------------
 
@@ -187,6 +217,35 @@ class ThinkingContext:
     def text(self) -> str:
         """Get the accumulated content as a string."""
         return self._require_content().text
+
+    # -- Rich convenience methods ---------------------------------------------
+
+    def append_rich(self, renderable: Any, *, theme: Any = None) -> None:
+        """Append a Rich renderable or markup string, auto-switching to ANSI format.
+
+        Args:
+            renderable: Rich markup string or Rich renderable object.
+            theme: Optional Rich Theme override (defaults to session theme).
+        """
+        if self._set_format is not None:
+            self._set_format("ansi")
+        self._require_content().append_rich(
+            renderable, theme=theme or self._rich_theme
+        )
+
+    def set_line_rich(self, index: int, renderable: Any, *, theme: Any = None) -> None:
+        """Set a line from a Rich renderable, auto-switching to ANSI format.
+
+        Args:
+            index: Line index (supports negative indices).
+            renderable: Rich markup string or Rich renderable object.
+            theme: Optional Rich Theme override (defaults to session theme).
+        """
+        if self._set_format is not None:
+            self._set_format("ansi")
+        self._require_content().set_line_rich(
+            index, renderable, theme=theme or self._rich_theme
+        )
 
     # -- Title control --------------------------------------------------------
 

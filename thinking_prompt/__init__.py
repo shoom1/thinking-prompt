@@ -42,6 +42,7 @@ from .types import (
     StreamingContent,
     ThinkingContext,
     ContentCallback,
+    ContentFormat,
     MessageRole,
     InputHandler,
 )
@@ -73,6 +74,7 @@ __all__ = [
     "StreamingContent",
     "ThinkingContext",
     "ContentCallback",
+    "ContentFormat",
     "MessageRole",
     "InputHandler",
     # Dialog

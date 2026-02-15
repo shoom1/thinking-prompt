@@ -281,3 +281,58 @@ class TestStreamingContentWithThinkingControl:
         assert control.content == "Hello world!\nHow are you?"
 
         control.finish()
+
+
+class TestStreamingContentRichMethods:
+    """Test append_rich() and set_line_rich() on StreamingContent."""
+
+    def test_append_rich_markup_string(self):
+        """append_rich should convert Rich markup to ANSI."""
+        content = StreamingContent()
+        content.append_rich("[green]✓ Done[/green]\n")
+        text = content.get_content()
+        # Should contain ANSI escape codes and the text
+        assert "✓ Done" in text
+        assert "\033[" in text  # ANSI escape codes present
+
+    def test_append_rich_text_object(self):
+        """append_rich should handle Rich Text objects."""
+        from rich.text import Text
+        content = StreamingContent()
+        content.append_rich(Text("Hello", style="bold"))
+        text = content.get_content()
+        assert "Hello" in text
+
+    def test_append_rich_plain_string(self):
+        """append_rich with plain string should produce output."""
+        content = StreamingContent()
+        content.append_rich("plain text\n")
+        text = content.get_content()
+        assert "plain text" in text
+
+    def test_set_line_rich_markup(self):
+        """set_line_rich should replace a line with Rich-converted content."""
+        content = StreamingContent()
+        content.append("line0\nline1\n")
+        content.set_line_rich(0, "[green]✓ line0[/green]")
+        text = content.get_content()
+        assert "✓ line0" in text
+        assert "\033[" in text  # ANSI escape codes
+
+    def test_set_line_rich_takes_first_line_only(self):
+        """set_line_rich should only use the first line of multi-line output."""
+        content = StreamingContent()
+        content.append("line0\nline1\n")
+        content.set_line_rich(0, "[green]first[/green]")
+        lines = content.get_content().split('\n')
+        # line0 should be replaced, line1 preserved
+        assert "first" in lines[0]
+        assert "line1" in lines[1]
+
+    def test_set_line_rich_negative_index(self):
+        """set_line_rich should support negative indices."""
+        content = StreamingContent()
+        content.append("line0\nline1\n")
+        content.set_line_rich(-1, "[bold]LAST[/bold]")
+        text = content.get_content()
+        assert "LAST" in text
