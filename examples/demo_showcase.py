@@ -53,6 +53,7 @@ class SlashCommandCompleter(Completer):
         "tasks": "Rich-styled task progress demo",
         "settings": "Settings dialog demo",
         "clear": "Clear the screen",
+        "quit": "Exit the application",
     }
 
     def get_completions(self, document: Document, complete_event):
@@ -154,6 +155,7 @@ async def main():
                 "- **/tasks** - Rich-styled task progress demo\n"
                 "- **/settings** - Settings dialog demo\n"
                 "- **/clear** - Clear the screen\n"
+                "- **/quit** - Exit the application\n"
                 "- *anything else* - Process with thinking visualization\n",
                 markdown=True
             )
@@ -161,6 +163,10 @@ async def main():
 
         if cmd == "clear":
             session.clear()
+            return
+
+        if cmd == "quit":
+            session.exit()
             return
 
         if cmd == "thinking":
