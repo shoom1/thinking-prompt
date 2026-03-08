@@ -74,10 +74,7 @@ def truncate_ansi_to_lines(content: str, max_lines: int) -> str:
         Truncated content with ANSI reset + ``...`` if over limit,
         otherwise content.rstrip().
     """
-    lines = content.split('\n')
-    if len(lines) > max_lines:
-        return '\n'.join(lines[:max_lines]) + '\n\033[0m...'
-    return content.rstrip()
+    return truncate_to_lines(content, max_lines, suffix="\033[0m...")
 
 
 # =============================================================================
@@ -195,13 +192,14 @@ class ThinkingContext:
         content: Optional[StreamingContent],
         set_title: Callable[[str], None],
         get_title: Callable[[], str],
-        set_format: Optional[Callable[[str], None]] = None,
+        set_format: Optional[Callable[[ContentFormat], None]] = None,
         rich_theme: Any = None,
     ) -> None:
         self._content = content
         self._set_title = set_title
         self._get_title = get_title
         self._set_format = set_format
+        self._format_set = False
         self._rich_theme = rich_theme
 
     # -- StreamingContent delegation ------------------------------------------
@@ -241,6 +239,12 @@ class ThinkingContext:
 
     # -- Rich convenience methods ---------------------------------------------
 
+    def _ensure_ansi_format(self) -> None:
+        """Switch content format to ANSI once (idempotent)."""
+        if self._set_format is not None and not self._format_set:
+            self._set_format("ansi")
+            self._format_set = True
+
     def append_rich(self, renderable: Any, *, theme: Any = None) -> None:
         """Append a Rich renderable or markup string, auto-switching to ANSI format.
 
@@ -248,8 +252,7 @@ class ThinkingContext:
             renderable: Rich markup string or Rich renderable object.
             theme: Optional Rich Theme override (defaults to session theme).
         """
-        if self._set_format is not None:
-            self._set_format("ansi")
+        self._ensure_ansi_format()
         self._require_content().append_rich(
             renderable, theme=theme or self._rich_theme
         )
@@ -262,8 +265,7 @@ class ThinkingContext:
             renderable: Rich markup string or Rich renderable object.
             theme: Optional Rich Theme override (defaults to session theme).
         """
-        if self._set_format is not None:
-            self._set_format("ansi")
+        self._ensure_ansi_format()
         self._require_content().set_line_rich(
             index, renderable, theme=theme or self._rich_theme
         )

@@ -442,12 +442,8 @@ class ThinkingPromptSession:
         if not self._thinking_control.is_active:
             return ""
 
-        # Get full content and format before finishing (while callback is still set)
-        full_content = self._thinking_control.content
-        content_format = self._thinking_control.content_format
-
-        # Finish thinking
-        self._thinking_control.finish()
+        # Finish thinking and get content + format in one call
+        full_content, _, content_format = self._thinking_control.finish()
 
         # Reset separator title to default
         if self._thinking_separator:
@@ -528,14 +524,8 @@ class ThinkingPromptSession:
             The separator title is reset to default on exit.
         """
         content = StreamingContent()
-        self.start_thinking(content.get_content, title=title, content_format=content_format)
-        ctx = ThinkingContext(
-            content=content,
-            set_title=self._set_thinking_title,
-            get_title=self._get_thinking_title,
-            set_format=self._thinking_control.set_content_format,
-            rich_theme=self._display.rich_theme,
-        )
+        ctx = self.start_thinking(content.get_content, title=title, content_format=content_format)
+        ctx._content = content
         try:
             yield ctx
             self.finish_thinking(add_to_history=add_to_history, echo_to_console=echo_to_console)

@@ -34,16 +34,8 @@ def _is_rich_renderable(obj: Any) -> bool:
 
 
 def _rich_to_ansi(renderable: Any, theme: Any = None) -> str:
-    """Convert a Rich renderable to an ANSI-formatted string."""
-    try:
-        from rich.console import Console
-        from io import StringIO
-        file = StringIO()
-        console = Console(file=file, force_terminal=True, theme=theme)
-        console.print(renderable)
-        return file.getvalue()
-    except ImportError:
-        return str(renderable)
+    """Convert a Rich renderable to an ANSI-formatted string (with trailing newline)."""
+    return _renderable_to_ansi(renderable, theme=theme) + "\n"
 
 
 def _renderable_to_ansi(renderable: Any, theme: Any = None) -> str:
