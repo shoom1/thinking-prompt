@@ -34,8 +34,20 @@ def _is_rich_renderable(obj: Any) -> bool:
 
 
 def _rich_to_ansi(renderable: Any, theme: Any = None) -> str:
-    """Convert a Rich renderable to an ANSI-formatted string (with trailing newline)."""
-    return _renderable_to_ansi(renderable, theme=theme) + "\n"
+    """Convert a Rich renderable to an ANSI-formatted string.
+
+    Unlike ``_renderable_to_ansi``, this respects terminal width so that
+    layout-aware renderables (Panel, Table, etc.) size correctly.
+    """
+    try:
+        from rich.console import Console
+        from io import StringIO
+        file = StringIO()
+        console = Console(file=file, force_terminal=True, theme=theme)
+        console.print(renderable)
+        return file.getvalue()
+    except ImportError:
+        return str(renderable)
 
 
 def _renderable_to_ansi(renderable: Any, theme: Any = None) -> str:
