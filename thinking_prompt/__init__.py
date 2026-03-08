@@ -59,6 +59,7 @@ from .settings_dialog import (
     TextItem,
     SettingsDialog,
 )
+from .display import _renderable_to_ansi as rich_to_ansi
 
 __version__ = "0.2.4"
 
@@ -88,4 +89,6 @@ __all__ = [
     "CheckboxItem",
     "TextItem",
     "SettingsDialog",
+    # Utilities
+    "rich_to_ansi",
 ]
