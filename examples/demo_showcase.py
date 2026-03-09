@@ -109,7 +109,7 @@ def create_welcome_message():
 async def main():
     app_info = AppInfo(
         name="ThinkingBox",
-        version="0.2.3",
+        version="0.2.5",
         welcome_message=create_welcome_message,
         thinking_text="Processing",
         thinking_animation=("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"),
