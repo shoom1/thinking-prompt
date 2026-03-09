@@ -224,3 +224,162 @@ class TestSessionThinkingTitle:
             ctx.append("line0\nline1\n")
             ctx.set_line(-1, "UPDATED")
             assert ctx.text == "line0\nUPDATED\n"
+
+
+# =============================================================================
+# ThinkingContext Rich methods tests
+# =============================================================================
+
+
+class TestThinkingContextRichMethods:
+    """Test append_rich() and set_line_rich() on ThinkingContext."""
+
+    def test_append_rich_converts_markup(self):
+        """append_rich should convert Rich markup and append."""
+        content = StreamingContent()
+        set_format_calls = []
+        ctx = ThinkingContext(
+            content,
+            set_title=MagicMock(),
+            get_title=lambda: "",
+            set_format=lambda fmt: set_format_calls.append(fmt),
+        )
+        ctx.append_rich("[green]✓ Done[/green]\n")
+        text = content.text
+        assert "✓ Done" in text
+        assert "\033[" in text  # ANSI codes
+
+    def test_append_rich_auto_switches_format(self):
+        """append_rich should auto-switch to ansi format."""
+        content = StreamingContent()
+        set_format_calls = []
+        ctx = ThinkingContext(
+            content,
+            set_title=MagicMock(),
+            get_title=lambda: "",
+            set_format=lambda fmt: set_format_calls.append(fmt),
+        )
+        ctx.append_rich("[bold]text[/bold]")
+        assert set_format_calls == ["ansi"]
+
+    def test_set_line_rich_auto_switches_format(self):
+        """set_line_rich should auto-switch to ansi format."""
+        content = StreamingContent()
+        content.append("line0\nline1\n")
+        set_format_calls = []
+        ctx = ThinkingContext(
+            content,
+            set_title=MagicMock(),
+            get_title=lambda: "",
+            set_format=lambda fmt: set_format_calls.append(fmt),
+        )
+        ctx.set_line_rich(0, "[green]✓ line0[/green]")
+        assert set_format_calls == ["ansi"]
+
+    def test_set_line_rich_replaces_line(self):
+        """set_line_rich should replace the specified line."""
+        content = StreamingContent()
+        content.append("line0\nline1\n")
+        ctx = ThinkingContext(
+            content,
+            set_title=MagicMock(),
+            get_title=lambda: "",
+            set_format=MagicMock(),
+        )
+        ctx.set_line_rich(0, "[green]REPLACED[/green]")
+        text = content.text
+        assert "REPLACED" in text
+        assert "line1" in text
+
+    def test_append_rich_without_set_format(self):
+        """append_rich should work even without set_format callback."""
+        content = StreamingContent()
+        ctx = ThinkingContext(
+            content,
+            set_title=MagicMock(),
+            get_title=lambda: "",
+        )
+        ctx.append_rich("[bold]text[/bold]")
+        assert "text" in content.text
+
+    def test_append_rich_raises_without_content(self):
+        """append_rich should raise when content is None."""
+        ctx = ThinkingContext(
+            None,
+            set_title=MagicMock(),
+            get_title=lambda: "",
+        )
+        with pytest.raises(AttributeError, match="no content"):
+            ctx.append_rich("[bold]text[/bold]")
+
+    def test_set_line_rich_raises_without_content(self):
+        """set_line_rich should raise when content is None."""
+        ctx = ThinkingContext(
+            None,
+            set_title=MagicMock(),
+            get_title=lambda: "",
+        )
+        with pytest.raises(AttributeError, match="no content"):
+            ctx.set_line_rich(0, "[bold]text[/bold]")
+
+    def test_rich_theme_is_passed_through(self):
+        """rich_theme should be used when no explicit theme is given."""
+        from rich.theme import Theme
+        custom_theme = Theme({"custom": "bold green"})
+
+        content = StreamingContent()
+        ctx = ThinkingContext(
+            content,
+            set_title=MagicMock(),
+            get_title=lambda: "",
+            set_format=MagicMock(),
+            rich_theme=custom_theme,
+        )
+        ctx.append_rich("[custom]styled[/custom]")
+        text = content.text
+        # Should contain the text (with ANSI styling from theme)
+        assert "styled" in text
+
+
+class TestThinkingContextRichSessionIntegration:
+    """Test Rich methods through session.thinking() context manager."""
+
+    def _make_session(self):
+        from thinking_prompt import ThinkingPromptSession, AppInfo
+        app_info = AppInfo(
+            name="Test",
+            version="0.0.1",
+            thinking_text="Thinking",
+        )
+        return ThinkingPromptSession(app_info=app_info)
+
+    @pytest.mark.asyncio
+    async def test_append_rich_in_context_manager(self):
+        """append_rich should work inside thinking() context manager."""
+        session = self._make_session()
+        async with session.thinking(add_to_history=False, echo_to_console=False) as ctx:
+            ctx.append_rich("[green]✓ Step 1[/green]\n")
+            ctx.append_rich("[dim]  Step 2[/dim]\n")
+            text = ctx.text
+            assert "✓ Step 1" in text
+            assert "Step 2" in text
+
+    @pytest.mark.asyncio
+    async def test_set_line_rich_in_context_manager(self):
+        """set_line_rich should work inside thinking() context manager."""
+        session = self._make_session()
+        async with session.thinking(add_to_history=False, echo_to_console=False) as ctx:
+            ctx.append_rich("[dim]  Step 1[/dim]\n")
+            ctx.append_rich("[dim]  Step 2[/dim]\n")
+            ctx.set_line_rich(0, "[green]✓ Step 1[/green]")
+            text = ctx.text
+            assert "✓ Step 1" in text
+
+    @pytest.mark.asyncio
+    async def test_append_rich_auto_switches_format_in_session(self):
+        """append_rich should auto-switch thinking control to ansi format."""
+        session = self._make_session()
+        async with session.thinking(add_to_history=False, echo_to_console=False) as ctx:
+            assert session._thinking_control.content_format == "plain"
+            ctx.append_rich("[bold]text[/bold]")
+            assert session._thinking_control.content_format == "ansi"

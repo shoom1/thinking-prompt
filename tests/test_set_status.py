@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import pytest
 
-from prompt_toolkit.formatted_text import ANSI, AnyFormattedText, FormattedText
+from prompt_toolkit.formatted_text import ANSI, FormattedText
 from prompt_toolkit.styles import Style
 
 from thinking_prompt.display import Display
@@ -43,35 +43,6 @@ class TestDisplayToAnsi:
         result = display.to_ansi("hello")
         assert isinstance(result, ANSI)
         assert "hello" in result.value
-
-
-# =============================================================================
-# Display.is_rich_renderable() Tests
-# =============================================================================
-
-
-class TestDisplayIsRichRenderable:
-    """Test Display.is_rich_renderable() public method."""
-
-    @pytest.fixture
-    def display(self) -> Display:
-        return Display(style=Style.from_dict({}), is_fullscreen=lambda: False)
-
-    def test_detects_rich_object(self, display: Display):
-        """Should detect objects with __rich_console__."""
-        class FakeRenderable:
-            def __rich_console__(self, console, options):
-                pass
-        assert display.is_rich_renderable(FakeRenderable())
-
-    def test_rejects_plain_string(self, display: Display):
-        """Plain strings are not Rich renderables."""
-        assert not display.is_rich_renderable("hello")
-
-    def test_rejects_formatted_text(self, display: Display):
-        """FormattedText is not a Rich renderable."""
-        ft = FormattedText([("", "hello")])
-        assert not display.is_rich_renderable(ft)
 
 
 # =============================================================================

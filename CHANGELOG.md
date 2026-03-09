@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.5] - 2026-03-08
+
+### Added
+
+- `rich_to_ansi()` public API — convert Rich markup to ANSI strings for use with callback-based `start_thinking()` API
+- Rich/ANSI formatted text support in thinking box via `append_rich()` and `set_line_rich()`
+- `demo_task_progress.py` example with Rich-styled task progress and in-place status updates
+- `/quit` and `/tasks` commands in demo_showcase
+- `environment.yml` and `requirements.txt` for conda/pip environment setup
+
+### Changed
+
+- Deduplicated expand-hint and ANSI truncation logic
+- `truncate_ansi_to_lines()` now delegates to `truncate_to_lines()` with ANSI reset suffix
+- `thinking()` context manager reuses `ThinkingContext` from `start_thinking()` instead of creating a duplicate
+- `finish_thinking()` uses return value of `finish()` instead of double-reading content
+- `ThinkingContext.set_format` callback typed as `ContentFormat` instead of `str`
+- Redundant `set_format("ansi")` calls guarded with idempotent `_ensure_ansi_format()`
+
+### Fixed
+
+- `_rich_to_ansi` now correctly respects terminal width for layout-aware renderables (Panel, Table)
+
+### Docs
+
+- Updated README with v0.2.3–v0.2.4 features: Rich/ANSI content, dynamic titles, `set_status()`, completions params
+
 ## [0.2.4] - 2026-02-09
 
 ### Added

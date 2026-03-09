@@ -23,7 +23,7 @@ from typing import (
 )
 
 if TYPE_CHECKING:
-    from .types import ContentCallback, InputHandler, MessageRole
+    from .types import ContentCallback, ContentFormat, InputHandler, MessageRole
     from .dialog import DialogConfig, BaseDialog, DialogManager
     from .settings_dialog import SettingsItem
 
@@ -43,7 +43,7 @@ from .thinking import ThinkingBoxControl
 from .styles import ThinkingPromptStyles, DEFAULT_STYLES
 from .app_info import AppInfo
 from .types import StreamingContent, ThinkingContext
-from .display import Display
+from .display import Display, _is_rich_renderable
 
 
 class ThinkingPromptSession:
@@ -369,7 +369,13 @@ class ThinkingPromptSession:
     # Thinking API
     # =========================================================================
 
-    def start_thinking(self, content_callback: Callable[[], str], *, title: Optional[str] = None) -> ThinkingContext:
+    def start_thinking(
+        self,
+        content_callback: Callable[[], str],
+        *,
+        title: Optional[str] = None,
+        content_format: "ContentFormat" = "plain",
+    ) -> ThinkingContext:
         """
         Start the thinking state with a content callback.
 
@@ -381,6 +387,7 @@ class ThinkingPromptSession:
         Args:
             content_callback: Callable that returns the current thinking content.
             title: Optional title to set on the thinking separator.
+            content_format: Format for rendering ("plain" or "ansi").
 
         Returns:
             ThinkingContext for title control (content is None in low-level API).
@@ -403,12 +410,14 @@ class ThinkingPromptSession:
         """
         if title is not None:
             self._set_thinking_title(title)
-        self._thinking_control.start(content_callback)
+        self._thinking_control.start(content_callback, content_format=content_format)
         self._invalidate()
         return ThinkingContext(
             content=None,  # Low-level API: caller manages their own content
             set_title=self._set_thinking_title,
             get_title=self._get_thinking_title,
+            set_format=self._thinking_control.set_content_format,
+            rich_theme=self._display.rich_theme,
         )
 
     def finish_thinking(
@@ -433,11 +442,8 @@ class ThinkingPromptSession:
         if not self._thinking_control.is_active:
             return ""
 
-        # Get full content before finishing (while callback is still set)
-        full_content = self._thinking_control.content
-
-        # Finish thinking
-        self._thinking_control.finish()
+        # Finish thinking and get content + format in one call
+        full_content, _, content_format = self._thinking_control.finish()
 
         # Reset separator title to default
         if self._thinking_separator:
@@ -453,6 +459,7 @@ class ThinkingPromptSession:
                 truncate_lines=self._max_thinking_height,
                 add_to_history=add_to_history,
                 echo_to_console=should_echo,
+                content_format=content_format,
             )
 
         self._invalidate()
@@ -468,6 +475,7 @@ class ThinkingPromptSession:
         self,
         *,
         title: Optional[str] = None,
+        content_format: "ContentFormat" = "plain",
         add_to_history: bool = True,
         echo_to_console: Optional[bool] = None,
     ) -> AsyncIterator[ThinkingContext]:
@@ -480,6 +488,7 @@ class ThinkingPromptSession:
 
         Args:
             title: Optional title for the thinking separator.
+            content_format: Format for rendering ("plain" or "ansi").
             add_to_history: If True, add thinking content to chat history
                 when exiting the context.
             echo_to_console: If True, print thinking content to console.
@@ -497,20 +506,17 @@ class ThinkingPromptSession:
 
             # Thinking is automatically finished when exiting the context
 
-        Example with streaming LLM:
+        Example with Rich-styled lines:
             async with session.thinking() as ctx:
-                async for chunk in llm.stream(prompt):
-                    ctx.append(chunk)
+                ctx.append_rich("[dim]  Step 1: Load data[/dim]\\n")
+                ctx.append_rich("[dim]  Step 2: Process[/dim]\\n")
 
-            session.add_response("Here's my analysis...")
+                await do_step_1()
+                ctx.set_line_rich(0, "[green]✓ Step 1: Load data[/green]")
+                ctx.set_line_rich(1, "[bold]⟳ Step 2: Processing...[/bold]")
 
-        Example with in-place line updates:
-            async with session.thinking(title="Processing") as ctx:
-                ctx.append("[░░░░░░░░░░]   0%\\n")
-                for i in range(1, 101):
-                    bar = "█" * (i // 10) + "░" * (10 - i // 10)
-                    ctx.set_line(-1, f"[{bar}] {i:3d}%")
-                    await asyncio.sleep(0.05)
+                await do_step_2()
+                ctx.set_line_rich(1, "[green]✓ Step 2: Process[/green]")
 
         Note:
             If an exception occurs within the context, thinking is still
@@ -518,12 +524,8 @@ class ThinkingPromptSession:
             The separator title is reset to default on exit.
         """
         content = StreamingContent()
-        self.start_thinking(content.get_content, title=title)
-        ctx = ThinkingContext(
-            content=content,
-            set_title=self._set_thinking_title,
-            get_title=self._get_thinking_title,
-        )
+        ctx = self.start_thinking(content.get_content, title=title, content_format=content_format)
+        ctx._content = content
         try:
             yield ctx
             self.finish_thinking(add_to_history=add_to_history, echo_to_console=echo_to_console)
@@ -933,7 +935,7 @@ class ThinkingPromptSession:
 
         Accepts plain text, FormattedText, or Rich renderables.
         """
-        if self._display.is_rich_renderable(text):
+        if _is_rich_renderable(text):
             self._status_text = self._display.to_ansi(text)
         else:
             self._status_text = text
@@ -974,8 +976,8 @@ class ThinkingPromptSession:
             if await session.yes_no_dialog("Confirm", "Delete this file?"):
                 delete_file()
         """
-        from .dialog import create_yes_no_dialog
-        dialog = create_yes_no_dialog(title, text, yes_text, no_text)
+        from .dialog import _YesNoDialog
+        dialog = _YesNoDialog(title, text, yes_text, no_text)
         return await self._dialogs.show(dialog)
 
     async def message_dialog(
@@ -995,8 +997,8 @@ class ThinkingPromptSession:
         Example:
             await session.message_dialog("Info", "Operation completed.")
         """
-        from .dialog import create_message_dialog
-        dialog = create_message_dialog(title, text, ok_text)
+        from .dialog import _MessageDialog
+        dialog = _MessageDialog(title, text, ok_text)
         await self._dialogs.show(dialog)
 
     async def choice_dialog(
@@ -1025,8 +1027,8 @@ class ThinkingPromptSession:
             if action == "Save":
                 save_file()
         """
-        from .dialog import create_choice_dialog
-        dialog = create_choice_dialog(title, text, choices)
+        from .dialog import _ChoiceDialog
+        dialog = _ChoiceDialog(title, text, choices)
         return await self._dialogs.show(dialog)
 
     async def dropdown_dialog(
@@ -1056,8 +1058,8 @@ class ThinkingPromptSession:
                 default="System",
             )
         """
-        from .dialog import create_dropdown_dialog
-        dialog = create_dropdown_dialog(title, text, options, default)
+        from .dialog import _DropdownDialog
+        dialog = _DropdownDialog(title, text, options, default)
         return await self._dialogs.show(dialog)
 
     async def show_dialog(

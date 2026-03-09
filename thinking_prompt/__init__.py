@@ -42,6 +42,7 @@ from .types import (
     StreamingContent,
     ThinkingContext,
     ContentCallback,
+    ContentFormat,
     MessageRole,
     InputHandler,
 )
@@ -58,8 +59,9 @@ from .settings_dialog import (
     TextItem,
     SettingsDialog,
 )
+from .display import _renderable_to_ansi as rich_to_ansi
 
-__version__ = "0.2.4"
+__version__ = "0.2.5"
 
 __all__ = [
     # Main class
@@ -73,6 +75,7 @@ __all__ = [
     "StreamingContent",
     "ThinkingContext",
     "ContentCallback",
+    "ContentFormat",
     "MessageRole",
     "InputHandler",
     # Dialog
@@ -86,4 +89,6 @@ __all__ = [
     "CheckboxItem",
     "TextItem",
     "SettingsDialog",
+    # Utilities
+    "rich_to_ansi",
 ]

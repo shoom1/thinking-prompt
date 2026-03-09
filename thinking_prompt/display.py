@@ -18,7 +18,7 @@ from prompt_toolkit.formatted_text import ANSI, AnyFormattedText, FormattedText
 from prompt_toolkit.styles import Style
 
 from .history import FormattedTextHistory
-from .types import truncate_to_lines
+from .types import ContentFormat, truncate_ansi_to_lines, truncate_to_lines
 
 if TYPE_CHECKING:
     from .styles import ThinkingPromptStyles
@@ -34,7 +34,11 @@ def _is_rich_renderable(obj: Any) -> bool:
 
 
 def _rich_to_ansi(renderable: Any, theme: Any = None) -> str:
-    """Convert a Rich renderable to an ANSI-formatted string."""
+    """Convert a Rich renderable to an ANSI-formatted string.
+
+    Unlike ``_renderable_to_ansi``, this respects terminal width so that
+    layout-aware renderables (Panel, Table, etc.) size correctly.
+    """
     try:
         from rich.console import Console
         from io import StringIO
@@ -42,6 +46,23 @@ def _rich_to_ansi(renderable: Any, theme: Any = None) -> str:
         console = Console(file=file, force_terminal=True, theme=theme)
         console.print(renderable)
         return file.getvalue()
+    except ImportError:
+        return str(renderable)
+
+
+def _renderable_to_ansi(renderable: Any, theme: Any = None) -> str:
+    """Convert a Rich renderable or markup string to ANSI (no trailing newline/padding).
+
+    Handles both markup strings like "[green]text[/green]" and Rich objects
+    like Text("text", style="green").
+    """
+    try:
+        from rich.console import Console
+        from io import StringIO
+        f = StringIO()
+        console = Console(file=f, force_terminal=True, width=9999, theme=theme)
+        console.print(renderable, end="", highlight=False, soft_wrap=True)
+        return f.getvalue().rstrip()
     except ImportError:
         return str(renderable)
 
@@ -159,6 +180,11 @@ class Display:
         """Get the history buffer for fullscreen display."""
         return self._history
 
+    @property
+    def rich_theme(self) -> Any:
+        """Get the Rich theme for consistent styling."""
+        return self._rich_theme
+
     def set_on_change(self, callback: Optional[Callable[[], None]]) -> None:
         """
         Set callback for history changes (for UI invalidation).
@@ -218,6 +244,7 @@ class Display:
         truncate_lines: Optional[int] = None,
         add_to_history: bool = True,
         echo_to_console: bool = True,
+        content_format: ContentFormat = "plain",
     ) -> None:
         """
         Output thinking content to console and history.
@@ -228,8 +255,18 @@ class Display:
                            History always gets full content.
             add_to_history: If True, add to history.
             echo_to_console: If True, print to console.
+            content_format: Format of the content ("plain" or "ansi").
         """
         if not content.strip():
+            return
+
+        if content_format == "ansi":
+            self._thinking_ansi(
+                content,
+                truncate_lines=truncate_lines,
+                add_to_history=add_to_history,
+                echo_to_console=echo_to_console,
+            )
             return
 
         style = "class:history.thinking"
@@ -245,6 +282,30 @@ class Display:
             else:
                 console_text = content.rstrip() + "\n"
             self._print_to_console(FormattedText([(style, console_text)]))
+
+    def _thinking_ansi(
+        self,
+        content: str,
+        *,
+        truncate_lines: Optional[int] = None,
+        add_to_history: bool = True,
+        echo_to_console: bool = True,
+    ) -> None:
+        """Output ANSI-formatted thinking content."""
+        from prompt_toolkit.formatted_text import to_formatted_text
+
+        # History gets full content as parsed ANSI fragments
+        if add_to_history:
+            fragments = list(to_formatted_text(ANSI(content.rstrip() + "\n")))
+            self._history.append_formatted(fragments)
+
+        # Console gets possibly truncated content
+        if echo_to_console:
+            if truncate_lines is not None:
+                console_content = truncate_ansi_to_lines(content, truncate_lines) + '\n'
+            else:
+                console_content = content.rstrip() + '\n'
+            self._print_to_console(ANSI(console_content))
 
     def response(self, content: str) -> None:
         """
@@ -376,10 +437,6 @@ class Display:
         """
         ansi_str = _rich_to_ansi(renderable, theme=self._rich_theme)
         return ANSI(ansi_str.rstrip("\n"))
-
-    def is_rich_renderable(self, obj: Any) -> bool:
-        """Check if an object is a Rich renderable."""
-        return _is_rich_renderable(obj)
 
     def raw(self, content: str, style_class: str = "") -> None:
         """

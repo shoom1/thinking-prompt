@@ -50,8 +50,10 @@ class SlashCommandCompleter(Completer):
         "info": "Message dialog demo",
         "action": "Choice dialog demo",
         "theme": "Dropdown dialog demo",
+        "tasks": "Rich-styled task progress demo",
         "settings": "Settings dialog demo",
         "clear": "Clear the screen",
+        "quit": "Exit the application",
     }
 
     def get_completions(self, document: Document, complete_event):
@@ -107,7 +109,7 @@ def create_welcome_message():
 async def main():
     app_info = AppInfo(
         name="ThinkingBox",
-        version="0.2.3",
+        version="0.2.5",
         welcome_message=create_welcome_message,
         thinking_text="Processing",
         thinking_animation=("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"),
@@ -150,8 +152,10 @@ async def main():
                 "- **/info** - Message dialog demo\n"
                 "- **/action** - Choice dialog demo\n"
                 "- **/theme** - Dropdown dialog demo\n"
+                "- **/tasks** - Rich-styled task progress demo\n"
                 "- **/settings** - Settings dialog demo\n"
                 "- **/clear** - Clear the screen\n"
+                "- **/quit** - Exit the application\n"
                 "- *anything else* - Process with thinking visualization\n",
                 markdown=True
             )
@@ -159,6 +163,10 @@ async def main():
 
         if cmd == "clear":
             session.clear()
+            return
+
+        if cmd == "quit":
+            session.exit()
             return
 
         if cmd == "thinking":
@@ -201,6 +209,34 @@ async def main():
             session.add_response(
                 "**Demo complete** — used `ctx.set_title()` for separator changes "
                 "and `ctx.set_line(-1, ...)` for in-place updates.",
+                markdown=True,
+            )
+            return
+
+        if cmd == "tasks":
+            # Dedicated demo: ctx.append_rich() and ctx.set_line_rich()
+            steps = [
+                ("Scanning files", 0.6),
+                ("Parsing AST", 0.8),
+                ("Running checks", 1.0),
+                ("Generating report", 0.5),
+            ]
+
+            async with session.thinking(title="Processing") as ctx:
+                # Render all steps as dim/pending
+                for label, _ in steps:
+                    ctx.append_rich(f"[dim]  ○ {label}[/dim]\n")
+
+                # Process each step
+                for i, (label, duration) in enumerate(steps):
+                    ctx.set_line_rich(i, f"[bold cyan]  ⟳ {label}…[/bold cyan]")
+                    ctx.set_title(label)
+                    await asyncio.sleep(duration)
+                    ctx.set_line_rich(i, f"[green]  ✓ {label}[/green]")
+
+            session.add_response(
+                "**Demo complete** — used `ctx.append_rich()` for Rich-styled pending items "
+                "and `ctx.set_line_rich()` for colored in-place updates.",
                 markdown=True,
             )
             return

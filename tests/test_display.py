@@ -458,3 +458,92 @@ class TestDisplayFlushPending:
         assert len(fullscreen_display._pending_output) == 2
         fullscreen_display.flush_pending()
         assert len(fullscreen_display._pending_output) == 0
+
+
+# =============================================================================
+# Display ANSI Thinking Tests
+# =============================================================================
+
+
+class TestDisplayThinkingAnsi:
+    """Test Display.thinking() with ANSI format."""
+
+    def test_ansi_adds_to_history(self, display: Display):
+        """ANSI thinking content should be added to history as fragments."""
+        content = "\033[32m✓ Done\033[0m"
+        display.thinking(content, content_format="ansi")
+        formatted = display.history.get_formatted_text()
+        assert len(formatted) > 0
+        text = "".join(t for _, t in formatted)
+        assert "✓ Done" in text
+
+    def test_ansi_history_has_no_thinking_style(self, display: Display):
+        """ANSI content in history should NOT use class:history.thinking style."""
+        content = "\033[32m✓ Done\033[0m"
+        display.thinking(content, content_format="ansi")
+        formatted = display.history.get_formatted_text()
+        styles = [s for s, _ in formatted]
+        # Should not use the plain thinking style
+        assert "class:history.thinking" not in styles
+
+    def test_ansi_skips_empty_content(self, display: Display):
+        """ANSI thinking should skip empty content."""
+        display.thinking("", content_format="ansi")
+        display.thinking("   ", content_format="ansi")
+        assert display.history.is_empty
+
+    def test_ansi_skip_history_when_requested(self, display: Display):
+        """ANSI thinking should not add to history when add_to_history=False."""
+        display.thinking("\033[32mtext\033[0m", add_to_history=False, content_format="ansi")
+        assert display.history.is_empty
+
+    def test_ansi_truncates_when_requested(self, display: Display):
+        """ANSI thinking should truncate console output when truncate_lines is set."""
+        lines = [f"\033[32mLine {i}\033[0m" for i in range(10)]
+        content = "\n".join(lines)
+        display.thinking(content, truncate_lines=3, content_format="ansi")
+        # History should have full content
+        formatted = display.history.get_formatted_text()
+        text = "".join(t for _, t in formatted)
+        assert "Line 9" in text
+
+    def test_ansi_caches_in_fullscreen(self, fullscreen_display: Display):
+        """ANSI thinking should cache ANSI output in fullscreen mode."""
+        from prompt_toolkit.formatted_text import ANSI
+        fullscreen_display.thinking("\033[32mtext\033[0m", content_format="ansi")
+        assert len(fullscreen_display._pending_output) == 1
+        assert isinstance(fullscreen_display._pending_output[0], ANSI)
+
+    def test_plain_format_unchanged(self, display: Display):
+        """Plain format should work the same as before."""
+        display.thinking("Processing...", content_format="plain")
+        formatted = display.history.get_formatted_text()
+        styles = [s for s, _ in formatted]
+        assert "class:history.thinking" in styles
+
+
+class TestRenderableToAnsi:
+    """Test _renderable_to_ansi function."""
+
+    def test_converts_markup_string(self):
+        from thinking_prompt.display import _renderable_to_ansi
+        result = _renderable_to_ansi("[green]hello[/green]")
+        assert "hello" in result
+        assert "\033[" in result
+
+    def test_converts_rich_text_object(self):
+        from thinking_prompt.display import _renderable_to_ansi
+        from rich.text import Text
+        result = _renderable_to_ansi(Text("hello", style="bold"))
+        assert "hello" in result
+
+    def test_no_trailing_whitespace(self):
+        from thinking_prompt.display import _renderable_to_ansi
+        result = _renderable_to_ansi("[green]hello[/green]")
+        assert not result.endswith(" ")
+        assert not result.endswith("\n")
+
+    def test_plain_string(self):
+        from thinking_prompt.display import _renderable_to_ansi
+        result = _renderable_to_ansi("plain text")
+        assert "plain text" in result

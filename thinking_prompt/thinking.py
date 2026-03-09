@@ -10,11 +10,11 @@ import threading
 from typing import Callable, List, Optional, Tuple
 
 from prompt_toolkit.filters import Condition
-from prompt_toolkit.formatted_text import FormattedText
+from prompt_toolkit.formatted_text import ANSI, FormattedText, to_formatted_text
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.layout.controls import FormattedTextControl
 
-from .types import truncate_to_lines
+from .types import ContentFormat, truncate_ansi_to_lines, truncate_to_lines
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +66,7 @@ class ThinkingBoxControl(FormattedTextControl):
 
         control.expand()  # User pressed Ctrl+E
 
-        content, was_expanded = control.finish()
+        content, was_expanded, fmt = control.finish()
     """
 
     def __init__(
@@ -88,6 +88,7 @@ class ThinkingBoxControl(FormattedTextControl):
         self._box_style = style
         self._expand_key = expand_key
         self._is_expanded = False
+        self._content_format: ContentFormat = "plain"
         self._lock = threading.RLock()
 
         # Pass our formatting function to parent
@@ -98,37 +99,56 @@ class ThinkingBoxControl(FormattedTextControl):
             show_cursor=False,
         )
 
-    def start(self, content_callback: Callable[[], str]) -> None:
+    def start(
+        self,
+        content_callback: Callable[[], str],
+        content_format: ContentFormat = "plain",
+    ) -> None:
         """
         Start thinking with the given content callback.
 
         Args:
             content_callback: Callable that returns the current content.
+            content_format: Format for rendering content ("plain" or "ansi").
         """
         with self._lock:
             self._content_callback = content_callback
             self._is_expanded = False
+            self._content_format = content_format
 
-    def finish(self) -> Tuple[str, bool]:
+    def finish(self) -> Tuple[str, bool, ContentFormat]:
         """
         Finish thinking and reset state.
 
         Returns:
-            Tuple of (full_content, was_expanded).
+            Tuple of (full_content, was_expanded, content_format).
         """
         with self._lock:
             content = self.content
             was_expanded = self._is_expanded
+            fmt = self._content_format
             # Reset state
             self._content_callback = None
             self._is_expanded = False
-            return content, was_expanded
+            self._content_format = "plain"
+            return content, was_expanded, fmt
     
     @property
     def is_active(self) -> bool:
         """Check if thinking is active (has a content callback)."""
         with self._lock:
             return self._content_callback is not None
+
+    @property
+    def content_format(self) -> ContentFormat:
+        """Get the current content format."""
+        with self._lock:
+            return self._content_format
+
+    def set_content_format(self, fmt: ContentFormat) -> None:
+        """Set the content format (e.g. to switch to ANSI mode dynamically)."""
+        with self._lock:
+            self._content_format = fmt
 
     def _get_formatted_text(self) -> FormattedText:
         """
@@ -150,22 +170,47 @@ class ThinkingBoxControl(FormattedTextControl):
             return FormattedText([])
 
         with self._lock:
-            lines = content.split('\n')
+            if self._content_format == "ansi":
+                return self._format_ansi(content)
+            return self._format_plain(content)
 
-            # When collapsed and overflowing, truncate to make room for hint
-            if not self._is_expanded and len(lines) > self._max_collapsed_lines - 1:
-                # Show max_collapsed_lines - 1 lines of content + hint line
-                truncated_lines = lines[:self._max_collapsed_lines - 1]
-                truncated_content = '\n'.join(truncated_lines)
+    def _expand_hint(self, total_lines: int) -> str:
+        """Build the expand hint shown when content is truncated."""
+        hidden = total_lines - (self._max_collapsed_lines - 1)
+        return f"+{hidden} lines... {_format_key_for_display(self._expand_key)} to expand"
 
-                fragments: List[Tuple[str, str]] = [
-                    (self._box_style, truncated_content + '\n'),
-                    ("class:thinking-box.hint", f"+{len(lines) - (self._max_collapsed_lines - 1)} lines... {_format_key_for_display(self._expand_key)} to expand"),
-                ]
-            else:
-                fragments = [(self._box_style, content)]
+    def _format_plain(self, content: str) -> FormattedText:
+        """Format content as plain styled text."""
+        lines = content.split('\n')
 
-            return FormattedText(fragments)
+        if not self._is_expanded and len(lines) > self._max_collapsed_lines - 1:
+            truncated_lines = lines[:self._max_collapsed_lines - 1]
+            truncated_content = '\n'.join(truncated_lines)
+
+            fragments: List[Tuple[str, str]] = [
+                (self._box_style, truncated_content + '\n'),
+                ("class:thinking-box.hint", self._expand_hint(len(lines))),
+            ]
+        else:
+            fragments = [(self._box_style, content)]
+
+        return FormattedText(fragments)
+
+    def _format_ansi(self, content: str) -> FormattedText:
+        """Format content with ANSI escape codes parsed by prompt_toolkit."""
+        lines = content.split('\n')
+
+        if not self._is_expanded and len(lines) > self._max_collapsed_lines - 1:
+            truncated_lines = lines[:self._max_collapsed_lines - 1]
+            truncated_content = '\n'.join(truncated_lines) + '\n'
+
+            ansi_fragments = list(to_formatted_text(ANSI(truncated_content)))
+            ansi_fragments.append(
+                ("class:thinking-box.hint", self._expand_hint(len(lines)))
+            )
+            return FormattedText(ansi_fragments)
+
+        return FormattedText(list(to_formatted_text(ANSI(content))))
 
     @property
     def content(self) -> str:
@@ -277,6 +322,9 @@ class ThinkingBoxControl(FormattedTextControl):
         with self._lock:
             if self._is_expanded:
                 return content.rstrip()
+
+            if self._content_format == "ansi":
+                return truncate_ansi_to_lines(content, self._max_collapsed_lines - 1)
 
             # Same logic as _get_formatted_text: max_height - 1 lines + "..."
             return truncate_to_lines(content, self._max_collapsed_lines - 1)

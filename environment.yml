@@ -1,0 +1,16 @@
+name: thinking_prompt
+channels:
+  - defaults
+  - conda-forge
+dependencies:
+  - python=3.9
+  - pip
+  - pip:
+      - prompt_toolkit>=3.0.0
+      - rich>=13.0
+      - pygments>=2.0
+      - pytest>=7.0
+      - pytest-asyncio>=0.21
+      - pytest-cov>=4.0
+      - mypy>=1.0
+      - ruff>=0.1.0

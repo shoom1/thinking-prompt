@@ -14,11 +14,8 @@ from typing import (
     List,
     Literal,
     Optional,
-    Tuple,
     Union,
 )
-
-from prompt_toolkit.formatted_text import FormattedText
 
 
 # =============================================================================
@@ -28,6 +25,9 @@ from prompt_toolkit.formatted_text import FormattedText
 # Message roles supported by add_message()
 MessageRole = Literal["user", "assistant", "thinking", "system"]
 
+# Content format for thinking box rendering
+ContentFormat = Literal["plain", "ansi"]
+
 # Content callback type for thinking box
 ContentCallback = Callable[[], str]
 
@@ -35,16 +35,6 @@ ContentCallback = Callable[[], str]
 SyncInputHandler = Callable[[str], None]
 AsyncInputHandler = Callable[[str], Awaitable[None]]
 InputHandler = Union[SyncInputHandler, AsyncInputHandler]
-
-# Style fragment tuple (style_class, text)
-StyleFragment = Tuple[str, str]
-
-# List of style fragments
-StyleFragments = List[StyleFragment]
-
-# Welcome message types
-WelcomeContent = Union[str, FormattedText, Any]  # Any for Rich renderables
-WelcomeMessage = Union[WelcomeContent, Callable[[], WelcomeContent], None]
 
 
 # =============================================================================
@@ -67,6 +57,24 @@ def truncate_to_lines(content: str, max_lines: int, suffix: str = "...") -> str:
     if len(lines) > max_lines:
         return '\n'.join(lines[:max_lines]) + '\n' + suffix
     return content.rstrip()
+
+
+def truncate_ansi_to_lines(content: str, max_lines: int) -> str:
+    """
+    Truncate ANSI-formatted content to max_lines with a reset suffix.
+
+    Inserts an ANSI reset (``\\033[0m``) before the ``...`` suffix to
+    prevent style leakage into subsequent output.
+
+    Args:
+        content: The ANSI-formatted content to truncate.
+        max_lines: Maximum number of lines to keep.
+
+    Returns:
+        Truncated content with ANSI reset + ``...`` if over limit,
+        otherwise content.rstrip().
+    """
+    return truncate_to_lines(content, max_lines, suffix="\033[0m...")
 
 
 # =============================================================================
@@ -142,6 +150,28 @@ class StreamingContent:
             self._chunks.clear()
             self._chunks.append("\n".join(lines) + ("\n" if has_trailing_newline else ""))
 
+    def append_rich(self, renderable: Any, *, theme: Any = None) -> None:
+        """Append a Rich renderable or markup string, converted to ANSI.
+
+        Args:
+            renderable: Rich markup string or Rich renderable object.
+            theme: Optional Rich Theme for styling.
+        """
+        from .display import _renderable_to_ansi
+        self.append(_renderable_to_ansi(renderable, theme=theme))
+
+    def set_line_rich(self, index: int, renderable: Any, *, theme: Any = None) -> None:
+        """Set a line from a Rich renderable or markup string.
+
+        Args:
+            index: Line index (supports negative indices).
+            renderable: Rich markup string or Rich renderable object.
+            theme: Optional Rich Theme for styling.
+        """
+        from .display import _renderable_to_ansi
+        ansi = _renderable_to_ansi(renderable, theme=theme)
+        self.set_line(index, ansi.split('\n')[0])
+
     @property
     def text(self) -> str:
         """Alias for get_content() for convenience."""
@@ -162,10 +192,15 @@ class ThinkingContext:
         content: Optional[StreamingContent],
         set_title: Callable[[str], None],
         get_title: Callable[[], str],
+        set_format: Optional[Callable[[ContentFormat], None]] = None,
+        rich_theme: Any = None,
     ) -> None:
         self._content = content
         self._set_title = set_title
         self._get_title = get_title
+        self._set_format = set_format
+        self._format_set = False
+        self._rich_theme = rich_theme
 
     # -- StreamingContent delegation ------------------------------------------
 
@@ -201,6 +236,39 @@ class ThinkingContext:
     def text(self) -> str:
         """Get the accumulated content as a string."""
         return self._require_content().text
+
+    # -- Rich convenience methods ---------------------------------------------
+
+    def _ensure_ansi_format(self) -> None:
+        """Switch content format to ANSI once (idempotent)."""
+        if self._set_format is not None and not self._format_set:
+            self._set_format("ansi")
+            self._format_set = True
+
+    def append_rich(self, renderable: Any, *, theme: Any = None) -> None:
+        """Append a Rich renderable or markup string, auto-switching to ANSI format.
+
+        Args:
+            renderable: Rich markup string or Rich renderable object.
+            theme: Optional Rich Theme override (defaults to session theme).
+        """
+        self._ensure_ansi_format()
+        self._require_content().append_rich(
+            renderable, theme=theme or self._rich_theme
+        )
+
+    def set_line_rich(self, index: int, renderable: Any, *, theme: Any = None) -> None:
+        """Set a line from a Rich renderable, auto-switching to ANSI format.
+
+        Args:
+            index: Line index (supports negative indices).
+            renderable: Rich markup string or Rich renderable object.
+            theme: Optional Rich Theme override (defaults to session theme).
+        """
+        self._ensure_ansi_format()
+        self._require_content().set_line_rich(
+            index, renderable, theme=theme or self._rich_theme
+        )
 
     # -- Title control --------------------------------------------------------
 

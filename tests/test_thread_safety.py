@@ -167,7 +167,7 @@ class TestThinkingBoxControlThreadSafety:
                 try:
                     control.start(lambda: f"thread-{thread_id}-{i}")
                     time.sleep(0.001)
-                    content, _ = control.finish()
+                    content, _, _fmt = control.finish()
                     results.append(f"ok-{thread_id}")
                 except Exception as e:
                     results.append(f"error-{thread_id}: {e}")
