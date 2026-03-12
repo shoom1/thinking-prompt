@@ -45,7 +45,7 @@ if TYPE_CHECKING:
 DEFAULT_SPINNER_FRAMES = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
 
 
-class ThinkingSeparator:
+class ThinkingHeader:
     """
     Animated separator line for the thinking box.
 
@@ -142,10 +142,14 @@ class ThinkingSeparator:
         self._last_update = 0.0
 
 
+# Backward-compat alias
+ThinkingSeparator = ThinkingHeader
+
+
 def create_thinking_box(
     control: ThinkingBoxControl,
     max_height: int,
-    separator: ThinkingSeparator | None = None,
+    separator: ThinkingHeader | None = None,
 ) -> ConditionalContainer:
     """
     Create the thinking box container.
@@ -160,7 +164,7 @@ def create_thinking_box(
     Args:
         control: The ThinkingBoxControl instance.
         max_height: Maximum height when collapsed.
-        separator: Optional ThinkingSeparator for animated separator line.
+        separator: Optional ThinkingHeader for animated separator line.
                   If None, uses default separator.
 
     Returns:
@@ -168,7 +172,7 @@ def create_thinking_box(
     """
     # Use provided separator or create default
     if separator is None:
-        separator = ThinkingSeparator()
+        separator = ThinkingHeader()
 
     def is_thinking() -> bool:
         return control.is_active
@@ -341,7 +345,7 @@ def create_layout(
     is_fullscreen: Callable[[], bool],
     get_status_text: Callable[[], AnyFormattedText],
     is_status_bar_enabled: Callable[[], bool],
-    separator: ThinkingSeparator | None = None,
+    separator: ThinkingHeader | None = None,
     completions_menu_height: int = 5,
 ) -> Layout:
     """
@@ -356,7 +360,7 @@ def create_layout(
         is_fullscreen: Callable that returns fullscreen state.
         get_status_text: Callable that returns status bar text.
         is_status_bar_enabled: Callable that returns status bar visibility.
-        separator: Optional ThinkingSeparator for animated separator line.
+        separator: Optional ThinkingHeader for animated separator line.
         completions_menu_height: Maximum height of the completions dropdown menu.
 
     Returns:

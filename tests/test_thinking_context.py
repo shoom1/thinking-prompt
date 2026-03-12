@@ -145,13 +145,13 @@ class TestSessionThinkingTitle:
     def test_start_thinking_sets_title(self):
         session = self._make_session()
         session.start_thinking(lambda: "", title="Processing")
-        assert session._thinking_separator.text == "Processing"
+        assert session._thinking_header.text == "Processing"
         session.finish_thinking(add_to_history=False, echo_to_console=False)
 
     def test_start_thinking_no_title_keeps_default(self):
         session = self._make_session()
         session.start_thinking(lambda: "")
-        assert session._thinking_separator.text == "Thinking"
+        assert session._thinking_header.text == "Thinking"
         session.finish_thinking(add_to_history=False, echo_to_console=False)
 
     def test_start_thinking_returns_thinking_context(self):
@@ -163,15 +163,15 @@ class TestSessionThinkingTitle:
     def test_finish_thinking_resets_title(self):
         session = self._make_session()
         session.start_thinking(lambda: "", title="Custom")
-        assert session._thinking_separator.text == "Custom"
+        assert session._thinking_header.text == "Custom"
         session.finish_thinking(add_to_history=False, echo_to_console=False)
-        assert session._thinking_separator.text == "Thinking"
+        assert session._thinking_header.text == "Thinking"
 
     def test_set_title_via_context(self):
         session = self._make_session()
         ctx = session.start_thinking(lambda: "")
         ctx.set_title("Updated")
-        assert session._thinking_separator.text == "Updated"
+        assert session._thinking_header.text == "Updated"
         session.finish_thinking(add_to_history=False, echo_to_console=False)
 
     def test_title_property_via_context(self):
@@ -192,21 +192,21 @@ class TestSessionThinkingTitle:
     async def test_thinking_context_manager_title(self):
         session = self._make_session()
         async with session.thinking(title="Working", add_to_history=False, echo_to_console=False) as ctx:
-            assert session._thinking_separator.text == "Working"
+            assert session._thinking_header.text == "Working"
             ctx.set_title("Almost Done")
-            assert session._thinking_separator.text == "Almost Done"
+            assert session._thinking_header.text == "Almost Done"
         # After exit, title should be reset
-        assert session._thinking_separator.text == "Thinking"
+        assert session._thinking_header.text == "Thinking"
 
     @pytest.mark.asyncio
     async def test_thinking_context_manager_resets_on_exception(self):
         session = self._make_session()
         with pytest.raises(ValueError):
             async with session.thinking(title="Crashing", add_to_history=False, echo_to_console=False) as ctx:
-                assert session._thinking_separator.text == "Crashing"
+                assert session._thinking_header.text == "Crashing"
                 raise ValueError("boom")
         # Title should still be reset
-        assert session._thinking_separator.text == "Thinking"
+        assert session._thinking_header.text == "Thinking"
 
     @pytest.mark.asyncio
     async def test_thinking_context_manager_yields_thinking_context(self):

@@ -37,7 +37,7 @@ from prompt_toolkit.history import History, InMemoryHistory
 from prompt_toolkit.key_binding import KeyBindings, merge_key_bindings
 from prompt_toolkit.key_binding.key_processor import KeyPressEvent
 
-from .layout import create_layout, ThinkingSeparator
+from .layout import create_layout, ThinkingHeader
 from .history import FormattedTextHistory
 from .thinking import ThinkingBoxControl
 from .styles import ThinkingPromptStyles, DEFAULT_STYLES
@@ -240,9 +240,9 @@ class ThinkingPromptSession:
         )
 
         # Create separator from app_info config
-        self._thinking_separator: Optional[ThinkingSeparator] = None
+        self._thinking_header: Optional[ThinkingHeader] = None
         if self._app_info:
-            self._thinking_separator = ThinkingSeparator(
+            self._thinking_header = ThinkingHeader(
                 text=self._app_info.thinking_text,
                 frames=self._app_info.thinking_animation,
                 position=self._app_info.thinking_animation_position,
@@ -257,7 +257,7 @@ class ThinkingPromptSession:
             is_fullscreen=lambda: self._is_fullscreen,
             get_status_text=lambda: self._status_text,
             is_status_bar_enabled=lambda: self._enable_status_bar,
-            separator=self._thinking_separator,
+            separator=self._thinking_header,
             completions_menu_height=self._completions_menu_height,
         )
 
@@ -355,14 +355,14 @@ class ThinkingPromptSession:
 
     def _set_thinking_title(self, text: str) -> None:
         """Set thinking separator title."""
-        if self._thinking_separator:
-            self._thinking_separator.text = str(text)
+        if self._thinking_header:
+            self._thinking_header.text = str(text)
             self._invalidate()
 
     def _get_thinking_title(self) -> str:
         """Get current thinking separator title."""
-        if self._thinking_separator:
-            return self._thinking_separator.text
+        if self._thinking_header:
+            return self._thinking_header.text
         return self._default_thinking_text
 
     # =========================================================================
@@ -446,8 +446,8 @@ class ThinkingPromptSession:
         full_content, _, content_format = self._thinking_control.finish()
 
         # Reset separator title to default
-        if self._thinking_separator:
-            self._thinking_separator.text = self._default_thinking_text
+        if self._thinking_header:
+            self._thinking_header.text = self._default_thinking_text
 
         # Resolve echo_to_console: None means use default from AppInfo
         should_echo = echo_to_console if echo_to_console is not None else self._echo_thinking
