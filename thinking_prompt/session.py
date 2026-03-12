@@ -311,6 +311,7 @@ class ThinkingPromptSession:
         @kb.add(self._expand_key, filter=Condition(can_toggle))
         def toggle_expand(event: KeyPressEvent) -> None:
             self._manager.toggle_all()
+            self._invalidate()
 
         # Fullscreen toggle key binding (only when enabled)
         if self._fullscreen_enabled:
@@ -408,9 +409,9 @@ class ThinkingPromptSession:
 
         # Apply header config from app_info
         if box.header and self._header_config:
-            if "frames" in self._header_config:
+            if self._header_config.get("frames") is not None:
                 box.header.frames = self._header_config["frames"]
-            if "position" in self._header_config:
+            if self._header_config.get("position") is not None:
                 box.header.position = self._header_config["position"]
 
         self._invalidate()
