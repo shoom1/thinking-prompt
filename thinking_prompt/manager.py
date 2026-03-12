@@ -7,12 +7,12 @@ ThinkingBoxManager (collection manager with thread-safe operations).
 from __future__ import annotations
 
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Callable, List, Optional, Tuple
 
 from prompt_toolkit.filters import Condition
 from prompt_toolkit.layout import HSplit, Window
-from prompt_toolkit.layout.containers import Container, ConditionalContainer
+from prompt_toolkit.layout.containers import Container
 from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.layout.dimension import Dimension as D
 from prompt_toolkit.layout.margins import ConditionalMargin, ScrollbarMargin
