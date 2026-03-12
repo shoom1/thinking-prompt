@@ -194,6 +194,7 @@ class ThinkingContext:
         get_title: Callable[[], str],
         set_format: Optional[Callable[[ContentFormat], None]] = None,
         rich_theme: Any = None,
+        finish: Optional[Callable[..., str]] = None,
     ) -> None:
         self._content = content
         self._set_title = set_title
@@ -201,6 +202,7 @@ class ThinkingContext:
         self._set_format = set_format
         self._format_set = False
         self._rich_theme = rich_theme
+        self._finish = finish
 
     # -- StreamingContent delegation ------------------------------------------
 
@@ -280,3 +282,31 @@ class ThinkingContext:
     def title(self) -> str:
         """Get the current separator title."""
         return self._get_title()
+
+    # -- Finish control -------------------------------------------------------
+
+    def finish(
+        self,
+        add_to_history: bool = True,
+        echo_to_console: Optional[bool] = None,
+    ) -> str:
+        """Finish this thinking box and remove it from display.
+
+        Args:
+            add_to_history: If True, add content to chat history.
+            echo_to_console: If True, print content to console.
+
+        Returns:
+            The full content that was displayed.
+
+        Raises:
+            RuntimeError: If no finish callback was provided.
+        """
+        if self._finish is None:
+            raise RuntimeError(
+                "No finish callback — use session.finish_thinking() "
+                "or the thinking() context manager instead."
+            )
+        return self._finish(
+            add_to_history=add_to_history, echo_to_console=echo_to_console
+        )

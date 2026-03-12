@@ -19,6 +19,7 @@ from prompt_toolkit.filters import Condition
 from prompt_toolkit.formatted_text import AnyFormattedText, FormattedText
 from prompt_toolkit.layout import (
     BufferControl,
+    DynamicContainer,
     FloatContainer,
     FormattedTextControl,
     HSplit,
@@ -37,7 +38,6 @@ from prompt_toolkit.layout.processors import (
 )
 
 if TYPE_CHECKING:
-    from .thinking import ThinkingBoxControl
     from .history import FormattedTextHistory
 
 
@@ -146,90 +146,9 @@ class ThinkingHeader:
 ThinkingSeparator = ThinkingHeader
 
 
-def create_thinking_box(
-    control: ThinkingBoxControl,
-    max_height: int,
-    separator: ThinkingHeader | None = None,
-) -> ConditionalContainer:
-    """
-    Create the thinking box container.
-
-    The thinking box:
-    - Is visible only when control is active (thinking state)
-    - Has max height when collapsed
-    - Expands to fill available space when expanded
-    - Shows scrollbar when content exceeds visible area
-    - Has animated separator line above
-
-    Args:
-        control: The ThinkingBoxControl instance.
-        max_height: Maximum height when collapsed.
-        separator: Optional ThinkingHeader for animated separator line.
-                  If None, uses default separator.
-
-    Returns:
-        A ConditionalContainer that shows the thinking box.
-    """
-    # Use provided separator or create default
-    if separator is None:
-        separator = ThinkingHeader()
-
-    def is_thinking() -> bool:
-        return control.is_active
-
-    def is_expanded() -> bool:
-        return control.is_expanded
-
-    def get_height() -> D:
-        """Calculate height based on content and expanded state."""
-        if not control.is_active:
-            return D(min=1, max=1)
-
-        if control.is_expanded:
-            # When expanded, use flexible height
-            return D(min=5, preferred=20, max=40)
-        else:
-            # When collapsed, limit to max_height
-            line_count = control.get_line_count()
-            height = min(max(1, line_count), max_height)
-            return D(min=1, max=max_height, preferred=height)
-
-    # Conditions for visibility
-    is_thinking_filter = Condition(is_thinking)
-    is_expanded_filter = Condition(is_expanded)
-
-    # Window with the control directly (it's a FormattedTextControl)
-    thinking_window = Window(
-        content=control,
-        height=get_height,
-        wrap_lines=True,
-        dont_extend_height=True,
-        right_margins=[
-            ConditionalMargin(
-                ScrollbarMargin(display_arrows=True),
-                filter=is_expanded_filter,
-            ),
-        ],
-    )
-
-    # Animated separator line above the thinking box
-    separator_control = FormattedTextControl(
-        text=lambda: separator.get_formatted_text(80)
-    )
-    separator_window = Window(
-        content=separator_control,
-        height=D.exact(1),
-    )
-
-    content = HSplit([
-        ConditionalContainer(separator_window, filter=is_thinking_filter),
-        thinking_window,
-    ])
-
-    return ConditionalContainer(
-        content=content,
-        filter=is_thinking_filter,
-    )
+def create_thinking_area(manager) -> DynamicContainer:
+    """Create a dynamic container that renders active thinking boxes."""
+    return DynamicContainer(lambda: manager.get_container())
 
 
 def create_history_window(
@@ -339,13 +258,12 @@ def create_status_bar(
 def create_layout(
     default_buffer: Buffer,
     message: Callable[[], AnyFormattedText],
-    thinking_control: ThinkingBoxControl,
     max_thinking_height: int,
     history: FormattedTextHistory,
     is_fullscreen: Callable[[], bool],
     get_status_text: Callable[[], AnyFormattedText],
     is_status_bar_enabled: Callable[[], bool],
-    separator: ThinkingHeader | None = None,
+    thinking_manager=None,
     completions_menu_height: int = 5,
 ) -> Layout:
     """
@@ -354,13 +272,12 @@ def create_layout(
     Args:
         default_buffer: The main input buffer.
         message: Callable that returns the prompt message.
-        thinking_control: The ThinkingBoxControl instance.
         max_thinking_height: Maximum height for collapsed thinking box.
         history: The FormattedTextHistory instance.
         is_fullscreen: Callable that returns fullscreen state.
         get_status_text: Callable that returns status bar text.
         is_status_bar_enabled: Callable that returns status bar visibility.
-        separator: Optional ThinkingHeader for animated separator line.
+        thinking_manager: ThinkingBoxManager instance for managing thinking boxes.
         completions_menu_height: Maximum height of the completions dropdown menu.
 
     Returns:
@@ -434,12 +351,8 @@ def create_layout(
         is_visible=is_fullscreen_cond,
     )
 
-    # Thinking box (visible when thinking)
-    thinking_box = create_thinking_box(
-        control=thinking_control,
-        max_height=max_thinking_height,
-        separator=separator,
-    )
+    # Thinking area (visible when thinking)
+    thinking_area = create_thinking_area(thinking_manager)
 
     # Status bar
     status_bar = create_status_bar(
@@ -450,7 +363,7 @@ def create_layout(
     # Build the main layout
     main_layout = HSplit([
         history_window,        # Only visible in full-screen
-        thinking_box,          # Only visible when thinking
+        thinking_area,         # Only visible when thinking
         input_with_separators, # Always visible
         status_bar,            # Status bar at bottom
     ])
