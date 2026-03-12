@@ -118,6 +118,54 @@ class TestThinkingContextNoContent:
         setter.assert_called_once_with("Works")
 
 
+class TestThinkingContextFinish:
+    """Test ThinkingContext.finish() method."""
+
+    def test_finish_calls_callback(self):
+        finish_mock = MagicMock(return_value="content")
+        ctx = ThinkingContext(
+            StreamingContent(),
+            set_title=MagicMock(),
+            get_title=lambda: "",
+            finish=finish_mock,
+        )
+        result = ctx.finish()
+        finish_mock.assert_called_once_with(add_to_history=True, echo_to_console=None)
+        assert result == "content"
+
+    def test_finish_passes_kwargs(self):
+        finish_mock = MagicMock(return_value="content")
+        ctx = ThinkingContext(
+            StreamingContent(),
+            set_title=MagicMock(),
+            get_title=lambda: "",
+            finish=finish_mock,
+        )
+        ctx.finish(add_to_history=False, echo_to_console=True)
+        finish_mock.assert_called_once_with(add_to_history=False, echo_to_console=True)
+
+    def test_finish_raises_without_callback(self):
+        ctx = ThinkingContext(
+            StreamingContent(),
+            set_title=MagicMock(),
+            get_title=lambda: "",
+        )
+        with pytest.raises(RuntimeError, match="No finish callback"):
+            ctx.finish()
+
+    def test_finish_works_without_content(self):
+        """finish() should work even when content is None (low-level API)."""
+        finish_mock = MagicMock(return_value="")
+        ctx = ThinkingContext(
+            None,
+            set_title=MagicMock(),
+            get_title=lambda: "",
+            finish=finish_mock,
+        )
+        ctx.finish()
+        finish_mock.assert_called_once()
+
+
 # =============================================================================
 # Session integration tests
 # =============================================================================
@@ -144,14 +192,14 @@ class TestSessionThinkingTitle:
 
     def test_start_thinking_sets_title(self):
         session = self._make_session()
-        session.start_thinking(lambda: "", title="Processing")
-        assert session._thinking_separator.text == "Processing"
+        ctx = session.start_thinking(lambda: "", title="Processing")
+        assert ctx.title == "Processing"
         session.finish_thinking(add_to_history=False, echo_to_console=False)
 
     def test_start_thinking_no_title_keeps_default(self):
         session = self._make_session()
-        session.start_thinking(lambda: "")
-        assert session._thinking_separator.text == "Thinking"
+        ctx = session.start_thinking(lambda: "")
+        assert ctx.title == "Thinking"  # default
         session.finish_thinking(add_to_history=False, echo_to_console=False)
 
     def test_start_thinking_returns_thinking_context(self):
@@ -160,18 +208,11 @@ class TestSessionThinkingTitle:
         assert isinstance(ctx, ThinkingContext)
         session.finish_thinking(add_to_history=False, echo_to_console=False)
 
-    def test_finish_thinking_resets_title(self):
-        session = self._make_session()
-        session.start_thinking(lambda: "", title="Custom")
-        assert session._thinking_separator.text == "Custom"
-        session.finish_thinking(add_to_history=False, echo_to_console=False)
-        assert session._thinking_separator.text == "Thinking"
-
     def test_set_title_via_context(self):
         session = self._make_session()
         ctx = session.start_thinking(lambda: "")
         ctx.set_title("Updated")
-        assert session._thinking_separator.text == "Updated"
+        assert ctx.title == "Updated"
         session.finish_thinking(add_to_history=False, echo_to_console=False)
 
     def test_title_property_via_context(self):
@@ -180,11 +221,10 @@ class TestSessionThinkingTitle:
         assert ctx.title == "Hello"
         session.finish_thinking(add_to_history=False, echo_to_console=False)
 
-    def test_no_separator_no_error(self):
-        """Session without app_info should not error on title operations."""
+    def test_no_title_no_error(self):
+        """Session without title should use default fallback."""
         session = self._make_session_no_appinfo()
-        ctx = session.start_thinking(lambda: "", title="Ignored")
-        ctx.set_title("Also Ignored")
+        ctx = session.start_thinking(lambda: "")
         assert ctx.title == "Thinking"  # default fallback
         session.finish_thinking(add_to_history=False, echo_to_console=False)
 
@@ -192,21 +232,19 @@ class TestSessionThinkingTitle:
     async def test_thinking_context_manager_title(self):
         session = self._make_session()
         async with session.thinking(title="Working", add_to_history=False, echo_to_console=False) as ctx:
-            assert session._thinking_separator.text == "Working"
+            assert ctx.title == "Working"
             ctx.set_title("Almost Done")
-            assert session._thinking_separator.text == "Almost Done"
-        # After exit, title should be reset
-        assert session._thinking_separator.text == "Thinking"
+            assert ctx.title == "Almost Done"
 
     @pytest.mark.asyncio
     async def test_thinking_context_manager_resets_on_exception(self):
         session = self._make_session()
         with pytest.raises(ValueError):
             async with session.thinking(title="Crashing", add_to_history=False, echo_to_console=False) as ctx:
-                assert session._thinking_separator.text == "Crashing"
+                assert ctx.title == "Crashing"
                 raise ValueError("boom")
-        # Title should still be reset
-        assert session._thinking_separator.text == "Thinking"
+        # After exception, the box should be removed
+        assert not session._manager.has_active_boxes
 
     @pytest.mark.asyncio
     async def test_thinking_context_manager_yields_thinking_context(self):
@@ -380,6 +418,9 @@ class TestThinkingContextRichSessionIntegration:
         """append_rich should auto-switch thinking control to ansi format."""
         session = self._make_session()
         async with session.thinking(add_to_history=False, echo_to_console=False) as ctx:
-            assert session._thinking_control.content_format == "plain"
+            # Verify through the manager's box
+            boxes = session._manager.get_sorted_boxes()
+            assert len(boxes) == 1
+            assert boxes[0].control.content_format == "plain"
             ctx.append_rich("[bold]text[/bold]")
-            assert session._thinking_control.content_format == "ansi"
+            assert boxes[0].control.content_format == "ansi"

@@ -34,12 +34,12 @@ from prompt_toolkit.enums import DEFAULT_BUFFER, EditingMode
 from prompt_toolkit.filters import Condition, has_focus
 from prompt_toolkit.formatted_text import AnyFormattedText, FormattedText
 from prompt_toolkit.history import History, InMemoryHistory
-from prompt_toolkit.key_binding import KeyBindings, merge_key_bindings
+from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.key_binding.key_processor import KeyPressEvent
 
-from .layout import create_layout, ThinkingSeparator
+from .layout import create_layout
 from .history import FormattedTextHistory
-from .thinking import ThinkingBoxControl
+from .manager import ThinkingBoxManager
 from .styles import ThinkingPromptStyles, DEFAULT_STYLES
 from .app_info import AppInfo
 from .types import StreamingContent, ThinkingContext
@@ -158,11 +158,9 @@ class ThinkingPromptSession:
         self._fullscreen_enabled = app_info.fullscreen_enabled if app_info else False
         self._echo_thinking = app_info.echo_thinking if app_info else True
 
-        # Thinking box control (created once, reused)
-        self._thinking_control = ThinkingBoxControl(
-            max_collapsed_lines=max_thinking_height,
-            style="class:thinking-box",
-            expand_key=self._expand_key,
+        # Thinking box manager (manages multiple thinking boxes)
+        self._manager = ThinkingBoxManager(
+            default_max_lines=max_thinking_height,
         )
 
         # Input history (for up/down arrow)
@@ -234,30 +232,26 @@ class ThinkingPromptSession:
 
     def _create_session_layout(self):
         """Create the layout using the layout module."""
-        # Store default thinking text for reset after finish_thinking
         self._default_thinking_text = (
             self._app_info.thinking_text if self._app_info else "Thinking"
         )
-
-        # Create separator from app_info config
-        self._thinking_separator: Optional[ThinkingSeparator] = None
+        # Store header config from app_info for per-box headers
+        self._header_config = {}
         if self._app_info:
-            self._thinking_separator = ThinkingSeparator(
-                text=self._app_info.thinking_text,
-                frames=self._app_info.thinking_animation,
-                position=self._app_info.thinking_animation_position,
-            )
+            self._header_config = {
+                "frames": self._app_info.thinking_animation,
+                "position": self._app_info.thinking_animation_position,
+            }
 
         return create_layout(
             default_buffer=self.default_buffer,
             message=lambda: self._message,
-            thinking_control=self._thinking_control,
             max_thinking_height=self._max_thinking_height,
             history=self._display.history,
             is_fullscreen=lambda: self._is_fullscreen,
             get_status_text=lambda: self._status_text,
             is_status_bar_enabled=lambda: self._enable_status_bar,
-            separator=self._thinking_separator,
+            thinking_manager=self._manager,
             completions_menu_height=self._completions_menu_height,
         )
 
@@ -281,13 +275,12 @@ class ThinkingPromptSession:
         """Create key bindings for the session."""
         kb = KeyBindings()
 
-        # Cancel/interrupt
+        # Cancel/interrupt — finish all boxes instead of single control
         @kb.add("c-c")
         def cancel(event: KeyPressEvent) -> None:
             """Cancel current operation or exit."""
-            if self._thinking_control.is_active:
-                # Interrupt thinking - don't add to history
-                self._thinking_control.finish()
+            if self._manager.has_active_boxes:
+                self._manager.finish_all()
                 self._invalidate()
                 if self._pending_input and not self._pending_input.done():
                     self._pending_input.cancel()
@@ -307,10 +300,18 @@ class ThinkingPromptSession:
             """Accept input."""
             self.default_buffer.validate_and_handle()
 
-        # Merge with thinking box key bindings (expand/collapse)
-        thinking_kb = self._thinking_control.get_key_bindings(
-            is_fullscreen=lambda: self._is_fullscreen
-        )
+        # Expand/collapse — toggle all via manager
+        def can_toggle() -> bool:
+            if not self._manager.can_toggle():
+                return False
+            if self._is_fullscreen:
+                return False
+            return True
+
+        @kb.add(self._expand_key, filter=Condition(can_toggle))
+        def toggle_expand(event: KeyPressEvent) -> None:
+            self._manager.toggle_all()
+            self._invalidate()
 
         # Fullscreen toggle key binding (only when enabled)
         if self._fullscreen_enabled:
@@ -320,12 +321,11 @@ class ThinkingPromptSession:
                 if self._is_fullscreen:
                     self.switch_to_prompt()
                 else:
-                    # Auto-expand thinking box when entering fullscreen
-                    if self._thinking_control.is_active:
-                        self._thinking_control.expand()
+                    if self._manager.has_active_boxes:
+                        self._manager.expand_all()
                     self.switch_to_fullscreen()
 
-        return merge_key_bindings([kb, thinking_kb])
+        return kb
 
     def _invalidate(self) -> None:
         """Trigger UI refresh and update full_screen state."""
@@ -350,30 +350,16 @@ class ThinkingPromptSession:
         self._display.welcome(content)
 
     # =========================================================================
-    # Thinking Title Helpers
-    # =========================================================================
-
-    def _set_thinking_title(self, text: str) -> None:
-        """Set thinking separator title."""
-        if self._thinking_separator:
-            self._thinking_separator.text = str(text)
-            self._invalidate()
-
-    def _get_thinking_title(self) -> str:
-        """Get current thinking separator title."""
-        if self._thinking_separator:
-            return self._thinking_separator.text
-        return self._default_thinking_text
-
-    # =========================================================================
     # Thinking API
     # =========================================================================
 
     def start_thinking(
         self,
-        content_callback: Callable[[], str],
+        content_callback: Optional[Callable[[], str]] = None,
         *,
         title: Optional[str] = None,
+        order: int = 0,
+        max_lines: Optional[int] = None,
         content_format: "ContentFormat" = "plain",
     ) -> ThinkingContext:
         """
@@ -386,11 +372,14 @@ class ThinkingPromptSession:
 
         Args:
             content_callback: Callable that returns the current thinking content.
+                If None, a StreamingContent is created internally.
             title: Optional title to set on the thinking separator.
+            order: Sort key for multiple boxes (higher = closer to prompt).
+            max_lines: Max collapsed lines (overrides session default).
             content_format: Format for rendering ("plain" or "ansi").
 
         Returns:
-            ThinkingContext for title control (content is None in low-level API).
+            ThinkingContext for title control and content management.
 
         Example:
             content = ""
@@ -408,16 +397,52 @@ class ThinkingPromptSession:
 
             session.finish_thinking()
         """
-        if title is not None:
-            self._set_thinking_title(title)
-        self._thinking_control.start(content_callback, content_format=content_format)
+        # Always provide a title so a header is created for every box
+        effective_title = title if title is not None else self._default_thinking_text
+        box = self._manager.create_box(
+            content_callback=content_callback,
+            title=effective_title,
+            order=order,
+            max_lines=max_lines,
+            content_format=content_format,
+        )
+
+        # Apply header config from app_info
+        if box.header and self._header_config:
+            if self._header_config.get("frames") is not None:
+                box.header.frames = self._header_config["frames"]
+            if self._header_config.get("position") is not None:
+                box.header.position = self._header_config["position"]
+
         self._invalidate()
+
+        # Build finish callback for this specific box
+        def _finish_box(
+            add_to_history: bool = True,
+            echo_to_console: Optional[bool] = None,
+        ) -> str:
+            full_content, _, content_format_val = self._manager.remove_box(box.box_id)
+            should_echo = (
+                echo_to_console if echo_to_console is not None else self._echo_thinking
+            )
+            if full_content.strip():
+                self._display.thinking(
+                    full_content,
+                    truncate_lines=box.control.max_collapsed_lines,
+                    add_to_history=add_to_history,
+                    echo_to_console=should_echo,
+                    content_format=content_format_val,
+                )
+            self._invalidate()
+            return full_content
+
         return ThinkingContext(
-            content=None,  # Low-level API: caller manages their own content
-            set_title=self._set_thinking_title,
-            get_title=self._get_thinking_title,
-            set_format=self._thinking_control.set_content_format,
+            content=box.streaming_content,
+            set_title=lambda t: setattr(box.header, 'text', t) if box.header else None,
+            get_title=lambda: box.header.text if box.header else self._default_thinking_text,
+            set_format=box.control.set_content_format,
             rich_theme=self._display.rich_theme,
+            finish=_finish_box,
         )
 
     def finish_thinking(
@@ -426,7 +451,7 @@ class ThinkingPromptSession:
         echo_to_console: Optional[bool] = None,
     ) -> str:
         """
-        Complete the thinking phase.
+        Complete the thinking phase (finishes all active boxes).
 
         Console gets collapsed/truncated version (for prompt mode).
         History gets full content (for fullscreen mode).
@@ -439,36 +464,34 @@ class ThinkingPromptSession:
         Returns:
             The full thinking content that was displayed.
         """
-        if not self._thinking_control.is_active:
+        if not self._manager.has_active_boxes:
             return ""
 
-        # Finish thinking and get content + format in one call
-        full_content, _, content_format = self._thinking_control.finish()
+        should_echo = (
+            echo_to_console if echo_to_console is not None else self._echo_thinking
+        )
 
-        # Reset separator title to default
-        if self._thinking_separator:
-            self._thinking_separator.text = self._default_thinking_text
+        results = self._manager.finish_all()
+        all_content = []
 
-        # Resolve echo_to_console: None means use default from AppInfo
-        should_echo = echo_to_console if echo_to_console is not None else self._echo_thinking
-
-        # Output thinking content (truncated to console, full to history)
-        if full_content.strip():
-            self._display.thinking(
-                full_content,
-                truncate_lines=self._max_thinking_height,
-                add_to_history=add_to_history,
-                echo_to_console=should_echo,
-                content_format=content_format,
-            )
+        for box_id, full_content, _, content_format_val in results:
+            if full_content.strip():
+                self._display.thinking(
+                    full_content,
+                    truncate_lines=self._max_thinking_height,
+                    add_to_history=add_to_history,
+                    echo_to_console=should_echo,
+                    content_format=content_format_val,
+                )
+                all_content.append(full_content)
 
         self._invalidate()
-        return full_content
+        return "\n".join(all_content)
 
     @property
     def is_thinking(self) -> bool:
         """Check if currently in thinking state."""
-        return self._thinking_control.is_active
+        return self._manager.has_active_boxes
 
     @asynccontextmanager
     async def thinking(
@@ -478,6 +501,8 @@ class ThinkingPromptSession:
         content_format: "ContentFormat" = "plain",
         add_to_history: bool = True,
         echo_to_console: Optional[bool] = None,
+        order: int = 0,
+        max_lines: Optional[int] = None,
     ) -> AsyncIterator[ThinkingContext]:
         """
         Context manager for thinking operations.
@@ -493,6 +518,8 @@ class ThinkingPromptSession:
                 when exiting the context.
             echo_to_console: If True, print thinking content to console.
                             If None (default), uses AppInfo.echo_thinking setting.
+            order: Sort key for multiple boxes (higher = closer to prompt).
+            max_lines: Max collapsed lines (overrides session default).
 
         Yields:
             ThinkingContext: Content accumulator with title control.
@@ -521,17 +548,18 @@ class ThinkingPromptSession:
         Note:
             If an exception occurs within the context, thinking is still
             finished properly but content is not added to history.
-            The separator title is reset to default on exit.
         """
-        content = StreamingContent()
-        ctx = self.start_thinking(content.get_content, title=title, content_format=content_format)
-        ctx._content = content
+        ctx = self.start_thinking(
+            title=title,
+            content_format=content_format,
+            order=order,
+            max_lines=max_lines,
+        )
         try:
             yield ctx
-            self.finish_thinking(add_to_history=add_to_history, echo_to_console=echo_to_console)
+            ctx.finish(add_to_history=add_to_history, echo_to_console=echo_to_console)
         except BaseException:
-            # Finish thinking without adding to history or echoing on error
-            self.finish_thinking(add_to_history=False, echo_to_console=False)
+            ctx.finish(add_to_history=False, echo_to_console=False)
             raise
 
     # =========================================================================
