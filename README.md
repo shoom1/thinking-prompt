@@ -96,13 +96,13 @@ async with session.thinking() as content:
 ```python
 # Start with a content callback
 chunks = []
-session.start_thinking(lambda: ''.join(chunks))
+ctx = session.start_thinking(lambda: ''.join(chunks))
 
 chunks.append("Processing...\n")
 await asyncio.sleep(0.5)
 
-# Finish and optionally echo to console
-session.finish_thinking(add_to_history=True, echo_to_console=True)
+# Finish this specific box and optionally echo to console
+ctx.finish(add_to_history=True, echo_to_console=True)
 ```
 
 ### Rich/ANSI Content in Thinking Box

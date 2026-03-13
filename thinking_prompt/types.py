@@ -90,12 +90,12 @@ class StreamingContent:
 
     Example:
         content = StreamingContent()
-        session.start_thinking(content.get_content)
+        ctx = session.start_thinking(content.get_content)
 
         async for chunk in llm_stream():
             content.append(chunk)
 
-        session.finish_thinking()
+        ctx.finish()
     """
 
     def __init__(self) -> None:
@@ -304,8 +304,8 @@ class ThinkingContext:
         """
         if self._finish is None:
             raise RuntimeError(
-                "No finish callback — use session.finish_thinking() "
-                "or the thinking() context manager instead."
+                "No finish callback — use the thinking() context "
+                "manager for automatic lifecycle management."
             )
         return self._finish(
             add_to_history=add_to_history, echo_to_console=echo_to_console

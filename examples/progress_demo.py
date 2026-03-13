@@ -7,7 +7,7 @@ updates dynamically - the callback returns different content each time
 it's called.
 
 Press Ctrl+T during thinking to expand the thinking box.
-The thinking content is added to history when finish_thinking() is called.
+The thinking content is added to history when ctx.finish() is called.
 
 Run:
     python examples/progress_demo.py
@@ -48,7 +48,7 @@ async def main():
             )
 
         # Start thinking mode
-        session.start_thinking(get_content)
+        ctx = session.start_thinking(get_content)
 
         # Simulate work with progress updates
         steps = [
@@ -70,7 +70,7 @@ async def main():
         await asyncio.sleep(0.3)
 
         # Finish thinking - content is added to chat history
-        session.finish_thinking()
+        ctx.finish()
 
         # Add response to chat history
         session.add_response(f"Processed: {text}")

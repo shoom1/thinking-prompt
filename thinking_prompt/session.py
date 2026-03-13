@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
+import warnings
 from contextlib import asynccontextmanager
 from typing import (
     TYPE_CHECKING,
@@ -141,6 +142,7 @@ class ThinkingPromptSession:
         # Fullscreen state (thread-safe)
         self._is_fullscreen: bool = False
         self._fullscreen_lock = threading.RLock()
+        self._pre_fullscreen_expanded: Optional[bool] = None
 
         # Convert styles dataclass to prompt_toolkit Style
         self._style = self._styles.to_style()
@@ -322,6 +324,7 @@ class ThinkingPromptSession:
                     self.switch_to_prompt()
                 else:
                     if self._manager.has_active_boxes:
+                        self._pre_fullscreen_expanded = self._manager._expanded
                         self._manager.expand_all()
                     self.switch_to_fullscreen()
 
@@ -395,7 +398,7 @@ class ThinkingPromptSession:
             ctx.set_title("Finishing")
             content += "Done!\\n"
 
-            session.finish_thinking()
+            ctx.finish()
         """
         # Always provide a title so a header is created for every box
         effective_title = title if title is not None else self._default_thinking_text
@@ -453,6 +456,11 @@ class ThinkingPromptSession:
         """
         Complete the thinking phase (finishes all active boxes).
 
+        .. deprecated::
+            Use ``ThinkingContext.finish()`` on the context returned by
+            ``start_thinking()``, or use the ``thinking()`` async context
+            manager for automatic per-box lifecycle management.
+
         Console gets collapsed/truncated version (for prompt mode).
         History gets full content (for fullscreen mode).
 
@@ -464,6 +472,13 @@ class ThinkingPromptSession:
         Returns:
             The full thinking content that was displayed.
         """
+        warnings.warn(
+            "finish_thinking() is deprecated. Use ctx.finish() on the "
+            "ThinkingContext returned by start_thinking(), or use the "
+            "thinking() async context manager instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         if not self._manager.has_active_boxes:
             return ""
 
@@ -761,6 +776,11 @@ class ThinkingPromptSession:
         with self._fullscreen_lock:
             if self._is_fullscreen:
                 self._is_fullscreen = False
+                # Restore pre-fullscreen expansion state
+                if self._pre_fullscreen_expanded is not None:
+                    if not self._pre_fullscreen_expanded:
+                        self._manager.collapse_all()
+                    self._pre_fullscreen_expanded = None
                 self._display.flush_pending()  # Output cached content to console
                 self._invalidate()
 

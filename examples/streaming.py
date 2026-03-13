@@ -46,7 +46,7 @@ async def main():
             return ''.join(chunks)
 
         # Start thinking mode
-        session.start_thinking(get_content)
+        ctx = session.start_thinking(get_content)
 
         # Start with a header
         chunks.append(f"Thinking about: {question[:50]}...\n\n")
@@ -64,7 +64,7 @@ async def main():
         await asyncio.sleep(0.3)
 
         # Finish and persist to console
-        session.finish_thinking()
+        ctx.finish()
 
         # Add to chat history
         session.add_response(response)
