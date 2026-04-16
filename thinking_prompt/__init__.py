@@ -62,7 +62,7 @@ from .settings_dialog import (
 from .layout import ThinkingHeader
 from .display import _renderable_to_ansi as rich_to_ansi
 
-__version__ = "0.2.5"
+__version__ = "0.3.0"
 
 __all__ = [
     # Main class

@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-04-16
+
+### Added
+
+- **Multiple thinking boxes** — `start_thinking()` can be called multiple times to create independent, concurrent boxes
+- `ThinkingContext.finish()` method for finishing individual boxes (per-box lifecycle control)
+- Box ordering via `order` parameter (higher values position closer to the prompt)
+- Per-box `max_lines` configuration
+- `ThinkingBoxManager` for managing collections of thinking boxes with thread-safe operations
+- `ThinkingHeader` class (renamed from `ThinkingSeparator`) — exported from package
+- `demo_multi_box.py` example showing concurrent thinking boxes with task list pattern
+
+### Changed
+
+- `start_thinking()` now returns a `ThinkingContext` with per-box `finish()`, `set_title()`, and content methods
+- `start_thinking()` accepts optional `order` and `max_lines` parameters
+- `thinking()` context manager accepts `order` and `max_lines` parameters
+- `is_thinking` returns True if any box is active
+- Ctrl+T expands/collapses all boxes together
+- `/tasks` command in demo_showcase now uses multi-box pattern
+
+### Deprecated
+
+- `finish_thinking()` — use `ctx.finish()` on the `ThinkingContext` returned by `start_thinking()`, or use the `thinking()` async context manager
+
+### Fixed
+
+- Fullscreen exit now restores pre-fullscreen expansion state (boxes that were collapsed before entering fullscreen are collapsed again on exit)
+
 ## [0.2.5] - 2026-03-08
 
 ### Added
