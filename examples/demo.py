@@ -35,7 +35,7 @@ async def main():
             return ''.join(chunks)
 
         # Start thinking mode
-        session.start_thinking(get_content)
+        ctx = session.start_thinking(get_content)
 
         # Update thinking box in real-time
         chunks.append("Analyzing your input...\n")
@@ -69,7 +69,7 @@ async def main():
         await asyncio.sleep(0.3)
 
         # Finish - content is printed to console (if not in fullscreen)
-        session.finish_thinking()
+        ctx.finish()
 
         # Add response to chat history
         session.add_response(response)

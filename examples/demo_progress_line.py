@@ -94,7 +94,7 @@ async def main():
             return
 
         content = ProgressContent()
-        session.start_thinking(content.get_content)
+        ctx = session.start_thinking(content.get_content)
 
         try:
             # Phase 1: Setup
@@ -150,7 +150,7 @@ async def main():
             content.add_line(f"Analysis complete for: {user_input[:40]}{'...' if len(user_input) > 40 else ''}")
 
         finally:
-            session.finish_thinking()
+            ctx.finish()
 
         # Show result
         session.add_success(f"Processed: {user_input}")

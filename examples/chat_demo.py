@@ -39,7 +39,7 @@ async def main():
             return ''.join(chunks)
 
         # Start thinking mode
-        session.start_thinking(get_content)
+        ctx = session.start_thinking(get_content)
 
         # Phase 1: Initial analysis
         chunks.append("Analyzing your input...\n")
@@ -70,7 +70,7 @@ async def main():
         await asyncio.sleep(0.3)
 
         # Finish thinking - adds thinking content to history
-        session.finish_thinking()
+        ctx.finish()
 
         # Add the actual response (separate from thinking)
         response = f"I understood your message: '{user_input[:50]}{'...' if len(user_input) > 50 else ''}'"

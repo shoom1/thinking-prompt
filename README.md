@@ -7,9 +7,10 @@ A prompt_toolkit extension that adds a "thinking box" above the prompt for displ
 ## Features
 
 - **Thinking Box**: A collapsible area above the prompt that shows processing/thinking content
+- **Multiple Thinking Boxes**: Run multiple independent boxes concurrently with ordering and per-box lifecycle control
 - **Real-time Streaming**: Content updates in real-time as your callback returns new content
 - **Fullscreen Mode**: Optional fullscreen mode with chat history (disabled by default)
-- **Animated Separator**: Configurable animated indicator showing thinking is in progress
+- **Animated Header**: Configurable animated indicator showing thinking is in progress
 - **Rich Output**: Support for markdown rendering and syntax-highlighted code blocks
 - **Rich/ANSI in Thinking Box**: Use Rich markup for styled, in-place-updating content inside the thinking box
 - **Customizable Styles**: Full control over colors and styling
@@ -58,7 +59,7 @@ if __name__ == "__main__":
 
 | Key | Action |
 |-----|--------|
-| Ctrl+T | Expand/collapse thinking box (in prompt mode) |
+| Ctrl+T | Expand/collapse all thinking boxes (in prompt mode) |
 | Ctrl+E | Toggle fullscreen mode (when enabled) |
 | Ctrl+C | Cancel current operation or exit |
 | Ctrl+D | Exit application |
@@ -85,10 +86,10 @@ session = ThinkingPromptSession(
 
 **Context Manager (recommended):**
 ```python
-async with session.thinking() as content:
-    content.append("Step 1...\n")
+async with session.thinking(title="Processing") as ctx:
+    ctx.append("Step 1...\n")
     await asyncio.sleep(0.5)
-    content.append("Step 2...\n")
+    ctx.append("Step 2...\n")
 # Automatically finishes when exiting context
 ```
 
@@ -96,13 +97,46 @@ async with session.thinking() as content:
 ```python
 # Start with a content callback
 chunks = []
-session.start_thinking(lambda: ''.join(chunks))
+ctx = session.start_thinking(lambda: ''.join(chunks))
 
 chunks.append("Processing...\n")
 await asyncio.sleep(0.5)
 
-# Finish and optionally echo to console
-session.finish_thinking(add_to_history=True, echo_to_console=True)
+# Finish this specific box and optionally echo to console
+ctx.finish(add_to_history=True, echo_to_console=True)
+```
+
+### Multiple Thinking Boxes
+
+Run multiple boxes concurrently with independent lifecycles. Use `order` to control positioning (higher = closer to prompt):
+
+```python
+# Task list pinned near the prompt
+tasks = session.start_thinking(title="Tasks", order=100, max_lines=10)
+tasks.append_rich("[dim]  ○ Download[/dim]\n")
+tasks.append_rich("[dim]  ○ Process[/dim]\n")
+tasks.append_rich("[dim]  ○ Report[/dim]\n")
+
+# Step 1: separate detail box appears above the task list
+tasks.set_line_rich(0, "[bold cyan]  ⟳ Downloading…[/bold cyan]")
+dl = session.start_thinking(title="Download", max_lines=2)
+for pct in range(0, 101, 20):
+    dl.set_line(0, f"  {pct}% complete")
+    await asyncio.sleep(0.3)
+dl.finish(echo_to_console=False, add_to_history=False)
+tasks.set_line_rich(0, "[green]  ✓ Download[/green]")
+
+# Step 2: another detail box
+tasks.set_line_rich(1, "[bold cyan]  ⟳ Processing…[/bold cyan]")
+proc = session.start_thinking(title="Process", max_lines=2)
+for i in range(5):
+    proc.set_line(0, f"  Batch {i+1}/5...")
+    await asyncio.sleep(0.4)
+proc.finish(echo_to_console=False, add_to_history=False)
+tasks.set_line_rich(1, "[green]  ✓ Process[/green]")
+
+# Finish task list
+tasks.finish(echo_to_console=False, add_to_history=False)
 ```
 
 ### Rich/ANSI Content in Thinking Box
@@ -127,7 +161,7 @@ async with session.thinking(title="Processing") as ctx:
 
 ### Dynamic Titles & In-Place Updates
 
-Use `set_title()` to change the thinking box title and `set_line()` to update lines in place:
+Use `set_title()` to change the thinking header and `set_line()` to update lines in place:
 
 ```python
 async with session.thinking(title="Downloading") as ctx:
@@ -272,7 +306,7 @@ app_info = AppInfo(
     echo_thinking=True,          # Echo thinking to console after completion
 
     # Thinking animation
-    thinking_text="Thinking",    # Text in separator
+    thinking_text="Thinking",    # Text in header
     thinking_animation=("⠋", "⠙", "⠹", ...),  # Animation frames
     thinking_animation_position="before",      # "before" or "after" text
 )
@@ -287,12 +321,13 @@ See the `examples/` directory for complete demos:
 - `streaming.py` - Character-by-character streaming
 - `progress_demo.py` - Progress bar with callback
 - `demo_progress_line.py` - In-place progress updates
+- `demo_multi_box.py` - Multiple concurrent thinking boxes with task list
 - `demo_messages_during_thinking.py` - Output messages during thinking
 - `demo_animated_separator.py` - Different animation configurations
+- `demo_task_progress.py` - Rich-styled task progress with in-place status updates
 - `dialog_test.py` - Dialog system demo (yes/no, message, choice, dropdown)
 - `settings_dialog_demo.py` - Settings dialog with all control types
 - `demo_showcase.py` - Feature showcase for demos and screenshots
-- `demo_task_progress.py` - Rich-styled task progress with in-place status updates
 - `completer_demo.py` - Slash-command autocompletion (like Claude Code)
 
 ## License

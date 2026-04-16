@@ -32,7 +32,7 @@ async def main():
             return ''.join(chunks)
 
         # Start thinking mode with content callback
-        session.start_thinking(get_content)
+        ctx = session.start_thinking(get_content)
 
         # Update thinking box with streaming content
         chunks.append("Processing your input...\n")
@@ -48,7 +48,7 @@ async def main():
         await asyncio.sleep(0.5)
 
         # Finish thinking - content moves to console
-        session.finish_thinking()
+        ctx.finish()
 
         # Add response to chat history
         session.add_response(f"You entered {len(words)} word(s): {text}")

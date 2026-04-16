@@ -50,7 +50,7 @@ class SlashCommandCompleter(Completer):
         "info": "Message dialog demo",
         "action": "Choice dialog demo",
         "theme": "Dropdown dialog demo",
-        "tasks": "Rich-styled task progress demo",
+        "tasks": "Multi-box task progress demo",
         "settings": "Settings dialog demo",
         "clear": "Clear the screen",
         "quit": "Exit the application",
@@ -109,7 +109,7 @@ def create_welcome_message():
 async def main():
     app_info = AppInfo(
         name="ThinkingBox",
-        version="0.2.5",
+        version="0.3.0",
         welcome_message=create_welcome_message,
         thinking_text="Processing",
         thinking_animation=("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"),
@@ -152,7 +152,7 @@ async def main():
                 "- **/info** - Message dialog demo\n"
                 "- **/action** - Choice dialog demo\n"
                 "- **/theme** - Dropdown dialog demo\n"
-                "- **/tasks** - Rich-styled task progress demo\n"
+                "- **/tasks** - Multi-box task progress demo\n"
                 "- **/settings** - Settings dialog demo\n"
                 "- **/clear** - Clear the screen\n"
                 "- **/quit** - Exit the application\n"
@@ -214,29 +214,52 @@ async def main():
             return
 
         if cmd == "tasks":
-            # Dedicated demo: ctx.append_rich() and ctx.set_line_rich()
-            steps = [
-                ("Scanning files", 0.6),
-                ("Parsing AST", 0.8),
-                ("Running checks", 1.0),
-                ("Generating report", 0.5),
-            ]
+            # Multi-box demo: task list + per-step detail boxes
+            tasks = session.start_thinking(title="Tasks", order=100, max_lines=10)
+            tasks.append_rich("[dim]  ○ Scanning files[/dim]\n")
+            tasks.append_rich("[dim]  ○ Parsing AST[/dim]\n")
+            tasks.append_rich("[dim]  ○ Running checks[/dim]\n")
+            tasks.append_rich("[dim]  ○ Generating report[/dim]\n")
 
-            async with session.thinking(title="Processing") as ctx:
-                # Render all steps as dim/pending
-                for label, _ in steps:
-                    ctx.append_rich(f"[dim]  ○ {label}[/dim]\n")
+            # Step 1: Scan
+            tasks.set_line_rich(0, "[bold cyan]  ⟳ Scanning files…[/bold cyan]")
+            scan = session.start_thinking(title="Scan", max_lines=2)
+            for pct in range(0, 101, 25):
+                scan.set_line(0, f"  {pct}% scanned")
+                await asyncio.sleep(0.3)
+            scan.finish(echo_to_console=False, add_to_history=False)
+            tasks.set_line_rich(0, "[green]  ✓ Scanning files[/green]")
 
-                # Process each step
-                for i, (label, duration) in enumerate(steps):
-                    ctx.set_line_rich(i, f"[bold cyan]  ⟳ {label}…[/bold cyan]")
-                    ctx.set_title(label)
-                    await asyncio.sleep(duration)
-                    ctx.set_line_rich(i, f"[green]  ✓ {label}[/green]")
+            # Step 2: Parse
+            tasks.set_line_rich(1, "[bold cyan]  ⟳ Parsing AST…[/bold cyan]")
+            parse = session.start_thinking(title="Parse", max_lines=2)
+            for i in range(4):
+                parse.set_line(0, f"  Parsing module {i+1}/4...")
+                await asyncio.sleep(0.4)
+            parse.finish(echo_to_console=False, add_to_history=False)
+            tasks.set_line_rich(1, "[green]  ✓ Parsing AST[/green]")
+
+            # Step 3: Checks
+            tasks.set_line_rich(2, "[bold cyan]  ⟳ Running checks…[/bold cyan]")
+            checks = session.start_thinking(title="Checks", max_lines=2)
+            for name in ["lint", "types", "security"]:
+                checks.set_line(0, f"  Running {name}...")
+                await asyncio.sleep(0.4)
+            checks.finish(echo_to_console=False, add_to_history=False)
+            tasks.set_line_rich(2, "[green]  ✓ Running checks[/green]")
+
+            # Step 4: Report
+            tasks.set_line_rich(3, "[bold cyan]  ⟳ Generating report…[/bold cyan]")
+            await asyncio.sleep(0.5)
+            tasks.set_line_rich(3, "[green]  ✓ Generating report[/green]")
+
+            await asyncio.sleep(0.5)
+            tasks.finish(echo_to_console=False, add_to_history=False)
 
             session.add_response(
-                "**Demo complete** — used `ctx.append_rich()` for Rich-styled pending items "
-                "and `ctx.set_line_rich()` for colored in-place updates.",
+                "**Demo complete** — used multiple thinking boxes: a task list "
+                "with `order=100` pinned near the prompt, plus per-step detail boxes "
+                "that appear and disappear as each step runs.",
                 markdown=True,
             )
             return
