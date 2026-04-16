@@ -194,39 +194,39 @@ class TestSessionThinkingTitle:
         session = self._make_session()
         ctx = session.start_thinking(lambda: "", title="Processing")
         assert ctx.title == "Processing"
-        session.finish_thinking(add_to_history=False, echo_to_console=False)
+        ctx.finish(add_to_history=False, echo_to_console=False)
 
     def test_start_thinking_no_title_keeps_default(self):
         session = self._make_session()
         ctx = session.start_thinking(lambda: "")
         assert ctx.title == "Thinking"  # default
-        session.finish_thinking(add_to_history=False, echo_to_console=False)
+        ctx.finish(add_to_history=False, echo_to_console=False)
 
     def test_start_thinking_returns_thinking_context(self):
         session = self._make_session()
         ctx = session.start_thinking(lambda: "")
         assert isinstance(ctx, ThinkingContext)
-        session.finish_thinking(add_to_history=False, echo_to_console=False)
+        ctx.finish(add_to_history=False, echo_to_console=False)
 
     def test_set_title_via_context(self):
         session = self._make_session()
         ctx = session.start_thinking(lambda: "")
         ctx.set_title("Updated")
         assert ctx.title == "Updated"
-        session.finish_thinking(add_to_history=False, echo_to_console=False)
+        ctx.finish(add_to_history=False, echo_to_console=False)
 
     def test_title_property_via_context(self):
         session = self._make_session()
         ctx = session.start_thinking(lambda: "", title="Hello")
         assert ctx.title == "Hello"
-        session.finish_thinking(add_to_history=False, echo_to_console=False)
+        ctx.finish(add_to_history=False, echo_to_console=False)
 
     def test_no_title_no_error(self):
         """Session without title should use default fallback."""
         session = self._make_session_no_appinfo()
         ctx = session.start_thinking(lambda: "")
         assert ctx.title == "Thinking"  # default fallback
-        session.finish_thinking(add_to_history=False, echo_to_console=False)
+        ctx.finish(add_to_history=False, echo_to_console=False)
 
     @pytest.mark.asyncio
     async def test_thinking_context_manager_title(self):

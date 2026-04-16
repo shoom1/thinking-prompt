@@ -6,6 +6,8 @@ for creating, managing, and finishing multiple thinking boxes.
 """
 from __future__ import annotations
 
+import warnings
+
 import pytest
 
 from thinking_prompt import ThinkingPromptSession, AppInfo
@@ -29,24 +31,28 @@ class TestMultiBoxLifecycle:
     def test_multiple_start_thinking_creates_multiple_boxes(self):
         """Multiple start_thinking calls should create multiple active boxes."""
         session = _make_session()
-        session.start_thinking(lambda: "box 1")
-        session.start_thinking(lambda: "box 2")
-        session.start_thinking(lambda: "box 3")
+        ctx1 = session.start_thinking(lambda: "box 1")
+        ctx2 = session.start_thinking(lambda: "box 2")
+        ctx3 = session.start_thinking(lambda: "box 3")
         assert session._manager.active_count == 3
-        session.finish_thinking(add_to_history=False, echo_to_console=False)
+        ctx1.finish(add_to_history=False, echo_to_console=False)
+        ctx2.finish(add_to_history=False, echo_to_console=False)
+        ctx3.finish(add_to_history=False, echo_to_console=False)
 
     def test_finishing_one_box_keeps_others_active(self):
         """Finishing one box via ctx.finish() should keep other boxes active."""
         session = _make_session()
         ctx1 = session.start_thinking(lambda: "box 1")
-        session.start_thinking(lambda: "box 2")
-        session.start_thinking(lambda: "box 3")
+        ctx2 = session.start_thinking(lambda: "box 2")
+        ctx3 = session.start_thinking(lambda: "box 3")
         assert session._manager.active_count == 3
 
         ctx1.finish(add_to_history=False, echo_to_console=False)
         assert session._manager.active_count == 2
-        session.finish_thinking(add_to_history=False, echo_to_console=False)
+        ctx2.finish(add_to_history=False, echo_to_console=False)
+        ctx3.finish(add_to_history=False, echo_to_console=False)
 
+    @pytest.mark.filterwarnings("ignore::DeprecationWarning")
     def test_session_finish_thinking_finishes_all_boxes(self):
         """session.finish_thinking() should finish all active boxes."""
         session = _make_session()
@@ -103,6 +109,7 @@ class TestMultiBoxLifecycle:
         ctx.finish(add_to_history=False, echo_to_console=False)
         assert not session.is_thinking
 
+    @pytest.mark.filterwarnings("ignore::DeprecationWarning")
     def test_finish_thinking_on_empty_returns_empty_string(self):
         """session.finish_thinking() with no active boxes should return ''."""
         session = _make_session()
@@ -121,15 +128,17 @@ class TestMultiBoxOrdering:
     def test_boxes_sorted_by_order(self):
         """Boxes should be sorted by order (lower order at top)."""
         session = _make_session()
-        session.start_thinking(lambda: "high", order=10)
-        session.start_thinking(lambda: "low", order=1)
-        session.start_thinking(lambda: "mid", order=5)
+        ctx1 = session.start_thinking(lambda: "high", order=10)
+        ctx2 = session.start_thinking(lambda: "low", order=1)
+        ctx3 = session.start_thinking(lambda: "mid", order=5)
 
         sorted_boxes = session._manager.get_sorted_boxes()
         orders = [b.order for b in sorted_boxes]
         assert orders == [1, 5, 10]
 
-        session.finish_thinking(add_to_history=False, echo_to_console=False)
+        ctx1.finish(add_to_history=False, echo_to_console=False)
+        ctx2.finish(add_to_history=False, echo_to_console=False)
+        ctx3.finish(add_to_history=False, echo_to_console=False)
 
     def test_same_order_sorted_by_creation_sequence(self):
         """Boxes with the same order should be sorted by creation sequence."""
@@ -145,21 +154,26 @@ class TestMultiBoxOrdering:
         assert seqs == sorted(seqs)
         assert seqs[0] < seqs[1] < seqs[2]
 
-        session.finish_thinking(add_to_history=False, echo_to_console=False)
+        ctx1.finish(add_to_history=False, echo_to_console=False)
+        ctx2.finish(add_to_history=False, echo_to_console=False)
+        ctx3.finish(add_to_history=False, echo_to_console=False)
 
     def test_mixed_order_with_sequence_tiebreaker(self):
         """Mixed order values with creation sequence as tiebreaker."""
         session = _make_session()
-        session.start_thinking(lambda: "a", order=2, title="A")
-        session.start_thinking(lambda: "b", order=1, title="B")
-        session.start_thinking(lambda: "c", order=2, title="C")
-        session.start_thinking(lambda: "d", order=1, title="D")
+        ctx_a = session.start_thinking(lambda: "a", order=2, title="A")
+        ctx_b = session.start_thinking(lambda: "b", order=1, title="B")
+        ctx_c = session.start_thinking(lambda: "c", order=2, title="C")
+        ctx_d = session.start_thinking(lambda: "d", order=1, title="D")
 
         sorted_boxes = session._manager.get_sorted_boxes()
         titles = [b.header.text for b in sorted_boxes]
         assert titles == ["B", "D", "A", "C"]
 
-        session.finish_thinking(add_to_history=False, echo_to_console=False)
+        ctx_a.finish(add_to_history=False, echo_to_console=False)
+        ctx_b.finish(add_to_history=False, echo_to_console=False)
+        ctx_c.finish(add_to_history=False, echo_to_console=False)
+        ctx_d.finish(add_to_history=False, echo_to_console=False)
 
 
 # =============================================================================
@@ -173,21 +187,22 @@ class TestMultiBoxExpandCollapse:
     def test_toggle_all_expands_all_boxes(self):
         """toggle_all should expand all boxes when currently collapsed."""
         session = _make_session()
-        session.start_thinking(lambda: "a")
-        session.start_thinking(lambda: "b")
+        ctx1 = session.start_thinking(lambda: "a")
+        ctx2 = session.start_thinking(lambda: "b")
 
         session._manager.toggle_all()
 
         for box in session._manager.get_sorted_boxes():
             assert box.control.is_expanded
 
-        session.finish_thinking(add_to_history=False, echo_to_console=False)
+        ctx1.finish(add_to_history=False, echo_to_console=False)
+        ctx2.finish(add_to_history=False, echo_to_console=False)
 
     def test_toggle_all_collapses_all_boxes(self):
         """toggle_all should collapse all boxes when currently expanded."""
         session = _make_session()
-        session.start_thinking(lambda: "a")
-        session.start_thinking(lambda: "b")
+        ctx1 = session.start_thinking(lambda: "a")
+        ctx2 = session.start_thinking(lambda: "b")
 
         session._manager.expand_all()
         session._manager.toggle_all()
@@ -195,12 +210,13 @@ class TestMultiBoxExpandCollapse:
         for box in session._manager.get_sorted_boxes():
             assert not box.control.is_expanded
 
-        session.finish_thinking(add_to_history=False, echo_to_console=False)
+        ctx1.finish(add_to_history=False, echo_to_console=False)
+        ctx2.finish(add_to_history=False, echo_to_console=False)
 
     def test_new_boxes_inherit_expanded_state(self):
         """New boxes created after expand_all should inherit expanded state."""
         session = _make_session()
-        session.start_thinking(lambda: "a")
+        ctx1 = session.start_thinking(lambda: "a")
         session._manager.expand_all()
 
         # Create a new box after expanding
@@ -210,12 +226,13 @@ class TestMultiBoxExpandCollapse:
         new_box = [b for b in boxes if b.control.content == "b"][0]
         assert new_box.control.is_expanded
 
-        session.finish_thinking(add_to_history=False, echo_to_console=False)
+        ctx1.finish(add_to_history=False, echo_to_console=False)
+        ctx2.finish(add_to_history=False, echo_to_console=False)
 
     def test_new_boxes_inherit_collapsed_state(self):
         """New boxes created after collapse_all should remain collapsed."""
         session = _make_session()
-        session.start_thinking(lambda: "a")
+        ctx1 = session.start_thinking(lambda: "a")
         session._manager.expand_all()
         session._manager.collapse_all()
 
@@ -224,7 +241,8 @@ class TestMultiBoxExpandCollapse:
         new_box = [b for b in boxes if b.control.content == "b"][0]
         assert not new_box.control.is_expanded
 
-        session.finish_thinking(add_to_history=False, echo_to_console=False)
+        ctx1.finish(add_to_history=False, echo_to_console=False)
+        ctx2.finish(add_to_history=False, echo_to_console=False)
 
 
 # =============================================================================
@@ -235,6 +253,7 @@ class TestMultiBoxExpandCollapse:
 class TestMultiBoxBackwardCompat:
     """Test backward compatibility with single-box usage patterns."""
 
+    @pytest.mark.filterwarnings("ignore::DeprecationWarning")
     def test_single_box_start_finish(self):
         """Single-box start_thinking(callback) / finish_thinking() works as before."""
         session = _make_session()
@@ -278,14 +297,14 @@ class TestMultiBoxBackwardCompat:
         session = _make_session()
         ctx = session.start_thinking(lambda: "content")
         assert ctx.title == "Thinking"
-        session.finish_thinking(add_to_history=False, echo_to_console=False)
+        ctx.finish(add_to_history=False, echo_to_console=False)
 
     def test_start_thinking_with_explicit_title(self):
         """start_thinking with explicit title — ctx.title returns that title."""
         session = _make_session()
         ctx = session.start_thinking(lambda: "content", title="Custom")
         assert ctx.title == "Custom"
-        session.finish_thinking(add_to_history=False, echo_to_console=False)
+        ctx.finish(add_to_history=False, echo_to_console=False)
 
     def test_start_thinking_without_callback_creates_streaming_content(self):
         """start_thinking without callback should create StreamingContent via manager."""
@@ -293,7 +312,7 @@ class TestMultiBoxBackwardCompat:
         ctx = session.start_thinking()
         ctx.append("hello")
         assert ctx.text == "hello"
-        session.finish_thinking(add_to_history=False, echo_to_console=False)
+        ctx.finish(add_to_history=False, echo_to_console=False)
 
     @pytest.mark.asyncio
     async def test_context_manager_exception_cleanup(self):
