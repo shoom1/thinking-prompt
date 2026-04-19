@@ -10,23 +10,21 @@ from __future__ import annotations
 import asyncio
 import threading
 import warnings
-from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator, Coroutine, Sequence
+from contextlib import asynccontextmanager, suppress
 from typing import (
     TYPE_CHECKING,
     Any,
-    AsyncIterator,
     Callable,
-    Coroutine,
     Literal,
     Optional,
-    Sequence,
-    Union,
+    cast,
 )
 
 if TYPE_CHECKING:
-    from .types import ContentCallback, ContentFormat, InputHandler, MessageRole
-    from .dialog import DialogConfig, BaseDialog, DialogManager
+    from .dialog import BaseDialog, DialogConfig, DialogManager
     from .settings_dialog import SettingsItem
+    from .types import ContentFormat
 
 from prompt_toolkit.application import Application
 from prompt_toolkit.buffer import Buffer
@@ -38,13 +36,12 @@ from prompt_toolkit.history import History, InMemoryHistory
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.key_binding.key_processor import KeyPressEvent
 
-from .layout import create_layout
-from .history import FormattedTextHistory
-from .manager import ThinkingBoxManager
-from .styles import ThinkingPromptStyles, DEFAULT_STYLES
 from .app_info import AppInfo
-from .types import StreamingContent, ThinkingContext
 from .display import Display, _is_rich_renderable
+from .layout import create_layout
+from .manager import ThinkingBoxManager
+from .styles import DEFAULT_STYLES, ThinkingPromptStyles
+from .types import ThinkingContext
 
 
 class ThinkingPromptSession:
@@ -92,10 +89,10 @@ class ThinkingPromptSession:
     def __init__(
         self,
         message: AnyFormattedText = ">>> ",
-        app_info: Optional[AppInfo] = None,
-        styles: Optional[ThinkingPromptStyles] = None,
-        history: Optional[History] = None,
-        completer: Optional[Completer] = None,
+        app_info: AppInfo | None = None,
+        styles: ThinkingPromptStyles | None = None,
+        history: History | None = None,
+        completer: Completer | None = None,
         complete_while_typing: bool = False,
         completions_menu_height: int = 5,
         editing_mode: EditingMode = EditingMode.EMACS,
@@ -142,7 +139,7 @@ class ThinkingPromptSession:
         # Fullscreen state (thread-safe)
         self._is_fullscreen: bool = False
         self._fullscreen_lock = threading.RLock()
-        self._pre_fullscreen_expanded: Optional[bool] = None
+        self._pre_fullscreen_expanded: bool | None = None
 
         # Convert styles dataclass to prompt_toolkit Style
         self._style = self._styles.to_style()
@@ -170,15 +167,13 @@ class ThinkingPromptSession:
 
         # Input handler callback (can be set via @on_input decorator or run_async)
         # Handler can be sync (returns None) or async (returns Coroutine)
-        self._input_handler: Optional[
-            Callable[[str], Union[None, Coroutine[Any, Any, None]]]
-        ] = None
+        self._input_handler: Callable[[str], None | Coroutine[Any, Any, None]] | None = None
 
         # Pending input future for async handling
-        self._pending_input: Optional[asyncio.Future] = None
+        self._pending_input: asyncio.Future[str] | None = None
 
         # Dialog manager (lazy initialization)
-        self._dialog_manager: Optional[DialogManager] = None
+        self._dialog_manager: DialogManager | None = None
 
         # Create components
         self.default_buffer = self._create_default_buffer()
@@ -190,11 +185,13 @@ class ThinkingPromptSession:
 
     def _get_prompt_string(self) -> str:
         """Get the prompt as a plain string."""
-        msg = self._message
+        msg: Any = self._message
         if callable(msg):
             msg = msg()
         if isinstance(msg, str):
             return msg
+        if msg is None:
+            return ""
         if hasattr(msg, '__iter__'):
             return ''.join(item[1] if isinstance(item, tuple) else str(item) for item in msg)
         return str(msg)
@@ -232,13 +229,13 @@ class ThinkingPromptSession:
             multiline=False,
         )
 
-    def _create_session_layout(self):
+    def _create_session_layout(self) -> Any:
         """Create the layout using the layout module."""
         self._default_thinking_text = (
             self._app_info.thinking_text if self._app_info else "Thinking"
         )
         # Store header config from app_info for per-box headers
-        self._header_config = {}
+        self._header_config: dict[str, Any] = {}
         if self._app_info:
             self._header_config = {
                 "frames": self._app_info.thinking_animation,
@@ -306,9 +303,7 @@ class ThinkingPromptSession:
         def can_toggle() -> bool:
             if not self._manager.can_toggle():
                 return False
-            if self._is_fullscreen:
-                return False
-            return True
+            return not self._is_fullscreen
 
         @kb.add(self._expand_key, filter=Condition(can_toggle))
         def toggle_expand(event: KeyPressEvent) -> None:
@@ -358,12 +353,12 @@ class ThinkingPromptSession:
 
     def start_thinking(
         self,
-        content_callback: Optional[Callable[[], str]] = None,
+        content_callback: Callable[[], str] | None = None,
         *,
-        title: Optional[str] = None,
+        title: str | None = None,
         order: int = 0,
-        max_lines: Optional[int] = None,
-        content_format: "ContentFormat" = "plain",
+        max_lines: int | None = None,
+        content_format: ContentFormat = "plain",
     ) -> ThinkingContext:
         """
         Start the thinking state with a content callback.
@@ -422,7 +417,7 @@ class ThinkingPromptSession:
         # Build finish callback for this specific box
         def _finish_box(
             add_to_history: bool = True,
-            echo_to_console: Optional[bool] = None,
+            echo_to_console: bool | None = None,
         ) -> str:
             full_content, _, content_format_val = self._manager.remove_box(box.box_id)
             should_echo = (
@@ -451,7 +446,7 @@ class ThinkingPromptSession:
     def finish_thinking(
         self,
         add_to_history: bool = True,
-        echo_to_console: Optional[bool] = None,
+        echo_to_console: bool | None = None,
     ) -> str:
         """
         Complete the thinking phase (finishes all active boxes).
@@ -489,7 +484,7 @@ class ThinkingPromptSession:
         results = self._manager.finish_all()
         all_content = []
 
-        for box_id, full_content, _, content_format_val in results:
+        for _box_id, full_content, _, content_format_val in results:
             if full_content.strip():
                 self._display.thinking(
                     full_content,
@@ -512,12 +507,12 @@ class ThinkingPromptSession:
     async def thinking(
         self,
         *,
-        title: Optional[str] = None,
-        content_format: "ContentFormat" = "plain",
+        title: str | None = None,
+        content_format: ContentFormat = "plain",
         add_to_history: bool = True,
-        echo_to_console: Optional[bool] = None,
+        echo_to_console: bool | None = None,
         order: int = 0,
-        max_lines: Optional[int] = None,
+        max_lines: int | None = None,
     ) -> AsyncIterator[ThinkingContext]:
         """
         Context manager for thinking operations.
@@ -583,7 +578,7 @@ class ThinkingPromptSession:
 
     def add_response(
         self,
-        content: Union[str, FormattedText],
+        content: str | FormattedText,
         *,
         markdown: bool = False,
     ) -> None:
@@ -861,12 +856,12 @@ class ThinkingPromptSession:
         self._pending_input = asyncio.get_running_loop().create_future()
         try:
             return await self._pending_input
-        except asyncio.CancelledError:
-            raise KeyboardInterrupt()
+        except asyncio.CancelledError as exc:
+            raise KeyboardInterrupt() from exc
 
     async def run_async(
         self,
-        handler: Optional[Callable[[str], Any]] = None,
+        handler: Callable[[str], Any] | None = None,
     ) -> None:
         """
         Run the session asynchronously.
@@ -908,7 +903,7 @@ class ThinkingPromptSession:
                 "or register one with @session.on_input decorator."
             )
 
-        async def input_loop():
+        async def input_loop() -> None:
             while True:
                 try:
                     text = await self.prompt_async()
@@ -933,12 +928,10 @@ class ThinkingPromptSession:
             await self.app.run_async()
         finally:
             loop_task.cancel()
-            try:
+            with suppress(asyncio.CancelledError):
                 await loop_task
-            except asyncio.CancelledError:
-                pass
 
-    def run(self, handler: Optional[Callable[[str], Any]] = None) -> None:
+    def run(self, handler: Callable[[str], Any] | None = None) -> None:
         """
         Run the session synchronously.
 
@@ -1026,7 +1019,7 @@ class ThinkingPromptSession:
         """
         from .dialog import _YesNoDialog
         dialog = _YesNoDialog(title, text, yes_text, no_text)
-        return await self._dialogs.show(dialog)
+        return cast(bool, await self._dialogs.show(dialog))
 
     async def message_dialog(
         self,
@@ -1054,7 +1047,7 @@ class ThinkingPromptSession:
         title: str,
         text: str,
         choices: Sequence[str],
-    ) -> Optional[str]:
+    ) -> str | None:
         """
         Show a dialog with multiple choice buttons.
 
@@ -1077,15 +1070,15 @@ class ThinkingPromptSession:
         """
         from .dialog import _ChoiceDialog
         dialog = _ChoiceDialog(title, text, choices)
-        return await self._dialogs.show(dialog)
+        return cast(Optional[str], await self._dialogs.show(dialog))
 
     async def dropdown_dialog(
         self,
         title: str,
         text: str,
         options: Sequence[str],
-        default: Optional[str] = None,
-    ) -> Optional[str]:
+        default: str | None = None,
+    ) -> str | None:
         """
         Show a dialog with a dropdown/radio list selection.
 
@@ -1108,11 +1101,11 @@ class ThinkingPromptSession:
         """
         from .dialog import _DropdownDialog
         dialog = _DropdownDialog(title, text, options, default)
-        return await self._dialogs.show(dialog)
+        return cast(Optional[str], await self._dialogs.show(dialog))
 
     async def show_dialog(
         self,
-        dialog: Union[DialogConfig, BaseDialog],
+        dialog: DialogConfig | BaseDialog,
     ) -> Any:
         """
         Show a custom dialog.
@@ -1156,7 +1149,7 @@ class ThinkingPromptSession:
     async def show_settings_dialog(
         self,
         title: str,
-        items: list["SettingsItem"],
+        items: list[SettingsItem],
         can_cancel: bool = True,
         styles: dict | None = None,
         width: int | None = 60,
@@ -1201,4 +1194,6 @@ class ThinkingPromptSession:
         """
         from .settings_dialog import SettingsDialog
         dialog = SettingsDialog(title, items, can_cancel, styles, width, top)
-        return await self._dialogs.show(dialog)
+        return cast(
+            "dict[str, Any] | None", await self._dialogs.show(dialog)
+        )

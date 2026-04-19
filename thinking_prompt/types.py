@@ -7,16 +7,13 @@ for better type safety throughout the package.
 from __future__ import annotations
 
 import threading
+from collections.abc import Awaitable
 from typing import (
     Any,
-    Awaitable,
     Callable,
-    List,
     Literal,
-    Optional,
     Union,
 )
-
 
 # =============================================================================
 # Type Aliases
@@ -99,7 +96,7 @@ class StreamingContent:
     """
 
     def __init__(self) -> None:
-        self._chunks: List[str] = []
+        self._chunks: list[str] = []
         self._lock = threading.Lock()
 
     def append(self, chunk: str) -> None:
@@ -189,12 +186,12 @@ class ThinkingContext:
 
     def __init__(
         self,
-        content: Optional[StreamingContent],
+        content: StreamingContent | None,
         set_title: Callable[[str], None],
         get_title: Callable[[], str],
-        set_format: Optional[Callable[[ContentFormat], None]] = None,
+        set_format: Callable[[ContentFormat], None] | None = None,
         rich_theme: Any = None,
-        finish: Optional[Callable[..., str]] = None,
+        finish: Callable[..., str] | None = None,
     ) -> None:
         self._content = content
         self._set_title = set_title
@@ -288,7 +285,7 @@ class ThinkingContext:
     def finish(
         self,
         add_to_history: bool = True,
-        echo_to_console: Optional[bool] = None,
+        echo_to_console: bool | None = None,
     ) -> str:
         """Finish this thinking box and remove it from display.
 

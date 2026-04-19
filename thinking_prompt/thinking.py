@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from typing import Callable, List, Optional, Tuple
+from typing import Any, Callable
 
 from prompt_toolkit.filters import Condition
 from prompt_toolkit.formatted_text import ANSI, FormattedText, to_formatted_text
@@ -83,7 +83,7 @@ class ThinkingBoxControl(FormattedTextControl):
             style: Style class for the content.
             expand_key: Key binding for expand/collapse (prompt_toolkit format).
         """
-        self._content_callback: Optional[Callable[[], str]] = None
+        self._content_callback: Callable[[], str] | None = None
         self._max_collapsed_lines = max_collapsed_lines
         self._box_style = style
         self._expand_key = expand_key
@@ -116,7 +116,7 @@ class ThinkingBoxControl(FormattedTextControl):
             self._is_expanded = False
             self._content_format = content_format
 
-    def finish(self) -> Tuple[str, bool, ContentFormat]:
+    def finish(self) -> tuple[str, bool, ContentFormat]:
         """
         Finish thinking and reset state.
 
@@ -132,7 +132,7 @@ class ThinkingBoxControl(FormattedTextControl):
             self._is_expanded = False
             self._content_format = "plain"
             return content, was_expanded, fmt
-    
+
     @property
     def is_active(self) -> bool:
         """Check if thinking is active (has a content callback)."""
@@ -187,7 +187,7 @@ class ThinkingBoxControl(FormattedTextControl):
             truncated_lines = lines[:self._max_collapsed_lines - 1]
             truncated_content = '\n'.join(truncated_lines)
 
-            fragments: List[Tuple[str, str]] = [
+            fragments: list[tuple[str, str]] = [
                 (self._box_style, truncated_content + '\n'),
                 ("class:thinking-box.hint", self._expand_hint(len(lines))),
             ]
@@ -275,7 +275,7 @@ class ThinkingBoxControl(FormattedTextControl):
 
     def get_key_bindings(
         self,
-        is_fullscreen: Optional[Callable[[], bool]] = None,
+        is_fullscreen: Callable[[], bool] | None = None,
     ) -> KeyBindings:
         """
         Get key bindings for this control.
@@ -295,12 +295,10 @@ class ThinkingBoxControl(FormattedTextControl):
         def can_toggle() -> bool:
             if not self.can_toggle_expanded:
                 return False
-            if is_fullscreen and is_fullscreen():
-                return False
-            return True
+            return not (is_fullscreen and is_fullscreen())
 
         @kb.add(self._expand_key, filter=Condition(can_toggle))
-        def toggle_expand(event) -> None:
+        def toggle_expand(event: Any) -> None:
             self.toggle_expanded()
 
         return kb

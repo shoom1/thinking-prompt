@@ -6,9 +6,7 @@ Provides AppInfo dataclass for app metadata and welcome message.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Literal, Optional, Tuple, Union
-
-from prompt_toolkit.formatted_text import FormattedText
+from typing import Any, Callable, Literal
 
 
 @dataclass
@@ -82,8 +80,8 @@ class AppInfo:
     """
 
     name: str
-    version: Optional[str] = None
-    welcome_message: Union[str, Callable[[], Any], None] = None
+    version: str | None = None
+    welcome_message: str | Callable[[], Any] | None = None
 
     # Key bindings (prompt_toolkit format, e.g., "c-e" for Ctrl+E)
     fullscreen_key: str = "c-e"
@@ -101,7 +99,7 @@ class AppInfo:
     thinking_text: str = "Thinking"
     """Text shown in the thinking separator. Set to empty string for no text."""
 
-    thinking_animation: Tuple[str, ...] = field(
+    thinking_animation: tuple[str, ...] = field(
         default=("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
     )
     """Animation frames for the thinking indicator. Set to empty tuple for no animation."""
