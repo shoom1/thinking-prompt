@@ -39,30 +39,25 @@ from __future__ import annotations
 
 import asyncio
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import (
     TYPE_CHECKING,
     Any,
     Callable,
-    List,
-    Optional,
-    Sequence,
-    Union,
 )
 
 from prompt_toolkit.filters import Condition
 from prompt_toolkit.key_binding import KeyBindings, merge_key_bindings
 from prompt_toolkit.layout import (
+    AnyContainer,
     ConditionalContainer,
-    Container,
     DynamicContainer,
     Float,
     FloatContainer,
     HSplit,
-    VSplit,
     Window,
 )
-from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.widgets import Button, Dialog, Label, RadioList
 
@@ -110,10 +105,10 @@ class DialogConfig:
         width: Optional fixed width for the dialog.
     """
     title: str
-    body: Union[str, Container]
-    buttons: List[ButtonConfig] = field(default_factory=list)
+    body: str | AnyContainer
+    buttons: list[ButtonConfig] = field(default_factory=list)
     escape_result: Any = _UNSET
-    width: Optional[int] = None
+    width: int | None = None
 
 
 class BaseDialog(ABC):
@@ -156,16 +151,16 @@ class BaseDialog(ABC):
 
     title: str = "Dialog"
     escape_result: Any = None
-    width: Optional[int] = None  # None/0=auto, >0=min width, -1=max width
+    width: int | None = None  # None/0=auto, >0=min width, -1=max width
     # Vertical position: None=center, 0+=from top, negative=from bottom
-    top: Optional[int] = None
+    top: int | None = None
 
     def __init__(self) -> None:
-        self._result_future: Optional[asyncio.Future] = None
-        self._widget: Optional[Dialog] = None
-        self._manager: Optional[DialogManager] = None
+        self._result_future: asyncio.Future | None = None
+        self._widget: Dialog | None = None
+        self._manager: DialogManager | None = None
 
-    def _get_width_dimension(self) -> Optional[Dimension]:
+    def _get_width_dimension(self) -> Dimension | None:
         """Convert width setting to prompt_toolkit Dimension.
 
         Returns:
@@ -181,7 +176,7 @@ class BaseDialog(ABC):
             return Dimension(preferred=self.width)
 
     @abstractmethod
-    def build_body(self) -> Container:
+    def build_body(self) -> AnyContainer:
         """
         Build and return the dialog body container.
 
@@ -192,7 +187,7 @@ class BaseDialog(ABC):
         """
         pass
 
-    def get_buttons(self) -> List[tuple[str, Callable[[], None]]]:
+    def get_buttons(self) -> list[tuple[str, Callable[[], None]]]:
         """
         Return the list of buttons for the dialog.
 
@@ -259,18 +254,19 @@ class _ConfigBasedDialog(BaseDialog):
         self.title = config.title
         self.escape_result = config.escape_result
 
-    def build_body(self) -> Container:
+    def build_body(self) -> AnyContainer:
         body = self._config.body
         if isinstance(body, str):
             return Label(text=body)
         return body
 
-    def get_buttons(self) -> List[tuple[str, Callable[[], None]]]:
-        buttons = []
+    def get_buttons(self) -> list[tuple[str, Callable[[], None]]]:
+        def _make_handler(result: Any) -> Callable[[], None]:
+            return lambda: self.set_result(result)
+
+        buttons: list[tuple[str, Callable[[], None]]] = []
         for btn in self._config.buttons:
-            # Capture btn.result in closure properly
-            result = btn.result
-            buttons.append((btn.text, lambda r=result: self.set_result(r)))
+            buttons.append((btn.text, _make_handler(btn.result)))
         return buttons
 
 
@@ -291,10 +287,10 @@ class _YesNoDialog(BaseDialog):
         self._no_text = no_text
         self.escape_result = False  # Escape returns False
 
-    def build_body(self) -> Container:
+    def build_body(self) -> AnyContainer:
         return Label(text=self._text)
 
-    def get_buttons(self) -> List[tuple[str, Callable[[], None]]]:
+    def get_buttons(self) -> list[tuple[str, Callable[[], None]]]:
         return [
             (self._yes_text, lambda: self.set_result(True)),
             (self._no_text, lambda: self.set_result(False)),
@@ -316,10 +312,10 @@ class _MessageDialog(BaseDialog):
         self._ok_text = ok_text
         self.escape_result = None  # Escape returns None (same as OK)
 
-    def build_body(self) -> Container:
+    def build_body(self) -> AnyContainer:
         return Label(text=self._text)
 
-    def get_buttons(self) -> List[tuple[str, Callable[[], None]]]:
+    def get_buttons(self) -> list[tuple[str, Callable[[], None]]]:
         return [(self._ok_text, lambda: self.set_result(None))]
 
 
@@ -338,14 +334,16 @@ class _ChoiceDialog(BaseDialog):
         self._choices = choices
         self.escape_result = None  # Escape returns None
 
-    def build_body(self) -> Container:
+    def build_body(self) -> AnyContainer:
         return Label(text=self._text)
 
-    def get_buttons(self) -> List[tuple[str, Callable[[], None]]]:
-        buttons = []
+    def get_buttons(self) -> list[tuple[str, Callable[[], None]]]:
+        def _make_handler(choice: str) -> Callable[[], None]:
+            return lambda: self.set_result(choice)
+
+        buttons: list[tuple[str, Callable[[], None]]] = []
         for choice in self._choices:
-            # Capture choice in closure properly
-            buttons.append((choice, lambda c=choice: self.set_result(c)))
+            buttons.append((choice, _make_handler(choice)))
         return buttons
 
 
@@ -357,7 +355,7 @@ class _DropdownDialog(BaseDialog):
         title: str,
         text: str,
         options: Sequence[str],
-        default: Optional[str] = None,
+        default: str | None = None,
     ) -> None:
         super().__init__()
         self.title = title
@@ -374,13 +372,13 @@ class _DropdownDialog(BaseDialog):
         if default and default in options:
             self._radio_list.current_value = default
 
-    def build_body(self) -> Container:
+    def build_body(self) -> AnyContainer:
         return HSplit([
             Label(text=self._text),
             self._radio_list,
         ])
 
-    def get_buttons(self) -> List[tuple[str, Callable[[], None]]]:
+    def get_buttons(self) -> list[tuple[str, Callable[[], None]]]:
         return [
             ("OK", self._on_ok),
             ("Cancel", self.cancel),
@@ -407,15 +405,15 @@ class DialogManager:
     def __init__(self, session: ThinkingPromptSession) -> None:
         self._session = session
         self._visible = False
-        self._current_dialog: Optional[BaseDialog] = None
+        self._current_dialog: BaseDialog | None = None
         self._injected = False
         self._dialog_container = DynamicContainer(self._get_dialog_content)
-        self._dialog_float: Optional[Float] = None
+        self._dialog_float: Float | None = None
 
         # Create and register key bindings
         self._key_bindings = self._create_key_bindings()
 
-    def _get_dialog_content(self) -> Container:
+    def _get_dialog_content(self) -> AnyContainer:
         """Return current dialog widget or empty window."""
         if self._current_dialog and self._current_dialog._widget:
             return self._current_dialog._widget
@@ -426,7 +424,7 @@ class DialogManager:
         kb = KeyBindings()
 
         @kb.add("escape", filter=Condition(lambda: self._visible))
-        def handle_escape(event) -> None:
+        def handle_escape(event: Any) -> None:
             if self._current_dialog:
                 escape_result = self._current_dialog.escape_result
                 if not isinstance(escape_result, _Unset):
@@ -469,7 +467,7 @@ class DialogManager:
 
         self._injected = True
 
-    async def show(self, dialog: Union[DialogConfig, BaseDialog]) -> Any:
+    async def show(self, dialog: DialogConfig | BaseDialog) -> Any:
         """
         Show a dialog and wait for result.
 
@@ -508,6 +506,7 @@ class DialogManager:
 
         # Show dialog
         self._visible = True
+        assert dialog._widget is not None  # _build_widget set this above
         self._session.app.layout.focus(dialog._widget)
         self._session.app.invalidate()
 

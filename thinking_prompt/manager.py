@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import threading
 from dataclasses import dataclass
-from typing import Callable, List, Optional, Tuple
+from typing import Any, Callable
 
 from prompt_toolkit.filters import Condition
 from prompt_toolkit.layout import HSplit, Window
@@ -28,11 +28,11 @@ class ManagedBox:
 
     box_id: str
     control: ThinkingBoxControl
-    header: Optional[ThinkingHeader]
+    header: ThinkingHeader | None
     container: Container
     order: int
     seq: int
-    streaming_content: Optional[StreamingContent]
+    streaming_content: StreamingContent | None
 
 
 class ThinkingBoxManager:
@@ -58,13 +58,13 @@ class ThinkingBoxManager:
 
     def create_box(
         self,
-        content_callback: Optional[Callable[[], str]] = None,
+        content_callback: Callable[[], str] | None = None,
         *,
-        title: Optional[str] = None,
+        title: str | None = None,
         order: int = 0,
-        max_lines: Optional[int] = None,
+        max_lines: int | None = None,
         content_format: ContentFormat = "plain",
-        box_id: Optional[str] = None,
+        box_id: str | None = None,
     ) -> ManagedBox:
         """
         Create a new managed thinking box.
@@ -97,7 +97,7 @@ class ThinkingBoxManager:
             )
 
             # Create StreamingContent if no callback provided
-            streaming_content: Optional[StreamingContent] = None
+            streaming_content: StreamingContent | None = None
             if content_callback is None:
                 streaming_content = StreamingContent()
                 content_callback = streaming_content.get_content
@@ -110,7 +110,7 @@ class ThinkingBoxManager:
                 control.expand()
 
             # Create header if title provided
-            header: Optional[ThinkingHeader] = None
+            header: ThinkingHeader | None = None
             if title is not None:
                 header = ThinkingHeader(text=title)
 
@@ -137,7 +137,7 @@ class ThinkingBoxManager:
     def _build_container(
         self,
         control: ThinkingBoxControl,
-        header: Optional[ThinkingHeader],
+        header: ThinkingHeader | None,
         max_lines: int,
     ) -> Container:
         """Build the layout container for a single box."""
@@ -166,9 +166,12 @@ class ThinkingBoxManager:
         )
 
         if header is not None:
-            header_control = FormattedTextControl(
-                text=lambda h=header: h.get_formatted_text(80)
-            )
+            captured_header: ThinkingHeader = header
+
+            def _get_header_text() -> Any:
+                return captured_header.get_formatted_text(80)
+
+            header_control = FormattedTextControl(text=_get_header_text)
             header_window = Window(
                 content=header_control,
                 height=D.exact(1),
@@ -177,7 +180,7 @@ class ThinkingBoxManager:
 
         return content_window
 
-    def remove_box(self, box_id: str) -> Tuple[str, bool, ContentFormat]:
+    def remove_box(self, box_id: str) -> tuple[str, bool, ContentFormat]:
         """
         Remove a box and return its final state.
 
@@ -194,7 +197,7 @@ class ThinkingBoxManager:
                 return ("", False, "plain")
             return box.control.finish()
 
-    def get_sorted_boxes(self) -> List[ManagedBox]:
+    def get_sorted_boxes(self) -> list[ManagedBox]:
         """
         Get all boxes sorted by (order, seq).
 
@@ -252,7 +255,7 @@ class ThinkingBoxManager:
                 return True
             return any(box.control.can_toggle_expanded for box in self._boxes.values())
 
-    def finish_all(self) -> List[Tuple[str, str, bool, ContentFormat]]:
+    def finish_all(self) -> list[tuple[str, str, bool, ContentFormat]]:
         """
         Finish all boxes and return their final states.
 
@@ -260,7 +263,7 @@ class ThinkingBoxManager:
             List of (box_id, content, was_expanded, content_format) tuples.
         """
         with self._lock:
-            results: List[Tuple[str, str, bool, ContentFormat]] = []
+            results: list[tuple[str, str, bool, ContentFormat]] = []
             for box_id in list(self._boxes.keys()):
                 box = self._boxes.pop(box_id)
                 content, was_expanded, fmt = box.control.finish()

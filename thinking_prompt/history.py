@@ -6,9 +6,11 @@ Provides storage for styled text fragments to mimic console output in fullscreen
 from __future__ import annotations
 
 import threading
-from typing import Callable, List, Optional, Tuple, Union
+from collections.abc import Iterable
+from typing import Callable
 
 from prompt_toolkit.formatted_text import FormattedText
+from prompt_toolkit.formatted_text.base import OneStyleAndTextTuple
 
 
 class FormattedTextHistory:
@@ -31,9 +33,9 @@ class FormattedTextHistory:
     """
 
     def __init__(self) -> None:
-        self._fragments: List[Tuple[str, str]] = []
+        self._fragments: list[OneStyleAndTextTuple] = []
         self._lock = threading.RLock()
-        self._on_change: Optional[Callable[[], None]] = None
+        self._on_change: Callable[[], None] | None = None
 
     def set_on_change(self, callback: Callable[[], None]) -> None:
         """Set callback to trigger when history changes."""
@@ -57,13 +59,13 @@ class FormattedTextHistory:
             self._notify_change()
 
     def append_formatted(
-        self, formatted: Union[FormattedText, List[Tuple[str, str]]]
+        self, formatted: Iterable[OneStyleAndTextTuple]
     ) -> None:
         """
         Append multiple fragments from a FormattedText or list.
 
         Args:
-            formatted: FormattedText object or list of (style, text) tuples.
+            formatted: FormattedText object or iterable of (style, text[, handler]) tuples.
         """
         with self._lock:
             self._fragments.extend(formatted)

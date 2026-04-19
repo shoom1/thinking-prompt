@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any, Callable, Generic, TypeVar
 
 from prompt_toolkit.application.current import get_app
 from prompt_toolkit.buffer import Buffer
@@ -26,13 +26,11 @@ from prompt_toolkit.layout import (
     Float,
     FloatContainer,
     HSplit,
-    ScrollablePane,
     VSplit,
     Window,
 )
 from prompt_toolkit.layout.controls import FormattedTextControl, UIContent, UIControl
 from prompt_toolkit.layout.margins import ScrollbarMargin
-
 from prompt_toolkit.widgets import Frame
 
 from .dialog import BaseDialog
@@ -78,17 +76,24 @@ class TextItem(SettingsItem):
     edit_width: int = 15  # Width of text input field in edit mode
 
 
-class SettingControl(UIControl, ABC):
-    """Base class for setting controls with view/edit modes."""
+T = TypeVar("T", bound=SettingsItem)
 
-    def __init__(self, item: SettingsItem) -> None:
-        self._item = item
+
+class SettingControl(UIControl, ABC, Generic[T]):
+    """Base class for setting controls with view/edit modes.
+
+    Generic over the concrete SettingsItem subclass so subclasses get
+    typed access to their item-specific fields (e.g. options, width).
+    """
+
+    def __init__(self, item: T) -> None:
+        self._item: T = item
         self._value: Any = item.default
         self._editing = False
         self._has_focus = False
 
     @property
-    def item(self) -> SettingsItem:
+    def item(self) -> T:
         """The settings item this control represents."""
         return self._item
 
@@ -190,7 +195,7 @@ class SettingControl(UIControl, ABC):
         return lines
 
 
-class CheckboxControl(SettingControl):
+class CheckboxControl(SettingControl[CheckboxItem]):
     """Checkbox control that toggles on Space/Enter."""
 
     def __init__(self, item: CheckboxItem) -> None:
@@ -238,7 +243,7 @@ class CheckboxControl(SettingControl):
         return kb
 
 
-class InlineSelectControl(SettingControl):
+class InlineSelectControl(SettingControl[InlineSelectItem]):
     """Inline select control that cycles through options with Left/Right keys."""
 
     def __init__(self, item: InlineSelectItem) -> None:
@@ -302,7 +307,7 @@ class InlineSelectControl(SettingControl):
         return kb
 
 
-class DropdownControl(SettingControl):
+class DropdownControl(SettingControl[DropdownItem]):
     """Dropdown control with floating menu in edit mode."""
 
     def __init__(self, item: DropdownItem) -> None:
@@ -310,13 +315,13 @@ class DropdownControl(SettingControl):
         self._original_value: Any = item.default
         self._selected_index = 0  # Index in dropdown list during edit
         self._scroll_offset = 0  # For scrolling long lists
-        self._app_ref = None
+        self._app_ref: Any = None
         # Cache view-mode window for stable focus target
         height = 2 if item.description else 1
         self._view_window = Window(self, height=height)
         # Floating menu components (built lazily)
         self._menu_control = _DropdownMenuControl(self)
-        self._menu_window = None
+        self._menu_window: Window | None = None
         self._max_visible_height: int | None = None  # Set by parent dialog
 
     def set_max_visible_height(self, max_height: int) -> None:
@@ -338,9 +343,7 @@ class DropdownControl(SettingControl):
             # Check if view window or menu has focus
             if app.layout.has_focus(self._view_window):
                 return True
-            if self._menu_window and app.layout.has_focus(self._menu_window):
-                return True
-            return False
+            return bool(self._menu_window and app.layout.has_focus(self._menu_window))
         except Exception:
             return self._has_focus
 
@@ -446,6 +449,7 @@ class DropdownControl(SettingControl):
     def get_float(self) -> Float:
         """Return the Float for the dropdown menu (to be added at dialog level)."""
         self._build_menu()
+        assert self._menu_window is not None  # _build_menu sets this
 
         framed_menu = Frame(
             body=self._menu_window,
@@ -529,20 +533,20 @@ class _DropdownMenuControl(UIControl):
         return False  # Menu is not focusable, control handles keys
 
 
-class TextControl(SettingControl):
+class TextControl(SettingControl[TextItem]):
     """Text input control with view/edit modes."""
 
     def __init__(self, item: TextItem) -> None:
         super().__init__(item)
         self._original_value: str = item.default
         self._buffer = Buffer(multiline=False)
-        self._app_ref = None  # Store app reference for focus management
+        self._app_ref: Any = None  # Store app reference for focus management
         # Cache view-mode window for stable focus target
         height = 2 if item.description else 1
         self._view_window = Window(self, height=height)
         # Cache edit container for stable focus
-        self._edit_container = None
-        self._buffer_window = None
+        self._edit_container: Container | None = None
+        self._buffer_window: Window | None = None
 
     def enter_edit_mode(self, app: Any = None) -> None:
         """Enter edit mode - populate buffer with current value."""

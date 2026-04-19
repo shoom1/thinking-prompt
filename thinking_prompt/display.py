@@ -11,7 +11,7 @@ markdown, syntax highlighting, and Rich renderables.
 from __future__ import annotations
 
 import threading
-from typing import TYPE_CHECKING, Any, Callable, List, Optional
+from typing import TYPE_CHECKING, Any, Callable
 
 from prompt_toolkit import print_formatted_text
 from prompt_toolkit.formatted_text import ANSI, AnyFormattedText, FormattedText
@@ -40,8 +40,9 @@ def _rich_to_ansi(renderable: Any, theme: Any = None) -> str:
     layout-aware renderables (Panel, Table, etc.) size correctly.
     """
     try:
-        from rich.console import Console
         from io import StringIO
+
+        from rich.console import Console
         file = StringIO()
         console = Console(file=file, force_terminal=True, theme=theme)
         console.print(renderable)
@@ -57,8 +58,9 @@ def _renderable_to_ansi(renderable: Any, theme: Any = None) -> str:
     like Text("text", style="green").
     """
     try:
-        from rich.console import Console
         from io import StringIO
+
+        from rich.console import Console
         f = StringIO()
         console = Console(file=f, force_terminal=True, width=9999, theme=theme)
         console.print(renderable, end="", highlight=False, soft_wrap=True)
@@ -71,7 +73,7 @@ def _setup_simple_heading() -> None:
     """Patch Rich's Markdown to use left-aligned headings with H1 underlined."""
     try:
         from rich.console import Console, ConsoleOptions, RenderResult
-        from rich.markdown import Markdown, Heading
+        from rich.markdown import Heading, Markdown
         from rich.text import Text
 
         class SimpleHeading(Heading):
@@ -103,9 +105,10 @@ _setup_simple_heading()
 def _markdown_to_ansi(content: str, theme: Any = None) -> str:
     """Convert markdown to ANSI-formatted string using Rich."""
     try:
+        from io import StringIO
+
         from rich.console import Console
         from rich.markdown import Markdown
-        from io import StringIO
 
         file = StringIO()
         console = Console(file=file, force_terminal=True, theme=theme)
@@ -119,8 +122,8 @@ def _highlight_code(code: str, language: str = "python") -> str:
     """Syntax highlight code using Pygments."""
     try:
         from pygments import highlight
-        from pygments.lexers import get_lexer_by_name
         from pygments.formatters import TerminalFormatter
+        from pygments.lexers import get_lexer_by_name
         lexer = get_lexer_by_name(language)
         return highlight(code, lexer, TerminalFormatter())
     except ImportError:
@@ -145,7 +148,7 @@ class Display:
         self,
         style: Style,
         is_fullscreen: Callable[[], bool] = lambda: False,
-        thinking_styles: Optional[ThinkingPromptStyles] = None,
+        thinking_styles: ThinkingPromptStyles | None = None,
     ) -> None:
         """
         Initialize the Display.
@@ -160,10 +163,10 @@ class Display:
         self._history = FormattedTextHistory()
         self._is_fullscreen = is_fullscreen
         self._pending_lock = threading.Lock()
-        self._pending_output: List[AnyFormattedText] = []
+        self._pending_output: list[AnyFormattedText] = []
         self._rich_theme = self._create_rich_theme(thinking_styles)
 
-    def _create_rich_theme(self, thinking_styles: Optional[ThinkingPromptStyles]) -> Any:
+    def _create_rich_theme(self, thinking_styles: ThinkingPromptStyles | None) -> Any:
         """Create a Rich Theme from ThinkingPromptStyles."""
         try:
             from rich.theme import Theme
@@ -185,7 +188,7 @@ class Display:
         """Get the Rich theme for consistent styling."""
         return self._rich_theme
 
-    def set_on_change(self, callback: Optional[Callable[[], None]]) -> None:
+    def set_on_change(self, callback: Callable[[], None]) -> None:
         """
         Set callback for history changes (for UI invalidation).
 
@@ -241,7 +244,7 @@ class Display:
         self,
         content: str,
         *,
-        truncate_lines: Optional[int] = None,
+        truncate_lines: int | None = None,
         add_to_history: bool = True,
         echo_to_console: bool = True,
         content_format: ContentFormat = "plain",
@@ -287,7 +290,7 @@ class Display:
         self,
         content: str,
         *,
-        truncate_lines: Optional[int] = None,
+        truncate_lines: int | None = None,
         add_to_history: bool = True,
         echo_to_console: bool = True,
     ) -> None:
