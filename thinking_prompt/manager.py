@@ -271,6 +271,12 @@ class ThinkingBoxManager:
             return results
 
     @property
+    def is_expanded(self) -> bool:
+        """True if boxes are currently in the expanded state."""
+        with self._lock:
+            return self._expanded
+
+    @property
     def has_active_boxes(self) -> bool:
         """True if there are any active boxes."""
         with self._lock:

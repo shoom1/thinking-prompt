@@ -319,7 +319,7 @@ class ThinkingPromptSession:
                     self.switch_to_prompt()
                 else:
                     if self._manager.has_active_boxes:
-                        self._pre_fullscreen_expanded = self._manager._expanded
+                        self._pre_fullscreen_expanded = self._manager.is_expanded
                         self._manager.expand_all()
                     self.switch_to_fullscreen()
 
