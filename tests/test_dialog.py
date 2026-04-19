@@ -374,7 +374,10 @@ class TestDialogManager:
         manager = DialogManager(mock_session)
         assert manager._visible is False
         assert manager._current_dialog is None
-        assert manager._injected is False
+        # Float and KeyBindings are constructed eagerly so the session
+        # can wire them into the layout/Application at construction time.
+        assert manager.float is not None
+        assert manager.key_bindings is not None
 
     def test_dialog_manager_key_bindings_created(self):
         """DialogManager creates key bindings for Escape."""

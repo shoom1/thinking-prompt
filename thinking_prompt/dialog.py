@@ -48,13 +48,12 @@ from typing import (
 )
 
 from prompt_toolkit.filters import Condition
-from prompt_toolkit.key_binding import KeyBindings, merge_key_bindings
+from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.layout import (
     AnyContainer,
     ConditionalContainer,
     DynamicContainer,
     Float,
-    FloatContainer,
     HSplit,
     Window,
 )
@@ -392,26 +391,40 @@ class DialogManager:
     """
     Manages dialog display within a ThinkingPromptSession.
 
-    This class handles:
-    - Injecting a FloatContainer into the session's layout
-    - Showing/hiding dialogs
-    - Focus management
-    - Escape key handling
-
-    The DialogManager is created lazily by ThinkingPromptSession
-    when dialogs are first used.
+    The Float and KeyBindings are constructed eagerly and exposed via
+    properties so the session can wire them into the layout and
+    Application at construction time. This avoids fragile post-hoc
+    mutation of the live layout.
     """
 
     def __init__(self, session: ThinkingPromptSession) -> None:
         self._session = session
         self._visible = False
         self._current_dialog: BaseDialog | None = None
-        self._injected = False
         self._dialog_container = DynamicContainer(self._get_dialog_content)
-        self._dialog_float: Float | None = None
 
-        # Create and register key bindings
+        # Float is wired into the layout's FloatContainer at session construction.
+        # Visibility toggles via _visible; positioning is updated per show().
+        self._dialog_float = Float(
+            content=ConditionalContainer(
+                content=self._dialog_container,
+                filter=Condition(lambda: self._visible),
+            ),
+            allow_cover_cursor=True,
+        )
+
+        # Key bindings are merged into the Application at construction.
         self._key_bindings = self._create_key_bindings()
+
+    @property
+    def float(self) -> Float:
+        """The Float to be added to the layout's root FloatContainer."""
+        return self._dialog_float
+
+    @property
+    def key_bindings(self) -> KeyBindings:
+        """KeyBindings to be merged into the Application."""
+        return self._key_bindings
 
     def _get_dialog_content(self) -> AnyContainer:
         """Return current dialog widget or empty window."""
@@ -432,41 +445,6 @@ class DialogManager:
 
         return kb
 
-    def _inject_float_container(self) -> None:
-        """Inject FloatContainer into session layout (one-time)."""
-        if self._injected:
-            return
-
-        original_container = self._session.app.layout.container
-
-        # Create initial Float with no positioning (centered)
-        self._dialog_float = Float(
-            content=ConditionalContainer(
-                content=self._dialog_container,
-                filter=Condition(lambda: self._visible),
-            ),
-            allow_cover_cursor=True,
-        )
-
-        float_container = FloatContainer(
-            content=original_container,
-            floats=[self._dialog_float],
-        )
-
-        self._session.app.layout.container = float_container
-
-        # Merge key bindings with existing app key bindings
-        existing_kb = self._session.app.key_bindings
-        if existing_kb:
-            self._session.app.key_bindings = merge_key_bindings([
-                existing_kb,
-                self._key_bindings,
-            ])
-        else:
-            self._session.app.key_bindings = self._key_bindings
-
-        self._injected = True
-
     async def show(self, dialog: DialogConfig | BaseDialog) -> Any:
         """
         Show a dialog and wait for result.
@@ -477,9 +455,6 @@ class DialogManager:
         Returns:
             The result value set by the dialog (via button click or Escape).
         """
-        # Ensure float container is injected
-        self._inject_float_container()
-
         # Convert DialogConfig to BaseDialog if needed
         if isinstance(dialog, DialogConfig):
             dialog = _ConfigBasedDialog(dialog)
@@ -490,19 +465,18 @@ class DialogManager:
         dialog._build_widget()
 
         # Update Float positioning based on dialog's top attribute
-        if self._dialog_float:
-            if dialog.top is None:
-                # Center: no top or bottom constraint
-                self._dialog_float.top = None
-                self._dialog_float.bottom = None
-            elif dialog.top >= 0:
-                # Offset from top
-                self._dialog_float.top = dialog.top
-                self._dialog_float.bottom = None
-            else:
-                # Negative = offset from bottom
-                self._dialog_float.top = None
-                self._dialog_float.bottom = abs(dialog.top)
+        if dialog.top is None:
+            # Center: no top or bottom constraint
+            self._dialog_float.top = None
+            self._dialog_float.bottom = None
+        elif dialog.top >= 0:
+            # Offset from top
+            self._dialog_float.top = dialog.top
+            self._dialog_float.bottom = None
+        else:
+            # Negative = offset from bottom
+            self._dialog_float.top = None
+            self._dialog_float.bottom = abs(dialog.top)
 
         # Show dialog
         self._visible = True

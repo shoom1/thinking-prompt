@@ -33,7 +33,7 @@ from prompt_toolkit.enums import DEFAULT_BUFFER, EditingMode
 from prompt_toolkit.filters import Condition, has_focus
 from prompt_toolkit.formatted_text import AnyFormattedText, FormattedText
 from prompt_toolkit.history import History, InMemoryHistory
-from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.key_binding import KeyBindings, merge_key_bindings
 from prompt_toolkit.key_binding.key_processor import KeyPressEvent
 
 from .app_info import AppInfo
@@ -172,8 +172,11 @@ class ThinkingPromptSession:
         # Pending input future for async handling
         self._pending_input: asyncio.Future[str] | None = None
 
-        # Dialog manager (lazy initialization)
-        self._dialog_manager: DialogManager | None = None
+        # Dialog manager — built eagerly so its Float and KeyBindings can be
+        # wired into the layout and Application at construction time
+        # (avoids fragile post-hoc layout mutation).
+        from .dialog import DialogManager
+        self._dialog_manager: DialogManager = DialogManager(self)
 
         # Create components
         self.default_buffer = self._create_default_buffer()
@@ -252,13 +255,17 @@ class ThinkingPromptSession:
             is_status_bar_enabled=lambda: self._enable_status_bar,
             thinking_manager=self._manager,
             completions_menu_height=self._completions_menu_height,
+            extra_floats=[self._dialog_manager.float],
         )
 
     def _create_application(self) -> Application:
         """Create the Application object."""
 
-        # Key bindings
-        kb = self._create_key_bindings()
+        # Key bindings (session + dialog manager merged at construction)
+        kb = merge_key_bindings([
+            self._create_key_bindings(),
+            self._dialog_manager.key_bindings,
+        ])
 
         return Application(
             layout=self.layout,
@@ -988,10 +995,7 @@ class ThinkingPromptSession:
 
     @property
     def _dialogs(self) -> DialogManager:
-        """Get or create the dialog manager (lazy initialization)."""
-        if self._dialog_manager is None:
-            from .dialog import DialogManager
-            self._dialog_manager = DialogManager(self)
+        """Return the dialog manager (built eagerly in __init__)."""
         return self._dialog_manager
 
     async def yes_no_dialog(

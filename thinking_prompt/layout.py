@@ -263,6 +263,7 @@ def create_layout(
     is_status_bar_enabled: Callable[[], bool],
     thinking_manager: ThinkingBoxManager | None = None,
     completions_menu_height: int = 5,
+    extra_floats: list[Float] | None = None,
 ) -> Layout:
     """
     Create the layout with chat history, thinking box, and input.
@@ -277,6 +278,8 @@ def create_layout(
         is_status_bar_enabled: Callable that returns status bar visibility.
         thinking_manager: ThinkingBoxManager instance for managing thinking boxes.
         completions_menu_height: Maximum height of the completions dropdown menu.
+        extra_floats: Additional Floats (e.g. dialog Float) to wire into
+            the root FloatContainer at construction time.
 
     Returns:
         The complete Layout.
@@ -372,16 +375,20 @@ def create_layout(
     ])
 
     # Wrap in FloatContainer at root level so completions menu can expand
+    floats: list[Float] = [
+        Float(
+            xcursor=True,
+            ycursor=True,
+            transparent=True,
+            content=CompletionsMenu(max_height=completions_menu_height),
+        ),
+    ]
+    if extra_floats:
+        floats.extend(extra_floats)
+
     root = FloatContainer(
         content=main_layout,
-        floats=[
-            Float(
-                xcursor=True,
-                ycursor=True,
-                transparent=True,
-                content=CompletionsMenu(max_height=completions_menu_height),
-            ),
-        ],
+        floats=floats,
     )
 
     return Layout(root, focused_element=default_buffer)
