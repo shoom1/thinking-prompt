@@ -56,7 +56,9 @@ from prompt_toolkit.layout import (
     Float,
     FloatContainer,
     HSplit,
+    ScrollablePane,
     Window,
+    to_container,
 )
 from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.widgets import Button, Dialog, Label, RadioList
@@ -72,6 +74,11 @@ class _Unset:
 
 
 _UNSET = _Unset()
+
+
+# Sentinel returned by _compute_effective_height when the terminal is
+# too small to show the dialog. Caller aborts without building the widget.
+_TERMINAL_TOO_SMALL = object()
 
 
 @dataclass
@@ -154,6 +161,11 @@ class BaseDialog(ABC):
     width: int | None = None  # None/0=auto, >0=min width, -1=max width
     # Vertical position: None=center, 0+=from top, negative=from bottom
     top: int | None = None
+    # Fixed total dialog height. When set, the body is wrapped in a
+    # ScrollablePane so the dialog renders in one shot instead of
+    # growing line-by-line as the renderer measures content.
+    # Body content that overflows scrolls within the allocated area.
+    height: int | None = None
 
     def __init__(self) -> None:
         self._result_future: asyncio.Future | None = None
@@ -220,9 +232,30 @@ class BaseDialog(ABC):
         """
         self.set_result(self.escape_result)
 
-    def _build_widget(self) -> Dialog:
-        """Build the prompt_toolkit Dialog widget."""
+    # Chrome height = title bar (2) + button row (2) + padding (1) around the body.
+    # Used when `height` is set to compute the body area from the total.
+    _CHROME_HEIGHT = 5
+
+    def _build_widget(self, effective_height: int | None = None) -> Dialog:
+        """Build the prompt_toolkit Dialog widget.
+
+        Args:
+            effective_height: Caller-computed height after any terminal
+                clamping. Overrides ``self.height`` for body-wrapping
+                purposes. None means use ``self.height`` directly.
+        """
         body = self.build_body()
+
+        # Pin body height so the Dialog renders in one shot (opt-in via
+        # the ``height`` attribute). Overflow scrolls within the pane.
+        h = effective_height if effective_height is not None else self.height
+        if h is not None and h > 0:
+            body_height = max(1, h - self._CHROME_HEIGHT)
+            body = HSplit(
+                [ScrollablePane(to_container(body), show_scrollbar=True)],
+                height=Dimension.exact(body_height),
+            )
+
         buttons = [
             Button(text=text, handler=handler)
             for text, handler in self.get_buttons()
@@ -402,6 +435,17 @@ class DialogManager:
     when dialogs are first used.
     """
 
+    # Rows reserved below/above the dialog: prompt area, status bar, margin.
+    # When a dialog's ``height`` is set, the effective height is clamped to
+    # ``terminal_height - _TERMINAL_BUFFER_ROWS`` so the dialog doesn't
+    # cover the prompt or overflow the screen.
+    _TERMINAL_BUFFER_ROWS = 4
+
+    # Smallest total dialog height (chrome + body) that's considered usable.
+    # With _TERMINAL_BUFFER_ROWS = 4, this implies a minimum terminal height
+    # of _MIN_DIALOG_HEIGHT + _TERMINAL_BUFFER_ROWS = 12 rows.
+    _MIN_DIALOG_HEIGHT = 8
+
     def __init__(self, session: ThinkingPromptSession) -> None:
         self._session = session
         self._visible = False
@@ -476,6 +520,10 @@ class DialogManager:
 
         Returns:
             The result value set by the dialog (via button click or Escape).
+            If the dialog's ``height`` is set and the terminal is too small
+            to fit the minimum viable dialog, shows an error to the user and
+            returns ``dialog.escape_result`` (or None if escape is disabled)
+            without showing the dialog.
         """
         # Ensure float container is injected
         self._inject_float_container()
@@ -484,10 +532,16 @@ class DialogManager:
         if isinstance(dialog, DialogConfig):
             dialog = _ConfigBasedDialog(dialog)
 
+        # Clamp dialog.height against terminal height (if height is set).
+        effective_height = self._compute_effective_height(dialog)
+        if effective_height is _TERMINAL_TOO_SMALL:
+            escape = dialog.escape_result
+            return None if isinstance(escape, _Unset) else escape
+
         # Prepare dialog
         self._current_dialog = dialog
         future = dialog._prepare(self)
-        dialog._build_widget()
+        dialog._build_widget(effective_height=effective_height)
 
         # Update Float positioning based on dialog's top attribute
         if self._dialog_float:
@@ -503,6 +557,14 @@ class DialogManager:
                 # Negative = offset from bottom
                 self._dialog_float.top = None
                 self._dialog_float.bottom = abs(dialog.top)
+
+            # Pin Float height so prompt_toolkit allocates the full
+            # height in one render frame instead of measuring dialog
+            # content over multiple ticks.
+            if effective_height is not None:
+                self._dialog_float.height = effective_height
+            else:
+                self._dialog_float.height = None
 
         # Show dialog
         self._visible = True
@@ -521,3 +583,31 @@ class DialogManager:
             self._session.app.invalidate()
 
         return result
+
+    def _compute_effective_height(self, dialog: BaseDialog) -> Any:
+        """Clamp dialog.height to the terminal and return the value to use.
+
+        Returns:
+            - ``None`` if the dialog didn't request a fixed height.
+            - ``_TERMINAL_TOO_SMALL`` sentinel if the terminal can't fit
+              the minimum viable dialog; caller should abort with an
+              error message.
+            - otherwise the clamped height to pass through to build_widget
+              and Float.height.
+        """
+        if dialog.height is None or dialog.height <= 0:
+            return None
+
+        import shutil
+        term_height = shutil.get_terminal_size().lines
+        max_allowed = term_height - self._TERMINAL_BUFFER_ROWS
+
+        if max_allowed < self._MIN_DIALOG_HEIGHT:
+            required = self._MIN_DIALOG_HEIGHT + self._TERMINAL_BUFFER_ROWS
+            self._session.add_error(
+                f"Not enough room to show dialog: need at least {required} "
+                f"terminal rows, have {term_height}."
+            )
+            return _TERMINAL_TOO_SMALL
+
+        return min(dialog.height, max_allowed)

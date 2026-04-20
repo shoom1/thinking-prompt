@@ -351,6 +351,7 @@ async def main():
             dialog = SettingsDialog(
                 title="Settings",
                 items=settings_items,
+                height=16,
             )
             result = await session.show_dialog(dialog)
             if result:
