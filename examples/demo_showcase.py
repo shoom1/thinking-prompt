@@ -96,6 +96,7 @@ def create_welcome_message():
             content,
             border_style="blue",
             padding=(0, 2),
+            width=80,
         )
     else:
         return (

@@ -504,6 +504,11 @@ class DialogManager:
                 self._dialog_float.top = None
                 self._dialog_float.bottom = abs(dialog.top)
 
+        # Switch to fullscreen so the dialog renders against the alternate
+        # buffer and appears instantly, instead of growing line-by-line as
+        # the layout pushes the prompt up. Restore the prior mode on exit.
+        prior_fullscreen = self._session._set_dialog_fullscreen(True)
+
         # Show dialog
         self._visible = True
         assert dialog._widget is not None  # _build_widget set this above
@@ -518,6 +523,8 @@ class DialogManager:
             self._visible = False
             self._current_dialog = None
             self._session.app.layout.focus(self._session.default_buffer)
+            # Restore prior fullscreen state (no-op if it was already on).
+            self._session._set_dialog_fullscreen(prior_fullscreen)
             self._session.app.invalidate()
 
         return result

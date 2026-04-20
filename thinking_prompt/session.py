@@ -779,6 +779,33 @@ class ThinkingPromptSession:
                 self._display.flush_pending()  # Output cached content to console
                 self._invalidate()
 
+    def _set_dialog_fullscreen(self, active: bool) -> bool:
+        """
+        Toggle fullscreen for dialog display, returning the prior state.
+
+        Used by DialogManager to render dialogs against an alternate-buffer
+        screen so they appear instantly instead of growing line-by-line as
+        the layout pushes the prompt up. Bypasses the user-facing
+        `_fullscreen_enabled` gate and does NOT touch
+        `_pre_fullscreen_expanded` (which belongs to Ctrl+E flow).
+
+        Args:
+            active: True to enter fullscreen, False to leave.
+
+        Returns:
+            The fullscreen state before this call.
+        """
+        with self._fullscreen_lock:
+            prior = self._is_fullscreen
+            if prior == active:
+                return prior
+            self._is_fullscreen = active
+            if not active:
+                # Returning to prompt mode — flush any cached console output.
+                self._display.flush_pending()
+            self._invalidate()
+            return prior
+
     def exit(self) -> None:
         """
         Exit the session.
