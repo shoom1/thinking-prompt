@@ -289,6 +289,16 @@ if result:
 
 **Navigation:** Up/Down moves between controls, Tab cycles through controls and buttons, Ctrl+S saves.
 
+**Fixed dialog height:** Pass `height=N` to `show_settings_dialog()` (or set `height` on a `BaseDialog`/`SettingsDialog` subclass) to allocate the full dialog area in one render frame instead of growing line-by-line. Body content that exceeds the available rows scrolls within the dialog. The value is clamped to the terminal size; if the terminal is too small for the minimum dialog (12 rows), the dialog returns its escape result without opening.
+
+```python
+result = await session.show_settings_dialog(
+    title="Settings",
+    items=items,
+    height=15,
+)
+```
+
 ### AppInfo Configuration
 
 ```python

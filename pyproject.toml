@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "thinking-prompt"
-version = "0.3.0"
+version = "0.3.1"
 description = "A prompt_toolkit extension that adds a thinking box above the prompt"
 readme = "README.md"
 license = "MIT"
@@ -38,6 +38,7 @@ dev = [
     "pytest-cov>=4.0",
     "mypy>=1.0",
     "ruff>=0.1.0",
+    "types-Pygments",
 ]
 rich = ["rich>=13.0"]
 all = ["rich>=13.0", "pygments>=2.0"]

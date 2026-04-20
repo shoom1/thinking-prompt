@@ -32,37 +32,37 @@ Key bindings (defaults, configurable via AppInfo):
     Ctrl+D: Exit application
 """
 
-from .session import ThinkingPromptSession
 from .app_info import AppInfo
-from .styles import (
-    ThinkingPromptStyles,
-    DEFAULT_STYLES,
-)
-from .types import (
-    StreamingContent,
-    ThinkingContext,
-    ContentCallback,
-    ContentFormat,
-    MessageRole,
-    InputHandler,
-)
 from .dialog import (
-    DialogConfig,
-    ButtonConfig,
     BaseDialog,
+    ButtonConfig,
+    DialogConfig,
 )
+from .display import _renderable_to_ansi as rich_to_ansi
+from .layout import ThinkingHeader
+from .session import ThinkingPromptSession
 from .settings_dialog import (
-    SettingsItem,
+    CheckboxItem,
     DropdownItem,
     InlineSelectItem,
-    CheckboxItem,
-    TextItem,
     SettingsDialog,
+    SettingsItem,
+    TextItem,
 )
-from .layout import ThinkingHeader
-from .display import _renderable_to_ansi as rich_to_ansi
+from .styles import (
+    DEFAULT_STYLES,
+    ThinkingPromptStyles,
+)
+from .types import (
+    ContentCallback,
+    ContentFormat,
+    InputHandler,
+    MessageRole,
+    StreamingContent,
+    ThinkingContext,
+)
 
-__version__ = "0.3.0"
+__version__ = "0.3.1"
 
 __all__ = [
     # Main class

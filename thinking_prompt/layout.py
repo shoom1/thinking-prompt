@@ -10,7 +10,7 @@ Provides functions to create the UI layout components:
 from __future__ import annotations
 
 import time
-from typing import TYPE_CHECKING, Callable, Literal, Tuple
+from typing import TYPE_CHECKING, Callable, Literal
 
 from prompt_toolkit.application.current import get_app
 from prompt_toolkit.buffer import Buffer
@@ -20,25 +20,26 @@ from prompt_toolkit.formatted_text import AnyFormattedText, FormattedText
 from prompt_toolkit.layout import (
     BufferControl,
     DynamicContainer,
+    Float,
     FloatContainer,
     FormattedTextControl,
     HSplit,
     Layout,
     VSplit,
     Window,
-    Float,
 )
 from prompt_toolkit.layout.containers import ConditionalContainer, ScrollOffsets
 from prompt_toolkit.layout.dimension import Dimension as D
-from prompt_toolkit.layout.margins import ConditionalMargin, ScrollbarMargin
+from prompt_toolkit.layout.margins import ScrollbarMargin
 from prompt_toolkit.layout.menus import CompletionsMenu
 from prompt_toolkit.layout.processors import (
-    HighlightSelectionProcessor,
     HighlightIncrementalSearchProcessor,
+    HighlightSelectionProcessor,
 )
 
 if TYPE_CHECKING:
     from .history import FormattedTextHistory
+    from .manager import ThinkingBoxManager
 
 
 # Default spinner animation frames
@@ -62,7 +63,7 @@ class ThinkingHeader:
     def __init__(
         self,
         text: str = "Thinking",
-        frames: Tuple[str, ...] = DEFAULT_SPINNER_FRAMES,
+        frames: tuple[str, ...] = DEFAULT_SPINNER_FRAMES,
         position: Literal["before", "after"] = "before",
         border_char: str = "─",
         animation_interval: float = 0.1,
@@ -123,10 +124,7 @@ class ThinkingHeader:
             content = ""
 
         # Calculate padding for left-adjusted content
-        if content:
-            content_with_spaces = f" {content} "
-        else:
-            content_with_spaces = ""
+        content_with_spaces = f" {content} " if content else ""
 
         remaining = max(0, width - len(content_with_spaces))
         left_pad = min(3, remaining)  # Small left margin
@@ -146,7 +144,7 @@ class ThinkingHeader:
 ThinkingSeparator = ThinkingHeader
 
 
-def create_thinking_area(manager) -> DynamicContainer:
+def create_thinking_area(manager: ThinkingBoxManager) -> DynamicContainer:
     """Create a dynamic container that renders active thinking boxes."""
     return DynamicContainer(lambda: manager.get_container())
 
@@ -178,17 +176,17 @@ def create_history_window(
     # Track content length to detect new content
     last_history_len = [0]  # Use list for mutable closure
 
-    def get_history_text():
+    def get_history_text() -> FormattedText:
         return history.get_formatted_text()
 
-    def get_cursor_position():
+    def get_cursor_position() -> Point | None:
         """Return cursor position at end only when new content is added."""
         current_len = len(history)
         if current_len > last_history_len[0]:
             # New content added - scroll to bottom
             last_history_len[0] = current_len
             text = history.get_formatted_text()
-            line_count = sum(1 for _, t in text for c in t if c == '\n')
+            line_count = sum(fragment[1].count('\n') for fragment in text)
             return Point(x=0, y=max(0, line_count - 1))
         # No new content - return None to preserve scroll position
         return None
@@ -263,7 +261,7 @@ def create_layout(
     is_fullscreen: Callable[[], bool],
     get_status_text: Callable[[], AnyFormattedText],
     is_status_bar_enabled: Callable[[], bool],
-    thinking_manager=None,
+    thinking_manager: ThinkingBoxManager | None = None,
     completions_menu_height: int = 5,
 ) -> Layout:
     """
@@ -307,10 +305,13 @@ def create_layout(
 
     # Dynamic height function that reserves space for completion menu
     def get_input_height() -> D:
-        if completions_menu_height > 0 and not get_app().is_done:
-            # Reserve space only when completions menu is actually visible
-            if default_buffer.complete_state is not None:
-                return D(min=completions_menu_height)
+        # Reserve space only when completions menu is actually visible
+        if (
+            completions_menu_height > 0
+            and not get_app().is_done
+            and default_buffer.complete_state is not None
+        ):
+            return D(min=completions_menu_height)
         return D()
 
     # Input window - sizes naturally, but reserves space for completions menu
@@ -352,6 +353,8 @@ def create_layout(
     )
 
     # Thinking area (visible when thinking)
+    if thinking_manager is None:
+        raise ValueError("thinking_manager is required")
     thinking_area = create_thinking_area(thinking_manager)
 
     # Status bar

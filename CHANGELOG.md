@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-04-20
+
+### Added
+
+- Optional `BaseDialog.height` (and `height=` parameter on `SettingsDialog` / `show_settings_dialog()`) for one-shot dialog rendering — when set, the dialog allocates its full height in a single render frame instead of growing line-by-line, and body overflow scrolls within the pane. The value is clamped to `terminal_height - 4`; terminals too small for the minimum viable dialog (12 rows) short-circuit to the dialog's escape result.
+- `ThinkingBoxManager.is_expanded` public property.
+- CI workflow (`.github/workflows/ci.yml`) running ruff, mypy, and pytest on Python 3.9–3.12 for pushes and PRs to `main` and `develop`.
+
+### Changed
+
+- `SettingControl` is now `Generic[T]` over its concrete `SettingsItem` subclass, exposing subclass-only fields (`options`, `width`, `password`, `edit_width`) to the type checker without runtime casts.
+- Public dialog APIs (`yes_no_dialog`, `choice_dialog`, `dropdown_dialog`, `show_settings_dialog`, `prompt_async`) now return precise types instead of leaking `Any`.
+- `FormattedTextHistory` storage typed as `List[OneStyleAndTextTuple]`; `append_formatted` accepts any `Iterable`.
+- `create_thinking_area` now requires a `ThinkingBoxManager` (the previous `Optional` default was unreachable).
+
+### Fixed
+
+- History rendering no longer shows literal ANSI escape codes (e.g. `^[[34m`) in fullscreen mode. `Display` output methods (`welcome`, `rich`, `markdown`, `code`, `add_rich`, `raw`) now parse ANSI into `FormattedText` fragments before storing in history, matching the console-print path.
+- `create_history_window` cursor calculation unpacked 3-tuple fragments as 2-tuples (would crash on any fragment carrying a mouse handler); now handles both shapes and runs in O(N) instead of O(N·M).
+- Codebase now passes strict mypy (was 61 errors) and ruff (was 131 errors) against its own declared rules.
+
+### Chore
+
+- Added `types-Pygments` to dev dependencies.
+- `.ruff_cache` and `.mypy_cache` added to `.gitignore`; previously tracked `docs/plans` files untracked.
+
 ## [0.3.0] - 2026-04-16
 
 ### Added
