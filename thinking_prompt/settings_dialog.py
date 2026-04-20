@@ -705,6 +705,7 @@ class SettingsDialog(BaseDialog):
         styles: dict | None = None,
         width: int | None = 60,
         top: int | None = None,
+        height: int | None = None,
     ) -> None:
         super().__init__()
         self.title = title
@@ -713,6 +714,7 @@ class SettingsDialog(BaseDialog):
         self._styles = styles or {}
         self.width = width
         self.top = top
+        self.height = height
 
         # Original values for change detection
         self._original_values: dict[str, Any] = {}
