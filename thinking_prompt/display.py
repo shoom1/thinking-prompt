@@ -14,7 +14,7 @@ import threading
 from typing import TYPE_CHECKING, Any, Callable
 
 from prompt_toolkit import print_formatted_text
-from prompt_toolkit.formatted_text import ANSI, AnyFormattedText, FormattedText
+from prompt_toolkit.formatted_text import ANSI, AnyFormattedText, FormattedText, to_formatted_text
 from prompt_toolkit.styles import Style
 
 from .history import FormattedTextHistory
@@ -215,8 +215,14 @@ class Display:
         self._print_to_console(FormattedText([(style, text)]))
 
     def _output_ansi(self, content: str) -> None:
-        """Output ANSI string to console and history."""
-        self._history.append("", content)
+        """Output ANSI string to console and history.
+
+        ANSI is parsed into FormattedText fragments before being stored
+        in history so the fullscreen history Window renders styled
+        output instead of literal escape codes.
+        """
+        fragments = list(to_formatted_text(ANSI(content)))
+        self._history.append_formatted(fragments)
         self._print_to_console(ANSI(content))
 
     # =========================================================================
@@ -295,8 +301,6 @@ class Display:
         echo_to_console: bool = True,
     ) -> None:
         """Output ANSI-formatted thinking content."""
-        from prompt_toolkit.formatted_text import to_formatted_text
-
         # History gets full content as parsed ANSI fragments
         if add_to_history:
             fragments = list(to_formatted_text(ANSI(content.rstrip() + "\n")))
