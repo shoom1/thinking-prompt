@@ -298,13 +298,22 @@ class ThinkingPromptSession:
 
         # Cancel/interrupt — cancel the running handler, finish boxes,
         # cancel pending input. Falls through to app.exit() only when
-        # nothing is in flight.
+        # nothing was in flight at the moment Ctrl+C was pressed.
         @kb.add("c-c")
         def cancel(event: KeyPressEvent) -> None:
             """Cancel current operation or exit."""
+            # Snapshot state BEFORE we mutate anything. Otherwise the final
+            # idle check below would re-read state we just cleared (e.g.
+            # has_active_boxes after finish_all) and incorrectly conclude
+            # there was nothing to cancel, triggering app.exit().
             handler_running = (
                 self._current_handler_task is not None
                 and not self._current_handler_task.done()
+            )
+            had_active_boxes = self._manager.has_active_boxes
+            had_pending_input = (
+                self._pending_input is not None
+                and not self._pending_input.done()
             )
 
             if handler_running:
@@ -314,15 +323,16 @@ class ThinkingPromptSession:
                 assert self._current_handler_task is not None
                 self._current_handler_task.cancel()
 
-            if self._manager.has_active_boxes:
+            if had_active_boxes:
                 self._manager.finish_all()
                 self._invalidate()
 
-            if self._pending_input and not self._pending_input.done():
+            if had_pending_input:
+                assert self._pending_input is not None
                 self._pending_input.cancel()
 
-            if not handler_running and not self._manager.has_active_boxes:
-                # Nothing to cancel — exit application.
+            if not handler_running and not had_active_boxes and not had_pending_input:
+                # Nothing was in flight — Ctrl+C is the user asking to exit.
                 event.app.exit()
 
         # Exit
@@ -995,7 +1005,6 @@ class ThinkingPromptSession:
         except asyncio.CancelledError:
             if self._user_cancelled_handler:
                 # Ctrl+C path: swallow and continue the input loop.
-                self._user_cancelled_handler = False
                 self._cleanup_after_handler()
                 return
             # Outer cancellation (e.g. session shutdown) — propagate so
@@ -1007,6 +1016,13 @@ class ThinkingPromptSession:
             self.add_error(f"Handler error: {e}")
         finally:
             self._current_handler_task = None
+            # Always clear the cancel flag for the next invocation. We can't
+            # only reset it inside the except CancelledError block: if user
+            # code catches CancelledError and returns normally, or if cancel
+            # races against natural completion, no exception propagates here
+            # and the flag would stay sticky — making the *next* outer
+            # cancellation look like a Ctrl+C and silently swallowing it.
+            self._user_cancelled_handler = False
 
     def _cleanup_after_handler(self) -> None:
         """Drop any thinking boxes the handler left open and refresh UI."""

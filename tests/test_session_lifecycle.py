@@ -226,3 +226,114 @@ class TestCtrlCKeyBinding:
         session._current_handler_task = None
         handler(event)
         event.app.exit.assert_called_once()
+
+    def test_ctrl_c_with_orphan_box_clears_box_and_does_not_exit(self, session):
+        """Ctrl+C with an active thinking box (and no handler) must clear
+        the box but not also exit the app. Previously the binding read
+        has_active_boxes after finish_all() and treated the now-empty
+        manager as 'idle', falling through to app.exit()."""
+        # Open a box without a handler — simulates a box left orphaned by
+        # earlier code, or a box opened from a non-handler context.
+        session.start_thinking(lambda: "stuck", title="Stuck")
+        assert session._manager.has_active_boxes is True
+
+        handler = self._get_ctrl_c_handler(session)
+        event = MagicMock()
+        event.app = MagicMock()
+        handler(event)
+
+        assert session._manager.has_active_boxes is False
+        event.app.exit.assert_not_called()
+
+
+class TestUserCancelledFlagReset:
+    """_user_cancelled_handler must not stay True after _run_handler returns.
+
+    A sticky flag means the next outer cancellation (e.g. shutdown) is
+    silently swallowed because _run_handler treats it as a Ctrl+C."""
+
+    async def test_flag_reset_when_handler_swallows_cancel(self, session):
+        """If user code catches CancelledError and returns normally, the
+        flag must still be cleared so the next handler starts clean.
+
+        We use a `started` event so the cancel arrives *while the handler
+        is awaiting its gate*, not before its body has run — otherwise the
+        task is cancelled before its first tick and the outer await raises
+        CancelledError, hiding the bug we want to catch."""
+        started = asyncio.Event()
+        gate = asyncio.Event()
+
+        async def handler(text: str) -> None:
+            started.set()
+            try:
+                await gate.wait()
+            except asyncio.CancelledError:
+                # User code intentionally swallows — no re-raise. The outer
+                # `await task` inside _run_handler returns normally (no
+                # CancelledError), so the except block that resets the flag
+                # is never entered.
+                return
+
+        run_task = asyncio.create_task(session._run_handler(handler, "go"))
+
+        # Wait until the handler is actually running before issuing cancel.
+        await asyncio.wait_for(started.wait(), timeout=1)
+        assert session._current_handler_task is not None
+
+        session._user_cancelled_handler = True
+        session._current_handler_task.cancel()
+        await run_task
+
+        # After _run_handler returns the flag MUST be reset, regardless of
+        # whether the inner task raised CancelledError or returned normally.
+        assert session._user_cancelled_handler is False
+        assert session._current_handler_task is None
+
+    async def test_flag_reset_when_cancel_loses_race_to_completion(self, session):
+        """If Ctrl+C cancel is set but the task completes naturally before
+        cancellation takes effect, the flag must still reset for the next
+        handler invocation."""
+
+        async def handler(text: str) -> None:
+            return  # finishes immediately, no chance to be cancelled
+
+        session._user_cancelled_handler = True  # left over from prior cycle
+        await session._run_handler(handler, "go")
+
+        assert session._user_cancelled_handler is False
+        assert session._current_handler_task is None
+
+    async def test_outer_cancel_after_user_swallow_propagates(self, session):
+        """End-to-end: user cancel + handler swallow + later outer cancel
+        on a fresh handler must propagate (not be swallowed) because the
+        flag has been reset."""
+
+        async def swallowing(text: str) -> None:
+            try:
+                await asyncio.sleep(3600)
+            except asyncio.CancelledError:
+                return  # swallowed
+
+        run1 = asyncio.create_task(session._run_handler(swallowing, "first"))
+        for _ in range(50):
+            await asyncio.sleep(0)
+            if session._current_handler_task is not None:
+                break
+        session._user_cancelled_handler = True
+        session._current_handler_task.cancel()
+        await run1
+        assert session._user_cancelled_handler is False
+
+        # Now a fresh handler — outer cancellation must propagate.
+        async def long_running(text: str) -> None:
+            await asyncio.sleep(3600)
+
+        run2 = asyncio.create_task(session._run_handler(long_running, "second"))
+        for _ in range(50):
+            await asyncio.sleep(0)
+            if session._current_handler_task is not None:
+                break
+
+        run2.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await run2
