@@ -27,6 +27,11 @@ async def main():
         "stream": True,
         "api_key": "",
     }
+    # Keys whose values must never be echoed verbatim in demo output.
+    secret_keys = {"api_key"}
+
+    def _mask(d: dict) -> dict:
+        return {k: ("***" if k in secret_keys and v else v) for k, v in d.items()}
 
     @session.on_input
     async def handle(text: str):
@@ -70,9 +75,9 @@ async def main():
             else:
                 # Apply changes
                 current_settings.update(result)
-                session.add_response(f"Settings updated: {result}")
+                session.add_response(f"Settings updated: {_mask(result)}")
         else:
-            session.add_response(f"Current settings: {current_settings}")
+            session.add_response(f"Current settings: {_mask(current_settings)}")
 
     await session.run_async()
 
