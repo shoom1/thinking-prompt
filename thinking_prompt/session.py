@@ -172,6 +172,16 @@ class ThinkingPromptSession:
         # Pending input future for async handling
         self._pending_input: asyncio.Future[str] | None = None
 
+        # Currently running handler task (set by _run_handler while a user
+        # input handler is executing). Ctrl+C cancels this task; the input
+        # buffer's accept_handler refuses new input while it is running.
+        self._current_handler_task: asyncio.Task[None] | None = None
+        # Set to True by the Ctrl+C binding when it cancels the handler task.
+        # _run_handler reads this to distinguish a user-initiated cancel
+        # (swallow CancelledError, continue the input loop) from an outer
+        # cancellation (re-raise to let the input loop exit).
+        self._user_cancelled_handler: bool = False
+
         # Dialog manager (lazy initialization)
         self._dialog_manager: DialogManager | None = None
 
@@ -201,6 +211,18 @@ class ThinkingPromptSession:
 
         def accept_handler(buff: Buffer) -> bool:
             """Handle input acceptance."""
+            # Refuse to deliver input while a handler is already running.
+            # If we accepted, the new text would be echoed and the buffer
+            # cleared, but the handler couldn't pick it up — it would just
+            # vanish. Instead leave the buffer intact and surface a hint
+            # so the user knows why nothing happened.
+            if (
+                self._current_handler_task is not None
+                and not self._current_handler_task.done()
+            ):
+                self.set_status("Busy — press Ctrl+C to cancel")
+                return False
+
             text = buff.document.text
 
             # Add to input history (for up/down arrow)
@@ -274,17 +296,33 @@ class ThinkingPromptSession:
         """Create key bindings for the session."""
         kb = KeyBindings()
 
-        # Cancel/interrupt — finish all boxes instead of single control
+        # Cancel/interrupt — cancel the running handler, finish boxes,
+        # cancel pending input. Falls through to app.exit() only when
+        # nothing is in flight.
         @kb.add("c-c")
         def cancel(event: KeyPressEvent) -> None:
             """Cancel current operation or exit."""
+            handler_running = (
+                self._current_handler_task is not None
+                and not self._current_handler_task.done()
+            )
+
+            if handler_running:
+                # Mark before cancel so _run_handler treats this as a user
+                # cancellation and does not re-raise CancelledError.
+                self._user_cancelled_handler = True
+                assert self._current_handler_task is not None
+                self._current_handler_task.cancel()
+
             if self._manager.has_active_boxes:
                 self._manager.finish_all()
                 self._invalidate()
-                if self._pending_input and not self._pending_input.done():
-                    self._pending_input.cancel()
-            else:
-                # Exit application gracefully
+
+            if self._pending_input and not self._pending_input.done():
+                self._pending_input.cancel()
+
+            if not handler_running and not self._manager.has_active_boxes:
+                # Nothing to cancel — exit application.
                 event.app.exit()
 
         # Exit
@@ -907,15 +945,7 @@ class ThinkingPromptSession:
             while True:
                 try:
                     text = await self.prompt_async()
-
-                    try:
-                        result = effective_handler(text)
-                        if asyncio.iscoroutine(result):
-                            await result
-                    except Exception as e:
-                        # Log handler errors but don't crash the loop
-                        self.add_error(f"Handler error: {e}")
-
+                    await self._run_handler(effective_handler, text)
                 except (EOFError, KeyboardInterrupt):
                     break
                 except asyncio.CancelledError:
@@ -930,6 +960,59 @@ class ThinkingPromptSession:
             loop_task.cancel()
             with suppress(asyncio.CancelledError):
                 await loop_task
+
+    async def _run_handler(
+        self,
+        handler: Callable[[str], None | Coroutine[Any, Any, None]],
+        text: str,
+    ) -> None:
+        """Invoke the input handler with cancellation and cleanup hooks.
+
+        Async handlers run as a tracked ``asyncio.Task`` so the Ctrl+C
+        binding can cancel them. On user cancellation, on handler exception,
+        or on completion, any thinking boxes the handler left open are
+        finished so the UI cannot get stuck in a "thinking" state.
+
+        CancelledError raised from outside the handler (e.g. the input loop
+        being cancelled during shutdown) is re-raised so the loop can exit.
+        """
+        try:
+            result = handler(text)
+        except Exception as e:
+            self._cleanup_after_handler()
+            self.add_error(f"Handler error: {e}")
+            return
+
+        if not asyncio.iscoroutine(result):
+            # Sync handler — already complete, just clean up if it left
+            # any boxes open (it shouldn't, but defensive).
+            return
+
+        task = asyncio.create_task(result)
+        self._current_handler_task = task
+        try:
+            await task
+        except asyncio.CancelledError:
+            if self._user_cancelled_handler:
+                # Ctrl+C path: swallow and continue the input loop.
+                self._user_cancelled_handler = False
+                self._cleanup_after_handler()
+                return
+            # Outer cancellation (e.g. session shutdown) — propagate so
+            # the input loop exits.
+            self._cleanup_after_handler()
+            raise
+        except Exception as e:
+            self._cleanup_after_handler()
+            self.add_error(f"Handler error: {e}")
+        finally:
+            self._current_handler_task = None
+
+    def _cleanup_after_handler(self) -> None:
+        """Drop any thinking boxes the handler left open and refresh UI."""
+        if self._manager.has_active_boxes:
+            self._manager.finish_all()
+            self._invalidate()
 
     def run(self, handler: Callable[[str], Any] | None = None) -> None:
         """
