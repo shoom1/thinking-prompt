@@ -171,6 +171,13 @@ class BaseDialog(ABC):
         self._result_future: asyncio.Future | None = None
         self._widget: Dialog | None = None
         self._manager: DialogManager | None = None
+        # Populated by _build_widget. _initial_focus, when non-None, is the
+        # Window the DialogManager should focus after the dialog opens (used
+        # by ButtonConfig(focused=True)). _focused_button is the matching
+        # Button widget; _buttons is the full list for inspection/testing.
+        self._buttons: list[Button] = []
+        self._focused_button: Button | None = None
+        self._initial_focus: Window | None = None
 
     def _get_width_dimension(self) -> Dimension | None:
         """Convert width setting to prompt_toolkit Dimension.
@@ -256,19 +263,29 @@ class BaseDialog(ABC):
                 height=Dimension.exact(body_height),
             )
 
-        buttons = [
-            Button(text=text, handler=handler)
-            for text, handler in self.get_buttons()
-        ]
+        self._buttons = self._build_buttons()
 
         self._widget = Dialog(
             title=self.title,
             body=body,
-            buttons=buttons,
+            buttons=self._buttons,
             width=self._get_width_dimension(),
             with_background=False,  # Use styled dialog, no light overlay
         )
         return self._widget
+
+    def _build_buttons(self) -> list[Button]:
+        """Build the prompt_toolkit Button widgets for the dialog.
+
+        Default implementation calls ``get_buttons()`` for backward
+        compatibility. Subclasses that need to apply per-button styling
+        or initial focus (e.g. _ConfigBasedDialog using ButtonConfig)
+        should override this method directly.
+        """
+        return [
+            Button(text=text, handler=handler)
+            for text, handler in self.get_buttons()
+        ]
 
     def _prepare(self, manager: DialogManager) -> asyncio.Future:
         """Prepare the dialog for showing (called by DialogManager)."""
@@ -276,6 +293,24 @@ class BaseDialog(ABC):
         loop = asyncio.get_running_loop()
         self._result_future = loop.create_future()
         return self._result_future
+
+
+def _apply_button_style(button: Button, extra_style: str) -> None:
+    """Append ``extra_style`` to a Button's style classes.
+
+    The Button widget builds its own style callable that toggles between
+    ``class:button`` and ``class:button.focused`` based on focus. We wrap
+    that callable to append the user's style so focus styling still works.
+    """
+    if not extra_style:
+        return
+    original = button.window.style
+    if callable(original):
+        def combined() -> str:
+            return f"{original()} {extra_style}".strip()
+        button.window.style = combined
+    else:
+        button.window.style = f"{original} {extra_style}".strip()
 
 
 class _ConfigBasedDialog(BaseDialog):
@@ -286,6 +321,7 @@ class _ConfigBasedDialog(BaseDialog):
         self._config = config
         self.title = config.title
         self.escape_result = config.escape_result
+        self.width = config.width
 
     def build_body(self) -> AnyContainer:
         body = self._config.body
@@ -301,6 +337,25 @@ class _ConfigBasedDialog(BaseDialog):
         for btn in self._config.buttons:
             buttons.append((btn.text, _make_handler(btn.result)))
         return buttons
+
+    def _build_buttons(self) -> list[Button]:
+        """Build Button widgets, applying per-button style and focus flag."""
+        def _make_handler(result: Any) -> Callable[[], None]:
+            return lambda: self.set_result(result)
+
+        widgets: list[Button] = []
+        focused: Button | None = None
+        for cfg in self._config.buttons:
+            btn = Button(text=cfg.text, handler=_make_handler(cfg.result))
+            _apply_button_style(btn, cfg.style)
+            if cfg.focused and focused is None:
+                focused = btn
+            widgets.append(btn)
+
+        if focused is not None:
+            self._focused_button = focused
+            self._initial_focus = focused.window
+        return widgets
 
 
 class _YesNoDialog(BaseDialog):
@@ -570,6 +625,9 @@ class DialogManager:
         self._visible = True
         assert dialog._widget is not None  # _build_widget set this above
         self._session.app.layout.focus(dialog._widget)
+        # Override default focus when a button opted in via ButtonConfig.focused.
+        if dialog._initial_focus is not None:
+            self._session.app.layout.focus(dialog._initial_focus)
         self._session.app.invalidate()
 
         try:

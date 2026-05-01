@@ -356,6 +356,88 @@ class TestConfigBasedDialog:
         dialog = _ConfigBasedDialog(config)
         assert dialog.escape_result == "escaped"
 
+    def test_config_based_dialog_inherits_width(self):
+        """ConfigBasedDialog forwards DialogConfig.width to BaseDialog.width."""
+        config = DialogConfig(
+            title="Test",
+            body="Body",
+            width=80,
+        )
+        dialog = _ConfigBasedDialog(config)
+        assert dialog.width == 80
+
+    def test_config_based_dialog_default_width_is_none(self):
+        """When DialogConfig.width is None, BaseDialog.width stays None."""
+        config = DialogConfig(title="Test", body="Body")
+        dialog = _ConfigBasedDialog(config)
+        assert dialog.width is None
+
+
+class TestButtonConfigBehavior:
+    """ButtonConfig.focused and ButtonConfig.style must affect the built widget."""
+
+    def _build(self, buttons):
+        config = DialogConfig(title="T", body="B", buttons=buttons)
+        dialog = _ConfigBasedDialog(config)
+        widget = dialog._build_widget()
+        return dialog, widget
+
+    def test_focused_button_recorded_for_initial_focus(self):
+        """ButtonConfig(focused=True) marks that button as the initial focus target."""
+        buttons = [
+            ButtonConfig(text="One", result=1),
+            ButtonConfig(text="Two", result=2, focused=True),
+            ButtonConfig(text="Three", result=3),
+        ]
+        dialog, _ = self._build(buttons)
+
+        # BaseDialog should expose the button window that wants focus on show.
+        # `_initial_focus` is None when no button is focused; otherwise it is
+        # the button's containing Window so DialogManager can call
+        # app.layout.focus(...) on it.
+        assert dialog._initial_focus is not None
+        # And the focused-flag positions the second button:
+        from prompt_toolkit.widgets import Button
+        assert isinstance(dialog._focused_button, Button)
+        assert dialog._focused_button.text == "Two"
+
+    def test_no_focused_flag_means_no_initial_focus_override(self):
+        """Without focused=True on any button, _initial_focus stays None."""
+        buttons = [
+            ButtonConfig(text="One", result=1),
+            ButtonConfig(text="Two", result=2),
+        ]
+        dialog, _ = self._build(buttons)
+        assert dialog._initial_focus is None
+        assert dialog._focused_button is None
+
+    def test_button_style_applied_to_window(self):
+        """ButtonConfig.style is appended to the Button window's style classes."""
+        from prompt_toolkit.application import create_app_session
+        from prompt_toolkit.input.defaults import create_pipe_input
+        from prompt_toolkit.output import DummyOutput
+
+        buttons = [ButtonConfig(text="Danger", result=1, style="class:danger")]
+        dialog, _ = self._build(buttons)
+
+        # Find the Button window we built. _build_widget caches the buttons
+        # in the Dialog body; we walk the get_buttons output and rebuild
+        # is wasteful, so we expose the styled buttons via dialog._buttons.
+        from prompt_toolkit.widgets import Button
+        assert hasattr(dialog, "_buttons")
+        btns = dialog._buttons
+        assert len(btns) == 1
+        btn = btns[0]
+        assert isinstance(btn, Button)
+
+        # Button.window.style is callable. Resolve it inside an app session
+        # so get_app() works.
+        with create_pipe_input() as inp:
+            with create_app_session(input=inp, output=DummyOutput()):
+                style = btn.window.style
+                resolved = style() if callable(style) else style
+                assert "class:danger" in resolved
+
 
 # =============================================================================
 # DialogManager Tests

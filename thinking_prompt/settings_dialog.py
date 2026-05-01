@@ -31,6 +31,7 @@ from prompt_toolkit.layout import (
 )
 from prompt_toolkit.layout.controls import FormattedTextControl, UIContent, UIControl
 from prompt_toolkit.layout.margins import ScrollbarMargin
+from prompt_toolkit.layout.processors import PasswordProcessor
 from prompt_toolkit.widgets import Frame
 
 from .dialog import BaseDialog
@@ -639,6 +640,7 @@ class TextControl(SettingControl[TextItem]):
         buffer_control = BufferControl(
             buffer=self._buffer,
             key_bindings=edit_kb,
+            input_processors=[PasswordProcessor()] if self._item.password else None,
         )
 
         # Cache the buffer window for focus management

@@ -314,6 +314,7 @@ async def main():
                     description="Application color scheme",
                     options=["Light", "Dark", "System", "Solarized", "Nord"],
                     default="System",
+                    width=20,
                 ),
                 InlineSelectItem(
                     key="font_size",
@@ -352,10 +353,19 @@ async def main():
                 title="Settings",
                 items=settings_items,
                 height=16,
+                width=60,
             )
             result = await session.show_dialog(dialog)
             if result:
-                changes = [f"- **{k}**: {v}" for k, v in result.items()]
+                # Keep secrets out of the rendered diff, even in demos.
+                password_keys = {
+                    item.key for item in settings_items
+                    if isinstance(item, TextItem) and item.password
+                }
+                changes = [
+                    f"- **{k}**: {'***' if k in password_keys and v else v}"
+                    for k, v in result.items()
+                ]
                 session.add_response(
                     "## Settings Updated\n\n" + "\n".join(changes),
                     markdown=True
