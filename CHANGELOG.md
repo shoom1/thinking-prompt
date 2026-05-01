@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.2] - 2026-05-01
+
+### Fixed
+
+- Ctrl+C now cancels a running input handler instead of letting it run to completion. The handler is tracked as an `asyncio.Task` and cancelled on Ctrl+C, with active thinking boxes finished and pending input cancelled.
+- Input submitted while a handler is running is no longer silently dropped. `accept_handler` now refuses to deliver input while busy, leaves the buffer intact, and surfaces a `Busy — press Ctrl+C to cancel` status hint.
+- Handler exceptions no longer leave thinking boxes stuck in the active state — cleanup runs in the exception path so callers using `start_thinking()` are not left in a permanent "thinking" state.
+- Ctrl+C with only an orphan thinking box (no running handler) now clears the box without also exiting the app. Previously the same keypress finished the boxes and then fell through to `app.exit()`.
+- `_user_cancelled_handler` flag is now reset in `finally` so it can't stay sticky when a handler suppresses `CancelledError` or cancellation races with natural completion. Prevents a leftover `True` state from swallowing a later outer cancellation and stalling shutdown.
+- `TextItem(password=True)` now masks input during editing, matching the masking already applied in view mode (previously the secret was visible while typing).
+- `DialogConfig.width` is now actually applied to the rendered dialog (was a public field that `_ConfigBasedDialog` never copied to `BaseDialog.width`).
+- `ButtonConfig.style` and `ButtonConfig.focused` are now honored — the configured style wraps each button's window style, and the configured focused button receives initial focus when the dialog opens.
+- `_renderable_to_ansi` (and the public `rich_to_ansi`, `StreamingContent.append_rich`, `StreamingContent.set_line_rich`) now ignore `NO_COLOR=1`. These APIs explicitly produce ANSI for the thinking box; honoring `NO_COLOR` at the converter layer silently stripped styling and made tests environment-sensitive.
+
+### Changed
+
+- Demo password fields in `demo_showcase.py` and `settings_dialog_demo.py` now mask API-key values in display output so demos don't print secrets the user just typed.
+
 ## [0.3.1] - 2026-04-20
 
 ### Added
