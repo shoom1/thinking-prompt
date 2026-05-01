@@ -1,13 +1,15 @@
 """Tests for the settings dialog system."""
 from __future__ import annotations
 
-from prompt_toolkit.layout import HSplit, Window
+from prompt_toolkit.layout import BufferControl, HSplit, Window
+from prompt_toolkit.layout.processors import PasswordProcessor
 
 from thinking_prompt.settings_dialog import (
     CheckboxItem,
     DropdownItem,
     InlineSelectItem,
     SettingsDialog,
+    TextControl,
     TextItem,
 )
 
@@ -159,6 +161,37 @@ class TestSettingsDialogLayout:
         assert isinstance(dialog._controls[0], InlineSelectControl)
         assert isinstance(dialog._controls[1], CheckboxControl)
         assert isinstance(dialog._controls[2], TextControl)
+
+
+class TestTextControlPasswordMasking:
+    """Edit-mode rendering of password fields must not expose the buffer."""
+
+    def _get_buffer_control(self, control: TextControl) -> BufferControl:
+        control._build_edit_container()
+        assert control._buffer_window is not None
+        bc = control._buffer_window.content
+        assert isinstance(bc, BufferControl)
+        return bc
+
+    def test_password_text_item_uses_password_processor_in_edit_mode(self):
+        item = TextItem(key="api_key", label="API Key", password=True)
+        control = TextControl(item)
+
+        bc = self._get_buffer_control(control)
+        processors = bc.input_processors or []
+        assert any(isinstance(p, PasswordProcessor) for p in processors), (
+            "BufferControl for password=True TextItem must include "
+            "PasswordProcessor; got input_processors="
+            f"{processors!r}"
+        )
+
+    def test_non_password_text_item_has_no_password_processor(self):
+        item = TextItem(key="username", label="Username", password=False)
+        control = TextControl(item)
+
+        bc = self._get_buffer_control(control)
+        processors = bc.input_processors or []
+        assert not any(isinstance(p, PasswordProcessor) for p in processors)
 
 
 class TestSessionIntegration:

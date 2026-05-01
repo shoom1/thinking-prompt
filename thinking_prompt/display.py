@@ -56,13 +56,26 @@ def _renderable_to_ansi(renderable: Any, theme: Any = None) -> str:
 
     Handles both markup strings like "[green]text[/green]" and Rich objects
     like Text("text", style="green").
+
+    NO_COLOR is intentionally ignored here. The contract of this helper, and
+    of the public APIs that build on it (rich_to_ansi, StreamingContent's
+    append_rich/set_line_rich), is to produce ANSI-styled output for the
+    thinking box. Stripping styling at this layer would silently neuter that
+    promise. NO_COLOR semantics belong at the terminal-output layer, not at
+    a converter that exists to emit ANSI.
     """
     try:
         from io import StringIO
 
         from rich.console import Console
         f = StringIO()
-        console = Console(file=f, force_terminal=True, width=9999, theme=theme)
+        console = Console(
+            file=f,
+            force_terminal=True,
+            no_color=False,
+            width=9999,
+            theme=theme,
+        )
         console.print(renderable, end="", highlight=False, soft_wrap=True)
         return f.getvalue().rstrip()
     except ImportError:

@@ -547,3 +547,19 @@ class TestRenderableToAnsi:
         from thinking_prompt.display import _renderable_to_ansi
         result = _renderable_to_ansi("plain text")
         assert "plain text" in result
+
+    def test_produces_ansi_under_no_color(self, monkeypatch):
+        """The ANSI converter must ignore NO_COLOR.
+
+        NO_COLOR is honored at terminal-output layers, not at this converter.
+        Since the function's contract is "produce ANSI", silently stripping
+        styling under NO_COLOR breaks public APIs (rich_to_ansi, append_rich,
+        set_line_rich) that promise styled output.
+        """
+        from thinking_prompt.display import _renderable_to_ansi
+        monkeypatch.setenv("NO_COLOR", "1")
+        result = _renderable_to_ansi("[green]hello[/green]")
+        assert "hello" in result
+        assert "\033[" in result, (
+            f"Expected ANSI escape under NO_COLOR=1, got plain output: {result!r}"
+        )
