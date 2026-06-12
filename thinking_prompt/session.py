@@ -791,7 +791,17 @@ class ThinkingPromptSession:
         with self._fullscreen_lock:
             self._is_fullscreen = False
 
-        # Clear terminal and history
+        # Clear the terminal screen. While the app is running this must
+        # go through the renderer — a raw escape write behind its back
+        # leaves the renderer's notion of the screen stale and corrupts
+        # the next repaint.
+        if self.app and self.app.is_running:
+            self.app.renderer.clear()
+        else:
+            # \033[2J clears screen, \033[H homes the cursor.
+            print("\033[2J\033[H", end="", flush=True)
+
+        # Clear history buffer and any pending output
         self._display.clear()
 
         # Re-print welcome message
