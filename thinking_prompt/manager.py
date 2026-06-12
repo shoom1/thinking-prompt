@@ -47,9 +47,11 @@ class ThinkingBoxManager:
         self,
         default_max_lines: int = 15,
         default_style: str = "class:thinking-box",
+        expand_key: str = "c-t",
     ) -> None:
         self._default_max_lines = default_max_lines
         self._default_style = default_style
+        self._expand_key = expand_key
         self._boxes: dict[str, ManagedBox] = {}
         self._seq_counter = 0
         self._auto_id_counter = 0
@@ -90,10 +92,12 @@ class ThinkingBoxManager:
             # Determine max lines
             effective_max_lines = max_lines if max_lines is not None else self._default_max_lines
 
-            # Create control
+            # Create control. expand_key is forwarded so the truncation
+            # hint names the key that actually toggles expansion.
             control = ThinkingBoxControl(
                 max_collapsed_lines=effective_max_lines,
                 style=self._default_style,
+                expand_key=self._expand_key,
             )
 
             # Create StreamingContent if no callback provided

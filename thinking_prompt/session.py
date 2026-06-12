@@ -157,9 +157,12 @@ class ThinkingPromptSession:
         self._fullscreen_enabled = app_info.fullscreen_enabled if app_info else False
         self._echo_thinking = app_info.echo_thinking if app_info else True
 
-        # Thinking box manager (manages multiple thinking boxes)
+        # Thinking box manager (manages multiple thinking boxes).
+        # expand_key flows through to each box so the truncation hint
+        # matches the key bound below in _create_key_bindings.
         self._manager = ThinkingBoxManager(
             default_max_lines=max_thinking_height,
+            expand_key=self._expand_key,
         )
 
         # Input history (for up/down arrow)

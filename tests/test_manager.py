@@ -107,6 +107,28 @@ class TestCreation:
         box = mgr.create_box(lambda: "x")
         assert box.control.max_collapsed_lines == 20
 
+    def test_create_box_forwards_expand_key_to_hint(self):
+        """The truncation hint must name the manager's expand key.
+
+        Regression: boxes were created with the control's default
+        ("c-t"), so a custom expand key bound at the session level
+        showed the wrong key in the "+N lines... ctrl-t to expand"
+        hint."""
+        mgr = ThinkingBoxManager(default_max_lines=3, expand_key="c-x")
+        box = mgr.create_box(lambda: "1\n2\n3\n4\n5", title="T")
+        hint = "".join(frag[1] for frag in box.control._get_formatted_text())
+        assert "ctrl-x" in hint
+        assert "ctrl-t" not in hint
+
+    def test_session_expand_key_reaches_manager(self):
+        """AppInfo.expand_key flows through the session to the manager."""
+        from thinking_prompt import AppInfo, ThinkingPromptSession
+
+        session = ThinkingPromptSession(
+            app_info=AppInfo(name="t", expand_key="c-x")
+        )
+        assert session._manager._expand_key == "c-x"
+
     def test_create_box_content_format(self):
         """create_box with content_format should pass it to control.start()."""
         mgr = ThinkingBoxManager()
