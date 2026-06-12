@@ -166,6 +166,16 @@ class TestStreamingContentSetLine:
         content.set_line(3, "line3")
         assert content.text == "line0\n\n\nline3\n"
 
+    def test_set_line_negative_index_out_of_range_raises(self):
+        """A negative index beyond the first line raises a clear IndexError
+        naming the index the caller passed (not the normalized one)."""
+        content = StreamingContent()
+        content.append("only line\n")
+        with pytest.raises(IndexError, match=r"line index -5 out of range"):
+            content.set_line(-5, "nope")
+        # Content untouched after the failed call.
+        assert content.text == "only line\n"
+
     def test_set_line_preserves_trailing_newline(self):
         """Trailing newline should be preserved after set_line."""
         content = StreamingContent()

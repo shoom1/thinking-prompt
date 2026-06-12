@@ -137,6 +137,15 @@ class StreamingContent:
             # Handle negative indices
             if index < 0:
                 index = len(lines) + index
+                if index < 0:
+                    # Still negative after normalization: out of range.
+                    # Without this check the list assignment below would
+                    # raise an IndexError with the normalized (confusing)
+                    # index instead of the one the caller passed.
+                    raise IndexError(
+                        f"line index {index - len(lines)} out of range "
+                        f"for {len(lines)} line(s)"
+                    )
 
             # Extend if needed
             while index >= len(lines):
