@@ -154,7 +154,7 @@ class StreamingContent:
             renderable: Rich markup string or Rich renderable object.
             theme: Optional Rich Theme for styling.
         """
-        from .display import _renderable_to_ansi
+        from .rich_utils import _renderable_to_ansi
         self.append(_renderable_to_ansi(renderable, theme=theme))
 
     def set_line_rich(self, index: int, renderable: Any, *, theme: Any = None) -> None:
@@ -165,7 +165,7 @@ class StreamingContent:
             renderable: Rich markup string or Rich renderable object.
             theme: Optional Rich Theme for styling.
         """
-        from .display import _renderable_to_ansi
+        from .rich_utils import _renderable_to_ansi
         ansi = _renderable_to_ansi(renderable, theme=theme)
         self.set_line(index, ansi.split('\n')[0])
 

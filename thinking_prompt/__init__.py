@@ -38,8 +38,8 @@ from .dialog import (
     ButtonConfig,
     DialogConfig,
 )
-from .display import _renderable_to_ansi as rich_to_ansi
 from .layout import ThinkingHeader
+from .rich_utils import _renderable_to_ansi as rich_to_ansi
 from .session import ThinkingPromptSession
 from .settings_dialog import (
     CheckboxItem,
