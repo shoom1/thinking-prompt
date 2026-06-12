@@ -10,6 +10,7 @@ import threading
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from prompt_toolkit.application.current import get_app
 from prompt_toolkit.filters import Condition
 from prompt_toolkit.layout import HSplit, Window
 from prompt_toolkit.layout.containers import Container
@@ -173,7 +174,14 @@ class ThinkingBoxManager:
             captured_header: ThinkingHeader = header
 
             def _get_header_text() -> Any:
-                return captured_header.get_formatted_text(80)
+                # Size the separator to the terminal so it spans wide
+                # screens and doesn't overflow narrow ones. get_app()
+                # returns a dummy app (80 cols) outside a running app.
+                try:
+                    width = get_app().output.get_size().columns
+                except Exception:
+                    width = 80
+                return captured_header.get_formatted_text(width)
 
             header_control = FormattedTextControl(text=_get_header_text)
             header_window = Window(

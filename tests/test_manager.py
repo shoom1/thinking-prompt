@@ -129,6 +129,27 @@ class TestCreation:
         )
         assert session._manager._expand_key == "c-x"
 
+    def test_header_separator_spans_terminal_width(self):
+        """The header line is sized to the app's terminal width, not a
+        hardcoded 80 columns."""
+        from unittest.mock import MagicMock
+
+        from prompt_toolkit.application.current import set_app
+        from prompt_toolkit.data_structures import Size
+
+        mgr = ThinkingBoxManager()
+        box = mgr.create_box(lambda: "x", title="T")
+
+        # box.container is HSplit([header_window, content_window]).
+        header_window = box.container.get_children()[0]
+        get_text = header_window.content.text
+
+        fake_app = MagicMock()
+        fake_app.output.get_size.return_value = Size(rows=24, columns=120)
+        with set_app(fake_app):
+            line = "".join(frag[1] for frag in get_text())
+        assert len(line) == 120
+
     def test_create_box_content_format(self):
         """create_box with content_format should pass it to control.start()."""
         mgr = ThinkingBoxManager()
