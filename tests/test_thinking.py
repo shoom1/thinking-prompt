@@ -115,54 +115,6 @@ class TestThinkingBoxControlExpansion:
         assert not small_thinking_control.can_toggle_expanded
 
 
-class TestThinkingBoxControlTruncation:
-    """Test content truncation in collapsed mode."""
-
-    def test_console_output_truncated_when_collapsed(
-        self, small_thinking_control: ThinkingBoxControl, multiline_content: str
-    ):
-        """Console output should be truncated when collapsed and overflowing."""
-        small_thinking_control.start(lambda: multiline_content)
-        output = small_thinking_control.get_console_output()
-
-        assert output.endswith("...")
-        # max_collapsed_lines - 1 lines of content + "..."
-        assert output.count("\n") <= 4
-
-    def test_console_output_full_when_expanded(
-        self, small_thinking_control: ThinkingBoxControl, multiline_content: str
-    ):
-        """Console output should be full content when expanded."""
-        small_thinking_control.start(lambda: multiline_content)
-        small_thinking_control.expand()
-        output = small_thinking_control.get_console_output()
-
-        assert not output.endswith("...")
-        assert "Line 19" in output  # Last line should be present
-
-    def test_console_output_not_truncated_when_fits(
-        self, small_thinking_control: ThinkingBoxControl, short_content: str
-    ):
-        """Console output should not be truncated when content fits."""
-        small_thinking_control.start(lambda: short_content)
-        output = small_thinking_control.get_console_output()
-
-        assert not output.endswith("...")
-
-    def test_console_output_empty_when_inactive(
-        self, thinking_control: ThinkingBoxControl
-    ):
-        """Console output should be empty when inactive."""
-        assert thinking_control.get_console_output() == ""
-
-    def test_console_output_empty_when_whitespace_only(
-        self, thinking_control: ThinkingBoxControl
-    ):
-        """Console output should be empty when content is whitespace only."""
-        thinking_control.start(lambda: "   \n  \n  ")
-        assert thinking_control.get_console_output() == ""
-
-
 class TestThinkingBoxControlFormatting:
     """Test FormattedText output."""
 
@@ -245,46 +197,6 @@ class TestThinkingBoxControlLineCount:
         assert thinking_control.get_line_count() == 3
 
 
-class TestThinkingBoxControlKeyBindings:
-    """Test key bindings generation."""
-
-    def test_key_bindings_returns_bindings(
-        self, thinking_control: ThinkingBoxControl
-    ):
-        """Should return key bindings object."""
-        kb = thinking_control.get_key_bindings()
-        assert kb is not None
-
-    def test_key_bindings_disabled_in_fullscreen(
-        self, thinking_control: ThinkingBoxControl, multiline_content: str
-    ):
-        """Toggle key binding should be disabled in fullscreen mode."""
-        thinking_control.start(lambda: multiline_content)
-
-        # With is_fullscreen returning True, can_toggle should not be available
-        kb = thinking_control.get_key_bindings(is_fullscreen=lambda: True)
-
-        # The binding exists but filter should prevent activation
-        # We verify this by checking the control's toggle still works directly
-        assert not thinking_control.is_expanded
-        thinking_control.toggle_expanded()
-        assert thinking_control.is_expanded
-
-    def test_key_bindings_enabled_in_prompt_mode(
-        self, thinking_control: ThinkingBoxControl, multiline_content: str
-    ):
-        """Toggle key binding should be enabled in prompt mode."""
-        thinking_control.start(lambda: multiline_content)
-
-        # With is_fullscreen returning False, should be available
-        kb = thinking_control.get_key_bindings(is_fullscreen=lambda: False)
-
-        # Verify control can toggle
-        assert not thinking_control.is_expanded
-        thinking_control.toggle_expanded()
-        assert thinking_control.is_expanded
-
-
 class TestThinkingBoxControlAnsiFormat:
     """Test ANSI format rendering in ThinkingBoxControl."""
 
@@ -344,26 +256,6 @@ class TestThinkingBoxControlAnsiFormat:
         text = "".join(frag[1] for frag in formatted)
         assert "Line 19" in text
         assert "to expand" not in text
-
-    def test_ansi_console_output_truncated(self, small_thinking_control: ThinkingBoxControl):
-        """ANSI console output should be truncated when collapsed."""
-        lines = [f"\033[32mLine {i}\033[0m" for i in range(20)]
-        content = "\n".join(lines)
-        small_thinking_control.start(lambda: content, content_format="ansi")
-        output = small_thinking_control.get_console_output()
-
-        assert output.endswith("...")
-
-    def test_ansi_console_output_full_when_expanded(self, small_thinking_control: ThinkingBoxControl):
-        """ANSI console output should be full when expanded."""
-        lines = [f"\033[32mLine {i}\033[0m" for i in range(20)]
-        content = "\n".join(lines)
-        small_thinking_control.start(lambda: content, content_format="ansi")
-        small_thinking_control.expand()
-        output = small_thinking_control.get_console_output()
-
-        assert "Line 19" in output
-        assert not output.endswith("...")
 
     def test_plain_format_unchanged(self, thinking_control: ThinkingBoxControl):
         """Plain format should work exactly as before."""

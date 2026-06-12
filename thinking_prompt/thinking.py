@@ -7,14 +7,12 @@ from __future__ import annotations
 
 import logging
 import threading
-from typing import Any, Callable
+from typing import Callable
 
-from prompt_toolkit.filters import Condition
 from prompt_toolkit.formatted_text import ANSI, FormattedText, to_formatted_text
-from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.layout.controls import FormattedTextControl
 
-from .types import ContentFormat, truncate_ansi_to_lines, truncate_to_lines
+from .types import ContentFormat
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +44,6 @@ class ThinkingBoxControl(FormattedTextControl):
     - Expanded/collapsed state
     - Content retrieval via callback
     - Formatting with expand hint when collapsed and overflowing
-    - Truncation with "..." for console output
 
     Created once and passed directly to Window(content=...).
     Use start() to begin thinking and finish() to end.
@@ -272,60 +269,6 @@ class ThinkingBoxControl(FormattedTextControl):
 
             lines = content.split('\n')
             return len(lines) > self._max_collapsed_lines - 1
-
-    def get_key_bindings(
-        self,
-        is_fullscreen: Callable[[], bool] | None = None,
-    ) -> KeyBindings:
-        """
-        Get key bindings for this control.
-
-        Args:
-            is_fullscreen: Optional callback that returns True if in fullscreen mode.
-                          Expand key is disabled in fullscreen mode.
-
-        Returns:
-            KeyBindings with expand/collapse key (prompt mode only).
-        """
-        kb = KeyBindings()
-
-        # Expand key only available when:
-        # - Can toggle expanded (content overflows or already expanded)
-        # - Not in fullscreen mode
-        def can_toggle() -> bool:
-            if not self.can_toggle_expanded:
-                return False
-            return not (is_fullscreen and is_fullscreen())
-
-        @kb.add(self._expand_key, filter=Condition(can_toggle))
-        def toggle_expand(event: Any) -> None:
-            self.toggle_expanded()
-
-        return kb
-
-    def get_console_output(self) -> str:
-        """
-        Get content formatted for console output.
-
-        When collapsed and content exceeds max_collapsed_lines, returns
-        truncated content with "..." appended.
-
-        Returns:
-            Content string, possibly truncated with "...".
-        """
-        content = self.content
-        if not content or not content.strip():
-            return ""
-
-        with self._lock:
-            if self._is_expanded:
-                return content.rstrip()
-
-            if self._content_format == "ansi":
-                return truncate_ansi_to_lines(content, self._max_collapsed_lines - 1)
-
-            # Same logic as _get_formatted_text: max_height - 1 lines + "..."
-            return truncate_to_lines(content, self._max_collapsed_lines - 1)
 
     def get_line_count(self, width: int = 80) -> int:
         """
