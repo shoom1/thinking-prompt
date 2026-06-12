@@ -33,6 +33,11 @@ SyncInputHandler = Callable[[str], None]
 AsyncInputHandler = Callable[[str], Awaitable[None]]
 InputHandler = Union[SyncInputHandler, AsyncInputHandler]
 
+# Default spinner animation frames for the thinking header.
+# Single source of truth — referenced by layout.ThinkingHeader and
+# app_info.AppInfo.
+DEFAULT_SPINNER_FRAMES = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
+
 
 # =============================================================================
 # Utility Functions
