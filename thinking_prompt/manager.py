@@ -259,19 +259,21 @@ class ThinkingBoxManager:
                 return True
             return any(box.control.can_toggle_expanded for box in self._boxes.values())
 
-    def finish_all(self) -> list[tuple[str, str, bool, ContentFormat]]:
+    def finish_all(self) -> list[tuple[str, str, bool, ContentFormat, int]]:
         """
         Finish all boxes and return their final states.
 
         Returns:
-            List of (box_id, content, was_expanded, content_format) tuples.
+            List of (box_id, content, was_expanded, content_format,
+            max_collapsed_lines) tuples.
         """
         with self._lock:
-            results: list[tuple[str, str, bool, ContentFormat]] = []
+            results: list[tuple[str, str, bool, ContentFormat, int]] = []
             for box_id in list(self._boxes.keys()):
                 box = self._boxes.pop(box_id)
+                max_lines = box.control.max_collapsed_lines
                 content, was_expanded, fmt = box.control.finish()
-                results.append((box_id, content, was_expanded, fmt))
+                results.append((box_id, content, was_expanded, fmt, max_lines))
             return results
 
     @property

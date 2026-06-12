@@ -535,11 +535,13 @@ class ThinkingPromptSession:
         results = self._manager.finish_all()
         all_content = []
 
-        for _box_id, full_content, _, content_format_val in results:
+        for _box_id, full_content, _, content_format_val, max_lines in results:
             if full_content.strip():
                 self._display.thinking(
                     full_content,
-                    truncate_lines=self._max_thinking_height,
+                    # Truncate to each box's own limit, matching the
+                    # per-box finish path (_finish_box).
+                    truncate_lines=max_lines,
                     add_to_history=add_to_history,
                     echo_to_console=should_echo,
                     content_format=content_format_val,

@@ -290,8 +290,18 @@ class TestFinishAll:
         mgr = ThinkingBoxManager()
         mgr.create_box(lambda: "x", box_id="a", content_format="ansi")
         results = mgr.finish_all()
-        # results are (box_id, content, was_expanded, format)
+        # results are (box_id, content, was_expanded, format, max_lines)
         assert results[0][3] == "ansi"
+
+    def test_finish_all_includes_per_box_max_lines(self):
+        """finish_all should report each box's own collapsed-lines limit
+        so finish-time truncation can match the per-box finish path."""
+        mgr = ThinkingBoxManager(default_max_lines=15)
+        mgr.create_box(lambda: "x", box_id="a", max_lines=5)
+        mgr.create_box(lambda: "y", box_id="b")
+        by_id = {r[0]: r for r in mgr.finish_all()}
+        assert by_id["a"][4] == 5
+        assert by_id["b"][4] == 15
 
     def test_finish_all_empty_manager(self):
         """finish_all on empty manager should return empty list."""
