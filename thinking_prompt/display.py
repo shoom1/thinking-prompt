@@ -475,11 +475,13 @@ class Display:
             self._output_ansi(content)
 
     def clear(self) -> None:
-        """Clear the terminal screen and history buffer."""
-        # Clear terminal using ANSI escape codes
-        # \033[2J clears screen, \033[H moves cursor to home position
-        print("\033[2J\033[H", end="", flush=True)
+        """Clear the history buffer and any pending console output.
 
+        Clearing the terminal screen itself is the caller's job: while
+        an Application is running it must go through the renderer so the
+        renderer's state stays in sync with the screen (see
+        ThinkingPromptSession.clear()).
+        """
         # Clear history buffer
         self._history.clear()
 

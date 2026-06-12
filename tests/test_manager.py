@@ -107,6 +107,49 @@ class TestCreation:
         box = mgr.create_box(lambda: "x")
         assert box.control.max_collapsed_lines == 20
 
+    def test_create_box_forwards_expand_key_to_hint(self):
+        """The truncation hint must name the manager's expand key.
+
+        Regression: boxes were created with the control's default
+        ("c-t"), so a custom expand key bound at the session level
+        showed the wrong key in the "+N lines... ctrl-t to expand"
+        hint."""
+        mgr = ThinkingBoxManager(default_max_lines=3, expand_key="c-x")
+        box = mgr.create_box(lambda: "1\n2\n3\n4\n5", title="T")
+        hint = "".join(frag[1] for frag in box.control._get_formatted_text())
+        assert "ctrl-x" in hint
+        assert "ctrl-t" not in hint
+
+    def test_session_expand_key_reaches_manager(self):
+        """AppInfo.expand_key flows through the session to the manager."""
+        from thinking_prompt import AppInfo, ThinkingPromptSession
+
+        session = ThinkingPromptSession(
+            app_info=AppInfo(name="t", expand_key="c-x")
+        )
+        assert session._manager._expand_key == "c-x"
+
+    def test_header_separator_spans_terminal_width(self):
+        """The header line is sized to the app's terminal width, not a
+        hardcoded 80 columns."""
+        from unittest.mock import MagicMock
+
+        from prompt_toolkit.application.current import set_app
+        from prompt_toolkit.data_structures import Size
+
+        mgr = ThinkingBoxManager()
+        box = mgr.create_box(lambda: "x", title="T")
+
+        # box.container is HSplit([header_window, content_window]).
+        header_window = box.container.get_children()[0]
+        get_text = header_window.content.text
+
+        fake_app = MagicMock()
+        fake_app.output.get_size.return_value = Size(rows=24, columns=120)
+        with set_app(fake_app):
+            line = "".join(frag[1] for frag in get_text())
+        assert len(line) == 120
+
     def test_create_box_content_format(self):
         """create_box with content_format should pass it to control.start()."""
         mgr = ThinkingBoxManager()
@@ -268,8 +311,18 @@ class TestFinishAll:
         mgr = ThinkingBoxManager()
         mgr.create_box(lambda: "x", box_id="a", content_format="ansi")
         results = mgr.finish_all()
-        # results are (box_id, content, was_expanded, format)
+        # results are (box_id, content, was_expanded, format, max_lines)
         assert results[0][3] == "ansi"
+
+    def test_finish_all_includes_per_box_max_lines(self):
+        """finish_all should report each box's own collapsed-lines limit
+        so finish-time truncation can match the per-box finish path."""
+        mgr = ThinkingBoxManager(default_max_lines=15)
+        mgr.create_box(lambda: "x", box_id="a", max_lines=5)
+        mgr.create_box(lambda: "y", box_id="b")
+        by_id = {r[0]: r for r in mgr.finish_all()}
+        assert by_id["a"][4] == 5
+        assert by_id["b"][4] == 15
 
     def test_finish_all_empty_manager(self):
         """finish_all on empty manager should return empty list."""

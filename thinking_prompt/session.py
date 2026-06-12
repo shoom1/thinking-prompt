@@ -157,9 +157,12 @@ class ThinkingPromptSession:
         self._fullscreen_enabled = app_info.fullscreen_enabled if app_info else False
         self._echo_thinking = app_info.echo_thinking if app_info else True
 
-        # Thinking box manager (manages multiple thinking boxes)
+        # Thinking box manager (manages multiple thinking boxes).
+        # expand_key flows through to each box so the truncation hint
+        # matches the key bound below in _create_key_bindings.
         self._manager = ThinkingBoxManager(
             default_max_lines=max_thinking_height,
+            expand_key=self._expand_key,
         )
 
         # Input history (for up/down arrow)
@@ -542,11 +545,13 @@ class ThinkingPromptSession:
         results = self._manager.finish_all()
         all_content = []
 
-        for _box_id, full_content, _, content_format_val in results:
+        for _box_id, full_content, _, content_format_val, max_lines in results:
             if full_content.strip():
                 self._display.thinking(
                     full_content,
-                    truncate_lines=self._max_thinking_height,
+                    # Truncate to each box's own limit, matching the
+                    # per-box finish path (_finish_box).
+                    truncate_lines=max_lines,
                     add_to_history=add_to_history,
                     echo_to_console=should_echo,
                     content_format=content_format_val,
@@ -796,7 +801,17 @@ class ThinkingPromptSession:
         with self._fullscreen_lock:
             self._is_fullscreen = False
 
-        # Clear terminal and history
+        # Clear the terminal screen. While the app is running this must
+        # go through the renderer — a raw escape write behind its back
+        # leaves the renderer's notion of the screen stale and corrupts
+        # the next repaint.
+        if self.app and self.app.is_running:
+            self.app.renderer.clear()
+        else:
+            # \033[2J clears screen, \033[H homes the cursor.
+            print("\033[2J\033[H", end="", flush=True)
+
+        # Clear history buffer and any pending output
         self._display.clear()
 
         # Re-print welcome message
