@@ -297,8 +297,10 @@ class ThinkingPromptSession:
         kb = KeyBindings()
 
         # Cancel/interrupt — cancel the running handler, finish boxes,
-        # cancel pending input. Falls through to app.exit() only when
-        # nothing was in flight at the moment Ctrl+C was pressed.
+        # cancel pending input. Falls through to app.exit() when no
+        # handler was running and no boxes were active. A live pending
+        # input future does NOT count as in-flight work: it merely means
+        # the prompt is waiting for input, which is the idle state.
         @kb.add("c-c")
         def cancel(event: KeyPressEvent) -> None:
             """Cancel current operation or exit."""
@@ -331,8 +333,16 @@ class ThinkingPromptSession:
                 assert self._pending_input is not None
                 self._pending_input.cancel()
 
-            if not handler_running and not had_active_boxes and not had_pending_input:
-                # Nothing was in flight — Ctrl+C is the user asking to exit.
+            if not handler_running and not had_active_boxes:
+                # No handler and no boxes — the session is idle, so Ctrl+C
+                # means "exit". At an idle prompt the pending-input future
+                # is always live (prompt_async is awaiting it), so it must
+                # not count as in-flight work: treating it as such used to
+                # kill the input loop while leaving the app running, after
+                # which typed input was echoed but silently dropped. The
+                # future was cancelled above, so direct prompt_async()
+                # callers still observe KeyboardInterrupt; app.exit() ends
+                # run_async()'s own loop either way.
                 event.app.exit()
 
         # Exit
