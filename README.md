@@ -55,6 +55,12 @@ if __name__ == "__main__":
     asyncio.run(main())
 ```
 
+> **Note — input handlers run on the event loop.** A synchronous handler
+> blocks the UI for its entire duration: the screen freezes, the spinner
+> stops, and Ctrl+C is not processed until it returns. Use an `async`
+> handler for anything that takes time, and wrap blocking calls with
+> `await asyncio.to_thread(...)` so the UI stays responsive.
+
 ## Key Bindings
 
 | Key | Action |

@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- First Ctrl+C at an idle prompt now exits the session. Previously the live pending-input future was treated as in-flight work: the binding cancelled it (killing the input loop) but never exited the app, leaving a zombie session that echoed typed input without delivering it; only a second Ctrl+C exited. Behavior change for apps driving `prompt_async()` directly with their own loop: Ctrl+C at an idle prompt now also calls `app.exit()` in addition to raising `KeyboardInterrupt`, so a caller that swallowed the exception to keep the session alive will now observe the application exiting.
+- `DialogManager.show()` now raises `RuntimeError` when a dialog is already open instead of overwriting it — a second concurrent dialog used to orphan the first dialog's result future, hanging its awaiter forever.
+- `show_settings_dialog(can_cancel=False)` no longer returns the string `"close"` when Escape is pressed (violating the documented `dict | None` contract). Escape is now disabled in that mode; the Done button is the only way out.
+- Custom `AppInfo.expand_key` is now reflected in the thinking-box truncation hint. The hint previously always read `ctrl-t to expand` even when the actual binding was different.
+- `StreamingContent.set_line()` with an out-of-range negative index now raises a clear `IndexError` naming the index the caller passed, and leaves content untouched.
+- The deprecated `finish_thinking()` now truncates each box to its own `max_lines` instead of the session-wide `max_thinking_height`, matching `ThinkingContext.finish()`. (`ThinkingBoxManager.finish_all()` result tuples gained a fifth element, `max_collapsed_lines`.)
+- `clear()` now clears the screen through `app.renderer.clear()` while the app is running. The previous raw `\033[2J\033[H` write bypassed the renderer and left its screen state stale, corrupting the next repaint.
+- Thinking-box height estimation strips ANSI styling escapes before measuring line wrap, so heavily styled `content_format="ansi"` content no longer renders an oversized box.
+- The thinking header separator is sized to the terminal width instead of a hardcoded 80 columns.
+
+### Changed
+
+- Importing `thinking_prompt` no longer monkey-patches `rich.markdown.Markdown` globally. The left-aligned heading style is applied through an internal `Markdown` subclass used only by this library's own markdown rendering; host applications' Rich output is unaffected.
+- Rich/Pygments helpers moved from `display` to a new `rich_utils` module (`display` re-exports the old names for backward compatibility). The public `rich_to_ansi` export is unchanged.
+- Removed dead `ThinkingBoxControl.get_key_bindings()` and `get_console_output()` — neither had a production caller; expand/collapse is owned by the session-level binding and console truncation by `Display.thinking()`.
+- `DEFAULT_SPINNER_FRAMES` now lives in `types` as the single source of truth (still importable from `layout`); `AppInfo.thinking_animation` defaults to it.
+- README and docstrings now state explicitly that sync input handlers block the event loop (frozen UI, no Ctrl+C) and recommend async handlers with `asyncio.to_thread` for blocking work.
+
 ## [0.3.2] - 2026-05-01
 
 ### Fixed
