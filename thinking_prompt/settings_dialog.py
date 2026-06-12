@@ -34,7 +34,7 @@ from prompt_toolkit.layout.margins import ScrollbarMargin
 from prompt_toolkit.layout.processors import PasswordProcessor
 from prompt_toolkit.widgets import Frame
 
-from .dialog import BaseDialog
+from .dialog import _UNSET, BaseDialog
 
 
 @dataclass
@@ -732,8 +732,12 @@ class SettingsDialog(BaseDialog):
         # Navigation state
         self._focus_index = 0
 
-        # Escape behavior
-        self.escape_result = None if can_cancel else "close"
+        # Escape behavior. With can_cancel=False there is no cancel concept:
+        # disable Escape entirely (the Done button is the only way out).
+        # Any other sentinel here would leak through DialogManager.show()
+        # as the return value, violating the dict-or-None contract of
+        # show_settings_dialog().
+        self.escape_result = None if can_cancel else _UNSET
 
     def _create_control(self, item: SettingsItem) -> SettingControl:
         """Create the appropriate control for a settings item."""

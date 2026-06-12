@@ -468,6 +468,38 @@ class TestDialogManager:
         manager = DialogManager(mock_session)
         assert manager._key_bindings is not None
 
+    async def test_show_while_dialog_open_raises_and_first_still_resolves(self):
+        """show() must refuse a second concurrent dialog.
+
+        Overwriting _current_dialog would orphan the first dialog's
+        result future — its awaiter would hang forever. Failing loudly
+        is the contract; callers must close one dialog before opening
+        the next."""
+        mock_session = MagicMock()
+        # _inject_float_container wraps the real layout container; a
+        # MagicMock is rejected by FloatContainer, so provide a real one.
+        mock_session.app.layout.container = Window()
+        mock_session.app.key_bindings = None
+        manager = DialogManager(mock_session)
+
+        first = _MessageDialog("First", "body")
+        show_task = asyncio.create_task(manager.show(first))
+
+        # Let show() advance to awaiting the first dialog's result.
+        for _ in range(20):
+            await asyncio.sleep(0)
+            if manager._current_dialog is first:
+                break
+        assert manager._current_dialog is first
+
+        with pytest.raises(RuntimeError, match="already being shown"):
+            await manager.show(_MessageDialog("Second", "body"))
+
+        # The first dialog is unaffected and still resolvable.
+        first.set_result("done")
+        assert await asyncio.wait_for(show_task, timeout=1) == "done"
+        assert manager._current_dialog is None
+
 
 # =============================================================================
 # Integration-style Tests (without full Application)

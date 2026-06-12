@@ -579,7 +579,18 @@ class DialogManager:
             to fit the minimum viable dialog, shows an error to the user and
             returns ``dialog.escape_result`` (or None if escape is disabled)
             without showing the dialog.
+
+        Raises:
+            RuntimeError: If a dialog is already being shown. Showing a
+                second dialog would orphan the first one's result future,
+                leaving its awaiter hung forever.
         """
+        if self._current_dialog is not None:
+            raise RuntimeError(
+                "A dialog is already being shown. Wait for it to close "
+                "before showing another one."
+            )
+
         # Ensure float container is injected
         self._inject_float_container()
 

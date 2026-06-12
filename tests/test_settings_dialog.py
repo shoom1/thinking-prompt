@@ -4,6 +4,7 @@ from __future__ import annotations
 from prompt_toolkit.layout import BufferControl, HSplit, Window
 from prompt_toolkit.layout.processors import PasswordProcessor
 
+from thinking_prompt.dialog import _UNSET
 from thinking_prompt.settings_dialog import (
     CheckboxItem,
     DropdownItem,
@@ -126,6 +127,21 @@ class TestSettingsDialogState:
         """SettingsDialog can disable cancel."""
         dialog = SettingsDialog(title="Settings", items=[], can_cancel=False)
         assert dialog._can_cancel is False
+
+    def test_escape_returns_none_when_cancellable(self):
+        """With can_cancel=True, Escape cancels and returns None."""
+        dialog = SettingsDialog(title="Settings", items=[])
+        assert dialog.escape_result is None
+
+    def test_escape_disabled_when_not_cancellable(self):
+        """With can_cancel=False, Escape is disabled entirely.
+
+        Regression: escape_result used to be the string "close", which
+        leaked through DialogManager.show() as the return value of
+        show_settings_dialog() — violating its dict-or-None contract
+        (callers iterating result.items() would crash on a str)."""
+        dialog = SettingsDialog(title="Settings", items=[], can_cancel=False)
+        assert isinstance(dialog.escape_result, type(_UNSET))
 
 
 class TestSettingsDialogLayout:
