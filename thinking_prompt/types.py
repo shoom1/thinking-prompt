@@ -33,6 +33,11 @@ SyncInputHandler = Callable[[str], None]
 AsyncInputHandler = Callable[[str], Awaitable[None]]
 InputHandler = Union[SyncInputHandler, AsyncInputHandler]
 
+# Default spinner animation frames for the thinking header.
+# Single source of truth — referenced by layout.ThinkingHeader and
+# app_info.AppInfo.
+DEFAULT_SPINNER_FRAMES = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
+
 
 # =============================================================================
 # Utility Functions
@@ -163,7 +168,7 @@ class StreamingContent:
             renderable: Rich markup string or Rich renderable object.
             theme: Optional Rich Theme for styling.
         """
-        from .display import _renderable_to_ansi
+        from .rich_utils import _renderable_to_ansi
         self.append(_renderable_to_ansi(renderable, theme=theme))
 
     def set_line_rich(self, index: int, renderable: Any, *, theme: Any = None) -> None:
@@ -174,7 +179,7 @@ class StreamingContent:
             renderable: Rich markup string or Rich renderable object.
             theme: Optional Rich Theme for styling.
         """
-        from .display import _renderable_to_ansi
+        from .rich_utils import _renderable_to_ansi
         ansi = _renderable_to_ansi(renderable, theme=theme)
         self.set_line(index, ansi.split('\n')[0])
 

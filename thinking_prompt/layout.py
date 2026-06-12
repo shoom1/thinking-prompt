@@ -37,13 +37,21 @@ from prompt_toolkit.layout.processors import (
     HighlightSelectionProcessor,
 )
 
+from .types import DEFAULT_SPINNER_FRAMES
+
 if TYPE_CHECKING:
     from .history import FormattedTextHistory
     from .manager import ThinkingBoxManager
 
-
-# Default spinner animation frames
-DEFAULT_SPINNER_FRAMES = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
+__all__ = [
+    "DEFAULT_SPINNER_FRAMES",  # re-export; canonical home is types.py
+    "ThinkingHeader",
+    "ThinkingSeparator",
+    "create_history_window",
+    "create_layout",
+    "create_status_bar",
+    "create_thinking_area",
+]
 
 
 class ThinkingHeader:

@@ -37,9 +37,10 @@ from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.key_binding.key_processor import KeyPressEvent
 
 from .app_info import AppInfo
-from .display import Display, _is_rich_renderable
+from .display import Display
 from .layout import create_layout
 from .manager import ThinkingBoxManager
+from .rich_utils import _is_rich_renderable
 from .styles import DEFAULT_STYLES, ThinkingPromptStyles
 from .types import ThinkingContext
 

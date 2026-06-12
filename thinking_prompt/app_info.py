@@ -5,8 +5,10 @@ Provides AppInfo dataclass for app metadata and welcome message.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Callable, Literal
+
+from .types import DEFAULT_SPINNER_FRAMES
 
 
 @dataclass
@@ -99,9 +101,7 @@ class AppInfo:
     thinking_text: str = "Thinking"
     """Text shown in the thinking separator. Set to empty string for no text."""
 
-    thinking_animation: tuple[str, ...] = field(
-        default=("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
-    )
+    thinking_animation: tuple[str, ...] = DEFAULT_SPINNER_FRAMES
     """Animation frames for the thinking indicator. Set to empty tuple for no animation."""
 
     thinking_animation_position: Literal["before", "after"] = "before"
