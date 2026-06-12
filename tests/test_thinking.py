@@ -244,6 +244,17 @@ class TestThinkingBoxControlLineCount:
         thinking_control.start(lambda: "line1\n\nline3")
         assert thinking_control.get_line_count() == 3
 
+    def test_line_count_ignores_ansi_escape_bytes(
+        self, thinking_control: ThinkingBoxControl
+    ):
+        """SGR escape sequences occupy no columns and must not count
+        toward wrapping. 60 visible chars heavily styled used to be
+        measured as >80 bytes and reported as 2 lines."""
+        styled = "\x1b[1m\x1b[31m" + ("x" * 30) + "\x1b[0m\x1b[32m" + ("y" * 30) + "\x1b[0m"
+        assert len(styled) > 80  # raw bytes would wrap at width 80
+        thinking_control.start(lambda: styled, content_format="ansi")
+        assert thinking_control.get_line_count(width=80) == 1
+
 
 class TestThinkingBoxControlKeyBindings:
     """Test key bindings generation."""

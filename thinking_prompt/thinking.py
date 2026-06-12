@@ -6,6 +6,7 @@ A FormattedTextControl that manages thinking box state and content formatting.
 from __future__ import annotations
 
 import logging
+import re
 import threading
 from typing import Any, Callable
 
@@ -17,6 +18,10 @@ from prompt_toolkit.layout.controls import FormattedTextControl
 from .types import ContentFormat, truncate_ansi_to_lines, truncate_to_lines
 
 logger = logging.getLogger(__name__)
+
+# SGR (color/style) escape sequences. Stripped before width math so
+# styling bytes don't count toward wrapping calculations.
+_ANSI_SGR_RE = re.compile(r"\x1b\[[0-9;]*m")
 
 
 def _format_key_for_display(key: str) -> str:
@@ -344,6 +349,8 @@ class ThinkingBoxControl(FormattedTextControl):
         lines = content.split('\n')
         total = 0
         for line in lines:
+            # Styling escapes occupy no columns — measure visible text.
+            line = _ANSI_SGR_RE.sub("", line)
             if not line:
                 total += 1
             else:
