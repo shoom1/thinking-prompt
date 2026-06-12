@@ -882,6 +882,13 @@ class ThinkingPromptSession:
         input text as a string and can be sync or async. The handler decides
         whether to use thinking mode by calling start_thinking().
 
+        Warning:
+            Handlers run on the event loop. A synchronous handler blocks
+            the UI for its entire duration — the screen freezes, spinners
+            stop, and Ctrl+C is not processed until it returns. Use an
+            async handler for anything that takes time, and wrap blocking
+            calls with ``await asyncio.to_thread(...)``.
+
         Example:
             session = ThinkingPromptSession(header="MyApp")
 
@@ -944,6 +951,9 @@ class ThinkingPromptSession:
             handler: Callback for each input. If not provided, uses handler
                      registered with @on_input decorator. The handler decides
                      whether to use thinking mode by calling start_thinking().
+                     Sync handlers block the event loop (and the UI) until
+                     they return — prefer async handlers for slow work; see
+                     on_input() for details.
 
         Raises:
             ValueError: If no handler is provided and none was registered.
