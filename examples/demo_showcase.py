@@ -20,7 +20,7 @@ import asyncio
 from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.document import Document
 
-from thinking_prompt import ThinkingPromptSession, AppInfo
+from thinking_prompt import ThinkingPromptSession, AppInfo, __version__
 from thinking_prompt.settings_dialog import (
     SettingsDialog,
     DropdownItem,
@@ -109,7 +109,7 @@ def create_welcome_message():
 async def main():
     app_info = AppInfo(
         name="ThinkingBox",
-        version="0.3.0",
+        version=__version__,
         welcome_message=create_welcome_message,
         thinking_text="Processing",
         thinking_animation=("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"),
