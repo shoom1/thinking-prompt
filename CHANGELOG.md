@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.4.0] - 2026-06-13
 
 ### Fixed
 
@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Removed dead `ThinkingBoxControl.get_key_bindings()` and `get_console_output()` — neither had a production caller; expand/collapse is owned by the session-level binding and console truncation by `Display.thinking()`.
 - `DEFAULT_SPINNER_FRAMES` now lives in `types` as the single source of truth (still importable from `layout`); `AppInfo.thinking_animation` defaults to it.
 - README and docstrings now state explicitly that sync input handlers block the event loop (frozen UI, no Ctrl+C) and recommend async handlers with `asyncio.to_thread` for blocking work.
+- `examples/demo_showcase.py` now sources its displayed version from `thinking_prompt.__version__` instead of a hardcoded string, so the welcome banner can't drift from the package version.
 
 ## [0.3.2] - 2026-05-01
 
