@@ -10,6 +10,7 @@ import threading
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from prompt_toolkit.application.current import get_app
 from prompt_toolkit.filters import Condition
 from prompt_toolkit.layout import HSplit, Window
 from prompt_toolkit.layout.containers import Container
@@ -47,9 +48,11 @@ class ThinkingBoxManager:
         self,
         default_max_lines: int = 15,
         default_style: str = "class:thinking-box",
+        expand_key: str = "c-t",
     ) -> None:
         self._default_max_lines = default_max_lines
         self._default_style = default_style
+        self._expand_key = expand_key
         self._boxes: dict[str, ManagedBox] = {}
         self._seq_counter = 0
         self._auto_id_counter = 0
@@ -90,10 +93,12 @@ class ThinkingBoxManager:
             # Determine max lines
             effective_max_lines = max_lines if max_lines is not None else self._default_max_lines
 
-            # Create control
+            # Create control. expand_key is forwarded so the truncation
+            # hint names the key that actually toggles expansion.
             control = ThinkingBoxControl(
                 max_collapsed_lines=effective_max_lines,
                 style=self._default_style,
+                expand_key=self._expand_key,
             )
 
             # Create StreamingContent if no callback provided
@@ -169,7 +174,14 @@ class ThinkingBoxManager:
             captured_header: ThinkingHeader = header
 
             def _get_header_text() -> Any:
-                return captured_header.get_formatted_text(80)
+                # Size the separator to the terminal so it spans wide
+                # screens and doesn't overflow narrow ones. get_app()
+                # returns a dummy app (80 cols) outside a running app.
+                try:
+                    width = get_app().output.get_size().columns
+                except Exception:
+                    width = 80
+                return captured_header.get_formatted_text(width)
 
             header_control = FormattedTextControl(text=_get_header_text)
             header_window = Window(
@@ -255,19 +267,21 @@ class ThinkingBoxManager:
                 return True
             return any(box.control.can_toggle_expanded for box in self._boxes.values())
 
-    def finish_all(self) -> list[tuple[str, str, bool, ContentFormat]]:
+    def finish_all(self) -> list[tuple[str, str, bool, ContentFormat, int]]:
         """
         Finish all boxes and return their final states.
 
         Returns:
-            List of (box_id, content, was_expanded, content_format) tuples.
+            List of (box_id, content, was_expanded, content_format,
+            max_collapsed_lines) tuples.
         """
         with self._lock:
-            results: list[tuple[str, str, bool, ContentFormat]] = []
+            results: list[tuple[str, str, bool, ContentFormat, int]] = []
             for box_id in list(self._boxes.keys()):
                 box = self._boxes.pop(box_id)
+                max_lines = box.control.max_collapsed_lines
                 content, was_expanded, fmt = box.control.finish()
-                results.append((box_id, content, was_expanded, fmt))
+                results.append((box_id, content, was_expanded, fmt, max_lines))
             return results
 
     @property

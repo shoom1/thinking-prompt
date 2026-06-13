@@ -5,8 +5,8 @@ This module provides the Display class which manages all output for
 ThinkingPromptSession, writing to both the console (for prompt mode)
 and the FormattedTextHistory (for fullscreen mode).
 
-Also includes Rich and Pygments integration utilities for rendering
-markdown, syntax highlighting, and Rich renderables.
+Rich and Pygments integration utilities live in rich_utils; the names
+are re-exported here for backward compatibility.
 """
 from __future__ import annotations
 
@@ -18,132 +18,27 @@ from prompt_toolkit.formatted_text import ANSI, AnyFormattedText, FormattedText,
 from prompt_toolkit.styles import Style
 
 from .history import FormattedTextHistory
+from .rich_utils import (
+    _highlight_code,
+    _is_rich_renderable,
+    _markdown_to_ansi,
+    _renderable_to_ansi,
+    _rich_to_ansi,
+)
 from .types import ContentFormat, truncate_ansi_to_lines, truncate_to_lines
 
 if TYPE_CHECKING:
     from .styles import ThinkingPromptStyles
 
-
-# =============================================================================
-# Rich and Pygments Integration Helpers
-# =============================================================================
-
-def _is_rich_renderable(obj: Any) -> bool:
-    """Check if an object is a Rich renderable."""
-    return hasattr(obj, '__rich_console__') or hasattr(obj, '__rich__')
-
-
-def _rich_to_ansi(renderable: Any, theme: Any = None) -> str:
-    """Convert a Rich renderable to an ANSI-formatted string.
-
-    Unlike ``_renderable_to_ansi``, this respects terminal width so that
-    layout-aware renderables (Panel, Table, etc.) size correctly.
-    """
-    try:
-        from io import StringIO
-
-        from rich.console import Console
-        file = StringIO()
-        console = Console(file=file, force_terminal=True, theme=theme)
-        console.print(renderable)
-        return file.getvalue()
-    except ImportError:
-        return str(renderable)
-
-
-def _renderable_to_ansi(renderable: Any, theme: Any = None) -> str:
-    """Convert a Rich renderable or markup string to ANSI (no trailing newline/padding).
-
-    Handles both markup strings like "[green]text[/green]" and Rich objects
-    like Text("text", style="green").
-
-    NO_COLOR is intentionally ignored here. The contract of this helper, and
-    of the public APIs that build on it (rich_to_ansi, StreamingContent's
-    append_rich/set_line_rich), is to produce ANSI-styled output for the
-    thinking box. Stripping styling at this layer would silently neuter that
-    promise. NO_COLOR semantics belong at the terminal-output layer, not at
-    a converter that exists to emit ANSI.
-    """
-    try:
-        from io import StringIO
-
-        from rich.console import Console
-        f = StringIO()
-        console = Console(
-            file=f,
-            force_terminal=True,
-            no_color=False,
-            width=9999,
-            theme=theme,
-        )
-        console.print(renderable, end="", highlight=False, soft_wrap=True)
-        return f.getvalue().rstrip()
-    except ImportError:
-        return str(renderable)
-
-
-def _setup_simple_heading() -> None:
-    """Patch Rich's Markdown to use left-aligned headings with H1 underlined."""
-    try:
-        from rich.console import Console, ConsoleOptions, RenderResult
-        from rich.markdown import Heading, Markdown
-        from rich.text import Text
-
-        class SimpleHeading(Heading):
-            """Heading that renders left-aligned, bold, with H1 underlined."""
-
-            def __rich_console__(
-                self, console: Console, options: ConsoleOptions
-            ) -> RenderResult:
-                text = self.text
-                text.justify = 'left'
-
-                if self.tag == 'h1':
-                    yield text
-                    yield Text('─' * len(text.plain), style='markdown.h1.border')
-                else:
-                    if self.tag == 'h2':
-                        yield Text('')
-                    yield text
-
-        Markdown.elements['heading_open'] = SimpleHeading
-    except ImportError:
-        pass
-
-
-# Apply the simple heading patch at module load
-_setup_simple_heading()
-
-
-def _markdown_to_ansi(content: str, theme: Any = None) -> str:
-    """Convert markdown to ANSI-formatted string using Rich."""
-    try:
-        from io import StringIO
-
-        from rich.console import Console
-        from rich.markdown import Markdown
-
-        file = StringIO()
-        console = Console(file=file, force_terminal=True, theme=theme)
-        console.print(Markdown(content))
-        return file.getvalue()
-    except ImportError:
-        return content
-
-
-def _highlight_code(code: str, language: str = "python") -> str:
-    """Syntax highlight code using Pygments."""
-    try:
-        from pygments import highlight
-        from pygments.formatters import TerminalFormatter
-        from pygments.lexers import get_lexer_by_name
-        lexer = get_lexer_by_name(language)
-        return highlight(code, lexer, TerminalFormatter())
-    except ImportError:
-        return code
-    except Exception:
-        # Handle unknown language or other errors
-        return code
+__all__ = [
+    "Display",
+    # Backward-compat re-exports (moved to rich_utils)
+    "_highlight_code",
+    "_is_rich_renderable",
+    "_markdown_to_ansi",
+    "_renderable_to_ansi",
+    "_rich_to_ansi",
+]
 
 
 class Display:
@@ -475,11 +370,13 @@ class Display:
             self._output_ansi(content)
 
     def clear(self) -> None:
-        """Clear the terminal screen and history buffer."""
-        # Clear terminal using ANSI escape codes
-        # \033[2J clears screen, \033[H moves cursor to home position
-        print("\033[2J\033[H", end="", flush=True)
+        """Clear the history buffer and any pending console output.
 
+        Clearing the terminal screen itself is the caller's job: while
+        an Application is running it must go through the renderer so the
+        renderer's state stays in sync with the screen (see
+        ThinkingPromptSession.clear()).
+        """
         # Clear history buffer
         self._history.clear()
 

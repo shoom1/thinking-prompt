@@ -37,9 +37,10 @@ from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.key_binding.key_processor import KeyPressEvent
 
 from .app_info import AppInfo
-from .display import Display, _is_rich_renderable
+from .display import Display
 from .layout import create_layout
 from .manager import ThinkingBoxManager
+from .rich_utils import _is_rich_renderable
 from .styles import DEFAULT_STYLES, ThinkingPromptStyles
 from .types import ThinkingContext
 
@@ -157,9 +158,12 @@ class ThinkingPromptSession:
         self._fullscreen_enabled = app_info.fullscreen_enabled if app_info else False
         self._echo_thinking = app_info.echo_thinking if app_info else True
 
-        # Thinking box manager (manages multiple thinking boxes)
+        # Thinking box manager (manages multiple thinking boxes).
+        # expand_key flows through to each box so the truncation hint
+        # matches the key bound below in _create_key_bindings.
         self._manager = ThinkingBoxManager(
             default_max_lines=max_thinking_height,
+            expand_key=self._expand_key,
         )
 
         # Input history (for up/down arrow)
@@ -297,8 +301,10 @@ class ThinkingPromptSession:
         kb = KeyBindings()
 
         # Cancel/interrupt — cancel the running handler, finish boxes,
-        # cancel pending input. Falls through to app.exit() only when
-        # nothing was in flight at the moment Ctrl+C was pressed.
+        # cancel pending input. Falls through to app.exit() when no
+        # handler was running and no boxes were active. A live pending
+        # input future does NOT count as in-flight work: it merely means
+        # the prompt is waiting for input, which is the idle state.
         @kb.add("c-c")
         def cancel(event: KeyPressEvent) -> None:
             """Cancel current operation or exit."""
@@ -331,8 +337,16 @@ class ThinkingPromptSession:
                 assert self._pending_input is not None
                 self._pending_input.cancel()
 
-            if not handler_running and not had_active_boxes and not had_pending_input:
-                # Nothing was in flight — Ctrl+C is the user asking to exit.
+            if not handler_running and not had_active_boxes:
+                # No handler and no boxes — the session is idle, so Ctrl+C
+                # means "exit". At an idle prompt the pending-input future
+                # is always live (prompt_async is awaiting it), so it must
+                # not count as in-flight work: treating it as such used to
+                # kill the input loop while leaving the app running, after
+                # which typed input was echoed but silently dropped. The
+                # future was cancelled above, so direct prompt_async()
+                # callers still observe KeyboardInterrupt; app.exit() ends
+                # run_async()'s own loop either way.
                 event.app.exit()
 
         # Exit
@@ -532,11 +546,13 @@ class ThinkingPromptSession:
         results = self._manager.finish_all()
         all_content = []
 
-        for _box_id, full_content, _, content_format_val in results:
+        for _box_id, full_content, _, content_format_val, max_lines in results:
             if full_content.strip():
                 self._display.thinking(
                     full_content,
-                    truncate_lines=self._max_thinking_height,
+                    # Truncate to each box's own limit, matching the
+                    # per-box finish path (_finish_box).
+                    truncate_lines=max_lines,
                     add_to_history=add_to_history,
                     echo_to_console=should_echo,
                     content_format=content_format_val,
@@ -786,7 +802,17 @@ class ThinkingPromptSession:
         with self._fullscreen_lock:
             self._is_fullscreen = False
 
-        # Clear terminal and history
+        # Clear the terminal screen. While the app is running this must
+        # go through the renderer — a raw escape write behind its back
+        # leaves the renderer's notion of the screen stale and corrupts
+        # the next repaint.
+        if self.app and self.app.is_running:
+            self.app.renderer.clear()
+        else:
+            # \033[2J clears screen, \033[H homes the cursor.
+            print("\033[2J\033[H", end="", flush=True)
+
+        # Clear history buffer and any pending output
         self._display.clear()
 
         # Re-print welcome message
@@ -856,6 +882,13 @@ class ThinkingPromptSession:
         input text as a string and can be sync or async. The handler decides
         whether to use thinking mode by calling start_thinking().
 
+        Warning:
+            Handlers run on the event loop. A synchronous handler blocks
+            the UI for its entire duration — the screen freezes, spinners
+            stop, and Ctrl+C is not processed until it returns. Use an
+            async handler for anything that takes time, and wrap blocking
+            calls with ``await asyncio.to_thread(...)``.
+
         Example:
             session = ThinkingPromptSession(header="MyApp")
 
@@ -918,6 +951,9 @@ class ThinkingPromptSession:
             handler: Callback for each input. If not provided, uses handler
                      registered with @on_input decorator. The handler decides
                      whether to use thinking mode by calling start_thinking().
+                     Sync handlers block the event loop (and the UI) until
+                     they return — prefer async handlers for slow work; see
+                     on_input() for details.
 
         Raises:
             ValueError: If no handler is provided and none was registered.

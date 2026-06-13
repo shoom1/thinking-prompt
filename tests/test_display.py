@@ -103,6 +103,30 @@ class TestMarkdownToAnsi:
         result = markdown_to_ansi("")
         assert isinstance(result, str)
 
+    def test_does_not_patch_rich_markdown_globally(self):
+        """Importing thinking_prompt must not mutate Rich's own Markdown.
+
+        Regression: an import-time hook replaced
+        Markdown.elements['heading_open'] process-wide, changing heading
+        rendering for the host application's own Rich usage."""
+        rich_md = pytest.importorskip("rich.markdown")
+        # Force our markdown path (which uses the scoped subclass) first.
+        markdown_to_ansi("# Heading\n\nbody")
+        assert rich_md.Markdown.elements["heading_open"] is rich_md.Heading
+
+    def test_h1_left_aligned_with_underline(self):
+        """Our own markdown rendering keeps the custom heading style:
+        H1 is left-aligned (not centered) and underlined with ─."""
+        pytest.importorskip("rich")
+        import re
+
+        result = markdown_to_ansi("# Hi\n\nbody")
+        plain = re.sub(r"\x1b\[[0-9;]*m", "", result)
+        lines = [line for line in plain.splitlines() if line.strip()]
+        # Left-aligned: no centering padding before the heading text.
+        assert lines[0].startswith("Hi")
+        assert "──" in plain  # H1 underline
+
 
 class TestHighlightCode:
     """Test highlight_code function."""

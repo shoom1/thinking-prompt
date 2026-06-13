@@ -24,6 +24,17 @@ def session() -> ThinkingPromptSession:
     return ThinkingPromptSession()
 
 
+def _get_ctrl_c_handler(session: ThinkingPromptSession):
+    """Find the Ctrl+C key binding handler on the session's app."""
+    from prompt_toolkit.keys import Keys
+
+    kb = session.app.key_bindings
+    for binding in kb.bindings:
+        if binding.keys == (Keys.ControlC,):
+            return binding.handler
+    raise AssertionError("Ctrl+C binding not registered")
+
+
 class TestRunHandler:
     """_run_handler is the cancellable wrapper around a user input handler."""
 
@@ -186,12 +197,7 @@ class TestCtrlCKeyBinding:
     finishing active thinking boxes."""
 
     def _get_ctrl_c_handler(self, session):
-        from prompt_toolkit.keys import Keys
-        kb = session.app.key_bindings
-        for binding in kb.bindings:
-            if binding.keys == (Keys.ControlC,):
-                return binding.handler
-        raise AssertionError("Ctrl+C binding not registered")
+        return _get_ctrl_c_handler(session)
 
     def test_ctrl_c_cancels_running_handler(self, session):
         """When a handler task is running, Ctrl+C marks it as user-cancelled
@@ -218,14 +224,73 @@ class TestCtrlCKeyBinding:
                 pass
             loop.close()
 
-    def test_ctrl_c_idle_exits_app(self, session):
-        """With no handler and no boxes, Ctrl+C exits the application."""
+    async def test_ctrl_c_idle_exits_app(self, session):
+        """With no handler and no boxes, Ctrl+C exits the application.
+
+        At a real idle prompt, prompt_async() has installed a live
+        _pending_input future — its mere existence must not suppress the
+        exit. (The earlier version of this test set _pending_input = None,
+        a state that never occurs at an idle prompt in a real run, which
+        is how the zombie-session bug slipped past.)"""
+        session._pending_input = asyncio.get_running_loop().create_future()
+        session._current_handler_task = None
+
         handler = self._get_ctrl_c_handler(session)
         event = MagicMock()
-        # No handler task, no active boxes.
-        session._current_handler_task = None
         handler(event)
+
+        # The pending future is cancelled (direct prompt_async callers get
+        # KeyboardInterrupt) AND the app exits on this first Ctrl+C.
+        assert session._pending_input.cancelled()
         event.app.exit.assert_called_once()
+
+    async def test_first_ctrl_c_at_idle_prompt_terminates_run_async(self):
+        """Regression: the first Ctrl+C at an idle prompt must end the
+        session. Previously the binding treated the live pending-input
+        future as in-flight work — it cancelled the future (killing the
+        input loop) but never called app.exit(), leaving a zombie app
+        that echoed typed input without ever delivering it."""
+        session = ThinkingPromptSession()
+
+        # Grab the real Ctrl+C binding before stubbing out the app.
+        ctrl_c = _get_ctrl_c_handler(session)
+
+        # Stub the Application: run_async blocks until exit() is called,
+        # like the real one — but without a terminal.
+        exited = asyncio.Event()
+
+        async def fake_run_async() -> None:
+            await exited.wait()
+
+        app = MagicMock()
+        app.run_async = fake_run_async
+        app.exit = MagicMock(side_effect=exited.set)
+        app.is_running = True
+        session.app = app
+
+        async def handler(text: str) -> None:
+            pass
+
+        run_task = asyncio.create_task(session.run_async(handler))
+
+        # Wait until the input loop reaches the idle prompt (live future).
+        for _ in range(100):
+            await asyncio.sleep(0)
+            if (
+                session._pending_input is not None
+                and not session._pending_input.done()
+            ):
+                break
+        assert session._pending_input is not None
+        assert not session._pending_input.done()
+
+        # One Ctrl+C — the session must terminate, not become a zombie.
+        event = MagicMock()
+        event.app = app
+        ctrl_c(event)
+
+        await asyncio.wait_for(run_task, timeout=1)
+        app.exit.assert_called_once()
 
     def test_ctrl_c_with_orphan_box_clears_box_and_does_not_exit(self, session):
         """Ctrl+C with an active thinking box (and no handler) must clear
@@ -244,6 +309,35 @@ class TestCtrlCKeyBinding:
 
         assert session._manager.has_active_boxes is False
         event.app.exit.assert_not_called()
+
+
+class TestSessionClear:
+    """clear() must clear the screen via the renderer while the app is
+    running — a raw escape write behind the renderer's back leaves its
+    notion of the screen stale and corrupts the next repaint."""
+
+    def test_clear_uses_renderer_when_app_running(self, session, capsys):
+        session.app = MagicMock()
+        session.app.is_running = True
+        session._display.response("hello")
+        capsys.readouterr()  # discard the echoed response
+
+        session.clear()
+
+        session.app.renderer.clear.assert_called_once()
+        assert "\033[2J" not in capsys.readouterr().out
+        assert session._display.history.is_empty
+
+    def test_clear_falls_back_to_escape_codes_when_not_running(
+        self, session, capsys
+    ):
+        session.app = MagicMock()
+        session.app.is_running = False
+
+        session.clear()
+
+        session.app.renderer.clear.assert_not_called()
+        assert "\033[2J" in capsys.readouterr().out
 
 
 class TestUserCancelledFlagReset:
