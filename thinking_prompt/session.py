@@ -1030,8 +1030,9 @@ class ThinkingPromptSession:
             return
 
         if not asyncio.iscoroutine(result):
-            # Sync handler — already complete, just clean up if it left
-            # any boxes open (it shouldn't, but defensive).
+            # Sync handler — already complete. Drop any boxes it left
+            # open so the UI can't get stuck in a "thinking" state.
+            self._cleanup_after_handler()
             return
 
         task = asyncio.create_task(result)
@@ -1050,6 +1051,10 @@ class ThinkingPromptSession:
         except Exception as e:
             self._cleanup_after_handler()
             self.add_error(f"Handler error: {e}")
+        else:
+            # Handler completed normally — finish any boxes it left open
+            # (content is discarded, same as the cancel/error paths).
+            self._cleanup_after_handler()
         finally:
             self._current_handler_task = None
             # Always clear the cancel flag for the next invocation. We can't
