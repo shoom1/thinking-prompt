@@ -386,6 +386,9 @@ class TestCtrlDKeyBinding:
             if session._pending_input is not None and not session._pending_input.done():
                 break
 
+        assert session._pending_input is not None
+        assert not session._pending_input.done()
+
         binding = _get_ctrl_d_binding(session)
         event = MagicMock()
         binding.handler(event)
