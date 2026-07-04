@@ -29,7 +29,7 @@ Key bindings (defaults, configurable via AppInfo):
     Ctrl+T: Expand/collapse thinking box (in prompt mode)
     Ctrl+E: Toggle fullscreen mode (when fullscreen_enabled=True)
     Ctrl+C: Cancel current thinking or exit
-    Ctrl+D: Exit application
+    Ctrl+D: Exit application (empty input line only)
 """
 
 from .app_info import AppInfo

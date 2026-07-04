@@ -117,7 +117,8 @@ async def main():
 
             if cmd == "quit":
                 session.add_response("Goodbye!")
-                raise KeyboardInterrupt
+                session.exit()
+                return
 
             if cmd == "version":
                 session.add_response("CompleterDemo v1.0.0")
