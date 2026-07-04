@@ -349,10 +349,17 @@ class ThinkingPromptSession:
                 # run_async()'s own loop either way.
                 event.app.exit()
 
-        # Exit
-        @kb.add("c-d")
+        # Exit (EOF) — only on an empty input line, matching readline
+        # semantics. With text in the buffer this binding is inactive and
+        # prompt_toolkit's default emacs binding (delete-char) handles the
+        # key, so a typed draft is never destroyed by a stray Ctrl+D.
+        @kb.add("c-d", filter=Condition(lambda: not self.default_buffer.text))
         def exit_app(event: KeyPressEvent) -> None:
             """Exit the application."""
+            # Resolve the pending future so direct prompt_async() callers
+            # observe the documented EOFError instead of hanging forever.
+            if self._pending_input is not None and not self._pending_input.done():
+                self._pending_input.set_exception(EOFError())
             event.app.exit()
 
         # Enter to submit (when not thinking)
@@ -931,7 +938,7 @@ class ThinkingPromptSession:
             The user's input string.
 
         Raises:
-            EOFError: When Ctrl+D is pressed.
+            EOFError: When Ctrl+D is pressed on an empty input line.
             KeyboardInterrupt: When Ctrl+C is pressed (not during thinking).
         """
         self._pending_input = asyncio.get_running_loop().create_future()
