@@ -80,6 +80,29 @@ class TestRunHandler:
         assert session._manager.has_active_boxes is False
         assert session._current_handler_task is None
 
+    async def test_async_handler_success_finishes_orphan_boxes(self, session):
+        """A handler that returns without finishing its box must not leave
+        the UI stuck in a 'thinking' state — _run_handler's docstring
+        promises cleanup on completion, not only on error/cancel."""
+
+        async def handler(text: str) -> None:
+            session.start_thinking(lambda: "orphan\n", title="Work")
+            # returns without ctx.finish()
+
+        await session._run_handler(handler, "go")
+        assert session._manager.has_active_boxes is False
+        assert session._current_handler_task is None
+
+    async def test_sync_handler_finishes_orphan_boxes(self, session):
+        """Same contract for sync handlers: the early-return path must
+        also drop leftover boxes."""
+
+        def handler(text: str) -> None:
+            session.start_thinking(lambda: "orphan\n", title="Work")
+
+        await session._run_handler(handler, "go")
+        assert session._manager.has_active_boxes is False
+
     async def test_user_cancel_finishes_active_boxes_and_does_not_propagate(
         self, session
     ):
