@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.4] - 2026-07-04
+
+### Fixed
+
+- Input handlers that return without finishing their thinking boxes no longer leave the UI stuck with a permanently animating orphan box. `_run_handler` now finishes leftover boxes on normal completion — both async and sync handlers — matching the cleanup already performed on the cancellation and error paths. Leftover content is discarded, as on the Ctrl+C path. Behavior change for the edge case of a box deliberately left open across handler returns: it is now finished (content discarded) when the handler completes — keep the handler running (async) for the lifetime of such a box instead.
+- Ctrl+D now resolves a pending `prompt_async()` with the documented `EOFError` instead of leaving direct callers hanging forever, and only exits on an empty input line (readline semantics). With text in the buffer, prompt_toolkit's default emacs binding deletes the character under the cursor instead of discarding the draft and killing the session.
+- Collapsed thinking-box height is computed against the real terminal width instead of a hardcoded 80 columns, so wrapped lines no longer clip content on narrow terminals or reserve excess height on wide ones.
+- `examples/completer_demo.py` `/quit` now exits via `session.exit()`. The previous `raise KeyboardInterrupt` escaped the handler wrapper (`except Exception`), killed the input loop without exiting the app, and left a zombie UI.
+- Docstrings no longer teach broken or deprecated code: the `ThinkingPromptSession` class, `on_input`, and `run_async` examples use the `thinking()` context manager instead of the deprecated `finish_thinking()`, and the `on_input` example no longer passes a nonexistent `header=` kwarg. README no longer claims `set_status()` parses Rich markup strings — pass `Text.from_markup(...)` instead. The package docstring's key-binding list notes the empty-line qualifier as well. README's key-bindings table carries the same qualifier, and its examples list now includes `chat_demo.py` and `clear_demo.py`.
+
+### Changed
+
+- Dependency floors corrected: `prompt_toolkit>=3.0.36` (the old `>=3.0.0` floor resolved but crashed at import — `ScrollablePane`, used by the dialog system, was added in 3.0.15), `pygments>=2.15.0` (ReDoS hardening), and `rich` capped `<16` (the markdown renderer subclasses `rich.markdown.Heading` internals; 13–15 are the tested majors). New standalone `pygments` extra for code highlighting without rich.
+- CI: Python 3.13 added to the test matrix, plus a minimal job that runs the suite without optional extras so the rich fallback paths are actually exercised. Rich-dependent tests now skip cleanly when rich is absent.
+
 ## [0.3.3] - 2026-06-13
 
 ### Fixed

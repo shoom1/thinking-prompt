@@ -68,7 +68,7 @@ if __name__ == "__main__":
 | Ctrl+T | Expand/collapse all thinking boxes (in prompt mode) |
 | Ctrl+E | Toggle fullscreen mode (when enabled) |
 | Ctrl+C | Cancel current operation or exit |
-| Ctrl+D | Exit application |
+| Ctrl+D | Exit application (empty input line only) |
 
 ## API Reference
 
@@ -192,7 +192,8 @@ session.add_code("def hello(): return 'world'", language="python")
 
 # Status bar text
 session.set_status("Ready")                    # Plain text
-session.set_status("[bold]Processing[/bold]")  # Rich markup
+from rich.text import Text
+session.set_status(Text.from_markup("[bold]Processing[/bold]"))  # Rich renderable
 
 # Status messages
 session.add_success("Operation completed")
@@ -335,6 +336,8 @@ See the `examples/` directory for complete demos:
 - `basic.py` - Simple thinking box usage
 - `demo.py` - Interactive demo with simulated AI thinking
 - `streaming.py` - Character-by-character streaming
+- `chat_demo.py` - Chat-style conversation loop
+- `clear_demo.py` - Clearing the screen and history with `session.clear()`
 - `progress_demo.py` - Progress bar with callback
 - `demo_progress_line.py` - In-place progress updates
 - `demo_multi_box.py` - Multiple concurrent thinking boxes with task list

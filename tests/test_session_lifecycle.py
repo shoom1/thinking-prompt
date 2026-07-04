@@ -35,6 +35,17 @@ def _get_ctrl_c_handler(session: ThinkingPromptSession):
     raise AssertionError("Ctrl+C binding not registered")
 
 
+def _get_ctrl_d_binding(session: ThinkingPromptSession):
+    """Find the Ctrl+D key binding (handler + filter) on the session's app."""
+    from prompt_toolkit.keys import Keys
+
+    kb = session.app.key_bindings
+    for binding in kb.bindings:
+        if binding.keys == (Keys.ControlD,):
+            return binding
+    raise AssertionError("Ctrl+D binding not registered")
+
+
 class TestRunHandler:
     """_run_handler is the cancellable wrapper around a user input handler."""
 
@@ -79,6 +90,29 @@ class TestRunHandler:
         await session._run_handler(handler, "go")
         assert session._manager.has_active_boxes is False
         assert session._current_handler_task is None
+
+    async def test_async_handler_success_finishes_orphan_boxes(self, session):
+        """A handler that returns without finishing its box must not leave
+        the UI stuck in a 'thinking' state — _run_handler's docstring
+        promises cleanup on completion, not only on error/cancel."""
+
+        async def handler(text: str) -> None:
+            session.start_thinking(lambda: "orphan\n", title="Work")
+            # returns without ctx.finish()
+
+        await session._run_handler(handler, "go")
+        assert session._manager.has_active_boxes is False
+        assert session._current_handler_task is None
+
+    async def test_sync_handler_finishes_orphan_boxes(self, session):
+        """Same contract for sync handlers: the early-return path must
+        also drop leftover boxes."""
+
+        def handler(text: str) -> None:
+            session.start_thinking(lambda: "orphan\n", title="Work")
+
+        await session._run_handler(handler, "go")
+        assert session._manager.has_active_boxes is False
 
     async def test_user_cancel_finishes_active_boxes_and_does_not_propagate(
         self, session
@@ -309,6 +343,58 @@ class TestCtrlCKeyBinding:
 
         assert session._manager.has_active_boxes is False
         event.app.exit.assert_not_called()
+
+
+class TestCtrlDKeyBinding:
+    """Ctrl+D must deliver the documented EOFError to prompt_async()
+    callers and must not fire while the input line has text."""
+
+    async def test_ctrl_d_sets_eoferror_on_pending_input(self, session):
+        """prompt_async() docstring: 'Raises EOFError when Ctrl+D is
+        pressed'. The binding must resolve the pending future, not just
+        exit the app (which left direct prompt_async callers hanging)."""
+        session._pending_input = asyncio.get_running_loop().create_future()
+
+        binding = _get_ctrl_d_binding(session)
+        event = MagicMock()
+        binding.handler(event)
+
+        event.app.exit.assert_called_once()
+        assert session._pending_input.done()
+        with pytest.raises(EOFError):
+            session._pending_input.result()
+
+    def test_ctrl_d_filter_false_when_buffer_has_text(self, session):
+        """Readline semantics: EOF only on an empty line. With a draft in
+        the buffer the binding must not be active (the default emacs
+        delete-char binding applies instead), so Ctrl+D can't destroy
+        typed input and kill the session."""
+        binding = _get_ctrl_d_binding(session)
+
+        session.default_buffer.text = "draft in progress"
+        assert not binding.filter()
+
+        session.default_buffer.reset()
+        assert binding.filter()
+
+    async def test_prompt_async_raises_eoferror_end_to_end(self, session):
+        """await prompt_async() must raise EOFError after Ctrl+D."""
+        prompt_task = asyncio.create_task(session.prompt_async())
+        # Let prompt_async install its future.
+        for _ in range(20):
+            await asyncio.sleep(0)
+            if session._pending_input is not None and not session._pending_input.done():
+                break
+
+        assert session._pending_input is not None
+        assert not session._pending_input.done()
+
+        binding = _get_ctrl_d_binding(session)
+        event = MagicMock()
+        binding.handler(event)
+
+        with pytest.raises(EOFError):
+            await prompt_task
 
 
 class TestSessionClear:
