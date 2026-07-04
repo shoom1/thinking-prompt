@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "thinking-prompt"
-version = "0.3.3"
+version = "0.3.4"
 description = "A prompt_toolkit extension that adds a thinking box above the prompt"
 readme = "README.md"
 license = "MIT"
@@ -29,8 +29,8 @@ classifiers = [
     "Topic :: Terminals",
 ]
 dependencies = [
-    # 3.0.36: floor verified by scratch-venv install in Step 4; anything
-    # below 3.0.15 lacks ScrollablePane (dialog.py) and fails at import.
+    # 3.0.36: floor verified by installing into a clean venv and running the
+    # suite; below 3.0.15 ScrollablePane (dialog.py) is missing → ImportError.
     "prompt_toolkit>=3.0.36",
 ]
 
