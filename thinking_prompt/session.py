@@ -69,19 +69,11 @@ class ThinkingPromptSession:
             if not user_input.strip():
                 return
 
-            # Use a list for O(1) append, return joined string
-            chunks = []
+            async with session.thinking() as ctx:
+                ctx.append("Processing...\\n")
+                await asyncio.sleep(1)
+                ctx.append("Done!\\n")
 
-            def get_content():
-                return ''.join(chunks)
-
-            session.start_thinking(get_content)
-
-            chunks.append("Processing...\\n")
-            await asyncio.sleep(1)
-            chunks.append("Done!\\n")
-
-            session.finish_thinking()
             session.add_response(f"Echo: {user_input}")
 
         await session.run_async()
@@ -349,10 +341,17 @@ class ThinkingPromptSession:
                 # run_async()'s own loop either way.
                 event.app.exit()
 
-        # Exit
-        @kb.add("c-d")
+        # Exit (EOF) — only on an empty input line, matching readline
+        # semantics. With text in the buffer this binding is inactive and
+        # prompt_toolkit's default emacs binding (delete-char) handles the
+        # key, so a typed draft is never destroyed by a stray Ctrl+D.
+        @kb.add("c-d", filter=Condition(lambda: not self.default_buffer.text))
         def exit_app(event: KeyPressEvent) -> None:
             """Exit the application."""
+            # Resolve the pending future so direct prompt_async() callers
+            # observe the documented EOFError instead of hanging forever.
+            if self._pending_input is not None and not self._pending_input.done():
+                self._pending_input.set_exception(EOFError())
             event.app.exit()
 
         # Enter to submit (when not thinking)
@@ -890,20 +889,17 @@ class ThinkingPromptSession:
             calls with ``await asyncio.to_thread(...)``.
 
         Example:
-            session = ThinkingPromptSession(header="MyApp")
+            session = ThinkingPromptSession()
 
             @session.on_input
             async def handle(text: str):
                 if not text.strip():
                     return
 
-                chunks = []
-                session.start_thinking(lambda: ''.join(chunks))
+                async with session.thinking() as ctx:
+                    ctx.append("Processing...\\n")
+                    await asyncio.sleep(1)
 
-                chunks.append("Processing...\\n")
-                await asyncio.sleep(1)
-
-                session.finish_thinking()
                 session.add_response(f"Echo: {text}")
 
             await session.run_async()  # No handler arg needed
@@ -931,7 +927,7 @@ class ThinkingPromptSession:
             The user's input string.
 
         Raises:
-            EOFError: When Ctrl+D is pressed.
+            EOFError: When Ctrl+D is pressed on an empty input line.
             KeyboardInterrupt: When Ctrl+C is pressed (not during thinking).
         """
         self._pending_input = asyncio.get_running_loop().create_future()
@@ -961,11 +957,9 @@ class ThinkingPromptSession:
         Example:
             # Option 1: Pass handler directly
             async def handle(text):
-                chunks = []
-                session.start_thinking(lambda: ''.join(chunks))
-                chunks.append("Working...\\n")
-                await asyncio.sleep(1)
-                session.finish_thinking()
+                async with session.thinking() as ctx:
+                    ctx.append("Working...\\n")
+                    await asyncio.sleep(1)
 
             await session.run_async(handle)
 
@@ -1030,8 +1024,9 @@ class ThinkingPromptSession:
             return
 
         if not asyncio.iscoroutine(result):
-            # Sync handler — already complete, just clean up if it left
-            # any boxes open (it shouldn't, but defensive).
+            # Sync handler — already complete. Drop any boxes it left
+            # open so the UI can't get stuck in a "thinking" state.
+            self._cleanup_after_handler()
             return
 
         task = asyncio.create_task(result)
@@ -1050,6 +1045,10 @@ class ThinkingPromptSession:
         except Exception as e:
             self._cleanup_after_handler()
             self.add_error(f"Handler error: {e}")
+        else:
+            # Handler completed normally — finish any boxes it left open
+            # (content is discarded, same as the cancel/error paths).
+            self._cleanup_after_handler()
         finally:
             self._current_handler_task = None
             # Always clear the cancel flag for the next invocation. We can't

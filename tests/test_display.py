@@ -550,12 +550,14 @@ class TestRenderableToAnsi:
     """Test _renderable_to_ansi function."""
 
     def test_converts_markup_string(self):
+        pytest.importorskip("rich")
         from thinking_prompt.display import _renderable_to_ansi
         result = _renderable_to_ansi("[green]hello[/green]")
         assert "hello" in result
         assert "\033[" in result
 
     def test_converts_rich_text_object(self):
+        pytest.importorskip("rich")
         from thinking_prompt.display import _renderable_to_ansi
         from rich.text import Text
         result = _renderable_to_ansi(Text("hello", style="bold"))
@@ -580,6 +582,7 @@ class TestRenderableToAnsi:
         styling under NO_COLOR breaks public APIs (rich_to_ansi, append_rich,
         set_line_rich) that promise styled output.
         """
+        pytest.importorskip("rich")
         from thinking_prompt.display import _renderable_to_ansi
         monkeypatch.setenv("NO_COLOR", "1")
         result = _renderable_to_ansi("[green]hello[/green]")
