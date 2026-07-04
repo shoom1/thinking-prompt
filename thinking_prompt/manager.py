@@ -23,6 +23,18 @@ from .thinking import ThinkingBoxControl
 from .types import ContentFormat, StreamingContent
 
 
+def _terminal_width(default: int = 80) -> int:
+    """Best-effort terminal width in columns.
+
+    get_app() returns a dummy app (80 cols) outside a running
+    application; any failure falls back to ``default``.
+    """
+    try:
+        return get_app().output.get_size().columns
+    except Exception:
+        return default
+
+
 @dataclass
 class ManagedBox:
     """State for a single managed thinking box."""
@@ -151,7 +163,9 @@ class ThinkingBoxManager:
             if control.is_expanded:
                 return D(min=5, preferred=20, max=40)
             else:
-                line_count = control.get_line_count()
+                # Wrap-count at the real terminal width — a hardcoded 80
+                # clips wrapped content on narrow terminals.
+                line_count = control.get_line_count(_terminal_width())
                 height = min(max(1, line_count), max_lines)
                 return D(min=1, max=max_lines, preferred=height)
 
@@ -175,13 +189,8 @@ class ThinkingBoxManager:
 
             def _get_header_text() -> Any:
                 # Size the separator to the terminal so it spans wide
-                # screens and doesn't overflow narrow ones. get_app()
-                # returns a dummy app (80 cols) outside a running app.
-                try:
-                    width = get_app().output.get_size().columns
-                except Exception:
-                    width = 80
-                return captured_header.get_formatted_text(width)
+                # screens and doesn't overflow narrow ones.
+                return captured_header.get_formatted_text(_terminal_width())
 
             header_control = FormattedTextControl(text=_get_header_text)
             header_window = Window(

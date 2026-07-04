@@ -509,3 +509,38 @@ class TestThreadSafety:
         t2.join()
 
         assert not errors, f"Thread safety errors: {errors}"
+
+
+# =============================================================================
+# Collapsed height terminal width tests
+# =============================================================================
+
+
+class TestCollapsedHeightUsesTerminalWidth:
+    """Collapsed height must wrap-count at the real terminal width, not a
+    hardcoded 80 (manager.get_height previously called get_line_count()
+    with the width=80 default while the header one function away already
+    queried the live width)."""
+
+    def test_height_wraps_at_patched_terminal_width(self, monkeypatch):
+        import thinking_prompt.manager as manager_mod
+
+        monkeypatch.setattr(manager_mod, "_terminal_width", lambda *a, **k: 20)
+
+        manager = ThinkingBoxManager(default_max_lines=15)
+        # title=None -> no header -> container IS the content Window,
+        # whose .height is the get_height closure.
+        box = manager.create_box(lambda: "x" * 80, title=None)
+
+        dim = box.container.height()
+        # 80 chars at width 20 wrap to 4 display lines.
+        assert dim.preferred == 4
+
+    def test_height_defaults_to_80_columns_without_app(self):
+        manager = ThinkingBoxManager(default_max_lines=15)
+        box = manager.create_box(lambda: "x" * 80, title=None)
+
+        dim = box.container.height()
+        # Outside a running app the dummy app reports 80 columns:
+        # a single 80-char line occupies exactly 1 display line.
+        assert dim.preferred == 1
