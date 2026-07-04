@@ -24,11 +24,14 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Topic :: Terminals",
 ]
 dependencies = [
-    "prompt_toolkit>=3.0.0",
+    # 3.0.36: floor verified by scratch-venv install in Step 4; anything
+    # below 3.0.15 lacks ScrollablePane (dialog.py) and fails at import.
+    "prompt_toolkit>=3.0.36",
 ]
 
 [project.optional-dependencies]
@@ -40,8 +43,9 @@ dev = [
     "ruff>=0.1.0",
     "types-Pygments",
 ]
-rich = ["rich>=13.0"]
-all = ["rich>=13.0", "pygments>=2.0"]
+rich = ["rich>=13.0,<16"]
+pygments = ["pygments>=2.15.0"]
+all = ["rich>=13.0,<16", "pygments>=2.15.0"]
 
 [project.urls]
 Homepage = "https://github.com/shoom1/thinking-prompt"
