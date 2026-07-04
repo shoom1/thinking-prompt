@@ -274,6 +274,7 @@ class TestThinkingContextRichMethods:
 
     def test_append_rich_converts_markup(self):
         """append_rich should convert Rich markup and append."""
+        pytest.importorskip("rich")
         content = StreamingContent()
         set_format_calls = []
         ctx = ThinkingContext(
@@ -362,6 +363,7 @@ class TestThinkingContextRichMethods:
 
     def test_rich_theme_is_passed_through(self):
         """rich_theme should be used when no explicit theme is given."""
+        pytest.importorskip("rich")
         from rich.theme import Theme
         custom_theme = Theme({"custom": "bold green"})
 

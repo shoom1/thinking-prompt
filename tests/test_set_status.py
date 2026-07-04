@@ -26,12 +26,14 @@ class TestDisplayToAnsi:
 
     def test_converts_rich_text_to_ansi(self, display: Display):
         """Should convert a Rich Text object to a prompt_toolkit ANSI."""
+        pytest.importorskip("rich")
         from rich.text import Text
         result = display.to_ansi(Text("Hello", style="bold"))
         assert isinstance(result, ANSI)
 
     def test_strips_trailing_newlines(self, display: Display):
         """Should strip trailing newlines from output."""
+        pytest.importorskip("rich")
         from rich.text import Text
         result = display.to_ansi(Text("Hello"))
         # ANSI stores the raw value; check it doesn't end with newline
@@ -143,6 +145,7 @@ class TestSessionSetStatus:
 
     def test_set_status_rich_renderable(self, session):
         """set_status() with a Rich renderable should convert to ANSI."""
+        pytest.importorskip("rich")
         from rich.text import Text
         session.set_status(Text("Rich status", style="bold"))
         assert isinstance(session.status_text, ANSI)

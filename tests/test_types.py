@@ -298,6 +298,7 @@ class TestStreamingContentRichMethods:
 
     def test_append_rich_markup_string(self):
         """append_rich should convert Rich markup to ANSI."""
+        pytest.importorskip("rich")
         content = StreamingContent()
         content.append_rich("[green]✓ Done[/green]\n")
         text = content.get_content()
@@ -307,6 +308,7 @@ class TestStreamingContentRichMethods:
 
     def test_append_rich_text_object(self):
         """append_rich should handle Rich Text objects."""
+        pytest.importorskip("rich")
         from rich.text import Text
         content = StreamingContent()
         content.append_rich(Text("Hello", style="bold"))
@@ -322,6 +324,7 @@ class TestStreamingContentRichMethods:
 
     def test_set_line_rich_markup(self):
         """set_line_rich should replace a line with Rich-converted content."""
+        pytest.importorskip("rich")
         content = StreamingContent()
         content.append("line0\nline1\n")
         content.set_line_rich(0, "[green]✓ line0[/green]")
