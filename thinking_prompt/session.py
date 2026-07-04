@@ -69,19 +69,11 @@ class ThinkingPromptSession:
             if not user_input.strip():
                 return
 
-            # Use a list for O(1) append, return joined string
-            chunks = []
+            async with session.thinking() as ctx:
+                ctx.append("Processing...\\n")
+                await asyncio.sleep(1)
+                ctx.append("Done!\\n")
 
-            def get_content():
-                return ''.join(chunks)
-
-            session.start_thinking(get_content)
-
-            chunks.append("Processing...\\n")
-            await asyncio.sleep(1)
-            chunks.append("Done!\\n")
-
-            session.finish_thinking()
             session.add_response(f"Echo: {user_input}")
 
         await session.run_async()
@@ -897,20 +889,17 @@ class ThinkingPromptSession:
             calls with ``await asyncio.to_thread(...)``.
 
         Example:
-            session = ThinkingPromptSession(header="MyApp")
+            session = ThinkingPromptSession()
 
             @session.on_input
             async def handle(text: str):
                 if not text.strip():
                     return
 
-                chunks = []
-                session.start_thinking(lambda: ''.join(chunks))
+                async with session.thinking() as ctx:
+                    ctx.append("Processing...\\n")
+                    await asyncio.sleep(1)
 
-                chunks.append("Processing...\\n")
-                await asyncio.sleep(1)
-
-                session.finish_thinking()
                 session.add_response(f"Echo: {text}")
 
             await session.run_async()  # No handler arg needed
@@ -968,11 +957,9 @@ class ThinkingPromptSession:
         Example:
             # Option 1: Pass handler directly
             async def handle(text):
-                chunks = []
-                session.start_thinking(lambda: ''.join(chunks))
-                chunks.append("Working...\\n")
-                await asyncio.sleep(1)
-                session.finish_thinking()
+                async with session.thinking() as ctx:
+                    ctx.append("Working...\\n")
+                    await asyncio.sleep(1)
 
             await session.run_async(handle)
 
