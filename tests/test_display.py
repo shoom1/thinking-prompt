@@ -184,13 +184,13 @@ def default_style() -> Style:
 @pytest.fixture
 def display(default_style: Style) -> Display:
     """Create a Display instance in prompt mode (not fullscreen)."""
-    return Display(style=default_style, is_fullscreen=lambda: False)
+    return Display(get_style=lambda: default_style, is_fullscreen=lambda: False)
 
 
 @pytest.fixture
 def fullscreen_display(default_style: Style) -> Display:
     """Create a Display instance in fullscreen mode."""
-    return Display(style=default_style, is_fullscreen=lambda: True)
+    return Display(get_style=lambda: default_style, is_fullscreen=lambda: True)
 
 
 class TestDisplayInit:
@@ -198,8 +198,8 @@ class TestDisplayInit:
 
     def test_creates_with_style(self, default_style: Style):
         """Should initialize with provided style."""
-        display = Display(style=default_style)
-        assert display._style is default_style
+        display = Display(get_style=lambda: default_style)
+        assert display._get_style() is default_style
 
     def test_creates_empty_history(self, display: Display):
         """Should start with empty history."""
@@ -207,12 +207,12 @@ class TestDisplayInit:
 
     def test_default_not_fullscreen(self, default_style: Style):
         """Default is_fullscreen should return False."""
-        display = Display(style=default_style)
+        display = Display(get_style=lambda: default_style)
         assert not display._is_fullscreen()
 
     def test_custom_fullscreen_callback(self, default_style: Style):
         """Should use custom is_fullscreen callback."""
-        display = Display(style=default_style, is_fullscreen=lambda: True)
+        display = Display(get_style=lambda: default_style, is_fullscreen=lambda: True)
         assert display._is_fullscreen()
 
 

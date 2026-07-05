@@ -54,7 +54,7 @@ class Display:
 
     def __init__(
         self,
-        style: Style,
+        get_style: Callable[[], Style],
         is_fullscreen: Callable[[], bool] = lambda: False,
         thinking_styles: ThinkingPromptStyles | None = None,
         get_color_depth: Callable[[], Any] = lambda: None,
@@ -63,19 +63,22 @@ class Display:
         Initialize the Display.
 
         Args:
-            style: The prompt_toolkit Style for rendering output.
+            get_style: Callable returning the current prompt_toolkit Style for
+                      rendering output. Called on every print so a runtime
+                      theme change (see set_theme()) takes effect immediately.
             is_fullscreen: Callback that returns True if fullscreen mode is active.
                           Console output is cached in fullscreen mode.
             thinking_styles: Optional ThinkingPromptStyles for markdown rendering.
             get_color_depth: Callable that returns the effective color depth hint
                             for print_formatted_text. Defaults to None.
         """
-        self._style = style
+        self._get_style = get_style
         self._history = FormattedTextHistory()
         self._is_fullscreen = is_fullscreen
         self._get_color_depth = get_color_depth
         self._pending_lock = threading.Lock()
         self._pending_output: list[AnyFormattedText] = []
+        self._thinking_styles = thinking_styles
         self._rich_theme = self._create_rich_theme(thinking_styles)
 
     def _create_rich_theme(self, thinking_styles: ThinkingPromptStyles | None) -> Any:
@@ -100,6 +103,11 @@ class Display:
         """Get the Rich theme for consistent styling."""
         return self._rich_theme
 
+    def set_theme(self, styles: ThinkingPromptStyles) -> None:
+        """Adopt a new theme: rebuild the Rich theme used for markdown."""
+        self._thinking_styles = styles
+        self._rich_theme = self._create_rich_theme(styles)
+
     def set_on_change(self, callback: Callable[[], None]) -> None:
         """
         Set callback for history changes (for UI invalidation).
@@ -119,7 +127,9 @@ class Display:
             with self._pending_lock:
                 self._pending_output.append(content)
         else:
-            print_formatted_text(content, style=self._style, color_depth=self._get_color_depth())
+            print_formatted_text(
+                content, style=self._get_style(), color_depth=self._get_color_depth()
+            )
 
     def _output_styled(self, style: str, text: str) -> None:
         """Output styled text to history and console."""
@@ -399,4 +409,6 @@ class Display:
             pending = list(self._pending_output)
             self._pending_output.clear()
         for content in pending:
-            print_formatted_text(content, style=self._style, color_depth=self._get_color_depth())
+            print_formatted_text(
+                content, style=self._get_style(), color_depth=self._get_color_depth()
+            )
