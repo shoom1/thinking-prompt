@@ -448,7 +448,9 @@ class ThinkingPromptSession:
                 the transcript in the new theme. Markdown and code re-render
                 from source; rich/raw ANSI keeps its original colors. In
                 fullscreen mode the repaint is deferred to fullscreen exit,
-                replacing the pending-output flush.
+                replacing the pending-output flush. Terminals that do not
+                support scrollback erase (CSI 3J) keep old content above the
+                viewport; the visible screen still repaints fully.
 
         Raises:
             ValueError: For unknown theme names.
@@ -890,6 +892,8 @@ class ThinkingPromptSession:
         # Exit fullscreen if active
         with self._fullscreen_lock:
             self._is_fullscreen = False
+            # clear() supersedes any deferred repaint: nothing left to repaint.
+            self._repaint_on_fullscreen_exit = False
 
         # Clear the terminal screen. While the app is running this must
         # go through the renderer — a raw escape write behind its back

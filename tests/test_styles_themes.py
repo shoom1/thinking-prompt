@@ -86,6 +86,8 @@ class TestThemeFactories:
             (s.setting_label, s.setting_label_selected),
             (s.setting_value, s.setting_value_selected),
             (s.setting_desc, s.setting_desc_selected),
+            (s.radio_list, s.radio_selected),
+            (s.checkbox_list, s.checkbox_selected),
         ]
         for unselected, selected in pairs:
             assert selected, "selected state must not be empty in mono"
@@ -96,6 +98,7 @@ class TestThemeFactories:
         joined = " ".join(_all_style_values(s))
         assert "#" not in joined
         assert s.color_depth is None
+        assert "ansicyan" in joined and "ansired" in joined
 
     def test_light_sets_light_code_theme(self):
         assert ThinkingPromptStyles.light().markdown_code_theme == "default"

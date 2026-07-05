@@ -91,6 +91,7 @@ class FormattedTextHistory:
         self._render_code = render_code
         self._lock = threading.RLock()
         self._on_change: Callable[[], None] | None = None
+        self._revision = 0
 
     def set_on_change(self, callback: Callable[[], None]) -> None:
         """Set callback to trigger when history changes."""
@@ -107,6 +108,7 @@ class FormattedTextHistory:
             if self._max_entries is not None:
                 while len(self._entries) > self._max_entries:
                     self._entries.pop(0)
+            self._revision += 1
             self._notify_change()
 
     def append(
@@ -173,6 +175,11 @@ class FormattedTextHistory:
         entry.cache = _coalesce(list(to_formatted_text(ANSI(ansi))))
         return entry.cache
 
+    def render_entry(self, entry: _Entry) -> list[OneStyleAndTextTuple]:
+        """Public, lock-taking wrapper for Display's repaint."""
+        with self._lock:
+            return self._render_entry(entry)
+
     def get_formatted_text(self) -> FormattedText:
         """
         Get all entries rendered as FormattedText.
@@ -192,6 +199,7 @@ class FormattedTextHistory:
             for entry in self._entries:
                 if entry.kind in ("markdown", "code"):
                     entry.cache = None
+            self._revision += 1
             self._notify_change()
 
     def iter_entries(self) -> list[_Entry]:
@@ -203,6 +211,7 @@ class FormattedTextHistory:
         """Clear all entries."""
         with self._lock:
             self._entries.clear()
+            self._revision += 1
             self._notify_change()
 
     @property
@@ -210,6 +219,13 @@ class FormattedTextHistory:
         """Check if history is empty."""
         with self._lock:
             return len(self._entries) == 0
+
+    @property
+    def revision(self) -> int:
+        """Monotonic change counter; grows on every mutation, never decreases —
+        use instead of len() to detect changes."""
+        with self._lock:
+            return self._revision
 
     def __len__(self) -> int:
         """Number of transcript entries."""
