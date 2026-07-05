@@ -14,7 +14,7 @@ import threading
 from typing import TYPE_CHECKING, Any, Callable
 
 from prompt_toolkit import print_formatted_text
-from prompt_toolkit.formatted_text import ANSI, AnyFormattedText, FormattedText, to_formatted_text
+from prompt_toolkit.formatted_text import ANSI, AnyFormattedText, FormattedText
 from prompt_toolkit.styles import Style
 
 from .history import FormattedTextHistory
@@ -58,6 +58,7 @@ class Display:
         is_fullscreen: Callable[[], bool] = lambda: False,
         thinking_styles: ThinkingPromptStyles | None = None,
         get_color_depth: Callable[[], Any] = lambda: None,
+        history_limit: int | None = None,
     ) -> None:
         """
         Initialize the Display.
@@ -71,15 +72,29 @@ class Display:
             thinking_styles: Optional ThinkingPromptStyles for markdown rendering.
             get_color_depth: Callable that returns the effective color depth hint
                             for print_formatted_text. Defaults to None.
+            history_limit: Max transcript entries kept; oldest are trimmed.
+                          None (default) means unbounded.
         """
         self._get_style = get_style
-        self._history = FormattedTextHistory()
         self._is_fullscreen = is_fullscreen
         self._get_color_depth = get_color_depth
         self._pending_lock = threading.Lock()
         self._pending_output: list[AnyFormattedText] = []
         self._thinking_styles = thinking_styles
+        # Assigned before _history is constructed: the render callbacks
+        # below close over self._rich_theme/_markdown_code_theme so a
+        # later set_theme() swap takes effect on the next render.
         self._rich_theme = self._create_rich_theme(thinking_styles)
+        self._markdown_code_theme = (
+            thinking_styles.markdown_code_theme if thinking_styles else "monokai"
+        )
+        self._history = FormattedTextHistory(
+            max_entries=history_limit,
+            render_markdown=lambda src: _markdown_to_ansi(
+                src, theme=self._rich_theme, code_theme=self._markdown_code_theme
+            ),
+            render_code=_highlight_code,
+        )
 
     def _create_rich_theme(self, thinking_styles: ThinkingPromptStyles | None) -> Any:
         """Create a Rich Theme from ThinkingPromptStyles."""
@@ -104,9 +119,11 @@ class Display:
         return self._rich_theme
 
     def set_theme(self, styles: ThinkingPromptStyles) -> None:
-        """Adopt a new theme: rebuild the Rich theme used for markdown."""
+        """Adopt a new theme: rebuild Rich theme, re-render markdown/code."""
         self._thinking_styles = styles
         self._rich_theme = self._create_rich_theme(styles)
+        self._markdown_code_theme = styles.markdown_code_theme
+        self._history.invalidate_render_caches()
 
     def set_on_change(self, callback: Callable[[], None]) -> None:
         """
@@ -137,14 +154,13 @@ class Display:
         self._print_to_console(FormattedText([(style, text)]))
 
     def _output_ansi(self, content: str) -> None:
-        """Output ANSI string to console and history.
+        """Output baked ANSI string to console and history.
 
-        ANSI is parsed into FormattedText fragments before being stored
-        in history so the fullscreen history Window renders styled
-        output instead of literal escape codes.
+        Used for rich/welcome/unstyled-raw output: this content is never
+        re-themed, so it's stored as a baked ANSI entry rather than parsed
+        into fragments up front.
         """
-        fragments = list(to_formatted_text(ANSI(content)))
-        self._history.append_formatted(fragments)
+        self._history.append_ansi(content)
         self._print_to_console(ANSI(content))
 
     # =========================================================================
@@ -202,9 +218,9 @@ class Display:
 
         style = "class:history.thinking"
 
-        # History gets full content
+        # History gets full content, truncated on repaint to match console
         if add_to_history:
-            self._history.append(style, f"{content}\n")
+            self._history.append(style, f"{content}\n", truncate_lines=truncate_lines)
 
         # Console gets possibly truncated content
         if echo_to_console:
@@ -223,10 +239,12 @@ class Display:
         echo_to_console: bool = True,
     ) -> None:
         """Output ANSI-formatted thinking content."""
-        # History gets full content as parsed ANSI fragments
+        # History gets full content as baked ANSI, truncated on repaint to
+        # match the console (never re-themed: ANSI escapes are already baked).
         if add_to_history:
-            fragments = list(to_formatted_text(ANSI(content.rstrip() + "\n")))
-            self._history.append_formatted(fragments)
+            self._history.append_ansi(
+                content.rstrip() + "\n", truncate_lines=truncate_lines
+            )
 
         # Console gets possibly truncated content
         if echo_to_console:
@@ -285,24 +303,33 @@ class Display:
         """
         Output markdown content, rendered via Rich to ANSI.
 
-        Falls back to plain text if Rich is not installed.
+        Falls back to plain text if Rich is not installed. Stored in
+        history by source so a later set_theme() can re-render it with
+        the new Rich theme and code theme.
 
         Args:
             content: The markdown content.
         """
-        self._output_ansi(_markdown_to_ansi(content, theme=self._rich_theme))
+        rendered = _markdown_to_ansi(
+            content, theme=self._rich_theme, code_theme=self._markdown_code_theme
+        )
+        self._history.append_markdown(content)
+        self._print_to_console(ANSI(rendered))
 
     def code(self, code: str, language: str = "python") -> None:
         """
         Output syntax-highlighted code.
 
-        Uses Pygments for highlighting. Falls back to plain text if not installed.
+        Uses Pygments for highlighting. Falls back to plain text if not
+        installed. Stored in history by source so a later set_theme() can
+        re-render it.
 
         Args:
             code: The source code to highlight.
             language: The programming language (default: "python").
         """
-        self._output_ansi(_highlight_code(code, language))
+        self._history.append_code(code, language)
+        self._print_to_console(ANSI(_highlight_code(code, language)))
 
     def welcome(self, content: Any) -> None:
         """
