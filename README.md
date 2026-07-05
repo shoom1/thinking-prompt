@@ -386,6 +386,7 @@ See the `examples/` directory for complete demos:
 - `settings_dialog_demo.py` - Settings dialog with all control types
 - `demo_showcase.py` - Feature showcase for demos and screenshots
 - `completer_demo.py` - Slash-command autocompletion (like Claude Code)
+- `demo_themes.py` - Built-in themes and runtime theme switching
 
 ## License
 

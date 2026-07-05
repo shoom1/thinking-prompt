@@ -28,6 +28,8 @@ from .rich_utils import (
 from .types import ContentFormat, truncate_ansi_to_lines, truncate_to_lines
 
 if TYPE_CHECKING:
+    from prompt_toolkit.output import ColorDepth
+
     from .styles import ThinkingPromptStyles
 
 __all__ = [
@@ -57,7 +59,7 @@ class Display:
         get_style: Callable[[], Style],
         is_fullscreen: Callable[[], bool] = lambda: False,
         thinking_styles: ThinkingPromptStyles | None = None,
-        get_color_depth: Callable[[], Any] = lambda: None,
+        get_color_depth: Callable[[], ColorDepth | None] = lambda: None,
         history_limit: int | None = None,
     ) -> None:
         """
@@ -71,7 +73,8 @@ class Display:
                           Console output is cached in fullscreen mode.
             thinking_styles: Optional ThinkingPromptStyles for markdown rendering.
             get_color_depth: Callable that returns the effective color depth hint
-                            for print_formatted_text. Defaults to None.
+                            for print_formatted_text. Defaults to a no-op
+                            callable returning None.
             history_limit: Max transcript entries kept; oldest are trimmed.
                           None (default) means unbounded.
         """
@@ -454,15 +457,27 @@ class Display:
         """
         for entry in self._history.iter_entries():
             if entry.kind == "styled":
-                text = entry.text
+                # Mirror the add-time console normalization: stored text
+                # carries an unconditional trailing "\n" (on top of
+                # whatever the caller's content already had), which would
+                # otherwise throw off truncate_to_lines' line count and
+                # add a spurious "..." marker on repaint.
+                text = entry.text.rstrip("\n")
                 if entry.truncate_lines is not None:
                     text = truncate_to_lines(text, entry.truncate_lines) + "\n"
+                else:
+                    text = text + "\n"
                 self._print_to_console(FormattedText([(entry.style, text)]))
             elif entry.kind == "formatted":
                 self._print_to_console(FormattedText(entry.fragments))
             elif entry.kind == "ansi" and entry.truncate_lines is not None:
                 self._print_to_console(
-                    ANSI(truncate_ansi_to_lines(entry.source, entry.truncate_lines) + "\n")
+                    ANSI(
+                        truncate_ansi_to_lines(
+                            entry.source.rstrip("\n"), entry.truncate_lines
+                        )
+                        + "\n"
+                    )
                 )
             else:  # markdown/code (fresh render via cache) and untruncated ansi
-                self._print_to_console(FormattedText(self._history._render_entry(entry)))
+                self._print_to_console(FormattedText(self._history.render_entry(entry)))

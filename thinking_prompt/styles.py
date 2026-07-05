@@ -189,11 +189,8 @@ class ThinkingPromptStyles:
     # ==========================================================================
     # Rendering hints
     # ==========================================================================
-    color_depth: ColorDepth | None = None
-    """Render depth hint. mono() sets DEPTH_1_BIT; None = terminal default."""
-
-    markdown_code_theme: str = "monokai"
-    """Rich code theme for fenced blocks in markdown (light() uses "default")."""
+    color_depth: ColorDepth | None = None  # mono() sets DEPTH_1_BIT; None = terminal default.
+    markdown_code_theme: str = "monokai"  # Rich code theme for fences (light() uses "default").
 
     @classmethod
     def dark(cls) -> ThinkingPromptStyles:

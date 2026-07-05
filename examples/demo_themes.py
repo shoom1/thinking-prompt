@@ -15,7 +15,8 @@ Run:
 import asyncio
 
 from thinking_prompt import AppInfo, ThinkingPromptSession
-from thinking_prompt.styles import THEMES
+
+THEME_NAMES = ("dark", "light", "mono", "terminal", "auto")
 
 
 async def main() -> None:
@@ -31,7 +32,7 @@ async def main() -> None:
         if not text:
             return
         if text == "/themes":
-            session.add_response("Themes: " + ", ".join([*THEMES, "auto"]))
+            session.add_response("Themes: " + ", ".join(THEME_NAMES))
             return
         if text.startswith("/theme"):
             parts = text.split()

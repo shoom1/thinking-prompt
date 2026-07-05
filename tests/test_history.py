@@ -265,3 +265,46 @@ class TestTypedEntries:
         frags = list(h.get_formatted_text())
         assert ("class:x", "hello\n") in frags
         assert ("bold", "world") in frags
+
+
+class TestRevision:
+    """revision must keep growing even once history_limit trimming makes
+    len() saturate, or fullscreen auto-scroll (which used to key off
+    len(history)) freezes forever once the cap is hit."""
+
+    def test_revision_grows_on_append(self):
+        h = FormattedTextHistory()
+        assert h.revision == 0
+        h.append("class:a", "one")
+        r1 = h.revision
+        assert r1 > 0
+        h.append("class:a", "two")
+        assert h.revision > r1
+
+    def test_revision_keeps_growing_past_max_entries_trim(self):
+        h = FormattedTextHistory(max_entries=2)
+        revisions = []
+        for i in range(4):
+            h.append("class:a", f"entry-{i}")
+            revisions.append(h.revision)
+
+        # len() saturates at the cap...
+        assert len(h) == 2
+        # ...but revision must have strictly increased on every append,
+        # never saturating like len() does.
+        assert revisions == sorted(set(revisions))
+        assert all(b > a for a, b in zip(revisions, revisions[1:]))
+
+    def test_revision_grows_on_clear(self):
+        h = FormattedTextHistory()
+        h.append("class:a", "one")
+        r1 = h.revision
+        h.clear()
+        assert h.revision > r1
+
+    def test_revision_grows_on_invalidate_render_caches(self):
+        h = FormattedTextHistory()
+        h.append_markdown("# hi")
+        r1 = h.revision
+        h.invalidate_render_caches()
+        assert h.revision > r1

@@ -56,6 +56,16 @@ class TestEffectiveColorDepth:
         s = ThinkingPromptSession()
         assert s._effective_color_depth() is None
 
+    def test_light_theme_depth_none(self, monkeypatch):
+        monkeypatch.delenv("NO_COLOR", raising=False)
+        s = ThinkingPromptSession(theme="light")
+        assert s._effective_color_depth() is None
+
+    def test_terminal_theme_depth_none(self, monkeypatch):
+        monkeypatch.delenv("NO_COLOR", raising=False)
+        s = ThinkingPromptSession(theme="terminal")
+        assert s._effective_color_depth() is None
+
 
 from unittest.mock import MagicMock
 
@@ -188,3 +198,48 @@ class TestRepaint:
             s.set_theme("light", repaint=True)
             out = capsys.readouterr().out
         assert "l1" in out and "..." in out and "l4" not in out
+
+    def test_thinking_exact_truncate_lines_no_ellipsis_on_repaint(self, capsys):
+        """A thinking entry whose content is exactly truncate_lines lines
+        must NOT grow a stray '...' marker on repaint. The stored entry
+        carries an extra trailing "\\n" on top of the content's own
+        newlines; feeding that raw into truncate_to_lines miscounts the
+        line total and falsely triggers truncation (off-by-one)."""
+        from prompt_toolkit.application.current import create_app_session
+        from prompt_toolkit.output.defaults import create_output
+
+        s = ThinkingPromptSession(theme="dark")
+        s.app = MagicMock()
+        s.app.is_running = False
+        with create_app_session(output=create_output()):
+            s._display.thinking("l1\nl2", truncate_lines=2)
+            capsys.readouterr()
+            s.set_theme("light", repaint=True)
+            out = capsys.readouterr().out
+        assert "l1" in out and "l2" in out
+        assert "..." not in out
+
+    def test_clear_resets_repaint_on_fullscreen_exit_flag(self):
+        """session.clear() must reset _repaint_on_fullscreen_exit; otherwise
+        a later fullscreen exit fires an unrequested repaint (renderer.clear
+        + CSI 3J + reprint) instead of the normal flush_pending path."""
+        s = ThinkingPromptSession(theme="dark", app_info=None)
+        s._fullscreen_enabled = True
+        s.app = MagicMock()
+        s.app.is_running = True
+
+        s.switch_to_fullscreen()
+        s.set_theme("light", repaint=True)
+        assert s._repaint_on_fullscreen_exit is True
+
+        s.clear()
+        assert s._repaint_on_fullscreen_exit is False
+
+        s.switch_to_fullscreen()
+        s.app.output.write_raw.reset_mock()
+        s.app.renderer.clear.reset_mock()
+        s.switch_to_prompt()
+
+        # flush_pending path taken, not the repaint path.
+        s.app.output.write_raw.assert_not_called()
+        s.app.renderer.clear.assert_not_called()

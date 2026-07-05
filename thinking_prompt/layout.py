@@ -181,18 +181,21 @@ def create_history_window(
     Returns:
         A ConditionalContainer with the history.
     """
-    # Track content length to detect new content
-    last_history_len = [0]  # Use list for mutable closure
+    # Track content revision to detect new content. len(history) saturates
+    # once history_limit trimming kicks in (oldest entries are popped as new
+    # ones are appended), which would freeze auto-scroll forever; revision
+    # is monotonic and keeps growing past that point.
+    last_history_revision = [0]  # Use list for mutable closure
 
     def get_history_text() -> FormattedText:
         return history.get_formatted_text()
 
     def get_cursor_position() -> Point | None:
         """Return cursor position at end only when new content is added."""
-        current_len = len(history)
-        if current_len > last_history_len[0]:
+        current_revision = history.revision
+        if current_revision > last_history_revision[0]:
             # New content added - scroll to bottom
-            last_history_len[0] = current_len
+            last_history_revision[0] = current_revision
             text = history.get_formatted_text()
             line_count = sum(fragment[1].count('\n') for fragment in text)
             return Point(x=0, y=max(0, line_count - 1))
