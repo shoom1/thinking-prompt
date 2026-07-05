@@ -158,6 +158,9 @@ class ThinkingPromptSession:
         self._is_fullscreen: bool = False
         self._fullscreen_lock = threading.RLock()
         self._pre_fullscreen_expanded: bool | None = None
+        # Set by set_theme(repaint=True) while in fullscreen; consumed by
+        # switch_to_prompt(), which repaints instead of flushing pending output.
+        self._repaint_on_fullscreen_exit: bool = False
 
         # Convert styles dataclass to prompt_toolkit Style
         self._style = self._styles.to_style()
@@ -425,7 +428,9 @@ class ThinkingPromptSession:
         """The active theme's styles instance."""
         return self._styles
 
-    def set_theme(self, theme: str | ThinkingPromptStyles) -> None:
+    def set_theme(
+        self, theme: str | ThinkingPromptStyles, repaint: bool = False
+    ) -> None:
         """Switch the active theme at runtime.
 
         The live UI (prompt, thinking boxes, dialogs, fullscreen history)
@@ -433,11 +438,17 @@ class ThinkingPromptSession:
         printed to the terminal (prompt-mode scrollback) keeps its
         original colors — only the Display's ``get_style`` callable and
         the Application's ``DynamicStyle`` are re-read; scrollback lines
-        already written to the terminal are not retroactively recolored.
+        already written to the terminal are not retroactively recolored,
+        unless ``repaint=True`` is passed.
 
         Args:
             theme: Theme name ('dark', 'light', 'mono', 'terminal', 'auto')
                 or a ThinkingPromptStyles instance.
+            repaint: If True, clear the screen and scrollback and re-print
+                the transcript in the new theme. Markdown and code re-render
+                from source; rich/raw ANSI keeps its original colors. In
+                fullscreen mode the repaint is deferred to fullscreen exit,
+                replacing the pending-output flush.
 
         Raises:
             ValueError: For unknown theme names.
@@ -446,7 +457,24 @@ class ThinkingPromptSession:
         self._styles = resolved
         self._style = resolved.to_style()
         self._display.set_theme(resolved)
+        if repaint:
+            if self.is_fullscreen:
+                self._repaint_on_fullscreen_exit = True
+            else:
+                self._repaint_console()
         self._invalidate()
+
+    def _repaint_console(self) -> None:
+        """Clear screen + scrollback and re-print the transcript."""
+        if self.app and self.app.is_running:
+            self.app.renderer.clear()
+            # Renderer.clear() resets the screen model; scrollback erase is
+            # not part of its contract, so emit CSI 3J directly.
+            self.app.output.write_raw("\x1b[3J")
+            self.app.output.flush()
+        else:
+            print("\x1b[2J\x1b[H\x1b[3J", end="", flush=True)
+        self._display.reprint_transcript()
 
     def _invalidate(self) -> None:
         """Trigger UI refresh and update full_screen state."""
@@ -911,7 +939,12 @@ class ThinkingPromptSession:
                     if not self._pre_fullscreen_expanded:
                         self._manager.collapse_all()
                     self._pre_fullscreen_expanded = None
-                self._display.flush_pending()  # Output cached content to console
+                if self._repaint_on_fullscreen_exit:
+                    self._repaint_on_fullscreen_exit = False
+                    self._display.drop_pending()
+                    self._repaint_console()
+                else:
+                    self._display.flush_pending()  # Output cached content to console
                 self._invalidate()
 
     def exit(self) -> None:

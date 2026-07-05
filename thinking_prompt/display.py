@@ -439,3 +439,30 @@ class Display:
             print_formatted_text(
                 content, style=self._get_style(), color_depth=self._get_color_depth()
             )
+
+    def drop_pending(self) -> None:
+        """Discard cached fullscreen console output (superseded by repaint)."""
+        with self._pending_lock:
+            self._pending_output.clear()
+
+    def reprint_transcript(self) -> None:
+        """Re-print every transcript entry to the console in the current theme.
+
+        Console-only: nothing is appended to history. Thinking entries are
+        truncated to their recorded truncate_lines, reproducing the form
+        originally echoed. Runs on the event loop (called from set_theme).
+        """
+        for entry in self._history.iter_entries():
+            if entry.kind == "styled":
+                text = entry.text
+                if entry.truncate_lines is not None:
+                    text = truncate_to_lines(text, entry.truncate_lines) + "\n"
+                self._print_to_console(FormattedText([(entry.style, text)]))
+            elif entry.kind == "formatted":
+                self._print_to_console(FormattedText(entry.fragments))
+            elif entry.kind == "ansi" and entry.truncate_lines is not None:
+                self._print_to_console(
+                    ANSI(truncate_ansi_to_lines(entry.source, entry.truncate_lines) + "\n")
+                )
+            else:  # markdown/code (fresh render via cache) and untruncated ansi
+                self._print_to_console(FormattedText(self._history._render_entry(entry)))
