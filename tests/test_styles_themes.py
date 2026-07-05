@@ -44,3 +44,104 @@ class TestTokenCompletion:
         s = ThinkingPromptStyles()
         assert s.color_depth is None
         assert s.markdown_code_theme == "monokai"
+
+
+import pytest
+
+from prompt_toolkit.output import ColorDepth
+
+from thinking_prompt.styles import THEMES, resolve_theme
+
+
+def _all_style_values(s: ThinkingPromptStyles) -> list[str]:
+    return [v for v in s.to_style().style_rules for v in [v[1]]]
+
+
+class TestThemeFactories:
+    def test_dark_equals_default(self):
+        assert ThinkingPromptStyles.dark() == ThinkingPromptStyles()
+
+    def test_factories_return_fresh_instances(self):
+        a = ThinkingPromptStyles.light()
+        b = ThinkingPromptStyles.light()
+        assert a is not b
+        a.thinking_box = "fg:red"
+        assert b.thinking_box != "fg:red"
+
+    def test_mono_has_no_colors_and_1bit_depth(self):
+        s = ThinkingPromptStyles.mono()
+        joined = " ".join(_all_style_values(s))
+        assert "#" not in joined
+        assert "ansi" not in joined
+        assert s.color_depth is ColorDepth.DEPTH_1_BIT
+
+    def test_mono_selection_states_distinguishable(self):
+        """Every selected/focused style must differ from its unselected
+        counterpart in mono, or selection is invisible without color."""
+        s = ThinkingPromptStyles.mono()
+        pairs = [
+            (s.menu_item, s.menu_item_selected),
+            (s.menu_meta, s.menu_meta_selected),
+            (s.dialog_button, s.dialog_button_focused),
+            (s.setting_label, s.setting_label_selected),
+            (s.setting_value, s.setting_value_selected),
+            (s.setting_desc, s.setting_desc_selected),
+        ]
+        for unselected, selected in pairs:
+            assert selected, "selected state must not be empty in mono"
+            assert selected != unselected
+
+    def test_terminal_uses_named_ansi_only(self):
+        s = ThinkingPromptStyles.terminal()
+        joined = " ".join(_all_style_values(s))
+        assert "#" not in joined
+        assert s.color_depth is None
+
+    def test_light_sets_light_code_theme(self):
+        assert ThinkingPromptStyles.light().markdown_code_theme == "default"
+
+
+class TestResolveTheme:
+    def test_instance_passthrough(self):
+        s = ThinkingPromptStyles.light()
+        assert resolve_theme(s) is s
+
+    def test_names(self):
+        for name in ("dark", "light", "mono", "terminal"):
+            assert isinstance(resolve_theme(name), ThinkingPromptStyles)
+
+    def test_unknown_name_raises_with_valid_list(self):
+        with pytest.raises(ValueError, match="mono"):
+            resolve_theme("solarized")
+
+    def test_auto_no_color_wins(self, monkeypatch):
+        monkeypatch.setenv("NO_COLOR", "1")
+        monkeypatch.setenv("COLORFGBG", "0;15")
+        assert resolve_theme("auto").color_depth is ColorDepth.DEPTH_1_BIT
+
+    def test_auto_colorfgbg_light(self, monkeypatch):
+        monkeypatch.delenv("NO_COLOR", raising=False)
+        monkeypatch.setenv("COLORFGBG", "0;15")
+        assert resolve_theme("auto").markdown_code_theme == "default"
+
+    def test_auto_colorfgbg_dark(self, monkeypatch):
+        monkeypatch.delenv("NO_COLOR", raising=False)
+        monkeypatch.setenv("COLORFGBG", "15;0")
+        assert resolve_theme("auto") == ThinkingPromptStyles.dark()
+
+    def test_auto_fallback_is_terminal(self, monkeypatch):
+        monkeypatch.delenv("NO_COLOR", raising=False)
+        monkeypatch.delenv("COLORFGBG", raising=False)
+        s = resolve_theme("auto")
+        assert "#" not in " ".join(_all_style_values(s))
+
+    def test_auto_malformed_colorfgbg_is_terminal(self, monkeypatch):
+        monkeypatch.delenv("NO_COLOR", raising=False)
+        monkeypatch.setenv("COLORFGBG", "default;default")
+        s = resolve_theme("auto")
+        assert "#" not in " ".join(_all_style_values(s))
+
+    def test_empty_no_color_does_not_trigger(self, monkeypatch):
+        monkeypatch.setenv("NO_COLOR", "")
+        monkeypatch.delenv("COLORFGBG", raising=False)
+        assert resolve_theme("auto").color_depth is None

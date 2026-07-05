@@ -5,6 +5,8 @@ Provides ThinkingPromptStyles dataclass for clean style customization.
 """
 from __future__ import annotations
 
+import os
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from prompt_toolkit.output import ColorDepth
@@ -192,6 +194,91 @@ class ThinkingPromptStyles:
 
     markdown_code_theme: str = "monokai"
     """Rich code theme for fenced blocks in markdown (light() uses "default")."""
+
+    @classmethod
+    def dark(cls) -> ThinkingPromptStyles:
+        """The default dark theme (today's palette)."""
+        return cls()
+
+    @classmethod
+    def light(cls) -> ThinkingPromptStyles:
+        """Palette tuned for light terminal backgrounds."""
+        return cls(
+            color_accent="#0e7490",
+            color_accent_button="#0066cc",
+            color_success="#2e7d32",
+            color_warning="#b45309",
+            color_error="#b3261e",
+            color_text="#1f2328",
+            color_text_bright="#000000",
+            color_text_muted="#6b7280",
+            color_text_dim="#9ca3af",
+            color_bg_dark="#e5e7eb",
+            color_bg_dialog="#f3f4f6",
+            color_bg_input="#e8eaed",
+            color_thinking="#6b7280",
+            color_thinking_border="#9ca3af",
+            color_thinking_hint="#8a919c",
+            color_bg_status="#dbeafe",
+            color_text_status="#1e3a8a",
+            color_separator="#d1d5db",
+            color_bg_button="#d1d5db",
+            color_bg_selected="#cbd5e1",
+            color_shadow="#9ca3af",
+            assistant_prefix="fg:#0e7490 bold",
+            markdown_code_theme="default",
+        )
+
+    @classmethod
+    def mono(cls) -> ThinkingPromptStyles:
+        """Attributes only (bold/italic/reverse); rendered at 1-bit depth."""
+        return cls(
+            color_accent="", color_accent_button="", color_success="",
+            color_warning="", color_error="", color_text="",
+            color_text_bright="", color_text_muted="", color_text_dim="",
+            color_bg_dark="", color_bg_dialog="", color_bg_input="",
+            color_thinking="", color_thinking_border="", color_thinking_hint="",
+            color_bg_status="", color_text_status="", color_separator="",
+            color_bg_button="", color_bg_selected="", color_shadow="",
+            # Selection/focus states need reverse video to stay visible.
+            menu_item_selected="reverse",
+            menu_meta_selected="reverse",
+            dialog_button_focused="bold reverse",
+            radio_selected="bold",
+            checkbox_selected="bold",
+            setting_label_selected="bold",
+            setting_value_selected="italic",
+            setting_desc_selected="italic",
+            assistant_prefix="bold",
+            status_bar="reverse",
+            color_depth=ColorDepth.DEPTH_1_BIT,
+        )
+
+    @classmethod
+    def terminal(cls) -> ThinkingPromptStyles:
+        """Named ANSI colors — inherits the terminal's own palette."""
+        return cls(
+            color_accent="ansicyan",
+            color_accent_button="ansiblue",
+            color_success="ansigreen",
+            color_warning="ansiyellow",
+            color_error="ansired",
+            color_text="", color_text_bright="",
+            color_text_muted="ansibrightblack",
+            color_text_dim="ansibrightblack",
+            color_bg_dark="", color_bg_dialog="", color_bg_input="",
+            color_thinking="ansibrightblack",
+            color_thinking_border="ansibrightblack",
+            color_thinking_hint="ansibrightblack",
+            color_bg_status="", color_text_status="ansiblue",
+            color_separator="ansibrightblack",
+            color_bg_button="", color_bg_selected="", color_shadow="",
+            menu_item_selected="reverse",
+            menu_meta_selected="reverse",
+            dialog_button_focused="bold reverse",
+            assistant_prefix="fg:ansicyan bold",
+            markdown_code_theme="ansi_dark",
+        )
 
     def __post_init__(self) -> None:
         """Apply default values based on base theme colors."""
@@ -417,6 +504,50 @@ class ThinkingPromptStyles:
             'markdown.emph': 'italic',
             'markdown.s': 'strike',
         }
+
+
+THEMES: dict[str, Callable[[], ThinkingPromptStyles]] = {
+    "dark": ThinkingPromptStyles.dark,
+    "light": ThinkingPromptStyles.light,
+    "mono": ThinkingPromptStyles.mono,
+    "terminal": ThinkingPromptStyles.terminal,
+}
+
+
+def _resolve_auto() -> ThinkingPromptStyles:
+    """NO_COLOR -> mono; COLORFGBG -> light/dark; else terminal-native."""
+    if os.environ.get("NO_COLOR"):
+        return ThinkingPromptStyles.mono()
+    colorfgbg = os.environ.get("COLORFGBG", "")
+    parts = colorfgbg.split(";")
+    # A COLORFGBG without a fg;bg pair is not a value we trust.
+    if len(parts) >= 2:
+        try:
+            bg = int(parts[-1])
+        except ValueError:
+            pass
+        else:
+            if bg in (7, 15):
+                return ThinkingPromptStyles.light()
+            return ThinkingPromptStyles.dark()
+    return ThinkingPromptStyles.terminal()
+
+
+def resolve_theme(theme: str | ThinkingPromptStyles) -> ThinkingPromptStyles:
+    """Resolve a theme name or instance to a ThinkingPromptStyles.
+
+    Raises:
+        ValueError: For unknown theme names.
+    """
+    if isinstance(theme, ThinkingPromptStyles):
+        return theme
+    if theme == "auto":
+        return _resolve_auto()
+    try:
+        return THEMES[theme]()
+    except KeyError:
+        valid = ", ".join([*sorted(THEMES), "auto"])
+        raise ValueError(f"Unknown theme {theme!r}. Valid themes: {valid}") from None
 
 
 # Default styles instance
