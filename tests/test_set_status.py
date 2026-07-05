@@ -22,7 +22,8 @@ class TestDisplayToAnsi:
 
     @pytest.fixture
     def display(self) -> Display:
-        return Display(style=Style.from_dict({}), is_fullscreen=lambda: False)
+        style = Style.from_dict({})
+        return Display(get_style=lambda: style, is_fullscreen=lambda: False)
 
     def test_converts_rich_text_to_ansi(self, display: Display):
         """Should convert a Rich Text object to a prompt_toolkit ANSI."""

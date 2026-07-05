@@ -55,3 +55,43 @@ class TestEffectiveColorDepth:
         monkeypatch.delenv("NO_COLOR", raising=False)
         s = ThinkingPromptSession()
         assert s._effective_color_depth() is None
+
+
+from unittest.mock import MagicMock
+
+
+class TestSetTheme:
+    def test_set_theme_swaps_styles_and_invalidates(self):
+        s = ThinkingPromptSession(theme="dark")
+        s.app = MagicMock()
+        s.app.is_running = True
+
+        s.set_theme("light")
+
+        assert s.styles.markdown_code_theme == "default"
+        s.app.invalidate.assert_called()
+
+    def test_set_theme_accepts_instance(self):
+        s = ThinkingPromptSession()
+        custom = ThinkingPromptStyles(color_accent="#ff6600")
+        s.set_theme(custom)
+        assert s.styles is custom
+
+    def test_set_theme_updates_display_style(self):
+        s = ThinkingPromptSession(theme="dark")
+        before = s._display._get_style()
+        s.set_theme("light")
+        assert s._display._get_style() is not before
+
+    def test_set_theme_recomputes_depth(self, monkeypatch):
+        monkeypatch.delenv("NO_COLOR", raising=False)
+        s = ThinkingPromptSession(theme="dark")
+        assert s._effective_color_depth() is None
+        s.set_theme("mono")
+        from prompt_toolkit.output import ColorDepth
+        assert s._effective_color_depth() is ColorDepth.DEPTH_1_BIT
+
+    def test_app_style_is_dynamic(self):
+        from prompt_toolkit.styles import DynamicStyle
+        s = ThinkingPromptSession()
+        assert isinstance(s.app.style, DynamicStyle)

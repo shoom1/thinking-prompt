@@ -37,6 +37,7 @@ from prompt_toolkit.history import History, InMemoryHistory
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.key_binding.key_processor import KeyPressEvent
 from prompt_toolkit.output import ColorDepth
+from prompt_toolkit.styles import DynamicStyle
 
 from .app_info import AppInfo
 from .display import Display
@@ -160,7 +161,7 @@ class ThinkingPromptSession:
 
         # Display handles all output to console and history
         self._display = Display(
-            style=self._style,
+            get_style=lambda: self._style,
             is_fullscreen=lambda: self.is_fullscreen,  # Use property for thread safety
             thinking_styles=self._styles,
             get_color_depth=self._effective_color_depth,
@@ -302,7 +303,7 @@ class ThinkingPromptSession:
 
         return Application(
             layout=self.layout,
-            style=self._style,
+            style=DynamicStyle(lambda: self._style),
             key_bindings=kb,
             editing_mode=self._editing_mode,
             full_screen=False,  # Start in normal mode, will be updated dynamically
@@ -419,6 +420,29 @@ class ThinkingPromptSession:
     def styles(self) -> ThinkingPromptStyles:
         """The active theme's styles instance."""
         return self._styles
+
+    def set_theme(self, theme: str | ThinkingPromptStyles) -> None:
+        """Switch the active theme at runtime.
+
+        The live UI (prompt, thinking boxes, dialogs, fullscreen history)
+        re-renders in the new theme on the next paint. Content already
+        printed to the terminal (prompt-mode scrollback) keeps its
+        original colors — only the Display's ``get_style`` callable and
+        the Application's ``DynamicStyle`` are re-read; scrollback lines
+        already written to the terminal are not retroactively recolored.
+
+        Args:
+            theme: Theme name ('dark', 'light', 'mono', 'terminal', 'auto')
+                or a ThinkingPromptStyles instance.
+
+        Raises:
+            ValueError: For unknown theme names.
+        """
+        resolved = resolve_theme(theme)
+        self._styles = resolved
+        self._style = resolved.to_style()
+        self._display.set_theme(resolved)
+        self._invalidate()
 
     def _invalidate(self) -> None:
         """Trigger UI refresh and update full_screen state."""
