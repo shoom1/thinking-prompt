@@ -97,6 +97,7 @@ class ThinkingPromptSession:
         enable_status_bar: bool = True,
         status_text: AnyFormattedText = "Ctrl+C: cancel | Ctrl+D: exit",
         echo_input: bool = True,
+        history_limit: int | None = None,
     ) -> None:
         """
         Initialize the ThinkingPromptSession.
@@ -116,6 +117,8 @@ class ThinkingPromptSession:
             enable_status_bar: Whether to show status bar.
             status_text: Text to display in status bar.
             echo_input: Whether to echo user input to console before thinking.
+            history_limit: Max transcript entries kept for fullscreen history
+                          and repaint; oldest trimmed. None = unbounded.
 
         Raises:
             ValueError: If max_thinking_height is less than 2, or if both theme=
@@ -165,6 +168,7 @@ class ThinkingPromptSession:
             is_fullscreen=lambda: self.is_fullscreen,  # Use property for thread safety
             thinking_styles=self._styles,
             get_color_depth=self._effective_color_depth,
+            history_limit=history_limit,
         )
 
         # Get key bindings and feature flags from app_info or use defaults

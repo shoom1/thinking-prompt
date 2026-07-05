@@ -590,3 +590,66 @@ class TestRenderableToAnsi:
         assert "\033[" in result, (
             f"Expected ANSI escape under NO_COLOR=1, got plain output: {result!r}"
         )
+
+
+class TestTranscriptWiring:
+    def _display(self):
+        from thinking_prompt.display import Display
+        from thinking_prompt.styles import DEFAULT_STYLES
+        style = DEFAULT_STYLES.to_style()
+        return Display(get_style=lambda: style, thinking_styles=DEFAULT_STYLES)
+
+    def test_markdown_stored_as_source(self, capsys):
+        pytest.importorskip("rich")
+        # print_formatted_text() writes through the process-wide
+        # AppSession's Output, which lazily binds sys.stdout the first
+        # time *any* test triggers it and then caches that binding for
+        # the rest of the run (create_app_session() with no explicit
+        # output= even inherits the parent session's cached output).
+        # Building the Output here, with capsys already patching
+        # sys.stdout, and passing it explicitly is what actually forces
+        # a fresh binding — so this assertion doesn't depend on
+        # suite/test ordering.
+        from prompt_toolkit.application.current import create_app_session
+        from prompt_toolkit.output.defaults import create_output
+        d = self._display()
+        with create_app_session(output=create_output()):
+            d.markdown("# Hello")
+        entries = d.history.iter_entries()
+        assert entries[-1].kind == "markdown"
+        assert entries[-1].source == "# Hello"
+        assert "Hello" in capsys.readouterr().out
+
+    def test_code_stored_as_source(self, capsys):
+        d = self._display()
+        d.code("x = 1", "python")
+        entries = d.history.iter_entries()
+        assert entries[-1].kind == "code"
+        assert entries[-1].language == "python"
+
+    def test_rich_stored_as_baked_ansi(self, capsys):
+        pytest.importorskip("rich")
+        from rich.text import Text
+        d = self._display()
+        d.rich(Text("boxed"))
+        assert d.history.iter_entries()[-1].kind == "ansi"
+
+    def test_set_theme_invalidates_markdown_cache_and_code_theme(self):
+        pytest.importorskip("rich")
+        from thinking_prompt.styles import ThinkingPromptStyles
+        d = self._display()
+        d.markdown("```python\nx = 1\n```")
+        before = list(d.history.get_formatted_text())
+        d.set_theme(ThinkingPromptStyles.light())
+        after = list(d.history.get_formatted_text())
+        assert before != after  # monokai vs default code theme
+
+    def test_thinking_truncate_lines_recorded(self):
+        d = self._display()
+        d.thinking("l1\nl2\nl3", truncate_lines=2, echo_to_console=False)
+        assert d.history.iter_entries()[-1].truncate_lines == 2
+
+    def test_history_limit_flows_from_session(self):
+        from thinking_prompt import ThinkingPromptSession
+        s = ThinkingPromptSession(history_limit=3)
+        assert s._display.history._max_entries == 3

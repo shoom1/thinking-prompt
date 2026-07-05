@@ -95,3 +95,13 @@ class TestSetTheme:
         from prompt_toolkit.styles import DynamicStyle
         s = ThinkingPromptSession()
         assert isinstance(s.app.style, DynamicStyle)
+
+
+class TestHistoryLimit:
+    def test_history_limit_flows_to_display(self):
+        s = ThinkingPromptSession(history_limit=3)
+        assert s._display.history._max_entries == 3
+
+    def test_history_limit_defaults_to_unbounded(self):
+        s = ThinkingPromptSession()
+        assert s._display.history._max_entries is None
