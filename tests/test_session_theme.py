@@ -219,6 +219,23 @@ class TestRepaint:
         assert "l1" in out and "l2" in out
         assert "..." not in out
 
+    def test_user_input_reprints_on_one_line(self, capsys):
+        """Prompt prefix and message are one transcript entry: repaint must
+        render '>>> hello' exactly as the original echo did, not split
+        across lines (the prefix has no trailing newline of its own)."""
+        from prompt_toolkit.application.current import create_app_session
+        from prompt_toolkit.output.defaults import create_output
+
+        s = ThinkingPromptSession(theme="dark")
+        s.app = MagicMock()
+        s.app.is_running = False
+        with create_app_session(output=create_output()):
+            s._display.user_input(">>> ", "hello")
+            capsys.readouterr()
+            s.set_theme("light", repaint=True)
+            out = capsys.readouterr().out
+        assert ">>> hello" in out
+
     def test_clear_resets_repaint_on_fullscreen_exit_flag(self):
         """session.clear() must reset _repaint_on_fullscreen_exit; otherwise
         a later fullscreen exit fires an unrequested repaint (renderer.clear

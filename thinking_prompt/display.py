@@ -178,9 +178,15 @@ class Display:
             prompt: The prompt string that was shown.
             text: The user's input text.
         """
-        # Add to history as separate fragments
-        self._history.append("class:history.user-prefix", prompt)
-        self._history.append("class:history.user-message", f"{text}\n")
+        # Store as ONE formatted entry so reprint_transcript emits a single
+        # print matching the add-time echo below. Two styled entries would
+        # be reprinted separately (each print adds a trailing newline, and
+        # the prefix has none of its own), splitting ">>> hello" across
+        # lines. One input is also one history_limit entry this way.
+        self._history.append_formatted([
+            ("class:history.user-prefix", prompt),
+            ("class:history.user-message", f"{text}\n"),
+        ])
         # Print as single formatted output
         self._print_to_console(FormattedText([
             ("class:history.user-prefix", prompt),
