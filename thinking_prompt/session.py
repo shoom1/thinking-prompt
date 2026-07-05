@@ -8,6 +8,7 @@ can be expanded to full-screen mode with chat history.
 from __future__ import annotations
 
 import asyncio
+import os
 import threading
 import warnings
 from collections.abc import AsyncIterator, Coroutine, Sequence
@@ -35,13 +36,14 @@ from prompt_toolkit.formatted_text import AnyFormattedText, FormattedText
 from prompt_toolkit.history import History, InMemoryHistory
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.key_binding.key_processor import KeyPressEvent
+from prompt_toolkit.output import ColorDepth
 
 from .app_info import AppInfo
 from .display import Display
 from .layout import create_layout
 from .manager import ThinkingBoxManager
 from .rich_utils import _is_rich_renderable
-from .styles import DEFAULT_STYLES, ThinkingPromptStyles
+from .styles import DEFAULT_STYLES, ThinkingPromptStyles, resolve_theme
 from .types import ThinkingContext
 
 
@@ -84,6 +86,7 @@ class ThinkingPromptSession:
         message: AnyFormattedText = ">>> ",
         app_info: AppInfo | None = None,
         styles: ThinkingPromptStyles | None = None,
+        theme: str | ThinkingPromptStyles | None = None,
         history: History | None = None,
         completer: Completer | None = None,
         complete_while_typing: bool = False,
@@ -101,6 +104,8 @@ class ThinkingPromptSession:
             message: The prompt message to display.
             app_info: Application info (name, version, welcome message).
             styles: Custom styles for the session.
+            theme: Theme name ('dark', 'light', 'mono', 'terminal', 'auto') or
+                   ThinkingPromptStyles instance. Cannot be used with styles=.
             history: History object for input history.
             completer: Completer for input autocompletion.
             complete_while_typing: Show completions automatically while typing.
@@ -112,14 +117,30 @@ class ThinkingPromptSession:
             echo_input: Whether to echo user input to console before thinking.
 
         Raises:
-            ValueError: If max_thinking_height is less than 2.
+            ValueError: If max_thinking_height is less than 2, or if both theme=
+                       and styles= are provided.
         """
         if max_thinking_height < 2:
             raise ValueError("max_thinking_height must be at least 2")
 
         self._message = message
         self._app_info = app_info
-        self._styles = styles or DEFAULT_STYLES
+
+        # Handle theme vs styles parameters
+        if theme is not None and styles is not None:
+            raise ValueError(
+                "Pass either theme= or styles=, not both. theme= accepts a "
+                "name ('dark', 'light', 'mono', 'terminal', 'auto') or a "
+                "ThinkingPromptStyles instance."
+            )
+        if theme is not None:
+            self._styles = resolve_theme(theme)
+        else:
+            self._styles = styles or DEFAULT_STYLES
+
+        # NO_COLOR is read once at construction (no-color.org: non-empty).
+        self._no_color = bool(os.environ.get("NO_COLOR"))
+
         self._max_thinking_height = max_thinking_height
         self._enable_status_bar = enable_status_bar
         self._status_text = status_text
@@ -142,6 +163,7 @@ class ThinkingPromptSession:
             style=self._style,
             is_fullscreen=lambda: self.is_fullscreen,  # Use property for thread safety
             thinking_styles=self._styles,
+            get_color_depth=self._effective_color_depth,
         )
 
         # Get key bindings and feature flags from app_info or use defaults
@@ -286,6 +308,7 @@ class ThinkingPromptSession:
             full_screen=False,  # Start in normal mode, will be updated dynamically
             mouse_support=Condition(lambda: self._is_fullscreen),  # Only in fullscreen
             refresh_interval=0.1,  # For real-time updates
+            color_depth=self._effective_color_depth,
         )
 
     def _create_key_bindings(self) -> KeyBindings:
@@ -385,6 +408,17 @@ class ThinkingPromptSession:
                     self.switch_to_fullscreen()
 
         return kb
+
+    def _effective_color_depth(self) -> ColorDepth | None:
+        """NO_COLOR (env, at construction) wins; else the theme's hint."""
+        if self._no_color:
+            return ColorDepth.DEPTH_1_BIT
+        return self._styles.color_depth
+
+    @property
+    def styles(self) -> ThinkingPromptStyles:
+        """The active theme's styles instance."""
+        return self._styles
 
     def _invalidate(self) -> None:
         """Trigger UI refresh and update full_screen state."""

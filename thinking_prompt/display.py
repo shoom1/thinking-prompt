@@ -57,6 +57,7 @@ class Display:
         style: Style,
         is_fullscreen: Callable[[], bool] = lambda: False,
         thinking_styles: ThinkingPromptStyles | None = None,
+        get_color_depth: Callable[[], Any] = lambda: None,
     ) -> None:
         """
         Initialize the Display.
@@ -66,10 +67,13 @@ class Display:
             is_fullscreen: Callback that returns True if fullscreen mode is active.
                           Console output is cached in fullscreen mode.
             thinking_styles: Optional ThinkingPromptStyles for markdown rendering.
+            get_color_depth: Callable that returns the effective color depth hint
+                            for print_formatted_text. Defaults to None.
         """
         self._style = style
         self._history = FormattedTextHistory()
         self._is_fullscreen = is_fullscreen
+        self._get_color_depth = get_color_depth
         self._pending_lock = threading.Lock()
         self._pending_output: list[AnyFormattedText] = []
         self._rich_theme = self._create_rich_theme(thinking_styles)
@@ -115,7 +119,7 @@ class Display:
             with self._pending_lock:
                 self._pending_output.append(content)
         else:
-            print_formatted_text(content, style=self._style)
+            print_formatted_text(content, style=self._style, color_depth=self._get_color_depth())
 
     def _output_styled(self, style: str, text: str) -> None:
         """Output styled text to history and console."""
@@ -395,4 +399,4 @@ class Display:
             pending = list(self._pending_output)
             self._pending_output.clear()
         for content in pending:
-            print_formatted_text(content, style=self._style)
+            print_formatted_text(content, style=self._style, color_depth=self._get_color_depth())
