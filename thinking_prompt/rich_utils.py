@@ -105,7 +105,7 @@ def _get_markdown_cls() -> Any:
     return _LeftAlignedMarkdown
 
 
-def _markdown_to_ansi(content: str, theme: Any = None) -> str:
+def _markdown_to_ansi(content: str, theme: Any = None, code_theme: str = "monokai") -> str:
     """Convert markdown to ANSI-formatted string using Rich."""
     try:
         from io import StringIO
@@ -115,7 +115,7 @@ def _markdown_to_ansi(content: str, theme: Any = None) -> str:
         markdown_cls = _get_markdown_cls()
         file = StringIO()
         console = Console(file=file, force_terminal=True, theme=theme)
-        console.print(markdown_cls(content))
+        console.print(markdown_cls(content, code_theme=code_theme))
         return file.getvalue()
     except ImportError:
         return content

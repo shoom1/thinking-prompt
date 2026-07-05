@@ -8,6 +8,7 @@ can be expanded to full-screen mode with chat history.
 from __future__ import annotations
 
 import asyncio
+import os
 import threading
 import warnings
 from collections.abc import AsyncIterator, Coroutine, Sequence
@@ -35,13 +36,15 @@ from prompt_toolkit.formatted_text import AnyFormattedText, FormattedText
 from prompt_toolkit.history import History, InMemoryHistory
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.key_binding.key_processor import KeyPressEvent
+from prompt_toolkit.output import ColorDepth
+from prompt_toolkit.styles import DynamicStyle
 
 from .app_info import AppInfo
 from .display import Display
 from .layout import create_layout
 from .manager import ThinkingBoxManager
 from .rich_utils import _is_rich_renderable
-from .styles import DEFAULT_STYLES, ThinkingPromptStyles
+from .styles import DEFAULT_STYLES, ThinkingPromptStyles, resolve_theme
 from .types import ThinkingContext
 
 
@@ -84,6 +87,7 @@ class ThinkingPromptSession:
         message: AnyFormattedText = ">>> ",
         app_info: AppInfo | None = None,
         styles: ThinkingPromptStyles | None = None,
+        theme: str | ThinkingPromptStyles | None = None,
         history: History | None = None,
         completer: Completer | None = None,
         complete_while_typing: bool = False,
@@ -93,6 +97,7 @@ class ThinkingPromptSession:
         enable_status_bar: bool = True,
         status_text: AnyFormattedText = "Ctrl+C: cancel | Ctrl+D: exit",
         echo_input: bool = True,
+        history_limit: int | None = None,
     ) -> None:
         """
         Initialize the ThinkingPromptSession.
@@ -101,6 +106,8 @@ class ThinkingPromptSession:
             message: The prompt message to display.
             app_info: Application info (name, version, welcome message).
             styles: Custom styles for the session.
+            theme: Theme name ('dark', 'light', 'mono', 'terminal', 'auto') or
+                   ThinkingPromptStyles instance. Cannot be used with styles=.
             history: History object for input history.
             completer: Completer for input autocompletion.
             complete_while_typing: Show completions automatically while typing.
@@ -110,16 +117,34 @@ class ThinkingPromptSession:
             enable_status_bar: Whether to show status bar.
             status_text: Text to display in status bar.
             echo_input: Whether to echo user input to console before thinking.
+            history_limit: Max transcript entries kept for fullscreen history
+                          and repaint; oldest trimmed. None = unbounded.
 
         Raises:
-            ValueError: If max_thinking_height is less than 2.
+            ValueError: If max_thinking_height is less than 2, or if both theme=
+                       and styles= are provided.
         """
         if max_thinking_height < 2:
             raise ValueError("max_thinking_height must be at least 2")
 
         self._message = message
         self._app_info = app_info
-        self._styles = styles or DEFAULT_STYLES
+
+        # Handle theme vs styles parameters
+        if theme is not None and styles is not None:
+            raise ValueError(
+                "Pass either theme= or styles=, not both. theme= accepts a "
+                "name ('dark', 'light', 'mono', 'terminal', 'auto') or a "
+                "ThinkingPromptStyles instance."
+            )
+        if theme is not None:
+            self._styles = resolve_theme(theme)
+        else:
+            self._styles = styles or DEFAULT_STYLES
+
+        # NO_COLOR is read once at construction (no-color.org: non-empty).
+        self._no_color = bool(os.environ.get("NO_COLOR"))
+
         self._max_thinking_height = max_thinking_height
         self._enable_status_bar = enable_status_bar
         self._status_text = status_text
@@ -133,15 +158,20 @@ class ThinkingPromptSession:
         self._is_fullscreen: bool = False
         self._fullscreen_lock = threading.RLock()
         self._pre_fullscreen_expanded: bool | None = None
+        # Set by set_theme(repaint=True) while in fullscreen; consumed by
+        # switch_to_prompt(), which repaints instead of flushing pending output.
+        self._repaint_on_fullscreen_exit: bool = False
 
         # Convert styles dataclass to prompt_toolkit Style
         self._style = self._styles.to_style()
 
         # Display handles all output to console and history
         self._display = Display(
-            style=self._style,
+            get_style=lambda: self._style,
             is_fullscreen=lambda: self.is_fullscreen,  # Use property for thread safety
             thinking_styles=self._styles,
+            get_color_depth=self._effective_color_depth,
+            history_limit=history_limit,
         )
 
         # Get key bindings and feature flags from app_info or use defaults
@@ -280,12 +310,13 @@ class ThinkingPromptSession:
 
         return Application(
             layout=self.layout,
-            style=self._style,
+            style=DynamicStyle(lambda: self._style),
             key_bindings=kb,
             editing_mode=self._editing_mode,
             full_screen=False,  # Start in normal mode, will be updated dynamically
             mouse_support=Condition(lambda: self._is_fullscreen),  # Only in fullscreen
             refresh_interval=0.1,  # For real-time updates
+            color_depth=self._effective_color_depth,
         )
 
     def _create_key_bindings(self) -> KeyBindings:
@@ -385,6 +416,67 @@ class ThinkingPromptSession:
                     self.switch_to_fullscreen()
 
         return kb
+
+    def _effective_color_depth(self) -> ColorDepth | None:
+        """NO_COLOR (env, at construction) wins; else the theme's hint."""
+        if self._no_color:
+            return ColorDepth.DEPTH_1_BIT
+        return self._styles.color_depth
+
+    @property
+    def styles(self) -> ThinkingPromptStyles:
+        """The active theme's styles instance."""
+        return self._styles
+
+    def set_theme(
+        self, theme: str | ThinkingPromptStyles, repaint: bool = False
+    ) -> None:
+        """Switch the active theme at runtime.
+
+        The live UI (prompt, thinking boxes, dialogs, fullscreen history)
+        re-renders in the new theme on the next paint. Content already
+        printed to the terminal (prompt-mode scrollback) keeps its
+        original colors — only the Display's ``get_style`` callable and
+        the Application's ``DynamicStyle`` are re-read; scrollback lines
+        already written to the terminal are not retroactively recolored,
+        unless ``repaint=True`` is passed.
+
+        Args:
+            theme: Theme name ('dark', 'light', 'mono', 'terminal', 'auto')
+                or a ThinkingPromptStyles instance.
+            repaint: If True, clear the screen and scrollback and re-print
+                the transcript in the new theme. Markdown and code re-render
+                from source; rich/raw ANSI keeps its original colors. In
+                fullscreen mode the repaint is deferred to fullscreen exit,
+                replacing the pending-output flush. Terminals that do not
+                support scrollback erase (CSI 3J) keep old content above the
+                viewport; the visible screen still repaints fully.
+
+        Raises:
+            ValueError: For unknown theme names.
+        """
+        resolved = resolve_theme(theme)
+        self._styles = resolved
+        self._style = resolved.to_style()
+        self._display.set_theme(resolved)
+        if repaint:
+            if self.is_fullscreen:
+                self._repaint_on_fullscreen_exit = True
+            else:
+                self._repaint_console()
+        self._invalidate()
+
+    def _repaint_console(self) -> None:
+        """Clear screen + scrollback and re-print the transcript."""
+        if self.app and self.app.is_running:
+            self.app.renderer.clear()
+            # Renderer.clear() resets the screen model; scrollback erase is
+            # not part of its contract, so emit CSI 3J directly.
+            self.app.output.write_raw("\x1b[3J")
+            self.app.output.flush()
+        else:
+            print("\x1b[2J\x1b[H\x1b[3J", end="", flush=True)
+        self._display.reprint_transcript()
 
     def _invalidate(self) -> None:
         """Trigger UI refresh and update full_screen state."""
@@ -800,6 +892,8 @@ class ThinkingPromptSession:
         # Exit fullscreen if active
         with self._fullscreen_lock:
             self._is_fullscreen = False
+            # clear() supersedes any deferred repaint: nothing left to repaint.
+            self._repaint_on_fullscreen_exit = False
 
         # Clear the terminal screen. While the app is running this must
         # go through the renderer — a raw escape write behind its back
@@ -849,7 +943,12 @@ class ThinkingPromptSession:
                     if not self._pre_fullscreen_expanded:
                         self._manager.collapse_all()
                     self._pre_fullscreen_expanded = None
-                self._display.flush_pending()  # Output cached content to console
+                if self._repaint_on_fullscreen_exit:
+                    self._repaint_on_fullscreen_exit = False
+                    self._display.drop_pending()
+                    self._repaint_console()
+                else:
+                    self._display.flush_pending()  # Output cached content to console
                 self._invalidate()
 
     def exit(self) -> None:
