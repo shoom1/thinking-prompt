@@ -14,7 +14,7 @@ import threading
 from typing import TYPE_CHECKING, Any, Callable
 
 from prompt_toolkit import print_formatted_text
-from prompt_toolkit.formatted_text import ANSI, AnyFormattedText, FormattedText, to_formatted_text
+from prompt_toolkit.formatted_text import ANSI, AnyFormattedText, FormattedText
 from prompt_toolkit.styles import Style
 
 from .history import FormattedTextHistory
@@ -28,6 +28,8 @@ from .rich_utils import (
 from .types import ContentFormat, truncate_ansi_to_lines, truncate_to_lines
 
 if TYPE_CHECKING:
+    from prompt_toolkit.output import ColorDepth
+
     from .styles import ThinkingPromptStyles
 
 __all__ = [
@@ -54,25 +56,48 @@ class Display:
 
     def __init__(
         self,
-        style: Style,
+        get_style: Callable[[], Style],
         is_fullscreen: Callable[[], bool] = lambda: False,
         thinking_styles: ThinkingPromptStyles | None = None,
+        get_color_depth: Callable[[], ColorDepth | None] = lambda: None,
+        history_limit: int | None = None,
     ) -> None:
         """
         Initialize the Display.
 
         Args:
-            style: The prompt_toolkit Style for rendering output.
+            get_style: Callable returning the current prompt_toolkit Style for
+                      rendering output. Called on every print so a runtime
+                      theme change (see set_theme()) takes effect immediately.
             is_fullscreen: Callback that returns True if fullscreen mode is active.
                           Console output is cached in fullscreen mode.
             thinking_styles: Optional ThinkingPromptStyles for markdown rendering.
+            get_color_depth: Callable that returns the effective color depth hint
+                            for print_formatted_text. Defaults to a no-op
+                            callable returning None.
+            history_limit: Max transcript entries kept; oldest are trimmed.
+                          None (default) means unbounded.
         """
-        self._style = style
-        self._history = FormattedTextHistory()
+        self._get_style = get_style
         self._is_fullscreen = is_fullscreen
+        self._get_color_depth = get_color_depth
         self._pending_lock = threading.Lock()
         self._pending_output: list[AnyFormattedText] = []
+        self._thinking_styles = thinking_styles
+        # Assigned before _history is constructed: the render callbacks
+        # below close over self._rich_theme/_markdown_code_theme so a
+        # later set_theme() swap takes effect on the next render.
         self._rich_theme = self._create_rich_theme(thinking_styles)
+        self._markdown_code_theme = (
+            thinking_styles.markdown_code_theme if thinking_styles else "monokai"
+        )
+        self._history = FormattedTextHistory(
+            max_entries=history_limit,
+            render_markdown=lambda src: _markdown_to_ansi(
+                src, theme=self._rich_theme, code_theme=self._markdown_code_theme
+            ),
+            render_code=_highlight_code,
+        )
 
     def _create_rich_theme(self, thinking_styles: ThinkingPromptStyles | None) -> Any:
         """Create a Rich Theme from ThinkingPromptStyles."""
@@ -96,6 +121,13 @@ class Display:
         """Get the Rich theme for consistent styling."""
         return self._rich_theme
 
+    def set_theme(self, styles: ThinkingPromptStyles) -> None:
+        """Adopt a new theme: rebuild Rich theme, re-render markdown/code."""
+        self._thinking_styles = styles
+        self._rich_theme = self._create_rich_theme(styles)
+        self._markdown_code_theme = styles.markdown_code_theme
+        self._history.invalidate_render_caches()
+
     def set_on_change(self, callback: Callable[[], None]) -> None:
         """
         Set callback for history changes (for UI invalidation).
@@ -115,7 +147,9 @@ class Display:
             with self._pending_lock:
                 self._pending_output.append(content)
         else:
-            print_formatted_text(content, style=self._style)
+            print_formatted_text(
+                content, style=self._get_style(), color_depth=self._get_color_depth()
+            )
 
     def _output_styled(self, style: str, text: str) -> None:
         """Output styled text to history and console."""
@@ -123,14 +157,13 @@ class Display:
         self._print_to_console(FormattedText([(style, text)]))
 
     def _output_ansi(self, content: str) -> None:
-        """Output ANSI string to console and history.
+        """Output baked ANSI string to console and history.
 
-        ANSI is parsed into FormattedText fragments before being stored
-        in history so the fullscreen history Window renders styled
-        output instead of literal escape codes.
+        Used for rich/welcome/unstyled-raw output: this content is never
+        re-themed, so it's stored as a baked ANSI entry rather than parsed
+        into fragments up front.
         """
-        fragments = list(to_formatted_text(ANSI(content)))
-        self._history.append_formatted(fragments)
+        self._history.append_ansi(content)
         self._print_to_console(ANSI(content))
 
     # =========================================================================
@@ -145,9 +178,15 @@ class Display:
             prompt: The prompt string that was shown.
             text: The user's input text.
         """
-        # Add to history as separate fragments
-        self._history.append("class:history.user-prefix", prompt)
-        self._history.append("class:history.user-message", f"{text}\n")
+        # Store as ONE formatted entry so reprint_transcript emits a single
+        # print matching the add-time echo below. Two styled entries would
+        # be reprinted separately (each print adds a trailing newline, and
+        # the prefix has none of its own), splitting ">>> hello" across
+        # lines. One input is also one history_limit entry this way.
+        self._history.append_formatted([
+            ("class:history.user-prefix", prompt),
+            ("class:history.user-message", f"{text}\n"),
+        ])
         # Print as single formatted output
         self._print_to_console(FormattedText([
             ("class:history.user-prefix", prompt),
@@ -188,9 +227,9 @@ class Display:
 
         style = "class:history.thinking"
 
-        # History gets full content
+        # History gets full content, truncated on repaint to match console
         if add_to_history:
-            self._history.append(style, f"{content}\n")
+            self._history.append(style, f"{content}\n", truncate_lines=truncate_lines)
 
         # Console gets possibly truncated content
         if echo_to_console:
@@ -209,10 +248,12 @@ class Display:
         echo_to_console: bool = True,
     ) -> None:
         """Output ANSI-formatted thinking content."""
-        # History gets full content as parsed ANSI fragments
+        # History gets full content as baked ANSI, truncated on repaint to
+        # match the console (never re-themed: ANSI escapes are already baked).
         if add_to_history:
-            fragments = list(to_formatted_text(ANSI(content.rstrip() + "\n")))
-            self._history.append_formatted(fragments)
+            self._history.append_ansi(
+                content.rstrip() + "\n", truncate_lines=truncate_lines
+            )
 
         # Console gets possibly truncated content
         if echo_to_console:
@@ -271,24 +312,33 @@ class Display:
         """
         Output markdown content, rendered via Rich to ANSI.
 
-        Falls back to plain text if Rich is not installed.
+        Falls back to plain text if Rich is not installed. Stored in
+        history by source so a later set_theme() can re-render it with
+        the new Rich theme and code theme.
 
         Args:
             content: The markdown content.
         """
-        self._output_ansi(_markdown_to_ansi(content, theme=self._rich_theme))
+        rendered = _markdown_to_ansi(
+            content, theme=self._rich_theme, code_theme=self._markdown_code_theme
+        )
+        self._history.append_markdown(content)
+        self._print_to_console(ANSI(rendered))
 
     def code(self, code: str, language: str = "python") -> None:
         """
         Output syntax-highlighted code.
 
-        Uses Pygments for highlighting. Falls back to plain text if not installed.
+        Uses Pygments for highlighting. Falls back to plain text if not
+        installed. Stored in history by source so a later set_theme() can
+        re-render it.
 
         Args:
             code: The source code to highlight.
             language: The programming language (default: "python").
         """
-        self._output_ansi(_highlight_code(code, language))
+        self._history.append_code(code, language)
+        self._print_to_console(ANSI(_highlight_code(code, language)))
 
     def welcome(self, content: Any) -> None:
         """
@@ -395,4 +445,45 @@ class Display:
             pending = list(self._pending_output)
             self._pending_output.clear()
         for content in pending:
-            print_formatted_text(content, style=self._style)
+            print_formatted_text(
+                content, style=self._get_style(), color_depth=self._get_color_depth()
+            )
+
+    def drop_pending(self) -> None:
+        """Discard cached fullscreen console output (superseded by repaint)."""
+        with self._pending_lock:
+            self._pending_output.clear()
+
+    def reprint_transcript(self) -> None:
+        """Re-print every transcript entry to the console in the current theme.
+
+        Console-only: nothing is appended to history. Thinking entries are
+        truncated to their recorded truncate_lines, reproducing the form
+        originally echoed. Runs on the event loop (called from set_theme).
+        """
+        for entry in self._history.iter_entries():
+            if entry.kind == "styled":
+                # Mirror the add-time console normalization: stored text
+                # carries an unconditional trailing "\n" (on top of
+                # whatever the caller's content already had), which would
+                # otherwise throw off truncate_to_lines' line count and
+                # add a spurious "..." marker on repaint.
+                text = entry.text.rstrip("\n")
+                if entry.truncate_lines is not None:
+                    text = truncate_to_lines(text, entry.truncate_lines) + "\n"
+                else:
+                    text = text + "\n"
+                self._print_to_console(FormattedText([(entry.style, text)]))
+            elif entry.kind == "formatted":
+                self._print_to_console(FormattedText(entry.fragments))
+            elif entry.kind == "ansi" and entry.truncate_lines is not None:
+                self._print_to_console(
+                    ANSI(
+                        truncate_ansi_to_lines(
+                            entry.source.rstrip("\n"), entry.truncate_lines
+                        )
+                        + "\n"
+                    )
+                )
+            else:  # markdown/code (fresh render via cache) and untruncated ansi
+                self._print_to_console(FormattedText(self._history.render_entry(entry)))
