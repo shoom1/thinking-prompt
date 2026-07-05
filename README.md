@@ -329,6 +329,44 @@ app_info = AppInfo(
 )
 ```
 
+## Theming
+
+Four built-in themes, selectable by name:
+
+```python
+session = ThinkingPromptSession(theme="light")   # or "dark", "mono", "terminal", "auto"
+```
+
+- `dark` — the default (unchanged from previous versions)
+- `light` — palette tuned for light terminal backgrounds
+- `mono` — attributes only (bold/italic/reverse), rendered without color
+- `terminal` — named ANSI colors that inherit your terminal's own palette
+- `auto` — picks mono under `NO_COLOR`, light/dark from `COLORFGBG` when
+  available, otherwise `terminal`
+
+Custom themes are `ThinkingPromptStyles` instances (`theme=` accepts them
+too). All element styles derive from the `color_*` tokens, so overriding
+tokens restyles the whole UI consistently.
+
+Switch at runtime:
+
+```python
+session.set_theme("light")                # live UI re-themes on next paint
+session.set_theme("light", repaint=True)  # also clears and re-prints the transcript
+```
+
+With `repaint=True`, markdown and code blocks re-render from source in the
+new theme; output from `add_rich()` and raw ANSI keeps its original colors.
+
+`NO_COLOR` (non-empty, checked at startup — see no-color.org) forces
+colorless rendering regardless of theme, while keeping bold/italic.
+
+Bound history growth for long sessions:
+
+```python
+session = ThinkingPromptSession(history_limit=1000)  # max transcript entries
+```
+
 ## Examples
 
 See the `examples/` directory for complete demos:
