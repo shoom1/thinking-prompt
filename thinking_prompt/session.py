@@ -82,6 +82,9 @@ class ThinkingPromptSession:
         await session.run_async()
     """
 
+    # Status hint shown when Enter is refused because nobody awaits input.
+    _BUSY_STATUS = "Busy — press Ctrl+C to cancel"
+
     def __init__(
         self,
         message: AnyFormattedText = ">>> ",
@@ -232,22 +235,32 @@ class ThinkingPromptSession:
             return ''.join(item[1] if isinstance(item, tuple) else str(item) for item in msg)
         return str(msg)
 
+    def _input_wanted(self) -> bool:
+        """True when submitted input would reach someone.
+
+        False while a handler is running, and also in the gap between one
+        line resolving the pending future and the input loop's next
+        prompt_async() — a second line arriving in the same read (typed
+        ahead during a blocking handler, say) lands there.
+        """
+        handler_running = (
+            self._current_handler_task is not None
+            and not self._current_handler_task.done()
+        )
+        pending = self._pending_input
+        return not handler_running and pending is not None and not pending.done()
+
     def _create_default_buffer(self) -> Buffer:
         """Create the main input buffer."""
 
         def accept_handler(buff: Buffer) -> bool:
             """Handle input acceptance."""
-            # Refuse to deliver input while a handler is already running.
-            # If we accepted, the new text would be echoed and the buffer
-            # cleared, but the handler couldn't pick it up — it would just
-            # vanish. Instead leave the buffer intact and surface a hint
-            # so the user knows why nothing happened.
-            if (
-                self._current_handler_task is not None
-                and not self._current_handler_task.done()
-            ):
-                self.set_status("Busy — press Ctrl+C to cancel")
-                return False
+            # Backstop for the check in the Enter binding (accept_input),
+            # which refuses before prompt_toolkit touches the buffer. Note
+            # the return value means *keep_text*: True keeps the draft.
+            if not self._input_wanted():
+                self.set_status(self._BUSY_STATUS)
+                return True
 
             text = buff.document.text
 
@@ -261,10 +274,12 @@ class ThinkingPromptSession:
                     self._display.user_input(prompt_str, text)
 
             # Signal that input is ready - handler decides whether to use thinking mode
-            if self._pending_input and not self._pending_input.done():
-                self._pending_input.set_result(text)
+            assert self._pending_input is not None  # checked by _input_wanted()
+            self._pending_input.set_result(text)
 
-            # Clear buffer for next input
+            # Clear buffer for next input. Resetting here (rather than
+            # returning False) empties it before validate_and_handle's own
+            # append_to_history, which would otherwise record it twice.
             buff.reset()
             return True
 
@@ -389,7 +404,15 @@ class ThinkingPromptSession:
         # Enter to submit (when not thinking)
         @kb.add("enter", filter=has_focus(DEFAULT_BUFFER))
         def accept_input(event: KeyPressEvent) -> None:
-            """Accept input."""
+            """Accept input, or refuse it when nobody is waiting for it."""
+            # Refused input stays in the buffer, untouched: if we accepted,
+            # the text would be echoed and the buffer cleared, but nobody
+            # would pick it up — it would just vanish. The check runs here,
+            # before validate_and_handle(), so prompt_toolkit neither
+            # clears the draft nor records it in the input history.
+            if not self._input_wanted():
+                self.set_status(self._BUSY_STATUS)
+                return
             self.default_buffer.validate_and_handle()
 
         # Expand/collapse — toggle all via manager

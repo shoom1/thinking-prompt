@@ -191,10 +191,12 @@ class TestAcceptHandlerWhileBusy:
         finally:
             loop.close()
 
-    def test_busy_session_drops_input(self, session):
+    def test_busy_session_refuses_input(self, session):
         """While a handler task is running, accept_handler refuses the
-        input (returns False, leaves buffer intact, does not resolve the
-        pending input future)."""
+        input: the buffer stays intact and the pending input future is
+        not resolved. Goes through validate_and_handle(), the real call
+        path — accept_handler's return value means *keep_text*, so an
+        inverted value only shows up there."""
         loop = asyncio.new_event_loop()
         try:
             # Simulate a running handler.
@@ -207,15 +209,11 @@ class TestAcceptHandlerWhileBusy:
             session._pending_input = loop.create_future()
             session.default_buffer.text = "queued"
 
-            ah = session.default_buffer.accept_handler
-            assert ah is not None
-            result = ah(session.default_buffer)
+            session.default_buffer.validate_and_handle()
 
             # Don't deliver the text and don't clear the buffer.
             assert session._pending_input.done() is False
             assert session.default_buffer.text == "queued"
-            # Falsy return tells prompt_toolkit to keep the buffer.
-            assert result is False
 
             running.cancel()
             try:
