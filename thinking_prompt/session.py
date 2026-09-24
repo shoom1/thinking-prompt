@@ -323,11 +323,11 @@ class ThinkingPromptSession:
         """Create key bindings for the session."""
         kb = KeyBindings()
 
-        # Cancel/interrupt — cancel the running handler, finish boxes,
-        # cancel pending input. Falls through to app.exit() when no
-        # handler was running and no boxes were active. A live pending
-        # input future does NOT count as in-flight work: it merely means
-        # the prompt is waiting for input, which is the idle state.
+        # Cancel/interrupt — cancel the running handler and finish boxes.
+        # Falls through to exit (cancelling pending input) when no handler
+        # was running and no boxes were active. A live pending input
+        # future does NOT count as in-flight work: it merely means the
+        # prompt is waiting for input, which is the idle state.
         @kb.add("c-c")
         def cancel(event: KeyPressEvent) -> None:
             """Cancel current operation or exit."""
@@ -356,21 +356,22 @@ class ThinkingPromptSession:
                 self._manager.finish_all()
                 self._invalidate()
 
-            if had_pending_input:
-                assert self._pending_input is not None
-                self._pending_input.cancel()
-
             if not handler_running and not had_active_boxes:
                 # No handler and no boxes — the session is idle, so Ctrl+C
                 # means "exit". At an idle prompt the pending-input future
                 # is always live (prompt_async is awaiting it), so it must
                 # not count as in-flight work: treating it as such used to
                 # kill the input loop while leaving the app running, after
-                # which typed input was echoed but silently dropped. The
-                # future was cancelled above, so direct prompt_async()
-                # callers still observe KeyboardInterrupt; app.exit() ends
-                # run_async()'s own loop either way.
+                # which typed input was echoed but silently dropped.
+                # Cancelling it makes direct prompt_async() callers observe
+                # KeyboardInterrupt; app.exit() ends run_async()'s own loop.
+                if had_pending_input:
+                    assert self._pending_input is not None
+                    self._pending_input.cancel()
                 event.app.exit()
+            # Otherwise the pending input (if any) is left alone: cancelling
+            # it would end the input loop while the app — which is not
+            # exiting — keeps running, a zombie session.
 
         # Exit (EOF) — only on an empty input line, matching readline
         # semantics. With text in the buffer this binding is inactive and
@@ -1090,8 +1091,12 @@ class ThinkingPromptSession:
                 except asyncio.CancelledError:
                     break
 
-        # Run input loop as background task
+        # Run input loop as background task. The app must not outlive the
+        # loop: however the loop ends (EOF, KeyboardInterrupt escaping a
+        # handler, a cancelled pending future), a still-running app would
+        # echo typed input that nobody reads — a zombie session.
         loop_task = asyncio.create_task(input_loop())
+        loop_task.add_done_callback(lambda _task: self._exit_app())
 
         try:
             await self.app.run_async()
@@ -1157,6 +1162,12 @@ class ThinkingPromptSession:
             # and the flag would stay sticky — making the *next* outer
             # cancellation look like a Ctrl+C and silently swallowing it.
             self._user_cancelled_handler = False
+
+    def _exit_app(self) -> None:
+        """Exit the app unless it is not running or already exiting."""
+        future = self.app.future
+        if self.app.is_running and future is not None and not future.done():
+            self.app.exit()
 
     def _cleanup_after_handler(self) -> None:
         """Drop any thinking boxes the handler left open and refresh UI."""
