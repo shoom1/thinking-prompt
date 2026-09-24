@@ -111,3 +111,59 @@ class TestInputLoopLifetime:
                 await asyncio.wait_for(asyncio.shield(run), timeout=2)
 
             await run_with(session, handler, script)
+
+
+class TestTypeAhead:
+    async def test_second_line_in_same_read_is_not_lost(self):
+        """Two lines arriving in one read: the second must not be echoed
+        and then dropped. It stays in the buffer until the session is ready
+        for input again."""
+        delivered: list[str] = []
+
+        async def handler(text: str) -> None:
+            delivered.append(text)
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("first" + ENTER + "second" + ENTER)
+                await wait_until(lambda: delivered == ["first"] and waiting_for_input(session))
+                assert echoed_inputs(session) == delivered
+                assert session.default_buffer.text == "second"
+
+                inp.send_text(ENTER)
+                await wait_until(lambda: delivered == ["first", "second"])
+                assert echoed_inputs(session) == delivered
+
+            await run_with(session, handler, script)
+
+
+class TestInputWhileBusy:
+    async def test_enter_while_handler_runs_keeps_the_draft(self):
+        """Enter while a handler is running is refused: the draft stays in
+        the buffer (not cleared, not echoed) and can be submitted later."""
+        delivered: list[str] = []
+        release = asyncio.Event()
+
+        async def handler(text: str) -> None:
+            delivered.append(text)
+            if text == "slow":
+                await release.wait()
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("slow" + ENTER)
+                await wait_until(lambda: delivered == ["slow"])
+                inp.send_text("next" + ENTER)
+                await asyncio.sleep(0.1)
+                assert session.default_buffer.text == "next"
+                assert echoed_inputs(session) == ["slow"]
+
+                release.set()
+                await wait_until(lambda: waiting_for_input(session))
+                inp.send_text(ENTER)
+                await wait_until(lambda: delivered == ["slow", "next"])
+                assert session._input_history.get_strings()[-2:] == ["slow", "next"]
+
+            await run_with(session, handler, script)
