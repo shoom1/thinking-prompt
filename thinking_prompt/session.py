@@ -32,7 +32,12 @@ from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.completion import Completer
 from prompt_toolkit.enums import DEFAULT_BUFFER, EditingMode
 from prompt_toolkit.filters import Condition, has_focus
-from prompt_toolkit.formatted_text import AnyFormattedText, FormattedText
+from prompt_toolkit.formatted_text import (
+    AnyFormattedText,
+    FormattedText,
+    fragment_list_to_text,
+    to_formatted_text,
+)
 from prompt_toolkit.history import History, InMemoryHistory
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.key_binding.key_processor import KeyPressEvent
@@ -223,17 +228,9 @@ class ThinkingPromptSession:
         self._display.set_on_change(self._invalidate)
 
     def _get_prompt_string(self) -> str:
-        """Get the prompt as a plain string."""
-        msg: Any = self._message
-        if callable(msg):
-            msg = msg()
-        if isinstance(msg, str):
-            return msg
-        if msg is None:
-            return ""
-        if hasattr(msg, '__iter__'):
-            return ''.join(item[1] if isinstance(item, tuple) else str(item) for item in msg)
-        return str(msg)
+        """Get the prompt's visible text (any AnyFormattedText form, e.g.
+        HTML or ANSI objects, callables, fragment lists)."""
+        return fragment_list_to_text(to_formatted_text(self._message))
 
     def _input_wanted(self) -> bool:
         """True when submitted input would reach someone.

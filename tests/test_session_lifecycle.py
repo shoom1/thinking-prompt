@@ -520,3 +520,38 @@ class TestUserCancelledFlagReset:
         run2.cancel()
         with pytest.raises(asyncio.CancelledError):
             await run2
+
+
+class TestEchoedPrompt:
+    """The prompt echoed with each input is the prompt's visible text,
+    whatever AnyFormattedText form the message takes."""
+
+    @staticmethod
+    def _echoed_prefix(session: ThinkingPromptSession) -> str:
+        session.add_message("user", "hi")
+        entry = session._display.history.iter_entries()[-1]
+        return entry.fragments[0][1]
+
+    @pytest.mark.parametrize(
+        "message",
+        [
+            ">>> ",
+            lambda: ">>> ",
+            [("class:x", ">>"), ("", "> ")],
+        ],
+        ids=["str", "callable", "fragments"],
+    )
+    def test_plain_forms(self, message):
+        assert self._echoed_prefix(ThinkingPromptSession(message=message)) == ">>> "
+
+    def test_html_message(self):
+        from prompt_toolkit.formatted_text import HTML
+
+        session = ThinkingPromptSession(message=HTML("<ansigreen>&gt;&gt;&gt; </ansigreen>"))
+        assert self._echoed_prefix(session) == ">>> "
+
+    def test_ansi_message(self):
+        from prompt_toolkit.formatted_text import ANSI
+
+        session = ThinkingPromptSession(message=ANSI("\x1b[32m>>> \x1b[0m"))
+        assert self._echoed_prefix(session) == ">>> "
