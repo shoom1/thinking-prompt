@@ -43,6 +43,25 @@ DEFAULT_SPINNER_FRAMES = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"
 # Utility Functions
 # =============================================================================
 
+def split_content_lines(content: str) -> list[str]:
+    """
+    Split content into the lines it displays as.
+
+    Trailing whitespace is not content: a trailing newline ends the last
+    line rather than starting a new, empty one, and trailing blank lines
+    are dropped (echoed output is rstripped, so they must not count toward
+    truncation either). Every truncation path — the live thinking box, the
+    console echo, the repaint — splits through here so they agree.
+
+    Args:
+        content: The content to split.
+
+    Returns:
+        The content's lines; ``[""]`` for empty or whitespace-only content.
+    """
+    return content.rstrip().split('\n')
+
+
 def truncate_to_lines(content: str, max_lines: int, suffix: str = "...") -> str:
     """
     Truncate content to max_lines, appending suffix if truncated.
@@ -55,7 +74,7 @@ def truncate_to_lines(content: str, max_lines: int, suffix: str = "...") -> str:
     Returns:
         Truncated content with suffix if over limit, otherwise content.rstrip().
     """
-    lines = content.split('\n')
+    lines = split_content_lines(content)
     if len(lines) > max_lines:
         return '\n'.join(lines[:max_lines]) + '\n' + suffix
     return content.rstrip()

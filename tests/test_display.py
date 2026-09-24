@@ -653,3 +653,27 @@ class TestTranscriptWiring:
         from thinking_prompt import ThinkingPromptSession
         s = ThinkingPromptSession(history_limit=3)
         assert s._display.history._max_entries == 3
+
+
+class TestThinkingEchoRepaintParity:
+    """The console echo of a finished thinking box and its repaint (after
+    set_theme(repaint=True)) must print the same text. Fullscreen mode
+    caches console output, which makes both observable."""
+
+    @staticmethod
+    def _printed(display: Display) -> list[str]:
+        from prompt_toolkit.formatted_text import fragment_list_to_text, to_formatted_text
+
+        out = [fragment_list_to_text(to_formatted_text(c)) for c in display._pending_output]
+        display.drop_pending()
+        return out
+
+    @pytest.mark.parametrize("fmt", ["plain", "ansi"])
+    def test_content_that_fits_is_not_marked_truncated(self, fullscreen_display, fmt):
+        fullscreen_display.thinking("a\nb\n", truncate_lines=2, content_format=fmt)
+        echoed = self._printed(fullscreen_display)
+        fullscreen_display.reprint_transcript()
+        repainted = self._printed(fullscreen_display)
+
+        assert echoed == ["a\nb\n"]
+        assert repainted == echoed

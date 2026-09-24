@@ -465,9 +465,8 @@ class Display:
             if entry.kind == "styled":
                 # Mirror the add-time console normalization: stored text
                 # carries an unconditional trailing "\n" (on top of
-                # whatever the caller's content already had), which would
-                # otherwise throw off truncate_to_lines' line count and
-                # add a spurious "..." marker on repaint.
+                # whatever the caller's content already had); strip it so
+                # the entry ends with exactly one newline, as echoed.
                 text = entry.text.rstrip("\n")
                 if entry.truncate_lines is not None:
                     text = truncate_to_lines(text, entry.truncate_lines) + "\n"
