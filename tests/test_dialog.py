@@ -501,6 +501,54 @@ class TestDialogManager:
         assert manager._current_dialog is None
 
 
+class TestDialogManagerFailureRecovery:
+    """An exception while opening a dialog must not leave the manager
+    believing a dialog is open — that would refuse every later dialog."""
+
+    @staticmethod
+    async def _show_and_close_message_dialog(session) -> None:
+        task = asyncio.create_task(session.message_dialog("Next", "ok"))
+        for _ in range(20):
+            await asyncio.sleep(0)
+            if session._dialogs._current_dialog is not None:
+                break
+        session._dialogs._current_dialog.set_result(None)
+        await asyncio.wait_for(task, timeout=1)
+
+    @staticmethod
+    def _assert_closed(session) -> None:
+        manager = session._dialogs
+        assert manager._current_dialog is None
+        assert manager._visible is False
+        assert session.app.layout.has_focus(session.default_buffer)
+
+    async def test_failing_build_body_does_not_block_next_dialog(self):
+        from thinking_prompt import ThinkingPromptSession
+
+        class Broken(BaseDialog):
+            def build_body(self):
+                raise RuntimeError("bug in build_body")
+
+        session = ThinkingPromptSession()
+        with pytest.raises(RuntimeError, match="bug in build_body"):
+            await session.show_dialog(Broken())
+
+        self._assert_closed(session)
+        await self._show_and_close_message_dialog(session)
+
+    async def test_dialog_with_nothing_focusable_raises_clear_error(self):
+        """DialogConfig's buttons default to []; with a plain-text body the
+        dialog has nothing to focus, so it could never be closed."""
+        from thinking_prompt import ThinkingPromptSession
+
+        session = ThinkingPromptSession()
+        with pytest.raises(ValueError, match="no focusable element"):
+            await session.show_dialog(DialogConfig(title="Empty", body="hi"))
+
+        self._assert_closed(session)
+        await self._show_and_close_message_dialog(session)
+
+
 # =============================================================================
 # Integration-style Tests (without full Application)
 # =============================================================================
