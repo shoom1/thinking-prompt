@@ -349,3 +349,22 @@ class TestStreamingContentRichMethods:
         content.set_line_rich(-1, "[bold]LAST[/bold]")
         text = content.get_content()
         assert "LAST" in text
+
+
+class TestTruncateToLines:
+    """A trailing newline is not a line of its own when truncating."""
+
+    def test_trailing_newline_does_not_trigger_truncation(self):
+        from thinking_prompt.types import truncate_to_lines
+
+        assert truncate_to_lines("a\nb\nc\nd\n", 4) == "a\nb\nc\nd"
+
+    def test_truncates_beyond_limit(self):
+        from thinking_prompt.types import truncate_to_lines
+
+        assert truncate_to_lines("a\nb\nc\nd\ne\n", 4) == "a\nb\nc\nd\n..."
+
+    def test_ansi_trailing_newline_does_not_trigger_truncation(self):
+        from thinking_prompt.types import truncate_ansi_to_lines
+
+        assert truncate_ansi_to_lines("\033[1ma\033[0m\nb\n", 2) == "\033[1ma\033[0m\nb"

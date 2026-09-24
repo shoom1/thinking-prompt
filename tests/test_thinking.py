@@ -274,3 +274,34 @@ class TestThinkingBoxControlAnsiFormat:
         formatted = thinking_control._get_formatted_text()
         assert len(formatted) == 1
         assert formatted[0] == ("class:thinking-box", "Hello World")
+
+
+class TestTrailingNewline:
+    """A trailing newline ends the last line; it does not start a new,
+    hidden one. Content built with append("...\\n") — the documented
+    pattern — must not report phantom hidden lines."""
+
+    @staticmethod
+    def _lines(n: int) -> str:
+        return "".join(f"line {i}\n" for i in range(n))
+
+    @staticmethod
+    def _hint(control: ThinkingBoxControl) -> str:
+        return "".join(t for s, t in control._get_formatted_text() if "hint" in s)
+
+    def test_content_that_fits_shows_no_hint(self, small_thinking_control):
+        content = self._lines(4)  # max_collapsed_lines=5: 4 lines fit
+        small_thinking_control.start(lambda: content)
+        assert self._hint(small_thinking_control) == ""
+        assert small_thinking_control.can_toggle_expanded is False
+        assert small_thinking_control.get_line_count() == 4
+
+    def test_hidden_count_excludes_trailing_newline(self, small_thinking_control):
+        content = self._lines(20)  # 4 shown, 16 hidden
+        small_thinking_control.start(lambda: content)
+        assert self._hint(small_thinking_control).startswith("+16 lines")
+
+    def test_ansi_hidden_count_excludes_trailing_newline(self, small_thinking_control):
+        content = "".join(f"\033[32mline {i}\033[0m\n" for i in range(20))
+        small_thinking_control.start(lambda: content, content_format="ansi")
+        assert self._hint(small_thinking_control).startswith("+16 lines")
