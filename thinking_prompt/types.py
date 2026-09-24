@@ -264,6 +264,15 @@ class ThinkingContext:
         """Return the number of chunks."""
         return len(self._require_content())
 
+    def __bool__(self) -> bool:
+        """Always True: a context is a handle, not a collection.
+
+        Without this, truthiness would fall back to ``__len__`` — ``if ctx:``
+        would be False for a fresh (empty) box and raise for a context
+        without content.
+        """
+        return True
+
     @property
     def text(self) -> str:
         """Get the accumulated content as a string."""
