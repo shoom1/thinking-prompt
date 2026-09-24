@@ -367,13 +367,18 @@ class TestCtrlDKeyBinding:
         the buffer the binding must not be active (the default emacs
         delete-char binding applies instead), so Ctrl+D can't destroy
         typed input and kill the session."""
+        from prompt_toolkit.application.current import set_app
+
         binding = _get_ctrl_d_binding(session)
 
-        session.default_buffer.text = "draft in progress"
-        assert not binding.filter()
+        # The filter also requires prompt focus, which is resolved via
+        # the current app — evaluate it under the session's own app.
+        with set_app(session.app):
+            session.default_buffer.text = "draft in progress"
+            assert not binding.filter()
 
-        session.default_buffer.reset()
-        assert binding.filter()
+            session.default_buffer.reset()
+            assert binding.filter()
 
     async def test_prompt_async_raises_eoferror_end_to_end(self, session):
         """await prompt_async() must raise EOFError after Ctrl+D."""
