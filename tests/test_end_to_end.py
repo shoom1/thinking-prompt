@@ -167,3 +167,58 @@ class TestInputWhileBusy:
                 assert session._input_history.get_strings()[-2:] == ["slow", "next"]
 
             await run_with(session, handler, script)
+
+
+class TestCtrlDInDialog:
+    async def test_ctrl_d_in_dialog_text_field_deletes_char(self):
+        """Ctrl+D while editing a dialog text field is emacs delete-char;
+        it must not exit the session (the main prompt being empty is
+        irrelevant when it doesn't have focus)."""
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(
+                await session.show_settings_dialog(
+                    "Settings", [TextItem(key="name", label="Name", default="abc")]
+                )
+            )
+
+        with piped_session() as (session, inp):
+
+            def editing() -> bool:
+                dm = session._dialog_manager
+                dialog = dm._current_dialog if dm else None
+                return dialog is not None and dialog._controls[0].is_editing
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: session._dialog_manager is not None
+                                 and session._dialog_manager._visible)
+                inp.send_text(ENTER)
+                await wait_until(editing)
+                inp.send_text(CTRL_A + CTRL_D)
+                await asyncio.sleep(0.1)
+                assert not run.done(), "Ctrl+D in a dialog must not exit the app"
+                inp.send_text(ENTER)
+                await wait_until(lambda: not editing())
+                inp.send_text(CTRL_S)
+                await wait_until(lambda: results == [{"name": "bc"}])
+
+            await run_with(session, handler, script)
+
+    @pytest.mark.parametrize("draft", ["", "draft"])
+    async def test_ctrl_d_at_prompt_still_follows_readline_rules(self, draft: str):
+        """Regression guard: at the main prompt, Ctrl+D exits only on an
+        empty line."""
+
+        async def handler(text: str) -> None:
+            pass
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text(draft + CTRL_D)
+                await asyncio.sleep(0.2)
+                assert run.done() is (draft == "")
+
+            await run_with(session, handler, script)

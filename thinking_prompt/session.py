@@ -391,8 +391,14 @@ class ThinkingPromptSession:
         # Exit (EOF) — only on an empty input line, matching readline
         # semantics. With text in the buffer this binding is inactive and
         # prompt_toolkit's default emacs binding (delete-char) handles the
-        # key, so a typed draft is never destroyed by a stray Ctrl+D.
-        @kb.add("c-d", filter=Condition(lambda: not self.default_buffer.text))
+        # key, so a typed draft is never destroyed by a stray Ctrl+D. The
+        # prompt must also have focus: in a dialog's text field Ctrl+D is
+        # delete-char, whatever the (hidden) main buffer holds.
+        @kb.add(
+            "c-d",
+            filter=has_focus(DEFAULT_BUFFER)
+            & Condition(lambda: not self.default_buffer.text),
+        )
         def exit_app(event: KeyPressEvent) -> None:
             """Exit the application."""
             # Resolve the pending future so direct prompt_async() callers
