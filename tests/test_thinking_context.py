@@ -59,6 +59,20 @@ class TestThinkingContextDelegation:
         assert ctx.text == "hello"
 
 
+class TestThinkingContextTruthiness:
+    """A context is an object, not a collection: it is always truthy.
+    Otherwise `if ctx:` is False for a fresh (empty) box and raises for a
+    context without content."""
+
+    def test_empty_context_is_truthy(self):
+        ctx = ThinkingContext(StreamingContent(), set_title=MagicMock(), get_title=lambda: "")
+        assert bool(ctx) is True
+
+    def test_context_without_content_is_truthy(self):
+        ctx = ThinkingContext(None, set_title=MagicMock(), get_title=lambda: "")
+        assert bool(ctx) is True
+
+
 class TestThinkingContextTitleControl:
     """Test title control via ThinkingContext."""
 

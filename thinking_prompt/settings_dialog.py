@@ -260,7 +260,11 @@ class InlineSelectControl(SettingControl[InlineSelectItem]):
         try:
             idx = options.index(self._value)
         except ValueError:
-            idx = 0
+            # No current selection (no default, or a default that isn't an
+            # option): the first press selects the first option. Moving
+            # from index 0 would skip over it.
+            self._value = options[0]
+            return
         new_idx = max(0, min(len(options) - 1, idx + delta))
         self._value = options[new_idx]
 
