@@ -13,7 +13,7 @@ from typing import Callable
 from prompt_toolkit.formatted_text import ANSI, FormattedText, to_formatted_text
 from prompt_toolkit.layout.controls import FormattedTextControl
 
-from .types import ContentFormat
+from .types import ContentFormat, split_content_lines
 
 logger = logging.getLogger(__name__)
 
@@ -183,7 +183,7 @@ class ThinkingBoxControl(FormattedTextControl):
 
     def _format_plain(self, content: str) -> FormattedText:
         """Format content as plain styled text."""
-        lines = content.split('\n')
+        lines = split_content_lines(content)
 
         if not self._is_expanded and len(lines) > self._max_collapsed_lines - 1:
             truncated_lines = lines[:self._max_collapsed_lines - 1]
@@ -200,7 +200,7 @@ class ThinkingBoxControl(FormattedTextControl):
 
     def _format_ansi(self, content: str) -> FormattedText:
         """Format content with ANSI escape codes parsed by prompt_toolkit."""
-        lines = content.split('\n')
+        lines = split_content_lines(content)
 
         if not self._is_expanded and len(lines) > self._max_collapsed_lines - 1:
             truncated_lines = lines[:self._max_collapsed_lines - 1]
@@ -272,7 +272,7 @@ class ThinkingBoxControl(FormattedTextControl):
             if not content:
                 return False
 
-            lines = content.split('\n')
+            lines = split_content_lines(content)
             return len(lines) > self._max_collapsed_lines - 1
 
     def get_line_count(self, width: int = 80) -> int:
@@ -289,7 +289,7 @@ class ThinkingBoxControl(FormattedTextControl):
         if not content:
             return 0
 
-        lines = content.split('\n')
+        lines = split_content_lines(content)
         total = 0
         for line in lines:
             # Styling escapes occupy no columns — measure visible text.

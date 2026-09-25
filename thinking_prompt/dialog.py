@@ -584,6 +584,11 @@ class DialogManager:
             RuntimeError: If a dialog is already being shown. Showing a
                 second dialog would orphan the first one's result future,
                 leaving its awaiter hung forever.
+            ValueError: If the dialog has nothing focusable (e.g. a
+                ``DialogConfig`` with no buttons and a plain-text body).
+
+        Whatever the dialog raises while being built or opened, the
+        manager is left closed, so later dialogs can still be shown.
         """
         if self._current_dialog is not None:
             raise RuntimeError(
@@ -604,44 +609,53 @@ class DialogManager:
             escape = dialog.escape_result
             return None if isinstance(escape, _Unset) else escape
 
-        # Prepare dialog
+        # Everything after claiming the slot runs under the finally below:
+        # if building or focusing the dialog raises (a bug in a custom
+        # build_body, nothing focusable), the manager must not be left
+        # believing a dialog is open — it would refuse every later one.
         self._current_dialog = dialog
-        future = dialog._prepare(self)
-        dialog._build_widget(effective_height=effective_height)
-
-        # Update Float positioning based on dialog's top attribute
-        if self._dialog_float:
-            if dialog.top is None:
-                # Center: no top or bottom constraint
-                self._dialog_float.top = None
-                self._dialog_float.bottom = None
-            elif dialog.top >= 0:
-                # Offset from top
-                self._dialog_float.top = dialog.top
-                self._dialog_float.bottom = None
-            else:
-                # Negative = offset from bottom
-                self._dialog_float.top = None
-                self._dialog_float.bottom = abs(dialog.top)
-
-            # Pin Float height so prompt_toolkit allocates the full
-            # height in one render frame instead of measuring dialog
-            # content over multiple ticks.
-            if effective_height is not None:
-                self._dialog_float.height = effective_height
-            else:
-                self._dialog_float.height = None
-
-        # Show dialog
-        self._visible = True
-        assert dialog._widget is not None  # _build_widget set this above
-        self._session.app.layout.focus(dialog._widget)
-        # Override default focus when a button opted in via ButtonConfig.focused.
-        if dialog._initial_focus is not None:
-            self._session.app.layout.focus(dialog._initial_focus)
-        self._session.app.invalidate()
-
         try:
+            future = dialog._prepare(self)
+            dialog._build_widget(effective_height=effective_height)
+
+            # Update Float positioning based on dialog's top attribute
+            if self._dialog_float:
+                if dialog.top is None:
+                    # Center: no top or bottom constraint
+                    self._dialog_float.top = None
+                    self._dialog_float.bottom = None
+                elif dialog.top >= 0:
+                    # Offset from top
+                    self._dialog_float.top = dialog.top
+                    self._dialog_float.bottom = None
+                else:
+                    # Negative = offset from bottom
+                    self._dialog_float.top = None
+                    self._dialog_float.bottom = abs(dialog.top)
+
+                # Pin Float height so prompt_toolkit allocates the full
+                # height in one render frame instead of measuring dialog
+                # content over multiple ticks.
+                if effective_height is not None:
+                    self._dialog_float.height = effective_height
+                else:
+                    self._dialog_float.height = None
+
+            # Show dialog
+            self._visible = True
+            assert dialog._widget is not None  # _build_widget set this above
+            try:
+                self._session.app.layout.focus(dialog._widget)
+            except ValueError as exc:
+                raise ValueError(
+                    f"Dialog {dialog.title!r} has no focusable element, so it "
+                    "could never be closed. Give it at least one button."
+                ) from exc
+            # Override default focus when a button opted in via ButtonConfig.focused.
+            if dialog._initial_focus is not None:
+                self._session.app.layout.focus(dialog._initial_focus)
+            self._session.app.invalidate()
+
             # Wait for result
             result = await future
         finally:

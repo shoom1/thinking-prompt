@@ -1,6 +1,7 @@
 """Tests for the settings dialog system."""
 from __future__ import annotations
 
+import pytest
 from prompt_toolkit.layout import BufferControl, HSplit, Window
 from prompt_toolkit.layout.processors import PasswordProcessor
 
@@ -328,6 +329,27 @@ class TestInlineSelectControl:
 
         control.cycle(-1)
         assert control.value == "a"  # clamped at start
+
+    @pytest.mark.parametrize("default", [None, "not-an-option"])
+    @pytest.mark.parametrize("delta", [1, -1])
+    def test_first_press_without_selection_selects_first_option(self, default, delta):
+        """With no current selection (no default, or a default that isn't
+        an option), the first press selects the first option instead of
+        skipping over it."""
+        from thinking_prompt.settings_dialog import InlineSelectControl
+
+        item = InlineSelectItem(key="m", label="M", options=["a", "b", "c"], default=default)
+        control = InlineSelectControl(item)
+
+        control.cycle(delta)
+        assert control.value == "a"
+
+    def test_untouched_select_without_default_is_not_a_change(self):
+        """No default means "unset": leaving it alone reports no change."""
+        dialog = SettingsDialog(
+            title="S", items=[InlineSelectItem(key="m", label="M", options=["a", "b"])]
+        )
+        assert dialog._get_changed_values() == {}
 
     def test_inline_select_renders_label_and_value(self):
         """InlineSelect renders label and current option."""
