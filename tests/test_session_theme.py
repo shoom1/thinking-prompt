@@ -10,7 +10,7 @@ from thinking_prompt import ThinkingPromptSession, ThinkingPromptStyles
 class TestThemeParam:
     def test_theme_by_name(self):
         s = ThinkingPromptSession(theme="light")
-        assert s.styles.markdown_code_theme == "default"
+        assert s.styles.code_theme == "default"
 
     def test_theme_by_instance(self):
         styles = ThinkingPromptStyles.mono()
@@ -78,7 +78,7 @@ class TestSetTheme:
 
         s.set_theme("light")
 
-        assert s.styles.markdown_code_theme == "default"
+        assert s.styles.code_theme == "default"
         s.app.invalidate.assert_called()
 
     def test_set_theme_accepts_instance(self):

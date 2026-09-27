@@ -201,7 +201,9 @@ class ThinkingPromptStyles:
     # Rendering hints
     # ==========================================================================
     color_depth: ColorDepth | None = None  # mono() sets DEPTH_1_BIT; None = terminal default.
-    markdown_code_theme: str = "monokai"  # Rich code theme for fences (light() uses "default").
+    # Code highlighting for markdown fences and add_code(): a Pygments style
+    # name, or "ansi_dark"/"ansi_light" for the terminal's own 16 colors.
+    code_theme: str = "monokai"
 
     @classmethod
     def dark(cls) -> ThinkingPromptStyles:
@@ -234,7 +236,7 @@ class ThinkingPromptStyles:
             color_bg_selected="#cbd5e1",
             color_shadow="#9ca3af",
             assistant_prefix="fg:#0e7490 bold",
-            markdown_code_theme="default",
+            code_theme="default",
         )
 
     @classmethod
@@ -285,7 +287,7 @@ class ThinkingPromptStyles:
             menu_meta_selected="reverse",
             dialog_button_focused="bold reverse",
             assistant_prefix="fg:ansicyan bold",
-            markdown_code_theme="ansi_dark",
+            code_theme="ansi_dark",
         )
 
     def _derived(self) -> dict[str, str]:
