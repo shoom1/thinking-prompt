@@ -159,6 +159,10 @@ class ThinkingPromptSession:
         self._max_thinking_height = max_thinking_height
         self._enable_status_bar = enable_status_bar
         self._status_text = status_text
+        # Status the "Busy" hint replaced, restored once input is accepted
+        # again (see _show_busy_hint / _clear_busy_hint).
+        self._busy_hint_shown = False
+        self._status_before_busy: AnyFormattedText = None
         self._editing_mode = editing_mode
         self._echo_input = echo_input
         self._completer = completer
@@ -250,6 +254,23 @@ class ThinkingPromptSession:
         pending = self._pending_input
         return not handler_running and pending is not None and not pending.done()
 
+    def _show_busy_hint(self) -> None:
+        """Show the "Busy" status hint, remembering the status it replaces."""
+        if self._status_text != self._BUSY_STATUS:
+            self._status_before_busy = self._status_text
+        self._busy_hint_shown = True
+        self.set_status(self._BUSY_STATUS)
+
+    def _clear_busy_hint(self) -> None:
+        """Restore the status the "Busy" hint replaced — unless something
+        set a new status meanwhile (e.g. the handler reporting its result)."""
+        if not self._busy_hint_shown:
+            return
+        self._busy_hint_shown = False
+        if self._status_text == self._BUSY_STATUS:
+            self.status_text = self._status_before_busy
+        self._status_before_busy = None
+
     def _create_default_buffer(self) -> Buffer:
         """Create the main input buffer."""
 
@@ -259,7 +280,7 @@ class ThinkingPromptSession:
             # which refuses before prompt_toolkit touches the buffer. Note
             # the return value means *keep_text*: True keeps the draft.
             if not self._input_wanted():
-                self.set_status(self._BUSY_STATUS)
+                self._show_busy_hint()
                 return True
 
             text = buff.document.text
@@ -417,7 +438,7 @@ class ThinkingPromptSession:
             # before validate_and_handle(), so prompt_toolkit neither
             # clears the draft nor records it in the input history.
             if not self._input_wanted():
-                self.set_status(self._BUSY_STATUS)
+                self._show_busy_hint()
                 return
             self.default_buffer.validate_and_handle()
 
@@ -1060,6 +1081,8 @@ class ThinkingPromptSession:
             KeyboardInterrupt: When Ctrl+C is pressed (not during thinking).
         """
         self._pending_input = asyncio.get_running_loop().create_future()
+        # Input is wanted again: the "Busy" hint no longer applies.
+        self._clear_busy_hint()
         try:
             return await self._pending_input
         except asyncio.CancelledError as exc:
