@@ -8,6 +8,7 @@ can be expanded to full-screen mode with chat history.
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import threading
 import warnings
@@ -51,6 +52,8 @@ from .manager import ThinkingBoxManager
 from .rich_utils import _is_rich_renderable
 from .styles import DEFAULT_STYLES, ThinkingPromptStyles, resolve_theme
 from .types import ThinkingContext
+
+logger = logging.getLogger(__name__)
 
 
 class ThinkingPromptSession:
@@ -1150,7 +1153,7 @@ class ThinkingPromptSession:
             result = handler(text)
         except Exception as e:
             self._cleanup_after_handler()
-            self.add_error(f"Handler error: {e}")
+            self._report_handler_error(e)
             return
 
         if not asyncio.iscoroutine(result):
@@ -1174,7 +1177,7 @@ class ThinkingPromptSession:
             raise
         except Exception as e:
             self._cleanup_after_handler()
-            self.add_error(f"Handler error: {e}")
+            self._report_handler_error(e)
         else:
             # Handler completed normally — finish any boxes it left open
             # (content is discarded, same as the cancel/error paths).
@@ -1188,6 +1191,17 @@ class ThinkingPromptSession:
             # and the flag would stay sticky — making the *next* outer
             # cancellation look like a Ctrl+C and silently swallowing it.
             self._user_cancelled_handler = False
+
+    def _report_handler_error(self, exc: Exception) -> None:
+        """Log a handler exception with its traceback; show it on screen.
+
+        The screen line names the exception type — str() alone renders
+        KeyError('x') as just 'x'. The traceback goes to the
+        ``thinking_prompt`` logger, visible once the app configures logging.
+        """
+        logger.error("Input handler raised", exc_info=exc)
+        detail = f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
+        self.add_error(f"Handler error: {detail}")
 
     def _exit_app(self) -> None:
         """Exit the app unless it is not running or already exiting."""

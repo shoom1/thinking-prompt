@@ -61,6 +61,13 @@ if __name__ == "__main__":
 > handler for anything that takes time, and wrap blocking calls with
 > `await asyncio.to_thread(...)` so the UI stays responsive.
 
+> **Note — handler errors.** An exception in a handler is shown as
+> `[ERROR] Handler error: KeyError: 'x'` and logged, with its traceback,
+> to the `thinking_prompt` logger. The library adds no log output of its
+> own; configure logging to see tracebacks — to a file, since stderr
+> would draw over the UI:
+> `logging.basicConfig(filename="app.log", level=logging.ERROR)`.
+
 ## Key Bindings
 
 | Key | Action |

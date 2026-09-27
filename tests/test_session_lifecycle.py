@@ -555,3 +555,55 @@ class TestEchoedPrompt:
 
         session = ThinkingPromptSession(message=ANSI("\x1b[32m>>> \x1b[0m"))
         assert self._echoed_prefix(session) == ">>> "
+
+
+class TestHandlerErrorReporting:
+    """A handler exception must be debuggable: logged with its traceback,
+    and shown with its type (KeyError('x') used to print as just 'x')."""
+
+    @staticmethod
+    def _raise_key_error_async():
+        async def handler(text: str) -> None:
+            raise KeyError("x")
+        return handler
+
+    @staticmethod
+    def _raise_key_error_sync():
+        def handler(text: str) -> None:
+            raise KeyError("x")
+        return handler
+
+    @pytest.mark.parametrize("kind", ["async", "sync"])
+    async def test_error_is_logged_with_traceback(self, session, caplog, kind):
+        import logging
+
+        handler = (self._raise_key_error_async() if kind == "async"
+                   else self._raise_key_error_sync())
+        with caplog.at_level(logging.ERROR, logger="thinking_prompt"):
+            await session._run_handler(handler, "go")
+
+        records = [r for r in caplog.records if r.name.startswith("thinking_prompt")]
+        assert records, "handler error was not logged"
+        assert records[-1].exc_info is not None
+        assert records[-1].exc_info[0] is KeyError
+
+    async def test_error_message_names_the_exception_type(self, session):
+        await session._run_handler(self._raise_key_error_async(), "go")
+        last = session._display.history.iter_entries()[-1]
+        assert last.text == "[ERROR] Handler error: KeyError: 'x'\n"
+
+    def test_library_logging_is_silent_unless_app_configures_it(self):
+        """Libraries must not print log records on their own: with no
+        handler configured, Python's last-resort handler writes to stderr —
+        over the running UI. A NullHandler on the package logger prevents
+        that; apps that configure logging still get the records."""
+        import subprocess
+        import sys
+
+        proc = subprocess.run(
+            [sys.executable, "-c",
+             "import logging, thinking_prompt; "
+             "logging.getLogger('thinking_prompt.session').error('boom')"],
+            capture_output=True, text=True, check=True,
+        )
+        assert proc.stderr == ""
