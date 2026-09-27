@@ -46,7 +46,7 @@ class TestTokenCompletion:
     def test_new_fields_defaults(self):
         s = ThinkingPromptStyles()
         assert s.color_depth is None
-        assert s.markdown_code_theme == "monokai"
+        assert s.code_theme == "monokai"
 
 
 
@@ -140,7 +140,7 @@ class TestThemeFactories:
         assert "ansicyan" in joined and "ansired" in joined
 
     def test_light_sets_light_code_theme(self):
-        assert ThinkingPromptStyles.light().markdown_code_theme == "default"
+        assert ThinkingPromptStyles.light().code_theme == "default"
 
 
 class TestResolveTheme:
@@ -164,7 +164,7 @@ class TestResolveTheme:
     def test_auto_colorfgbg_light(self, monkeypatch):
         monkeypatch.delenv("NO_COLOR", raising=False)
         monkeypatch.setenv("COLORFGBG", "0;15")
-        assert resolve_theme("auto").markdown_code_theme == "default"
+        assert resolve_theme("auto").code_theme == "default"
 
     def test_auto_colorfgbg_dark(self, monkeypatch):
         monkeypatch.delenv("NO_COLOR", raising=False)

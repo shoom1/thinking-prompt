@@ -360,6 +360,11 @@ session = ThinkingPromptSession(theme=styles)
 Element fields you set explicitly (e.g. `error_message="fg:red"`) win over
 the tokens; `styles.to_style_dict()` shows the resolved result.
 
+Code highlighting — fenced code in markdown and `add_code()` alike —
+follows the theme's `code_theme`: a Pygments style name (`"monokai"` in
+dark, `"default"` in light), or `"ansi_dark"`/`"ansi_light"` to use the
+terminal's own 16 colors (the `terminal` theme's choice).
+
 Switch at runtime:
 
 ```python

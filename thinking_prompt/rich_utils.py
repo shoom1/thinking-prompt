@@ -121,16 +121,38 @@ def _markdown_to_ansi(content: str, theme: Any = None, code_theme: str = "monoka
         return content
 
 
-def _highlight_code(code: str, language: str = "python") -> str:
-    """Syntax highlight code using Pygments."""
+def _highlight_code(code: str, language: str = "python", code_theme: str = "monokai") -> str:
+    """Syntax highlight code using Pygments, in the given code theme.
+
+    ``code_theme`` follows Rich's conventions, so one setting
+    (``ThinkingPromptStyles.code_theme``) drives both fenced code in
+    markdown and ``add_code()``: a Pygments style name ("monokai",
+    "default", ...) renders in that style's colors; "ansi_dark" and
+    "ansi_light" use the 16 named ANSI colors, inheriting the terminal's
+    palette. An unknown name falls back to Pygments' "default" style, as
+    Rich does.
+    """
     try:
         from pygments import highlight
-        from pygments.formatters import TerminalFormatter
+        from pygments.formatter import Formatter
+        from pygments.formatters import TerminalFormatter, TerminalTrueColorFormatter
         from pygments.lexers import get_lexer_by_name
-        lexer = get_lexer_by_name(language)
-        return highlight(code, lexer, TerminalFormatter())
+        from pygments.styles import get_style_by_name
+        from pygments.util import ClassNotFound
     except ImportError:
         return code
+    try:
+        lexer = get_lexer_by_name(language)
+        formatter: Formatter[str]
+        if code_theme in ("ansi_dark", "ansi_light"):
+            formatter = TerminalFormatter(bg="dark" if code_theme == "ansi_dark" else "light")
+        else:
+            try:
+                style = get_style_by_name(code_theme)
+            except ClassNotFound:
+                style = get_style_by_name("default")
+            formatter = TerminalTrueColorFormatter(style=style)
+        return highlight(code, lexer, formatter)
     except Exception:
         # Handle unknown language or other errors
         return code

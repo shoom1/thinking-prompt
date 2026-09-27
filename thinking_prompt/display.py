@@ -85,18 +85,18 @@ class Display:
         self._pending_output: list[AnyFormattedText] = []
         self._thinking_styles = thinking_styles
         # Assigned before _history is constructed: the render callbacks
-        # below close over self._rich_theme/_markdown_code_theme so a
-        # later set_theme() swap takes effect on the next render.
+        # below close over self._rich_theme/_code_theme so a later
+        # set_theme() swap takes effect on the next render.
         self._rich_theme = self._create_rich_theme(thinking_styles)
-        self._markdown_code_theme = (
-            thinking_styles.markdown_code_theme if thinking_styles else "monokai"
-        )
+        self._code_theme = thinking_styles.code_theme if thinking_styles else "monokai"
         self._history = FormattedTextHistory(
             max_entries=history_limit,
             render_markdown=lambda src: _markdown_to_ansi(
-                src, theme=self._rich_theme, code_theme=self._markdown_code_theme
+                src, theme=self._rich_theme, code_theme=self._code_theme
             ),
-            render_code=_highlight_code,
+            render_code=lambda src, language: _highlight_code(
+                src, language, code_theme=self._code_theme
+            ),
         )
 
     def _create_rich_theme(self, thinking_styles: ThinkingPromptStyles | None) -> Any:
@@ -125,7 +125,7 @@ class Display:
         """Adopt a new theme: rebuild Rich theme, re-render markdown/code."""
         self._thinking_styles = styles
         self._rich_theme = self._create_rich_theme(styles)
-        self._markdown_code_theme = styles.markdown_code_theme
+        self._code_theme = styles.code_theme
         self._history.invalidate_render_caches()
 
     def set_on_change(self, callback: Callable[[], None]) -> None:
@@ -320,7 +320,7 @@ class Display:
             content: The markdown content.
         """
         rendered = _markdown_to_ansi(
-            content, theme=self._rich_theme, code_theme=self._markdown_code_theme
+            content, theme=self._rich_theme, code_theme=self._code_theme
         )
         self._history.append_markdown(content)
         self._print_to_console(ANSI(rendered))
@@ -338,7 +338,9 @@ class Display:
             language: The programming language (default: "python").
         """
         self._history.append_code(code, language)
-        self._print_to_console(ANSI(_highlight_code(code, language)))
+        self._print_to_console(
+            ANSI(_highlight_code(code, language, code_theme=self._code_theme))
+        )
 
     def welcome(self, content: Any) -> None:
         """
