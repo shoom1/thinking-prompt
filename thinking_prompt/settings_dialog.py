@@ -649,7 +649,7 @@ class TextControl(SettingControl[TextItem]):
 
         # Cache the buffer window for focus management
         edit_width = self._item.edit_width
-        self._buffer_window = Window(buffer_control, width=edit_width, style="class:setting-input")
+        self._buffer_window = Window(buffer_control, width=edit_width, style="class:text-area")
 
         row = VSplit([
             Window(

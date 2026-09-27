@@ -187,3 +187,30 @@ class TestResolveTheme:
         monkeypatch.setenv("NO_COLOR", "")
         monkeypatch.delenv("COLORFGBG", raising=False)
         assert resolve_theme("auto").color_depth is None
+
+
+class TestStyleClassesDefined:
+    def test_every_class_the_package_uses_is_themed(self):
+        """A widget styled with a class the theme doesn't define silently
+        ignores the theme (the settings text field used an undefined
+        class:setting-input). Scans string literals, not docstrings."""
+        import ast
+        import pathlib
+        import re
+
+        import thinking_prompt
+
+        used: set[str] = set()
+        for path in pathlib.Path(thinking_prompt.__file__).parent.glob("*.py"):
+            tree = ast.parse(path.read_text())
+            docstrings = {
+                id(n.value) for n in ast.walk(tree)
+                if isinstance(n, ast.Expr) and isinstance(n.value, ast.Constant)
+            }
+            for node in ast.walk(tree):
+                if (isinstance(node, ast.Constant) and isinstance(node.value, str)
+                        and id(node) not in docstrings):
+                    used.update(re.findall(r"class:([A-Za-z0-9_.-]+)", node.value))
+
+        assert used, "scan found no style classes — scanner broken?"
+        assert used - set(ThinkingPromptStyles().to_style_dict()) == set()
