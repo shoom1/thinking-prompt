@@ -10,7 +10,7 @@ from thinking_prompt import ThinkingPromptSession, ThinkingPromptStyles
 class TestThemeParam:
     def test_theme_by_name(self):
         s = ThinkingPromptSession(theme="light")
-        assert s.styles.markdown_code_theme == "default"
+        assert s.styles.code_theme == "default"
 
     def test_theme_by_instance(self):
         styles = ThinkingPromptStyles.mono()
@@ -78,7 +78,7 @@ class TestSetTheme:
 
         s.set_theme("light")
 
-        assert s.styles.markdown_code_theme == "default"
+        assert s.styles.code_theme == "default"
         s.app.invalidate.assert_called()
 
     def test_set_theme_accepts_instance(self):
@@ -260,3 +260,38 @@ class TestRepaint:
         # flush_pending path taken, not the repaint path.
         s.app.output.write_raw.assert_not_called()
         s.app.renderer.clear.assert_not_called()
+
+
+class TestLayoutAppliesThemeClasses:
+    """The prompt and history style fields only work if the layout tags
+    those windows with their classes. (Async: rendering the input buffer
+    starts a history-loading task, which needs a running loop.)"""
+
+    @staticmethod
+    def _cell_style(session: ThinkingPromptSession, text: str) -> str:
+        """Render the layout; return the style of the cell where `text` starts."""
+        from prompt_toolkit.application.current import set_app
+        from prompt_toolkit.layout.mouse_handlers import MouseHandlers
+        from prompt_toolkit.layout.screen import Screen, WritePosition
+
+        width, height = 40, 20
+        screen = Screen()
+        with set_app(session.app):
+            session.layout.container.write_to_screen(
+                screen, MouseHandlers(), WritePosition(0, 0, width, height), "", True, None
+            )
+        for y in range(height):
+            row = "".join(screen.data_buffer[y][x].char for x in range(width))
+            if text in row:
+                return screen.data_buffer[y][row.index(text)].style
+        raise AssertionError(f"{text!r} not rendered")
+
+    async def test_prompt_window_uses_prompt_class(self):
+        s = ThinkingPromptSession(message="PROMPT> ")
+        assert "class:prompt" in self._cell_style(s, "PROMPT>")
+
+    async def test_fullscreen_history_uses_history_class(self):
+        s = ThinkingPromptSession()
+        s._is_fullscreen = True
+        s.add_response("RESPONSE-TEXT")
+        assert "class:history" in self._cell_style(s, "RESPONSE-TEXT").split()
