@@ -63,9 +63,9 @@ class ThinkingPromptSession:
     This class provides a prompt interface similar to PromptSession but with
     additional features:
     - A thinking box that appears above the input during processing
-    - Expand/collapse functionality (Ctrl+E) for the thinking box
-    - Automatic transition to full-screen mode when expanded
-    - Chat history visible in full-screen mode
+    - Expand/collapse of thinking boxes (Ctrl+T by default)
+    - Optional fullscreen mode showing the chat history (Ctrl+E by default,
+      when AppInfo.fullscreen_enabled is set)
 
     The handler decides whether to use thinking mode by calling start_thinking()
     with a content callback. This allows flexible control over when the thinking
@@ -349,7 +349,7 @@ class ThinkingPromptSession:
             style=DynamicStyle(lambda: self._style),
             key_bindings=kb,
             editing_mode=self._editing_mode,
-            full_screen=False,  # Start in normal mode, will be updated dynamically
+            full_screen=False,  # Fixed for the app's lifetime; see _invalidate()
             mouse_support=Condition(lambda: self._is_fullscreen),  # Only in fullscreen
             refresh_interval=0.1,  # For real-time updates
             color_depth=self._effective_color_depth,
@@ -530,10 +530,14 @@ class ThinkingPromptSession:
         self._display.reprint_transcript()
 
     def _invalidate(self) -> None:
-        """Trigger UI refresh and update full_screen state."""
+        """Trigger UI refresh and sync app.full_screen with fullscreen mode."""
         if self.app:
-            # Update full_screen based on state
-            # prompt_toolkit handles alternate buffer switching automatically
+            # This does NOT switch to the alternate screen: prompt_toolkit's
+            # Renderer fixes that choice when the Application is built
+            # (full_screen=False above). "Fullscreen" here means the history
+            # window is shown and the inline app grows to the terminal
+            # height. app.full_screen is still read at runtime — it gates
+            # prompt_toolkit's page-navigation key bindings.
             self.app.full_screen = self._is_fullscreen
 
             if self.app.is_running:
