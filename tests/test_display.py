@@ -725,3 +725,25 @@ class TestThinkingEchoRepaintParity:
 
         assert echoed == ["a\nb\n"]
         assert repainted == echoed
+
+
+class TestThinkingEchoTail:
+    """A tail box echoes "..." then its last lines; repaint matches."""
+
+    _printed = staticmethod(TestThinkingEchoRepaintParity._printed)
+
+    def test_tail_echo_keeps_last_lines(self, fullscreen_display):
+        content = "".join(f"line {i}\n" for i in range(10))
+        fullscreen_display.thinking(content, truncate_lines=3, overflow="tail")
+        assert self._printed(fullscreen_display) == ["...\nline 7\nline 8\nline 9\n"]
+
+    @pytest.mark.parametrize("fmt", ["plain", "ansi"])
+    def test_tail_repaint_matches_echo(self, fullscreen_display, fmt):
+        content = "".join(f"line {i}\n" for i in range(10))
+        fullscreen_display.thinking(
+            content, truncate_lines=3, content_format=fmt, overflow="tail"
+        )
+        echoed = self._printed(fullscreen_display)
+        fullscreen_display.reprint_transcript()
+        assert self._printed(fullscreen_display) == echoed
+        assert echoed == ["...\nline 7\nline 8\nline 9\n"]
