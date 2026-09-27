@@ -32,6 +32,8 @@ Key bindings (defaults, configurable via AppInfo):
     Ctrl+D: Exit application (empty input line only)
 """
 
+import logging
+
 from .app_info import AppInfo
 from .dialog import (
     BaseDialog,
@@ -63,6 +65,11 @@ from .types import (
 )
 
 __version__ = "0.3.4"
+
+# Library logging convention: records go nowhere unless the application
+# configures logging. Without a handler, Python's last-resort handler
+# would print them to stderr — over the running UI.
+logging.getLogger(__name__).addHandler(logging.NullHandler())
 
 __all__ = [
     # Main class
