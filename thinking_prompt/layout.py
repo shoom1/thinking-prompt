@@ -310,6 +310,7 @@ def create_layout(
     # Prompt window
     prompt_window = Window(
         content=FormattedTextControl(text=message),
+        style="class:prompt",
         dont_extend_width=True,
         dont_extend_height=True,
     )
@@ -361,6 +362,7 @@ def create_layout(
     history_window = create_history_window(
         history=history,
         is_visible=is_fullscreen_cond,
+        style="class:history",
     )
 
     # Thinking area (visible when thinking)
