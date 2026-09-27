@@ -329,3 +329,51 @@ class TestMultiBoxBackwardCompat:
 
         assert not session.is_thinking
         assert session._manager.active_count == 0
+
+
+class TestSessionOverflow:
+    """overflow= on start_thinking()/thinking() reaches the box and decides
+    which end of the content the finish echo keeps."""
+
+    @staticmethod
+    def _session():
+        # Fullscreen caches console output instead of printing it, which
+        # makes the finish echo observable.
+        s = ThinkingPromptSession()
+        s._is_fullscreen = True
+        return s
+
+    @staticmethod
+    def _echoed(s) -> list[str]:
+        from prompt_toolkit.formatted_text import fragment_list_to_text, to_formatted_text
+
+        return [fragment_list_to_text(to_formatted_text(c)) for c in s._display._pending_output]
+
+    @staticmethod
+    def _lines(n: int) -> str:
+        return "".join(f"line {i}\n" for i in range(n))
+
+    def test_default_is_tail_and_echo_keeps_last_lines(self):
+        s = self._session()
+        ctx = s.start_thinking(max_lines=3)
+        ctx.append(self._lines(10))
+        ctx.finish(echo_to_console=True)
+        assert self._echoed(s) == ["...\nline 7\nline 8\nline 9\n"]
+
+    async def test_thinking_head_echo_keeps_first_lines(self):
+        s = self._session()
+        async with s.thinking(max_lines=3, overflow="head", echo_to_console=True) as ctx:
+            ctx.append(self._lines(10))
+            assert s._manager.get_sorted_boxes()[0].control.overflow == "head"
+        assert self._echoed(s) == ["line 0\nline 1\nline 2\n...\n"]
+
+    def test_deprecated_finish_thinking_keeps_each_boxs_end(self):
+        s = self._session()
+        s.start_thinking(max_lines=2).append(self._lines(5))
+        s.start_thinking(max_lines=2, overflow="head").append(self._lines(5))
+        with pytest.warns(DeprecationWarning):
+            s.finish_thinking(echo_to_console=True)
+        assert self._echoed(s) == ["...\nline 3\nline 4\n", "line 0\nline 1\n...\n"]
+
+    def test_overflow_type_is_exported(self):
+        from thinking_prompt import Overflow  # noqa: F401
