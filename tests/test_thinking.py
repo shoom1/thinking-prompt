@@ -299,9 +299,114 @@ class TestTrailingNewline:
     def test_hidden_count_excludes_trailing_newline(self, small_thinking_control):
         content = self._lines(20)  # 4 shown, 16 hidden
         small_thinking_control.start(lambda: content)
-        assert self._hint(small_thinking_control).startswith("+16 lines")
+        assert self._hint(small_thinking_control).startswith("+16 earlier lines")
 
     def test_ansi_hidden_count_excludes_trailing_newline(self, small_thinking_control):
         content = "".join(f"\033[32mline {i}\033[0m\n" for i in range(20))
         small_thinking_control.start(lambda: content, content_format="ansi")
-        assert self._hint(small_thinking_control).startswith("+16 lines")
+        assert self._hint(small_thinking_control).startswith("+16 earlier lines")
+
+
+def _rendered(control: ThinkingBoxControl, width: int, height: int) -> list[str]:
+    """The text lines the control renders into a width x height window."""
+    from prompt_toolkit.formatted_text import fragment_list_to_text
+
+    ui = control.create_content(width, height)
+    return [fragment_list_to_text(ui.get_line(i)) for i in range(ui.line_count)]
+
+
+def _numbered(n: int) -> str:
+    return "".join(f"line {i}\n" for i in range(n))
+
+
+class TestOverflowTail:
+    """Default: an overflowing box shows its newest lines under a hint."""
+
+    def test_collapsed_shows_newest_lines_under_hint(self):
+        control = ThinkingBoxControl(max_collapsed_lines=5)
+        content = _numbered(60)
+        control.start(lambda: content)
+        assert _rendered(control, 40, 5) == [
+            "+56 earlier lines... ctrl-t to expand",
+            "line 56", "line 57", "line 58", "line 59",
+        ]
+
+    def test_exactly_max_lines_fits_without_hint(self):
+        control = ThinkingBoxControl(max_collapsed_lines=5)
+        content = _numbered(5)
+        control.start(lambda: content)
+        assert _rendered(control, 40, 5) == [f"line {i}" for i in range(5)]
+        assert control.can_toggle_expanded is False
+
+    def test_one_line_over_max_can_expand(self):
+        control = ThinkingBoxControl(max_collapsed_lines=5)
+        content = _numbered(6)
+        control.start(lambda: content)
+        assert control.can_toggle_expanded is True
+
+    def test_fits_by_rows_counting_wrapped_lines(self):
+        """Ten 15-char lines at width 10 take two rows each: a 5-row box
+        has 4 rows for content, i.e. the last two lines."""
+        control = ThinkingBoxControl(max_collapsed_lines=5)
+        content = "".join(f"{i:02d}" + "x" * 13 + "\n" for i in range(10))
+        control.start(lambda: content)
+        rows = _rendered(control, 10, 5)
+        assert rows[0].startswith("+8 earlier lines")
+        assert "".join(rows[1:]).startswith("08") and "09" in "".join(rows[1:])
+
+    def test_squeezed_box_fits_the_rows_it_gets(self):
+        control = ThinkingBoxControl(max_collapsed_lines=5)
+        content = _numbered(60)
+        control.start(lambda: content)
+        assert _rendered(control, 40, 3) == [
+            "+58 earlier lines... ctrl-t to expand", "line 58", "line 59",
+        ]
+
+    def test_expanded_fits_given_height_and_offers_collapse(self):
+        control = ThinkingBoxControl(max_collapsed_lines=5)
+        content = _numbered(60)
+        control.start(lambda: content)
+        control.expand()
+        rows = _rendered(control, 40, 8)
+        assert rows[0] == "+53 earlier lines... ctrl-t to collapse"
+        assert rows[1:] == [f"line {i}" for i in range(53, 60)]
+
+    def test_expanded_with_room_shows_everything(self):
+        control = ThinkingBoxControl(max_collapsed_lines=5)
+        content = _numbered(12)
+        control.start(lambda: content)
+        control.expand()
+        assert _rendered(control, 40, 30) == [f"line {i}" for i in range(12)]
+
+    def test_ansi_style_carries_across_the_cut(self):
+        """A color opened before the cut still applies to the lines shown."""
+        from prompt_toolkit.formatted_text import fragment_list_to_text
+
+        control = ThinkingBoxControl(max_collapsed_lines=5)
+        content = "\x1b[31m" + _numbered(10) + "\x1b[0m"
+        control.start(lambda: content, content_format="ansi")
+        ui = control.create_content(40, 5)
+        last = ui.get_line(ui.line_count - 1)
+        assert fragment_list_to_text(last) == "line 9"
+        assert all("ansired" in style for style, text in last if text)
+
+
+class TestOverflowHead:
+    """overflow="head" keeps the first lines, hint at the bottom."""
+
+    def test_collapsed_shows_first_lines_over_hint(self):
+        control = ThinkingBoxControl(max_collapsed_lines=5, overflow="head")
+        content = _numbered(60)
+        control.start(lambda: content)
+        assert _rendered(control, 40, 5) == [
+            "line 0", "line 1", "line 2", "line 3",
+            "+56 lines... ctrl-t to expand",
+        ]
+
+    def test_singular_hint_and_wrap_aware_fit(self):
+        """Four short lines fill the 4 content rows; the long last line is
+        the single hidden one."""
+        control = ThinkingBoxControl(max_collapsed_lines=5, overflow="head")
+        content = "a\nb\nc\nd\n" + "x" * 15 + "\n"
+        control.start(lambda: content)
+        assert _rendered(control, 10, 5) == ["a", "b", "c", "d", "+1 line... ctrl-t to expand"]
