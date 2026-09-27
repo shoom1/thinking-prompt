@@ -169,6 +169,52 @@ class TestInputWhileBusy:
             await run_with(session, handler, script)
 
 
+class TestBusyHint:
+    """The "Busy" status hint is temporary: once input is accepted again the
+    previous status returns — unless something set a new status meanwhile."""
+
+    async def test_busy_hint_clears_when_input_is_accepted_again(self):
+        release = asyncio.Event()
+
+        async def handler(text: str) -> None:
+            await release.wait()
+
+        with piped_session(status_text="READY") as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("slow" + ENTER)
+                await wait_until(lambda: session._current_handler_task is not None)
+                inp.send_text("x" + ENTER)
+                await wait_until(lambda: session.status_text == session._BUSY_STATUS)
+
+                release.set()
+                await wait_until(lambda: waiting_for_input(session))
+                assert session.status_text == "READY"
+
+            await run_with(session, handler, script)
+
+    async def test_status_set_while_busy_is_kept(self):
+        release = asyncio.Event()
+
+        async def handler(text: str) -> None:
+            await release.wait()
+            session.set_status("DONE")
+
+        with piped_session(status_text="READY") as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("slow" + ENTER)
+                await wait_until(lambda: session._current_handler_task is not None)
+                inp.send_text("x" + ENTER)
+                await wait_until(lambda: session.status_text == session._BUSY_STATUS)
+
+                release.set()
+                await wait_until(lambda: waiting_for_input(session))
+                assert session.status_text == "DONE"
+
+            await run_with(session, handler, script)
+
+
 class TestCtrlDInDialog:
     async def test_ctrl_d_in_dialog_text_field_deletes_char(self):
         """Ctrl+D while editing a dialog text field is emacs delete-char;
