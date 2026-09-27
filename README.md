@@ -119,6 +119,23 @@ await asyncio.sleep(0.5)
 ctx.finish(add_to_history=True, echo_to_console=True)
 ```
 
+### Long Content
+
+A collapsed box shows at most `max_lines` rows (session default:
+`max_thinking_height`). When content overflows, the box keeps the
+**newest** lines under a `+N earlier lines... ctrl-t to expand` hint, so a
+stream stays visibly live. Ctrl+T expands the box to fit its content, up to
+the space the terminal has. When the box finishes, the console echo keeps
+the same end the box showed.
+
+For content whose first lines matter most — a task list, a plan — keep the
+head instead:
+
+```python
+tasks = session.start_thinking(title="Tasks", max_lines=10, overflow="head")
+# or: async with session.thinking(overflow="head") as ctx: ...
+```
+
 ### Multiple Thinking Boxes
 
 Run multiple boxes concurrently with independent lifecycles. Use `order` to control positioning (higher = closer to prompt):
