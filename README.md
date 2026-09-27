@@ -346,7 +346,24 @@ session = ThinkingPromptSession(theme="light")   # or "dark", "mono", "terminal"
 
 Custom themes are `ThinkingPromptStyles` instances (`theme=` accepts them
 too). All element styles derive from the `color_*` tokens, so overriding
-tokens restyles the whole UI consistently.
+tokens restyles the whole UI consistently. Derivation happens at render
+time, so tweaking a built-in theme works too:
+
+```python
+import dataclasses
+from thinking_prompt import ThinkingPromptStyles
+
+styles = dataclasses.replace(ThinkingPromptStyles.light(), color_accent="#c2410c")
+session = ThinkingPromptSession(theme=styles)
+```
+
+Element fields you set explicitly (e.g. `error_message="fg:red"`) win over
+the tokens; `styles.to_style_dict()` shows the resolved result.
+
+Code highlighting — fenced code in markdown and `add_code()` alike —
+follows the theme's `code_theme`: a Pygments style name (`"monokai"` in
+dark, `"default"` in light), or `"ansi_dark"`/`"ansi_light"` to use the
+terminal's own 16 colors (the `terminal` theme's choice).
 
 Switch at runtime:
 

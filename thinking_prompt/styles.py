@@ -43,12 +43,23 @@ class ThinkingPromptStyles:
     - All element styles derive from `color_*` tokens; customize those
       properties to change colors throughout
 
+    Element style fields hold explicit overrides only; "" (the default)
+    means "derive from the tokens". Derivation happens when the Style is
+    built (``to_style()``), so changing a token later — via
+    ``dataclasses.replace()`` or by assignment — restyles every element
+    you haven't overridden. A running session picks up a mutated instance
+    on ``session.set_theme(styles)``. Use ``to_style_dict()`` to inspect
+    the resolved styles.
+
     Example:
         styles = ThinkingPromptStyles(
             color_accent="#ff6600",  # Orange accent instead of cyan
-            menu_selected="bg:#ff6600 fg:#ffffff",  # Orange selection
+            menu_item_selected="bg:#ff6600 fg:#ffffff",  # Orange selection
         )
-        session = ThinkingPromptSession(styles=styles)
+        session = ThinkingPromptSession(theme=styles)
+
+        # Tweak a built-in theme
+        styles = dataclasses.replace(ThinkingPromptStyles.light(), color_error="#d00")
     """
 
     # ==========================================================================
@@ -81,10 +92,10 @@ class ThinkingPromptStyles:
     # ==========================================================================
     menu_bg: str = ""  # Defaults to color_bg_dark
     menu_item: str = ""  # Defaults to color_text on color_bg_dark
-    menu_item_selected: str = ""  # Defaults to color_text_bright on color_accent_button
+    menu_item_selected: str = ""  # Defaults to color_accent on color_bg_selected
     menu_border: str = ""  # Defaults to color_text_muted on color_bg_dark
-    menu_meta: str = ""  # Defaults to color_text_muted on color_bg_dark
-    menu_meta_selected: str = ""  # Defaults to slightly dimmed on color_accent_button
+    menu_meta: str = ""  # Defaults to color_text on color_bg_dark
+    menu_meta_selected: str = ""  # Defaults to color_accent on color_bg_selected
 
     # ==========================================================================
     # Thinking box styles
@@ -190,7 +201,9 @@ class ThinkingPromptStyles:
     # Rendering hints
     # ==========================================================================
     color_depth: ColorDepth | None = None  # mono() sets DEPTH_1_BIT; None = terminal default.
-    markdown_code_theme: str = "monokai"  # Rich code theme for fences (light() uses "default").
+    # Code highlighting for markdown fences and add_code(): a Pygments style
+    # name, or "ansi_dark"/"ansi_light" for the terminal's own 16 colors.
+    code_theme: str = "monokai"
 
     @classmethod
     def dark(cls) -> ThinkingPromptStyles:
@@ -223,7 +236,7 @@ class ThinkingPromptStyles:
             color_bg_selected="#cbd5e1",
             color_shadow="#9ca3af",
             assistant_prefix="fg:#0e7490 bold",
-            markdown_code_theme="default",
+            code_theme="default",
         )
 
     @classmethod
@@ -274,130 +287,162 @@ class ThinkingPromptStyles:
             menu_meta_selected="reverse",
             dialog_button_focused="bold reverse",
             assistant_prefix="fg:ansicyan bold",
-            markdown_code_theme="ansi_dark",
+            code_theme="ansi_dark",
         )
 
-    def __post_init__(self) -> None:
-        """Apply default values based on base theme colors."""
-        # Thinking box (token-derived; formerly hardcoded hex)
-        if not self.thinking_box:
-            self.thinking_box = _style_str(_fg(self.color_thinking), "italic")
-        if not self.thinking_box_border:
-            self.thinking_box_border = _fg(self.color_thinking_border)
-        if not self.thinking_box_hint:
-            self.thinking_box_hint = _style_str(_fg(self.color_thinking_hint), "italic")
-        if not self.thinking_message:
-            self.thinking_message = _style_str(_fg(self.color_thinking), "italic")
-        if not self.status_bar:
-            self.status_bar = _style_str(_bg(self.color_bg_status), _fg(self.color_text_status))
-        if not self.input_separator:
-            self.input_separator = _fg(self.color_separator)
-        if not self.dialog_shadow:
-            self.dialog_shadow = _bg(self.color_shadow)
+    def _derived(self) -> dict[str, str]:
+        """Element styles derived from the color tokens (field name -> style).
 
-        # Menu styles
-        if not self.menu_bg:
-            self.menu_bg = _bg(self.color_bg_dark)
-        if not self.menu_item:
-            self.menu_item = _style_str(_fg(self.color_text), _bg(self.color_bg_dark))
-        if not self.menu_item_selected:
-            self.menu_item_selected = _style_str(
+        Consulted when the Style is built, for every element field left at
+        "" — so token changes, via dataclasses.replace() or mutation,
+        restyle everything that isn't explicitly overridden.
+        """
+        return {
+            # Thinking box
+            "thinking_box": _style_str(_fg(self.color_thinking), "italic"),
+            "thinking_box_border": _fg(self.color_thinking_border),
+            "thinking_box_hint": _style_str(_fg(self.color_thinking_hint), "italic"),
+            "thinking_message": _style_str(_fg(self.color_thinking), "italic"),
+            "status_bar": _style_str(_bg(self.color_bg_status), _fg(self.color_text_status)),
+            "input_separator": _fg(self.color_separator),
+            "dialog_shadow": _bg(self.color_shadow),
+            # Menu styles
+            "menu_bg": _bg(self.color_bg_dark),
+            "menu_item": _style_str(_fg(self.color_text), _bg(self.color_bg_dark)),
+            "menu_item_selected": _style_str(
                 _fg(self.color_accent), _bg(self.color_bg_selected), "noreverse"
-            )
-        if not self.menu_border:
-            self.menu_border = _style_str(_fg(self.color_text_muted), _bg(self.color_bg_dark))
-        if not self.menu_meta:
-            self.menu_meta = _style_str(_fg(self.color_text), _bg(self.color_bg_dark))
-        if not self.menu_meta_selected:
-            self.menu_meta_selected = _style_str(
+            ),
+            "menu_border": _style_str(_fg(self.color_text_muted), _bg(self.color_bg_dark)),
+            "menu_meta": _style_str(_fg(self.color_text), _bg(self.color_bg_dark)),
+            "menu_meta_selected": _style_str(
                 _fg(self.color_accent), _bg(self.color_bg_selected), "noreverse"
-            )
-
-        # Chat history
-        if not self.user_prefix:
-            self.user_prefix = _style_str(_fg(self.color_accent), _bg(self.color_bg_input))
-        if not self.user_message:
-            self.user_message = _style_str(
+            ),
+            # Chat history
+            "user_prefix": _style_str(_fg(self.color_accent), _bg(self.color_bg_input)),
+            "user_message": _style_str(
                 _fg(self.color_text_bright), _bg(self.color_bg_input), "italic"
-            )
-        if not self.user_separator:
-            self.user_separator = _fg(self.color_text_muted)
-        if not self.assistant_message:
-            self.assistant_message = _fg(self.color_text_bright)
-        if not self.system_message:
-            self.system_message = _fg(self.color_warning)
-
-        # Status messages
-        if not self.error_message:
-            self.error_message = _style_str(_fg(self.color_error), "bold")
-        if not self.warning_message:
-            self.warning_message = _fg(self.color_warning)
-        if not self.success_message:
-            self.success_message = _fg(self.color_success)
-
-        # Dialog
-        if not self.dialog:
-            self.dialog = _bg(self.color_bg_dialog)
-        if not self.dialog_title:
-            self.dialog_title = _style_str(_fg(self.color_text_bright), "bold")
-        if not self.dialog_body:
-            self.dialog_body = _style_str(_bg(self.color_bg_dialog), _fg(self.color_text))
-        if not self.dialog_border:
-            self.dialog_border = _fg(self.color_text_muted)
-        if not self.dialog_button:
-            self.dialog_button = _style_str(_bg(self.color_bg_button), _fg(self.color_text))
-        if not self.dialog_button_focused:
-            self.dialog_button_focused = _style_str(
+            ),
+            "user_separator": _fg(self.color_text_muted),
+            "assistant_message": _fg(self.color_text_bright),
+            "system_message": _fg(self.color_warning),
+            # Status messages
+            "error_message": _style_str(_fg(self.color_error), "bold"),
+            "warning_message": _fg(self.color_warning),
+            "success_message": _fg(self.color_success),
+            # Dialog
+            "dialog": _bg(self.color_bg_dialog),
+            "dialog_title": _style_str(_fg(self.color_text_bright), "bold"),
+            "dialog_body": _style_str(_bg(self.color_bg_dialog), _fg(self.color_text)),
+            "dialog_border": _fg(self.color_text_muted),
+            "dialog_button": _style_str(_bg(self.color_bg_button), _fg(self.color_text)),
+            "dialog_button_focused": _style_str(
                 _bg(self.color_accent_button), _fg(self.color_text_bright), "bold"
-            )
+            ),
+            # Form controls
+            "radio_list": _style_str(_bg(self.color_bg_dialog), _fg(self.color_text)),
+            "radio_selected": _style_str(_fg(self.color_accent), "bold"),
+            "checkbox_list": _style_str(_bg(self.color_bg_dialog), _fg(self.color_text)),
+            "checkbox_selected": _style_str(_fg(self.color_accent), "bold"),
+            "text_area": _style_str(_bg(self.color_bg_input), _fg(self.color_text_bright)),
+            "select_value": _fg(self.color_accent),
+            "select_arrow": _fg(self.color_text_muted),
+            "checkbox_mark": _fg(self.color_accent),
+            # Settings list
+            "setting_indicator": _fg(self.color_accent),
+            "setting_label": _fg(self.color_text),
+            "setting_label_selected": _fg(self.color_accent),
+            "setting_value": _fg(self.color_text_muted),
+            "setting_value_selected": _style_str(_fg(self.color_accent), "italic"),
+            "setting_value_true": _fg(self.color_success),
+            "setting_value_true_selected": _style_str(_fg(self.color_success), "italic"),
+            "setting_value_false": _fg(self.color_text_muted),
+            "setting_value_false_selected": _style_str(_fg(self.color_text_muted), "italic"),
+            "setting_desc": _fg(self.color_text_dim),
+            "setting_desc_selected": _fg(self.color_text_muted),
+            # Scrollbar
+            "scrollbar_background": _bg(self.color_bg_dark),
+            "scrollbar_button": _bg(self.color_text_dim),
+        }
 
-        # Form controls
-        if not self.radio_list:
-            self.radio_list = _style_str(_bg(self.color_bg_dialog), _fg(self.color_text))
-        if not self.radio_selected:
-            self.radio_selected = _style_str(_fg(self.color_accent), "bold")
-        if not self.checkbox_list:
-            self.checkbox_list = _style_str(_bg(self.color_bg_dialog), _fg(self.color_text))
-        if not self.checkbox_selected:
-            self.checkbox_selected = _style_str(_fg(self.color_accent), "bold")
-        if not self.text_area:
-            self.text_area = _style_str(_bg(self.color_bg_input), _fg(self.color_text_bright))
-        if not self.select_value:
-            self.select_value = _fg(self.color_accent)
-        if not self.select_arrow:
-            self.select_arrow = _fg(self.color_text_muted)
-        if not self.checkbox_mark:
-            self.checkbox_mark = _fg(self.color_accent)
+    def to_style_dict(self) -> dict[str, str]:
+        """
+        The resolved style rules, by prompt_toolkit class name.
 
-        # Settings list
-        if not self.setting_indicator:
-            self.setting_indicator = _fg(self.color_accent)
-        if not self.setting_label:
-            self.setting_label = _fg(self.color_text)
-        if not self.setting_label_selected:
-            self.setting_label_selected = _fg(self.color_accent)
-        if not self.setting_value:
-            self.setting_value = _fg(self.color_text_muted)
-        if not self.setting_value_selected:
-            self.setting_value_selected = _style_str(_fg(self.color_accent), "italic")
-        if not self.setting_value_true:
-            self.setting_value_true = _fg(self.color_success)
-        if not self.setting_value_true_selected:
-            self.setting_value_true_selected = _style_str(_fg(self.color_success), "italic")
-        if not self.setting_value_false:
-            self.setting_value_false = _fg(self.color_text_muted)
-        if not self.setting_value_false_selected:
-            self.setting_value_false_selected = _style_str(_fg(self.color_text_muted), "italic")
-        if not self.setting_desc:
-            self.setting_desc = _fg(self.color_text_dim)
-        if not self.setting_desc_selected:
-            self.setting_desc_selected = _fg(self.color_text_muted)
+        Element fields left at "" are derived from the color tokens now,
+        not at construction; explicitly set fields win. Useful for
+        inspecting what a theme actually renders.
 
-        # Scrollbar
-        if not self.scrollbar_background:
-            self.scrollbar_background = _bg(self.color_bg_dark)
-        if not self.scrollbar_button:
-            self.scrollbar_button = _bg(self.color_text_dim)
+        Returns:
+            The dict passed to ``Style.from_dict()`` by ``to_style()``.
+        """
+        derived = self._derived()
+
+        def r(name: str) -> str:
+            return getattr(self, name) or derived.get(name, "")
+
+        return {
+            'thinking-box': r("thinking_box"),
+            'thinking-box.border': r("thinking_box_border"),
+            'thinking-box.hint': r("thinking_box_hint"),
+            'status': r("status_bar"),
+            'history': r("history"),
+            'history.user-prefix': r("user_prefix"),
+            'history.user-message': r("user_message"),
+            'history.user-separator': r("user_separator"),
+            'history.assistant-prefix': r("assistant_prefix"),
+            'history.assistant-message': r("assistant_message"),
+            'history.thinking': r("thinking_message"),
+            'history.system': r("system_message"),
+            'history.error': r("error_message"),
+            'history.warning': r("warning_message"),
+            'history.success': r("success_message"),
+            'prompt': r("prompt"),
+            'input-separator': r("input_separator"),
+            # Dialog styles
+            'dialog': r("dialog"),
+            'dialog.body': r("dialog_body"),
+            'dialog frame.label': r("dialog_title"),
+            'dialog frame.border': r("dialog_border"),
+            'dialog shadow': r("dialog_shadow"),
+            'button': r("dialog_button"),
+            'button.focused': r("dialog_button_focused"),
+            # Form controls
+            'radio-list': r("radio_list"),
+            'radio-selected': r("radio_selected"),
+            'checkbox-list': r("checkbox_list"),
+            'checkbox-selected': r("checkbox_selected"),
+            'text-area': r("text_area"),
+            'select-value': r("select_value"),
+            'select-arrow': r("select_arrow"),
+            'checkbox-mark': r("checkbox_mark"),
+            # Settings list
+            'setting-indicator': r("setting_indicator"),
+            'setting-label': r("setting_label"),
+            'setting-label-selected': r("setting_label_selected"),
+            'setting-value': r("setting_value"),
+            'setting-value-selected': r("setting_value_selected"),
+            'setting-value-true': r("setting_value_true"),
+            'setting-value-true-selected': r("setting_value_true_selected"),
+            'setting-value-false': r("setting_value_false"),
+            'setting-value-false-selected': r("setting_value_false_selected"),
+            'setting-desc': r("setting_desc"),
+            'setting-desc-selected': r("setting_desc_selected"),
+            # Dropdown menu (uses shared menu styles)
+            'setting-dropdown': r("menu_bg"),
+            'setting-dropdown-border': r("menu_border"),
+            'setting-dropdown-item': r("menu_item"),
+            'setting-dropdown-selected': r("menu_item_selected"),
+            # Completion menu (uses shared menu styles)
+            'completion-menu': r("menu_bg"),
+            'completion-menu.completion': r("menu_item"),
+            'completion-menu.completion.current': r("menu_item_selected"),
+            'completion-menu.meta': r("menu_meta"),
+            'completion-menu.meta.current': r("menu_meta_selected"),
+            'completion-menu.meta.completion': r("menu_meta"),
+            'completion-menu.meta.completion.current': r("menu_meta_selected"),
+            'scrollbar.background': r("scrollbar_background"),
+            'scrollbar.button': r("scrollbar_button"),
+        }
 
     def to_style(self) -> Style:
         """
@@ -406,69 +451,7 @@ class ThinkingPromptStyles:
         Returns:
             A Style object for use with prompt_toolkit Application.
         """
-        return Style.from_dict({
-            'thinking-box': self.thinking_box,
-            'thinking-box.border': self.thinking_box_border,
-            'thinking-box.hint': self.thinking_box_hint,
-            'status': self.status_bar,
-            'history': self.history,
-            'history.user-prefix': self.user_prefix,
-            'history.user-message': self.user_message,
-            'history.user-separator': self.user_separator,
-            'history.assistant-prefix': self.assistant_prefix,
-            'history.assistant-message': self.assistant_message,
-            'history.thinking': self.thinking_message,
-            'history.system': self.system_message,
-            'history.error': self.error_message,
-            'history.warning': self.warning_message,
-            'history.success': self.success_message,
-            'prompt': self.prompt,
-            'input-separator': self.input_separator,
-            # Dialog styles
-            'dialog': self.dialog,
-            'dialog.body': self.dialog_body,
-            'dialog frame.label': self.dialog_title,
-            'dialog frame.border': self.dialog_border,
-            'dialog shadow': self.dialog_shadow,
-            'button': self.dialog_button,
-            'button.focused': self.dialog_button_focused,
-            # Form controls
-            'radio-list': self.radio_list,
-            'radio-selected': self.radio_selected,
-            'checkbox-list': self.checkbox_list,
-            'checkbox-selected': self.checkbox_selected,
-            'text-area': self.text_area,
-            'select-value': self.select_value,
-            'select-arrow': self.select_arrow,
-            'checkbox-mark': self.checkbox_mark,
-            # Settings list
-            'setting-indicator': self.setting_indicator,
-            'setting-label': self.setting_label,
-            'setting-label-selected': self.setting_label_selected,
-            'setting-value': self.setting_value,
-            'setting-value-selected': self.setting_value_selected,
-            'setting-value-true': self.setting_value_true,
-            'setting-value-true-selected': self.setting_value_true_selected,
-            'setting-value-false': self.setting_value_false,
-            'setting-value-false-selected': self.setting_value_false_selected,
-            'setting-desc': self.setting_desc,
-            'setting-desc-selected': self.setting_desc_selected,
-            # Dropdown menu (uses shared menu styles)
-            'setting-dropdown': self.menu_bg,
-            'setting-dropdown-border': self.menu_border,
-            'setting-dropdown-item': self.menu_item,
-            'setting-dropdown-selected': self.menu_item_selected,
-            # Completion menu (uses shared menu styles)
-            'completion-menu': self.menu_bg,
-            'completion-menu.completion': self.menu_item,
-            'completion-menu.completion.current': self.menu_item_selected,
-            'completion-menu.meta': self.menu_meta,
-            'completion-menu.meta.current': self.menu_meta_selected,
-            'completion-menu.meta.completion': self.menu_meta,
-            'completion-menu.meta.completion.current': self.menu_meta_selected,
-            'scrollbar.background': self.scrollbar_background,
-            'scrollbar.button': self.scrollbar_button,
-        })
+        return Style.from_dict(self.to_style_dict())
 
     def to_rich_theme_dict(self) -> dict[str, str]:
         """

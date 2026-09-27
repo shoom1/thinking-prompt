@@ -164,6 +164,31 @@ class TestHighlightCode:
         assert isinstance(result, str)
         assert "const" in result or "console" in result
 
+    def test_code_theme_selects_pygments_style(self):
+        pytest.importorskip("pygments")
+        code = "def hello():\n    return 'world'"
+        assert highlight_code(code, "python", code_theme="monokai") != highlight_code(
+            code, "python", code_theme="default"
+        )
+
+    def test_ansi_code_themes_use_terminal_palette(self):
+        """ansi_dark/ansi_light (as in Rich) emit only the 16 named ANSI
+        colors, so the terminal's own palette applies."""
+        pytest.importorskip("pygments")
+        code = "def hello():\n    return 'world'"
+        dark = highlight_code(code, "python", code_theme="ansi_dark")
+        light = highlight_code(code, "python", code_theme="ansi_light")
+        assert dark != light
+        for out in (dark, light):
+            assert "\x1b[" in out
+            assert "38;2;" not in out and "38;5;" not in out
+
+    def test_unknown_code_theme_still_highlights(self):
+        pytest.importorskip("pygments")
+        result = highlight_code("x = 1", "python", code_theme="no-such-style")
+        assert "\x1b[" in result
+        assert "x" in result
+
 
 # =============================================================================
 # Display Class Tests
@@ -643,6 +668,29 @@ class TestTranscriptWiring:
         d.set_theme(ThinkingPromptStyles.light())
         after = list(d.history.get_formatted_text())
         assert before != after  # monokai vs default code theme
+
+    def test_set_theme_rerenders_add_code_in_new_theme(self):
+        pytest.importorskip("pygments")
+        from thinking_prompt.styles import ThinkingPromptStyles
+        d = self._display()
+        d.code("def hello():\n    return 'world'", "python")
+        before = list(d.history.get_formatted_text())
+        d.set_theme(ThinkingPromptStyles.light())
+        after = list(d.history.get_formatted_text())
+        assert before != after
+
+    def test_add_code_console_echo_follows_theme(self):
+        pytest.importorskip("pygments")
+        from thinking_prompt.styles import ThinkingPromptStyles
+
+        def echoed(styles: ThinkingPromptStyles) -> str:
+            style = styles.to_style()
+            d = Display(get_style=lambda: style, is_fullscreen=lambda: True,
+                        thinking_styles=styles)
+            d.code("def hello():\n    return 'world'", "python")
+            return d._pending_output[0].value
+
+        assert echoed(ThinkingPromptStyles.dark()) != echoed(ThinkingPromptStyles.light())
 
     def test_thinking_truncate_lines_recorded(self):
         d = self._display()
