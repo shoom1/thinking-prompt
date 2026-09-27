@@ -25,6 +25,10 @@ MessageRole = Literal["user", "assistant", "thinking", "system"]
 # Content format for thinking box rendering
 ContentFormat = Literal["plain", "ansi"]
 
+# Which end of overflowing thinking-box content stays visible: "tail" keeps
+# the newest lines (streaming), "head" the first lines (e.g. a task list).
+Overflow = Literal["tail", "head"]
+
 # Content callback type for thinking box
 ContentCallback = Callable[[], str]
 
