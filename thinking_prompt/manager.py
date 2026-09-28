@@ -11,16 +11,14 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from prompt_toolkit.application.current import get_app
-from prompt_toolkit.filters import Condition
 from prompt_toolkit.layout import HSplit, Window
 from prompt_toolkit.layout.containers import Container
 from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.layout.dimension import Dimension as D
-from prompt_toolkit.layout.margins import ConditionalMargin, ScrollbarMargin
 
 from .layout import ThinkingHeader
 from .thinking import ThinkingBoxControl
-from .types import ContentFormat, StreamingContent
+from .types import ContentFormat, Overflow, StreamingContent
 
 
 def _terminal_width(default: int = 80) -> int:
@@ -80,6 +78,7 @@ class ThinkingBoxManager:
         max_lines: int | None = None,
         content_format: ContentFormat = "plain",
         box_id: str | None = None,
+        overflow: Overflow = "tail",
     ) -> ManagedBox:
         """
         Create a new managed thinking box.
@@ -92,6 +91,8 @@ class ThinkingBoxManager:
             max_lines: Max collapsed lines (overrides default).
             content_format: Content format ("plain" or "ansi").
             box_id: Custom box ID. Auto-assigned if not provided.
+            overflow: Which end of overflowing content stays visible:
+                "tail" (newest lines) or "head" (first lines).
 
         Returns:
             The newly created ManagedBox.
@@ -111,6 +112,7 @@ class ThinkingBoxManager:
                 max_collapsed_lines=effective_max_lines,
                 style=self._default_style,
                 expand_key=self._expand_key,
+                overflow=overflow,
             )
 
             # Create StreamingContent if no callback provided
@@ -160,28 +162,21 @@ class ThinkingBoxManager:
         """Build the layout container for a single box."""
 
         def get_height() -> D:
+            # Wrap-count at the real terminal width — a hardcoded 80
+            # clips wrapped content on narrow terminals.
+            rows = max(1, control.get_line_count(_terminal_width()))
             if control.is_expanded:
-                return D(min=5, preferred=20, max=40)
-            else:
-                # Wrap-count at the real terminal width — a hardcoded 80
-                # clips wrapped content on narrow terminals.
-                line_count = control.get_line_count(_terminal_width())
-                height = min(max(1, line_count), max_lines)
-                return D(min=1, max=max_lines, preferred=height)
-
-        is_expanded_filter = Condition(lambda: control.is_expanded)
+                # Fit the content; with no max, the layout squeezes the box
+                # on a short screen, and the control then keeps the
+                # overflow end in the rows it gets (nothing scrolls).
+                return D(min=1, preferred=rows)
+            return D(min=1, max=max_lines, preferred=min(rows, max_lines))
 
         content_window = Window(
             content=control,
             height=get_height,
             wrap_lines=True,
             dont_extend_height=True,
-            right_margins=[
-                ConditionalMargin(
-                    ScrollbarMargin(display_arrows=True),
-                    filter=is_expanded_filter,
-                ),
-            ],
         )
 
         if header is not None:
@@ -276,21 +271,22 @@ class ThinkingBoxManager:
                 return True
             return any(box.control.can_toggle_expanded for box in self._boxes.values())
 
-    def finish_all(self) -> list[tuple[str, str, bool, ContentFormat, int]]:
+    def finish_all(self) -> list[tuple[str, str, bool, ContentFormat, int, Overflow]]:
         """
         Finish all boxes and return their final states.
 
         Returns:
             List of (box_id, content, was_expanded, content_format,
-            max_collapsed_lines) tuples.
+            max_collapsed_lines, overflow) tuples.
         """
         with self._lock:
-            results: list[tuple[str, str, bool, ContentFormat, int]] = []
+            results: list[tuple[str, str, bool, ContentFormat, int, Overflow]] = []
             for box_id in list(self._boxes.keys()):
                 box = self._boxes.pop(box_id)
                 max_lines = box.control.max_collapsed_lines
+                overflow = box.control.overflow
                 content, was_expanded, fmt = box.control.finish()
-                results.append((box_id, content, was_expanded, fmt, max_lines))
+                results.append((box_id, content, was_expanded, fmt, max_lines, overflow))
             return results
 
     @property

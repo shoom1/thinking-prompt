@@ -6,6 +6,7 @@ for better type safety throughout the package.
 """
 from __future__ import annotations
 
+import re
 import threading
 from collections.abc import Awaitable
 from typing import (
@@ -25,6 +26,10 @@ MessageRole = Literal["user", "assistant", "thinking", "system"]
 # Content format for thinking box rendering
 ContentFormat = Literal["plain", "ansi"]
 
+# Which end of overflowing thinking-box content stays visible: "tail" keeps
+# the newest lines (streaming), "head" the first lines (e.g. a task list).
+Overflow = Literal["tail", "head"]
+
 # Content callback type for thinking box
 ContentCallback = Callable[[], str]
 
@@ -32,6 +37,10 @@ ContentCallback = Callable[[], str]
 SyncInputHandler = Callable[[str], None]
 AsyncInputHandler = Callable[[str], Awaitable[None]]
 InputHandler = Union[SyncInputHandler, AsyncInputHandler]
+
+# SGR (color/style) escape sequences — the only escapes thinking content is
+# expected to carry. Used to measure/replay styling without the text.
+ANSI_SGR_RE = re.compile(r"\x1b\[[0-9;]*m")
 
 # Default spinner animation frames for the thinking header.
 # Single source of truth — referenced by layout.ThinkingHeader and
@@ -62,40 +71,60 @@ def split_content_lines(content: str) -> list[str]:
     return content.rstrip().split('\n')
 
 
-def truncate_to_lines(content: str, max_lines: int, suffix: str = "...") -> str:
+def truncate_to_lines(
+    content: str,
+    max_lines: int,
+    suffix: str = "...",
+    overflow: Overflow = "head",
+) -> str:
     """
-    Truncate content to max_lines, appending suffix if truncated.
+    Truncate content to max_lines, marking the cut with suffix.
 
     Args:
         content: The content to truncate.
         max_lines: Maximum number of lines to keep.
-        suffix: Suffix to append when truncated (default: "...").
+        suffix: Marker for the cut (default: "...").
+        overflow: Which end to keep: "head" (first lines, marker after
+            them) or "tail" (last lines, marker before them).
 
     Returns:
-        Truncated content with suffix if over limit, otherwise content.rstrip().
+        Truncated content with the marker if over limit, otherwise
+        content.rstrip().
     """
     lines = split_content_lines(content)
-    if len(lines) > max_lines:
-        return '\n'.join(lines[:max_lines]) + '\n' + suffix
-    return content.rstrip()
+    if len(lines) <= max_lines:
+        return content.rstrip()
+    if overflow == "tail":
+        return suffix + '\n' + '\n'.join(lines[-max_lines:])
+    return '\n'.join(lines[:max_lines]) + '\n' + suffix
 
 
-def truncate_ansi_to_lines(content: str, max_lines: int) -> str:
+def truncate_ansi_to_lines(
+    content: str, max_lines: int, overflow: Overflow = "head"
+) -> str:
     """
-    Truncate ANSI-formatted content to max_lines with a reset suffix.
+    Truncate ANSI-formatted content to max_lines, keeping styles intact.
 
-    Inserts an ANSI reset (``\\033[0m``) before the ``...`` suffix to
-    prevent style leakage into subsequent output.
+    Keeping the head, an ANSI reset (``\\033[0m``) precedes the ``...``
+    marker so styles don't leak into it. Keeping the tail, the SGR codes of
+    the cut-off lines are replayed after the marker, restoring the style
+    state the kept lines were written in (e.g. a color opened earlier).
 
     Args:
         content: The ANSI-formatted content to truncate.
         max_lines: Maximum number of lines to keep.
+        overflow: Which end to keep: "head" or "tail".
 
     Returns:
-        Truncated content with ANSI reset + ``...`` if over limit,
-        otherwise content.rstrip().
+        Truncated content if over limit, otherwise content.rstrip().
     """
-    return truncate_to_lines(content, max_lines, suffix="\033[0m...")
+    if overflow == "head":
+        return truncate_to_lines(content, max_lines, suffix="\033[0m...")
+    lines = split_content_lines(content)
+    if len(lines) <= max_lines:
+        return content.rstrip()
+    state = "".join(ANSI_SGR_RE.findall("\n".join(lines[:-max_lines])))
+    return "...\n" + state + "\n".join(lines[-max_lines:])
 
 
 # =============================================================================

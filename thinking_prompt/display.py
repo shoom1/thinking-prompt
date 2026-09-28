@@ -25,7 +25,7 @@ from .rich_utils import (
     _renderable_to_ansi,
     _rich_to_ansi,
 )
-from .types import ContentFormat, truncate_ansi_to_lines, truncate_to_lines
+from .types import ContentFormat, Overflow, truncate_ansi_to_lines, truncate_to_lines
 
 if TYPE_CHECKING:
     from prompt_toolkit.output import ColorDepth
@@ -201,6 +201,7 @@ class Display:
         add_to_history: bool = True,
         echo_to_console: bool = True,
         content_format: ContentFormat = "plain",
+        overflow: Overflow = "head",
     ) -> None:
         """
         Output thinking content to console and history.
@@ -212,6 +213,8 @@ class Display:
             add_to_history: If True, add to history.
             echo_to_console: If True, print to console.
             content_format: Format of the content ("plain" or "ansi").
+            overflow: Which end truncation keeps: "head" (first lines) or
+                "tail" (last lines) — match the box it came from.
         """
         if not content.strip():
             return
@@ -222,6 +225,7 @@ class Display:
                 truncate_lines=truncate_lines,
                 add_to_history=add_to_history,
                 echo_to_console=echo_to_console,
+                overflow=overflow,
             )
             return
 
@@ -229,12 +233,15 @@ class Display:
 
         # History gets full content, truncated on repaint to match console
         if add_to_history:
-            self._history.append(style, f"{content}\n", truncate_lines=truncate_lines)
+            self._history.append(
+                style, f"{content}\n",
+                truncate_lines=truncate_lines, truncate_overflow=overflow,
+            )
 
         # Console gets possibly truncated content
         if echo_to_console:
             if truncate_lines is not None:
-                console_text = truncate_to_lines(content, truncate_lines) + "\n"
+                console_text = truncate_to_lines(content, truncate_lines, overflow=overflow) + "\n"
             else:
                 console_text = content.rstrip() + "\n"
             self._print_to_console(FormattedText([(style, console_text)]))
@@ -246,19 +253,23 @@ class Display:
         truncate_lines: int | None = None,
         add_to_history: bool = True,
         echo_to_console: bool = True,
+        overflow: Overflow = "head",
     ) -> None:
         """Output ANSI-formatted thinking content."""
         # History gets full content as baked ANSI, truncated on repaint to
         # match the console (never re-themed: ANSI escapes are already baked).
         if add_to_history:
             self._history.append_ansi(
-                content.rstrip() + "\n", truncate_lines=truncate_lines
+                content.rstrip() + "\n",
+                truncate_lines=truncate_lines, truncate_overflow=overflow,
             )
 
         # Console gets possibly truncated content
         if echo_to_console:
             if truncate_lines is not None:
-                console_content = truncate_ansi_to_lines(content, truncate_lines) + '\n'
+                console_content = truncate_ansi_to_lines(
+                    content, truncate_lines, overflow=overflow
+                ) + '\n'
             else:
                 console_content = content.rstrip() + '\n'
             self._print_to_console(ANSI(console_content))
@@ -471,7 +482,9 @@ class Display:
                 # the entry ends with exactly one newline, as echoed.
                 text = entry.text.rstrip("\n")
                 if entry.truncate_lines is not None:
-                    text = truncate_to_lines(text, entry.truncate_lines) + "\n"
+                    text = truncate_to_lines(
+                        text, entry.truncate_lines, overflow=entry.truncate_overflow
+                    ) + "\n"
                 else:
                     text = text + "\n"
                 self._print_to_console(FormattedText([(entry.style, text)]))
@@ -481,7 +494,9 @@ class Display:
                 self._print_to_console(
                     ANSI(
                         truncate_ansi_to_lines(
-                            entry.source.rstrip("\n"), entry.truncate_lines
+                            entry.source.rstrip("\n"),
+                            entry.truncate_lines,
+                            overflow=entry.truncate_overflow,
                         )
                         + "\n"
                     )

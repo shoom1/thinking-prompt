@@ -544,3 +544,51 @@ class TestCollapsedHeightUsesTerminalWidth:
         # Outside a running app the dummy app reports 80 columns:
         # a single 80-char line occupies exactly 1 display line.
         assert dim.preferred == 1
+
+
+def _render_rows(container, width: int, height: int) -> list[str]:
+    """Render a container into width x height; return its text rows."""
+    from prompt_toolkit.layout.mouse_handlers import MouseHandlers
+    from prompt_toolkit.layout.screen import Screen, WritePosition
+
+    screen = Screen()
+    container.write_to_screen(
+        screen, MouseHandlers(), WritePosition(0, 0, width, height), "", True, None
+    )
+    return [
+        "".join(screen.data_buffer[y][x].char for x in range(width)).rstrip()
+        for y in range(height)
+    ]
+
+
+class TestBoxSizing:
+    """Expanded boxes size to their content; when the screen is short the
+    layout squeezes them and they show the newest lines under the hint."""
+
+    @staticmethod
+    def _box(manager: ThinkingBoxManager, n: int, **kwargs):
+        content = "".join(f"line {i}\n" for i in range(n))
+        return manager.create_box(lambda: content, title="T", **kwargs)
+
+    def test_expanded_small_box_takes_its_content_height(self):
+        m = ThinkingBoxManager(default_max_lines=5)
+        self._box(m, 3)
+        m.expand_all()
+        # header + 3 content rows (it used to be a fixed 20)
+        assert m.get_container().preferred_height(40, 100).preferred == 4
+
+    def test_expanded_large_box_on_short_screen_follows_newest_lines(self):
+        m = ThinkingBoxManager(default_max_lines=5)
+        self._box(m, 60)
+        m.expand_all()
+        rows = _render_rows(m.get_container(), 40, 10)
+        assert rows[1] == "+52 earlier lines... ctrl-t to collapse"
+        assert rows[2:] == [f"line {i}" for i in range(52, 60)]
+
+    def test_overflow_defaults_to_tail(self):
+        m = ThinkingBoxManager()
+        assert self._box(m, 1).control.overflow == "tail"
+
+    def test_overflow_head_reaches_the_control(self):
+        m = ThinkingBoxManager()
+        assert self._box(m, 1, overflow="head").control.overflow == "head"
