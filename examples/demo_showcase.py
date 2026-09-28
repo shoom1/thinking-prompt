@@ -214,8 +214,11 @@ async def main():
             return
 
         if cmd == "tasks":
-            # Multi-box demo: task list + per-step detail boxes
-            tasks = session.start_thinking(title="Tasks", order=100, max_lines=10)
+            # Multi-box demo: task list + per-step detail boxes. The task
+            # list keeps its first items if it overflows (overflow="head").
+            tasks = session.start_thinking(
+                title="Tasks", order=100, max_lines=10, overflow="head"
+            )
             tasks.append_rich("[dim]  ○ Scanning files[/dim]\n")
             tasks.append_rich("[dim]  ○ Parsing AST[/dim]\n")
             tasks.append_rich("[dim]  ○ Running checks[/dim]\n")

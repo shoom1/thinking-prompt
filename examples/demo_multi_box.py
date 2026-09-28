@@ -27,8 +27,13 @@ async def main():
             session.exit()
             return
 
-        # Task list box — anchored near prompt with order=100
-        tasks = session.start_thinking(title="Tasks", order=100, max_lines=10)
+        # Task list box — anchored near prompt with order=100. A task list
+        # reads top-down, so if it ever outgrew max_lines we'd want its
+        # first items visible: overflow="head" (streams keep the default,
+        # "tail" — the newest lines).
+        tasks = session.start_thinking(
+            title="Tasks", order=100, max_lines=10, overflow="head"
+        )
         tasks.append_rich("[dim]  ○ Download data[/dim]\n")
         tasks.append_rich("[dim]  ○ Process data[/dim]\n")
         tasks.append_rich("[dim]  ○ Generate report[/dim]\n")
