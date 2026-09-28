@@ -46,7 +46,9 @@ async def main():
             ("Write output", 0.4),
         ]
 
-        async with session.thinking(title="Processing") as ctx:
+        # overflow="head": a step list reads top-down, so if it outgrew the
+        # box it should keep its first steps (streams use the default, "tail").
+        async with session.thinking(title="Processing", overflow="head") as ctx:
             # Render all steps as dim/pending
             for label, _ in steps:
                 ctx.append_rich(f"[dim]  ○ {label}[/dim]\n")
