@@ -26,7 +26,7 @@ from typing import (
 if TYPE_CHECKING:
     from .dialog import BaseDialog, DialogConfig, DialogManager
     from .settings_dialog import SettingsItem
-    from .types import ContentFormat
+    from .types import ContentFormat, Overflow
 
 from prompt_toolkit.application import Application
 from prompt_toolkit.buffer import Buffer
@@ -567,6 +567,7 @@ class ThinkingPromptSession:
         order: int = 0,
         max_lines: int | None = None,
         content_format: ContentFormat = "plain",
+        overflow: Overflow = "tail",
     ) -> ThinkingContext:
         """
         Start the thinking state with a content callback.
@@ -583,6 +584,10 @@ class ThinkingPromptSession:
             order: Sort key for multiple boxes (higher = closer to prompt).
             max_lines: Max collapsed lines (overrides session default).
             content_format: Format for rendering ("plain" or "ansi").
+            overflow: Which end of content that overflows the box stays
+                visible — in the box and in the echo when it finishes:
+                "tail" (newest lines, default) or "head" (first lines,
+                e.g. for a task list).
 
         Returns:
             ThinkingContext for title control and content management.
@@ -611,6 +616,7 @@ class ThinkingPromptSession:
             order=order,
             max_lines=max_lines,
             content_format=content_format,
+            overflow=overflow,
         )
 
         # Apply header config from app_info
@@ -638,6 +644,7 @@ class ThinkingPromptSession:
                     add_to_history=add_to_history,
                     echo_to_console=should_echo,
                     content_format=content_format_val,
+                    overflow=box.control.overflow,
                 )
             self._invalidate()
             return full_content
@@ -692,16 +699,17 @@ class ThinkingPromptSession:
         results = self._manager.finish_all()
         all_content = []
 
-        for _box_id, full_content, _, content_format_val, max_lines in results:
+        for _box_id, full_content, _, content_format_val, max_lines, overflow in results:
             if full_content.strip():
                 self._display.thinking(
                     full_content,
-                    # Truncate to each box's own limit, matching the
-                    # per-box finish path (_finish_box).
+                    # Truncate to each box's own limit and end, matching
+                    # the per-box finish path (_finish_box).
                     truncate_lines=max_lines,
                     add_to_history=add_to_history,
                     echo_to_console=should_echo,
                     content_format=content_format_val,
+                    overflow=overflow,
                 )
                 all_content.append(full_content)
 
@@ -723,6 +731,7 @@ class ThinkingPromptSession:
         echo_to_console: bool | None = None,
         order: int = 0,
         max_lines: int | None = None,
+        overflow: Overflow = "tail",
     ) -> AsyncIterator[ThinkingContext]:
         """
         Context manager for thinking operations.
@@ -740,6 +749,9 @@ class ThinkingPromptSession:
                             If None (default), uses AppInfo.echo_thinking setting.
             order: Sort key for multiple boxes (higher = closer to prompt).
             max_lines: Max collapsed lines (overrides session default).
+            overflow: Which end of overflowing content stays visible, in
+                the box and the finish echo: "tail" (newest lines, default)
+                or "head" (first lines).
 
         Yields:
             ThinkingContext: Content accumulator with title control.
@@ -774,6 +786,7 @@ class ThinkingPromptSession:
             content_format=content_format,
             order=order,
             max_lines=max_lines,
+            overflow=overflow,
         )
         try:
             yield ctx

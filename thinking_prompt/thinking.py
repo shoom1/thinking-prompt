@@ -6,20 +6,25 @@ A FormattedTextControl that manages thinking box state and content formatting.
 from __future__ import annotations
 
 import logging
-import re
 import threading
 from typing import Callable
 
-from prompt_toolkit.formatted_text import ANSI, FormattedText, to_formatted_text
-from prompt_toolkit.layout.controls import FormattedTextControl
+from prompt_toolkit.formatted_text import (
+    ANSI,
+    FormattedText,
+    StyleAndTextTuples,
+    fragment_list_to_text,
+    to_formatted_text,
+)
+from prompt_toolkit.formatted_text.utils import fragment_list_width, split_lines
+from prompt_toolkit.layout.controls import FormattedTextControl, UIContent
 
-from .types import ContentFormat, split_content_lines
+from .types import ContentFormat, Overflow
 
 logger = logging.getLogger(__name__)
 
-# SGR (color/style) escape sequences. Stripped before width math so
-# styling bytes don't count toward wrapping calculations.
-_ANSI_SGR_RE = re.compile(r"\x1b\[[0-9;]*m")
+# Width assumed when formatting before the first render (size unknown).
+_DEFAULT_WIDTH = 80
 
 
 def _format_key_for_display(key: str) -> str:
@@ -48,7 +53,10 @@ class ThinkingBoxControl(FormattedTextControl):
     - Active/inactive state (thinking or not)
     - Expanded/collapsed state
     - Content retrieval via callback
-    - Formatting with expand hint when collapsed and overflowing
+    - Fitting content to the rows it gets: when it overflows, one end is
+      kept (``overflow``: "tail" = newest lines, "head" = first lines) and a
+      hint names the hidden lines. Collapsed, the rows are capped at
+      ``max_collapsed_lines``; expanded, only by the window's height.
 
     Created once and passed directly to Window(content=...).
     Use start() to begin thinking and finish() to end.
@@ -76,6 +84,7 @@ class ThinkingBoxControl(FormattedTextControl):
         max_collapsed_lines: int = 15,
         style: str = "class:thinking-box",
         expand_key: str = "c-t",
+        overflow: Overflow = "tail",
     ) -> None:
         """
         Initialize the thinking box control.
@@ -84,11 +93,17 @@ class ThinkingBoxControl(FormattedTextControl):
             max_collapsed_lines: Max lines when collapsed (must be >= 2).
             style: Style class for the content.
             expand_key: Key binding for expand/collapse (prompt_toolkit format).
+            overflow: Which end of overflowing content stays visible:
+                "tail" (newest lines, default) or "head" (first lines).
         """
         self._content_callback: Callable[[], str] | None = None
         self._max_collapsed_lines = max_collapsed_lines
         self._box_style = style
         self._expand_key = expand_key
+        self._overflow: Overflow = overflow
+        # Width of the last render, for wrap-aware checks made between
+        # renders (e.g. whether the expand key applies).
+        self._last_width = _DEFAULT_WIDTH
         self._is_expanded = False
         self._content_format: ContentFormat = "plain"
         self._lock = threading.RLock()
@@ -154,11 +169,29 @@ class ThinkingBoxControl(FormattedTextControl):
 
     def _get_formatted_text(self) -> FormattedText:
         """
-        Get content as FormattedText for display.
+        Get content as FormattedText, fitted as if rendered at the last
+        known width with no height limit beyond the collapsed cap.
 
-        Transforms the raw content from callback, adding expand hint
-        when collapsed and content overflows.
+        Rendering goes through create_content(), which knows the real size;
+        this is FormattedTextControl's text callable (and a test hook).
         """
+        return self._format(self._last_width, None)
+
+    def create_content(self, width: int, height: int | None) -> UIContent:
+        """Render content fitted to the window's actual width and height.
+
+        Bypasses FormattedTextControl's per-render text cache: the fit
+        depends on the size, which its text callable can't see.
+        """
+        self._last_width = width
+        fragments = to_formatted_text(self._format(width, height), style=self.style)
+        lines = [list(line) for line in split_lines(fragments)]
+        return UIContent(
+            get_line=lambda i: lines[i], line_count=len(lines), show_cursor=False
+        )
+
+    def _format(self, width: int, height: int | None) -> FormattedText:
+        """Fit the current content into ``height`` rows of ``width`` columns."""
         if self._content_callback is None:
             return FormattedText([])
 
@@ -172,47 +205,87 @@ class ThinkingBoxControl(FormattedTextControl):
             return FormattedText([])
 
         with self._lock:
-            if self._content_format == "ansi":
-                return self._format_ansi(content)
-            return self._format_plain(content)
+            limit = height
+            if not self._is_expanded:
+                limit = (
+                    self._max_collapsed_lines
+                    if limit is None
+                    else min(limit, self._max_collapsed_lines)
+                )
+            return self._fit(self._content_lines(content), width, limit)
 
-    def _expand_hint(self, total_lines: int) -> str:
-        """Build the expand hint shown when content is truncated."""
-        hidden = total_lines - (self._max_collapsed_lines - 1)
-        return f"+{hidden} lines... {_format_key_for_display(self._expand_key)} to expand"
+    def _content_lines(self, content: str) -> list[StyleAndTextTuples]:
+        """Split content into display lines of fragments.
 
-    def _format_plain(self, content: str) -> FormattedText:
-        """Format content as plain styled text."""
-        lines = split_content_lines(content)
-
-        if not self._is_expanded and len(lines) > self._max_collapsed_lines - 1:
-            truncated_lines = lines[:self._max_collapsed_lines - 1]
-            truncated_content = '\n'.join(truncated_lines)
-
-            fragments: list[tuple[str, str]] = [
-                (self._box_style, truncated_content + '\n'),
-                ("class:thinking-box.hint", self._expand_hint(len(lines))),
-            ]
+        ANSI content is parsed as a whole before splitting, so a style
+        opened on an earlier line still applies to later lines even when
+        the earlier ones are cut off. Trailing blank lines are not content
+        (a trailing newline ends the last line), as in split_content_lines.
+        """
+        if self._content_format == "ansi":
+            fragments = to_formatted_text(ANSI(content))
         else:
-            fragments = [(self._box_style, content)]
+            fragments = to_formatted_text([(self._box_style, content)])
+        lines = [list(line) for line in split_lines(fragments)]
+        while len(lines) > 1 and not fragment_list_to_text(lines[-1]).strip():
+            lines.pop()
+        return lines
 
-        return FormattedText(fragments)
+    @staticmethod
+    def _rows(line: StyleAndTextTuples, width: int) -> int:
+        """Rows a line occupies when wrapped at ``width`` columns."""
+        if width <= 0:
+            return 1
+        return max(1, -(-fragment_list_width(line) // width))
 
-    def _format_ansi(self, content: str) -> FormattedText:
-        """Format content with ANSI escape codes parsed by prompt_toolkit."""
-        lines = split_content_lines(content)
+    def _fit(
+        self, lines: list[StyleAndTextTuples], width: int, limit: int | None
+    ) -> FormattedText:
+        """Keep the lines that fit in ``limit`` rows (None = no limit).
 
-        if not self._is_expanded and len(lines) > self._max_collapsed_lines - 1:
-            truncated_lines = lines[:self._max_collapsed_lines - 1]
-            truncated_content = '\n'.join(truncated_lines) + '\n'
+        On overflow one row goes to the hint and the rest to lines from the
+        ``overflow`` end — at least one line, even if it alone overflows.
+        """
+        rows = [self._rows(line, width) for line in lines]
+        if limit is None or sum(rows) <= limit:
+            return self._join(lines)
 
-            ansi_fragments = list(to_formatted_text(ANSI(truncated_content)))
-            ansi_fragments.append(
-                ("class:thinking-box.hint", self._expand_hint(len(lines)))
-            )
-            return FormattedText(ansi_fragments)
+        tail = self._overflow == "tail"
+        order = range(len(lines) - 1, -1, -1) if tail else range(len(lines))
+        budget = max(1, limit - 1)
+        kept: list[int] = []
+        used = 0
+        for i in order:
+            if kept and used + rows[i] > budget:
+                break
+            kept.append(i)
+            used += rows[i]
+        body = [lines[i] for i in sorted(kept)]
+        if limit < 2:
+            return self._join(body)  # no room for a hint
 
-        return FormattedText(list(to_formatted_text(ANSI(content))))
+        hint: StyleAndTextTuples = [
+            ("class:thinking-box.hint", self._hint(len(lines) - len(kept)))
+        ]
+        return self._join([hint, *body] if tail else [*body, hint])
+
+    def _hint(self, hidden: int) -> str:
+        """The line naming how many lines are hidden, and the toggle key."""
+        noun = "line" if hidden == 1 else "lines"
+        earlier = "earlier " if self._overflow == "tail" else ""
+        action = "collapse" if self._is_expanded else "expand"
+        key = _format_key_for_display(self._expand_key)
+        return f"+{hidden} {earlier}{noun}... {key} to {action}"
+
+    @staticmethod
+    def _join(lines: list[StyleAndTextTuples]) -> FormattedText:
+        """Join fragment lines with newlines."""
+        out: StyleAndTextTuples = []
+        for i, line in enumerate(lines):
+            if i:
+                out.append(("", "\n"))
+            out.extend(line)
+        return FormattedText(out)
 
     @property
     def content(self) -> str:
@@ -236,6 +309,11 @@ class ThinkingBoxControl(FormattedTextControl):
         """Get max lines for collapsed state."""
         return self._max_collapsed_lines
 
+    @property
+    def overflow(self) -> Overflow:
+        """Which end of overflowing content stays visible."""
+        return self._overflow
+
     def expand(self) -> None:
         """Expand the thinking box."""
         with self._lock:
@@ -258,7 +336,7 @@ class ThinkingBoxControl(FormattedTextControl):
 
         Returns True when:
         - Already expanded (can collapse), OR
-        - Active and content overflows (hint is visible, can expand)
+        - Active and content overflows the collapsed rows (hint is visible)
         """
         with self._lock:
             if self._is_expanded:
@@ -267,37 +345,21 @@ class ThinkingBoxControl(FormattedTextControl):
             if not self.is_active:
                 return False
 
-            # Check if content overflows (same condition as showing hint)
-            content = self.content
-            if not content:
-                return False
+            return self.get_line_count(self._last_width) > self._max_collapsed_lines
 
-            lines = split_content_lines(content)
-            return len(lines) > self._max_collapsed_lines - 1
-
-    def get_line_count(self, width: int = 80) -> int:
+    def get_line_count(self, width: int = _DEFAULT_WIDTH) -> int:
         """
-        Count display lines in content (accounting for wrapping).
+        Count display rows of the content, wrapped at ``width`` columns.
 
         Args:
             width: Terminal width for wrapping calculation.
 
         Returns:
-            Number of display lines.
+            Number of display rows (0 when there is no content).
         """
         content = self.content
         if not content:
             return 0
 
-        lines = split_content_lines(content)
-        total = 0
-        for line in lines:
-            # Styling escapes occupy no columns — measure visible text.
-            line = _ANSI_SGR_RE.sub("", line)
-            if not line:
-                total += 1
-            else:
-                # Account for wrapping
-                total += max(1, (len(line) + width - 1) // width)
-        return total
-
+        with self._lock:
+            return sum(self._rows(line, width) for line in self._content_lines(content))
