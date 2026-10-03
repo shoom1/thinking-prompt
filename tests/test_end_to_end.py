@@ -61,6 +61,19 @@ def echoed_inputs(session: ThinkingPromptSession) -> list[str]:
     ]
 
 
+def dialog_open(session: ThinkingPromptSession) -> bool:
+    dm = session._dialog_manager
+    return dm is not None and dm._visible
+
+
+def dialog_rendered(session: ThinkingPromptSession) -> bool:
+    """The open dialog has been drawn at least once. prompt_toolkit's Tab
+    navigation only considers windows visible in the last render, so send
+    navigation keys (Tab/Shift-Tab) only after this holds."""
+    layout = session.app.layout
+    return dialog_open(session) and layout.current_window in layout.visible_windows
+
+
 async def run_with(
     session: ThinkingPromptSession,
     handler: Callable[[str], Any],
@@ -242,8 +255,7 @@ class TestCtrlDInDialog:
 
             async def script(run: asyncio.Task[None]) -> None:
                 inp.send_text("go" + ENTER)
-                await wait_until(lambda: session._dialog_manager is not None
-                                 and session._dialog_manager._visible)
+                await wait_until(lambda: dialog_rendered(session))
                 inp.send_text(ENTER)
                 await wait_until(editing)
                 inp.send_text(CTRL_A + CTRL_D)
@@ -272,11 +284,6 @@ class TestCtrlDInDialog:
                 assert run.done() is (draft == "")
 
             await run_with(session, handler, script)
-
-
-def dialog_open(session: ThinkingPromptSession) -> bool:
-    dm = session._dialog_manager
-    return dm is not None and dm._visible
 
 
 class TestDialogEscape:
@@ -374,7 +381,7 @@ class TestDialogsEndToEnd:
 
             async def script(run: asyncio.Task[None]) -> None:
                 inp.send_text("go" + ENTER)
-                await wait_until(lambda: dialog_open(session))
+                await wait_until(lambda: dialog_rendered(session))
                 inp.send_text(TAB + ENTER)  # Login with the field still empty
                 await asyncio.sleep(0.2)
                 assert results == [] and dialog_open(session)
@@ -419,7 +426,7 @@ class TestDialogsEndToEnd:
 
             async def script(run: asyncio.Task[None]) -> None:
                 inp.send_text("go" + ENTER)
-                await wait_until(lambda: dialog_open(session))
+                await wait_until(lambda: dialog_rendered(session))
                 inp.send_text(TAB + ENTER)  # Login with the field still empty
                 await asyncio.sleep(0.2)
                 assert results == [] and dialog_open(session)
@@ -440,9 +447,34 @@ class TestDialogsEndToEnd:
 
             async def script(run: asyncio.Task[None]) -> None:
                 inp.send_text("go" + ENTER)
-                await wait_until(lambda: dialog_open(session))
+                await wait_until(lambda: dialog_rendered(session))
                 inp.send_text(DOWN + ENTER + TAB + ENTER)  # select "Dark", then OK
                 await wait_until(lambda: results == ["Dark"])
+
+            await run_with(session, handler, script)
+
+    async def test_keys_pressed_before_first_render_dont_break_navigation(self):
+        """Keys pressed in the instant between a dialog opening and its first
+        render (typed ahead) reach the focused control, and don't break the
+        dialog's Tab navigation once it's drawn. A delayed redraw makes the
+        window deterministic."""
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(
+                await session.dropdown_dialog("Theme", "Pick:", ["Light", "Dark", "System"])
+            )
+
+        with piped_session() as (session, inp):
+            session.app.min_redraw_interval = 0.5  # render lags behind input
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_open(session))
+                inp.send_text(DOWN + ENTER)  # before the dialog's first render
+                await wait_until(lambda: dialog_rendered(session), timeout=3)
+                inp.send_text(TAB + ENTER)  # OK
+                await wait_until(lambda: results == ["Dark"], timeout=3)
 
             await run_with(session, handler, script)
 
