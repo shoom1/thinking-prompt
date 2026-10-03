@@ -141,7 +141,9 @@ class Dialog:
         title: Title shown in the frame (default: none).
         body: Text (str, HTML, ANSI, FormattedText), shown in a Label, or
             any prompt_toolkit container.
-        buttons: ButtonConfigs (default: one "OK" button returning None).
+        buttons: ButtonConfigs (default: none). A dialog needs something to
+            focus: at least one button, or a focusable body (e.g. a TextArea,
+            closed with Escape).
         escape_result: What Escape and cancel() return (default None).
         escapable: If False, Escape does nothing (default True).
         width: None/0 = auto, >0 = preferred width, -1 = full width.
@@ -181,7 +183,7 @@ class Dialog:
 
     title: str = ""
     body: AnyFormattedText | AnyContainer = ""
-    buttons: Sequence[ButtonConfig] = (ButtonConfig("OK"),)
+    buttons: Sequence[ButtonConfig] = ()
     escape_result: Any = None
     escapable: bool = True
     width: int | None = None
@@ -548,7 +550,7 @@ class DialogManager:
                 second dialog would orphan the first one's result future,
                 leaving its awaiter hung forever.
             TypeError: If ``dialog`` isn't a Dialog.
-            ValueError: If the dialog has nothing focusable (e.g. buttons=[]
+            ValueError: If the dialog has nothing focusable (e.g. no buttons
                 and a text body).
 
         Whatever the dialog raises while being built or opened, the
@@ -622,8 +624,8 @@ class DialogManager:
                 self._session.app.layout.focus(dialog._widget)
             except ValueError as exc:
                 raise ValueError(
-                    f"Dialog {dialog.title!r} has no focusable element, so it "
-                    "could never be closed. Give it at least one button."
+                    f"Dialog {dialog.title!r} has nothing to focus: give it a "
+                    "button (buttons=[ButtonConfig(...)]) or a focusable body."
                 ) from exc
             # Override default focus when a button opted in via ButtonConfig.focused.
             if dialog._initial_focus is not None:

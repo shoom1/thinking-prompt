@@ -293,9 +293,11 @@ Escape closes any dialog and returns `None` (or the dialog's
 `escapable=False` to `Dialog(...)`, or set `escapable = False` on a
 subclass.
 
-A `Dialog` without `buttons` shows one OK button that returns `None`; pass
-`buttons=[]` for none (e.g. a focusable body closed by Escape). Other options:
-`escape_result`, `escapable`, `width`, `top`, `height`.
+A `Dialog` has no buttons unless you give it some, and it needs something
+to take keyboard focus: at least one button, or a focusable body (e.g. a
+`TextArea`, closed with Escape). Otherwise `show_dialog()` raises
+`ValueError`. Other options: `escape_result`, `escapable`, `width`, `top`,
+`height`.
 
 **Upgrading from 0.3:** `DialogConfig` and `BaseDialog` were removed.
 
@@ -305,6 +307,7 @@ A `Dialog` without `buttons` shows one OK button that returns `None`; pass
 | `class MyDialog(BaseDialog)` | `class MyDialog(Dialog)` |
 | `get_buttons()` returning `("OK", handler)` | `ButtonConfig("OK", handler=handler)` |
 | `escape_result = _UNSET` | `escapable = False` |
+| `BaseDialog` subclass relying on its default OK button | `buttons = (ButtonConfig("OK"),)` |
 
 ### Settings Dialog
 
