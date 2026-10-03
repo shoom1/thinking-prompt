@@ -27,6 +27,24 @@ from thinking_prompt.dialog import (
     _DropdownDialog,
 )
 
+_STILL_OPEN = object()  # _click() result when the click didn't close the dialog
+
+
+def _click(dialog: Any, index: int) -> Any:
+    """Build the dialog's widget and click button ``index``.
+
+    Returns the dialog's result, or _STILL_OPEN if the click didn't close it.
+    """
+    loop = asyncio.new_event_loop()
+    try:
+        dialog._result_future = loop.create_future()
+        dialog._build_widget()
+        dialog._buttons[index].handler()
+        future = dialog._result_future
+        return future.result() if future.done() else _STILL_OPEN
+    finally:
+        loop.close()
+
 
 # =============================================================================
 # ButtonConfig Tests
@@ -57,6 +75,24 @@ class TestButtonConfig:
         """ButtonConfig can have custom style."""
         btn = ButtonConfig(text="Danger", style="bg:red")
         assert btn.style == "bg:red"
+
+    def test_handler_defaults_to_none(self):
+        assert ButtonConfig(text="OK").handler is None
+
+    def test_result_and_handler_together_raise(self):
+        with pytest.raises(ValueError, match="result or a handler, not both"):
+            ButtonConfig(text="OK", result=1, handler=lambda: None)
+
+    def test_handler_runs_on_click_instead_of_closing(self):
+        clicks: list[str] = []
+        config = DialogConfig(title="T", body="B", buttons=[
+            ButtonConfig(text="Check", handler=lambda: clicks.append("clicked")),
+            ButtonConfig(text="OK", result="ok"),
+        ])
+        dialog = _ConfigBasedDialog(config)
+        assert _click(dialog, 0) is _STILL_OPEN
+        assert clicks == ["clicked"]
+        assert _click(dialog, 1) == "ok"
 
 
 # =============================================================================
