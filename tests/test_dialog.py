@@ -15,13 +15,9 @@ from prompt_toolkit.layout import HSplit, Window
 from prompt_toolkit.widgets import Label
 
 from thinking_prompt.dialog import (
-    BaseDialog,
     ButtonConfig,
     Dialog,
-    DialogConfig,
     DialogManager,
-    _UNSET,
-    _ConfigBasedDialog,
     _choice_dialog,
     _dropdown_dialog,
     _message_dialog,
@@ -86,79 +82,25 @@ class TestButtonConfig:
 
     def test_handler_runs_on_click_instead_of_closing(self):
         clicks: list[str] = []
-        config = DialogConfig(title="T", body="B", buttons=[
+        dialog = Dialog("T", "B", [
             ButtonConfig(text="Check", handler=lambda: clicks.append("clicked")),
             ButtonConfig(text="OK", result="ok"),
         ])
-        dialog = _ConfigBasedDialog(config)
         assert _click(dialog, 0) is _STILL_OPEN
         assert clicks == ["clicked"]
         assert _click(dialog, 1) == "ok"
 
 
 # =============================================================================
-# DialogConfig Tests
+# Dialog Tests
 # =============================================================================
 
-class TestDialogConfig:
-    """Tests for DialogConfig dataclass."""
-
-    def test_dialog_config_with_string_body(self):
-        """DialogConfig accepts string body."""
-        config = DialogConfig(
-            title="Test",
-            body="Hello World",
-            buttons=[ButtonConfig(text="OK")],
-        )
-        assert config.title == "Test"
-        assert config.body == "Hello World"
-        assert len(config.buttons) == 1
-
-    def test_dialog_config_with_container_body(self):
-        """DialogConfig accepts Container body."""
-        container = HSplit([Label("Test")])
-        config = DialogConfig(
-            title="Test",
-            body=container,
-            buttons=[ButtonConfig(text="OK")],
-        )
-        assert config.body is container
-
-    def test_dialog_config_escape_enabled_by_default(self):
-        """Like every other dialog, a DialogConfig closes on Escape with None."""
-        config = DialogConfig(title="Test", body="Body")
-        assert config.escapable is True
-        assert config.escape_result is None
-
-    def test_dialog_config_escape_enabled(self):
-        """DialogConfig can enable escape with result."""
-        config = DialogConfig(
-            title="Test",
-            body="Body",
-            escape_result=None,
-        )
-        assert config.escape_result is None
-
-    def test_dialog_config_width(self):
-        """DialogConfig can have custom width."""
-        config = DialogConfig(
-            title="Test",
-            body="Body",
-            width=80,
-        )
-        assert config.width == 80
-
-
-# =============================================================================
-# BaseDialog Tests
-# =============================================================================
-
-class TestBaseDialog:
-    """Tests for BaseDialog class."""
+class TestDialogSubclass:
+    """Tests for Dialog class."""
 
     def test_custom_dialog_subclass(self):
         """Custom dialog subclass works correctly."""
-        class MyDialog(BaseDialog):
+        class MyDialog(Dialog):
             title = "My Dialog"
             escape_result = "cancelled"
 
@@ -176,8 +118,8 @@ class TestBaseDialog:
         assert dialog.escape_result == "cancelled"
 
     def test_base_dialog_build_widget(self):
-        """BaseDialog._build_widget creates Dialog widget."""
-        class TestDialog(BaseDialog):
+        """Dialog._build_widget creates Dialog widget."""
+        class TestDialog(Dialog):
             title = "Test"
 
             def build_body(self):
@@ -192,8 +134,8 @@ class TestBaseDialog:
         assert widget is not None
 
     def test_base_dialog_set_result(self):
-        """BaseDialog.set_result sets the future."""
-        class TestDialog(BaseDialog):
+        """Dialog.set_result sets the future."""
+        class TestDialog(Dialog):
             title = "Test"
 
             def build_body(self):
@@ -215,8 +157,8 @@ class TestBaseDialog:
             loop.close()
 
     def test_base_dialog_cancel(self):
-        """BaseDialog.cancel sets escape_result."""
-        class TestDialog(BaseDialog):
+        """Dialog.cancel sets escape_result."""
+        class TestDialog(Dialog):
             title = "Test"
             escape_result = "escaped"
 
@@ -281,82 +223,11 @@ class TestBuiltinDialogs:
             _dropdown_dialog("Theme", "Select:", [])
 
 
-# =============================================================================
-# ConfigBasedDialog Tests
-# =============================================================================
-
-class TestConfigBasedDialog:
-    """Tests for _ConfigBasedDialog wrapper."""
-
-    def test_config_based_dialog_from_string_body(self):
-        """ConfigBasedDialog handles string body."""
-        config = DialogConfig(
-            title="Test",
-            body="String body",
-            buttons=[ButtonConfig(text="OK", result=True)],
-        )
-        dialog = _ConfigBasedDialog(config)
-        body = dialog.build_body()
-        assert isinstance(body, Label)
-
-    def test_config_based_dialog_from_container_body(self):
-        """ConfigBasedDialog handles Container body."""
-        container = HSplit([Label("Test")])
-        config = DialogConfig(
-            title="Test",
-            body=container,
-            buttons=[ButtonConfig(text="OK", result=True)],
-        )
-        dialog = _ConfigBasedDialog(config)
-        body = dialog.build_body()
-        assert body is container
-
-    def test_config_based_dialog_buttons(self):
-        """ConfigBasedDialog creates buttons from config."""
-        config = DialogConfig(
-            title="Test",
-            body="Body",
-            buttons=[
-                ButtonConfig(text="Save", result="save"),
-                ButtonConfig(text="Cancel", result=None),
-            ],
-        )
-        dialog = _ConfigBasedDialog(config)
-        assert [b.text for b in dialog.get_buttons()] == ["Save", "Cancel"]
-
-    def test_config_based_dialog_escape_result(self):
-        """ConfigBasedDialog inherits escape_result from config."""
-        config = DialogConfig(
-            title="Test",
-            body="Body",
-            escape_result="escaped",
-        )
-        dialog = _ConfigBasedDialog(config)
-        assert dialog.escape_result == "escaped"
-
-    def test_config_based_dialog_inherits_width(self):
-        """ConfigBasedDialog forwards DialogConfig.width to BaseDialog.width."""
-        config = DialogConfig(
-            title="Test",
-            body="Body",
-            width=80,
-        )
-        dialog = _ConfigBasedDialog(config)
-        assert dialog.width == 80
-
-    def test_config_based_dialog_default_width_is_none(self):
-        """When DialogConfig.width is None, BaseDialog.width stays None."""
-        config = DialogConfig(title="Test", body="Body")
-        dialog = _ConfigBasedDialog(config)
-        assert dialog.width is None
-
-
 class TestButtonConfigBehavior:
     """ButtonConfig.focused and ButtonConfig.style must affect the built widget."""
 
     def _build(self, buttons):
-        config = DialogConfig(title="T", body="B", buttons=buttons)
-        dialog = _ConfigBasedDialog(config)
+        dialog = Dialog("T", "B", buttons)
         widget = dialog._build_widget()
         return dialog, widget
 
@@ -369,7 +240,7 @@ class TestButtonConfigBehavior:
         ]
         dialog, _ = self._build(buttons)
 
-        # BaseDialog should expose the button window that wants focus on show.
+        # Dialog should expose the button window that wants focus on show.
         # `_initial_focus` is None when no button is focused; otherwise it is
         # the button's containing Window so DialogManager can call
         # app.layout.focus(...) on it.
@@ -503,7 +374,7 @@ class TestDialogManagerFailureRecovery:
     async def test_failing_build_body_does_not_block_next_dialog(self):
         from thinking_prompt import ThinkingPromptSession
 
-        class Broken(BaseDialog):
+        class Broken(Dialog):
             def build_body(self):
                 raise RuntimeError("bug in build_body")
 
@@ -515,13 +386,13 @@ class TestDialogManagerFailureRecovery:
         await self._show_and_close_message_dialog(session)
 
     async def test_dialog_with_nothing_focusable_raises_clear_error(self):
-        """DialogConfig's buttons default to []; with a plain-text body the
-        dialog has nothing to focus, so it could never be closed."""
+        """With buttons=[] and a plain-text body the dialog has nothing to
+        focus, so it could never be closed."""
         from thinking_prompt import ThinkingPromptSession
 
         session = ThinkingPromptSession()
         with pytest.raises(ValueError, match="no focusable element"):
-            await session.show_dialog(DialogConfig(title="Empty", body="hi"))
+            await session.show_dialog(Dialog("Empty", "hi", buttons=[]))
 
         self._assert_closed(session)
         await self._show_and_close_message_dialog(session)
@@ -536,7 +407,7 @@ class TestDialogIntegration:
 
     def test_dialog_result_flow(self):
         """A subclass button's result reaches the awaiter."""
-        class ResultDialog(BaseDialog):
+        class ResultDialog(Dialog):
             title = "Test"
 
             def build_body(self):
@@ -549,7 +420,7 @@ class TestDialogIntegration:
 
     def test_multiple_buttons_return_correct_results(self):
         """Each button returns its configured result."""
-        class MultiButtonDialog(BaseDialog):
+        class MultiButtonDialog(Dialog):
             title = "Test"
 
             def build_body(self):
@@ -571,7 +442,7 @@ class TestDialogEdgeCases:
 
     def test_dialog_with_no_buttons(self):
         """Dialog can have no custom buttons (uses default OK)."""
-        class NoButtonDialog(BaseDialog):
+        class NoButtonDialog(Dialog):
             title = "Info"
 
             def build_body(self):
@@ -585,7 +456,7 @@ class TestDialogEdgeCases:
 
     def test_dialog_escape_disabled(self):
         """A dialog opts out of Escape with escapable = False."""
-        class NoEscapeDialog(BaseDialog):
+        class NoEscapeDialog(Dialog):
             title = "Important"
             escapable = False
 
@@ -596,11 +467,11 @@ class TestDialogEdgeCases:
                 return [("Acknowledge", lambda: self.set_result(True))]
 
         assert NoEscapeDialog().escapable is False
-        assert BaseDialog.escapable is True
+        assert Dialog.escapable is True
 
     def test_set_result_only_works_once(self):
         """Setting result multiple times doesn't change first result."""
-        class TestDialog(BaseDialog):
+        class TestDialog(Dialog):
             title = "Test"
 
             def build_body(self):
@@ -622,69 +493,12 @@ class TestDialogEdgeCases:
 
     def test_config_button_closure_captures_correctly(self):
         """ButtonConfig results are captured correctly in closures."""
-        config = DialogConfig(
-            title="Test",
-            body="Body",
-            buttons=[
-                ButtonConfig(text="One", result=1),
-                ButtonConfig(text="Two", result=2),
-                ButtonConfig(text="Three", result=3),
-            ],
-        )
-        dialog = _ConfigBasedDialog(config)
+        dialog = Dialog("Test", "Body", [
+            ButtonConfig(text="One", result=1),
+            ButtonConfig(text="Two", result=2),
+            ButtonConfig(text="Three", result=3),
+        ])
         assert [_click(dialog, i) for i in range(3)] == [1, 2, 3]
-
-
-
-class TestDeprecatedUnsetEscape:
-    """escape_result=_UNSET (the old, private way to disable Escape) still
-    works, but warns — and its sentinel never reaches the caller."""
-
-    @staticmethod
-    def _unset_dialog():
-        class Legacy(BaseDialog):
-            title = "Legacy"
-            escape_result = _UNSET
-
-            def build_body(self):
-                return Label("body")
-
-            def get_buttons(self):
-                return [ButtonConfig("OK", result="ok"), ButtonConfig("Cancel", handler=self.cancel)]
-
-        return Legacy()
-
-    async def test_unset_disables_escape_and_warns(self):
-        from prompt_toolkit.keys import Keys
-
-        from thinking_prompt import ThinkingPromptSession
-
-        session = ThinkingPromptSession()
-        dialog = self._unset_dialog()
-        with pytest.warns(DeprecationWarning, match="escapable"):
-            task = asyncio.create_task(session.show_dialog(dialog))
-            for _ in range(20):
-                await asyncio.sleep(0)
-                if session._dialogs._current_dialog is dialog:
-                    break
-        escape = next(
-            b for b in session._dialogs._key_bindings.bindings if b.keys == (Keys.Escape,)
-        )
-        escape.handler(MagicMock())
-        await asyncio.sleep(0)
-        assert not task.done()
-        dialog.set_result("ok")
-        assert await asyncio.wait_for(task, timeout=1) == "ok"
-
-    def test_cancel_returns_none_not_the_sentinel(self):
-        dialog = self._unset_dialog()
-        loop = asyncio.new_event_loop()
-        try:
-            dialog._result_future = loop.create_future()
-            dialog.cancel()
-            assert dialog._result_future.result() is None
-        finally:
-            loop.close()
 
 
 class TestDialog:
@@ -839,3 +653,25 @@ class TestDialogButtons:
                     break
             d.set_result(expected)
             assert await asyncio.wait_for(task, timeout=1) == expected
+
+
+class TestRemovedApi:
+    """0.4 removes the old dialog API outright (no deprecation period)."""
+
+    def test_old_names_are_gone(self):
+        import thinking_prompt
+        import thinking_prompt.dialog as dialog_module
+
+        for name in ("BaseDialog", "DialogConfig"):
+            assert not hasattr(thinking_prompt, name)
+            assert name not in thinking_prompt.__all__
+        for name in ("BaseDialog", "DialogConfig", "_ConfigBasedDialog", "_UNSET", "_Unset"):
+            assert not hasattr(dialog_module, name)
+
+    async def test_show_dialog_rejects_non_dialogs_with_migration_hint(self):
+        from thinking_prompt import ThinkingPromptSession
+
+        session = ThinkingPromptSession()
+        with pytest.raises(TypeError, match=r"takes a Dialog, got dict.*DialogConfig was removed"):
+            await session.show_dialog({"title": "x"})
+        assert session._dialogs._current_dialog is None

@@ -7,31 +7,27 @@ create their own Application and cause rendering conflicts.
 
 Example usage:
 
-    # Simple built-in dialogs
+    # Built-in dialogs
     result = await session.yes_no_dialog("Confirm", "Are you sure?")
     await session.message_dialog("Info", "Operation completed.")
     choice = await session.choice_dialog("Action", "What to do?", ["Save", "Discard"])
 
-    # Custom dialog via composition
-    config = DialogConfig(
-        title="Custom",
-        body="Enter your choice:",
-        buttons=[
-            ButtonConfig(text="OK", result=True),
-            ButtonConfig(text="Cancel", result=False),
-        ],
-    )
-    result = await session.show_dialog(config)
+    # A dialog built with arguments
+    result = await session.show_dialog(Dialog(
+        "Custom",
+        "Enter your choice:",
+        [ButtonConfig("OK", result=True), ButtonConfig("Cancel", result=False)],
+    ))
 
-    # Custom dialog via subclass
-    class MyDialog(BaseDialog):
+    # A custom dialog via subclass
+    class MyDialog(Dialog):
         title = "My Dialog"
 
         def build_body(self):
             return Label("Custom content")
 
         def get_buttons(self):
-            return [("OK", lambda: self.set_result(True))]
+            return [ButtonConfig("OK", result=True)]
 
     result = await session.show_dialog(MyDialog())
 """
@@ -39,9 +35,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import warnings
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -72,16 +67,6 @@ if TYPE_CHECKING:
     from .session import ThinkingPromptSession
 
 logger = logging.getLogger(__name__)
-
-
-# Legacy sentinel: escape_result=_UNSET used to be the (private) way to
-# disable Escape. Deprecated in favor of escapable=False; still honored.
-class _Unset:
-    """Legacy escape_result sentinel meaning "Escape disabled" (deprecated)."""
-    pass
-
-
-_UNSET = _Unset()
 
 
 # Sentinel returned by _compute_effective_height when the terminal is
@@ -116,28 +101,6 @@ class ButtonConfig:
                 "ButtonConfig takes a result or a handler, not both: a handler "
                 "decides the result itself (dialog.set_result(...))."
             )
-
-
-@dataclass
-class DialogConfig:
-    """
-    Configuration for creating a simple dialog via composition.
-
-    Attributes:
-        title: Dialog title displayed in the border.
-        body: Dialog body - either a string or a prompt_toolkit Container.
-        buttons: List of ButtonConfig objects defining the buttons.
-        escape_result: Value returned when Escape is pressed (default None).
-        escapable: If False, Escape does nothing; only a button closes the
-                   dialog. Default True, as for every other dialog.
-        width: Optional fixed width for the dialog.
-    """
-    title: str
-    body: str | AnyContainer
-    buttons: list[ButtonConfig] = field(default_factory=list)
-    escape_result: Any = None
-    escapable: bool = True
-    width: int | None = None
 
 
 class _NotPassed:
@@ -312,15 +275,7 @@ class Dialog:
         Convenience method for cancel buttons. Works whether or not the
         dialog is escapable.
         """
-        self.set_result(self._escape_value())
-
-    def _escape_value(self) -> Any:
-        """escape_result — never the legacy _UNSET sentinel (that means None)."""
-        return None if isinstance(self.escape_result, _Unset) else self.escape_result
-
-    def _escape_enabled(self) -> bool:
-        """Whether Escape closes the dialog (escapable, and not legacy _UNSET)."""
-        return self.escapable and not isinstance(self.escape_result, _Unset)
+        self.set_result(self.escape_result)
 
     # Chrome height = title bar (2) + button row (2) + padding (1) around the body.
     # Used when `height` is set to compute the body area from the total.
@@ -410,10 +365,6 @@ class Dialog:
         return self._result_future
 
 
-# Transitional alias, removed in the next task (0.4 drops the old name).
-BaseDialog = Dialog
-
-
 def _apply_button_style(button: Button, extra_style: str) -> None:
     """Append ``extra_style`` to a Button's style classes.
 
@@ -430,20 +381,6 @@ def _apply_button_style(button: Button, extra_style: str) -> None:
         button.window.style = combined
     else:
         button.window.style = f"{original} {extra_style}".strip()
-
-
-class _ConfigBasedDialog(Dialog):
-    """Internal: a Dialog built from a DialogConfig (removed with DialogConfig)."""
-
-    def __init__(self, config: DialogConfig) -> None:
-        super().__init__(
-            config.title,
-            config.body,
-            config.buttons,
-            escape_result=config.escape_result,
-            escapable=config.escapable,
-            width=config.width,
-        )
 
 
 def _yes_no_dialog(
@@ -536,7 +473,7 @@ class DialogManager:
         @kb.add("escape", filter=Condition(lambda: self._visible))
         def handle_escape(event: Any) -> None:
             dialog = self._current_dialog
-            if dialog and dialog._escape_enabled():
+            if dialog and dialog.escapable:
                 dialog.set_result(dialog.escape_result)
 
         return kb
@@ -576,12 +513,12 @@ class DialogManager:
 
         self._injected = True
 
-    async def show(self, dialog: DialogConfig | Dialog) -> Any:
+    async def show(self, dialog: Dialog) -> Any:
         """
         Show a dialog and wait for result.
 
         Args:
-            dialog: Either a DialogConfig or a BaseDialog subclass instance.
+            dialog: The Dialog to show.
 
         Returns:
             The result value set by the dialog (via button click or Escape).
@@ -594,12 +531,20 @@ class DialogManager:
             RuntimeError: If a dialog is already being shown. Showing a
                 second dialog would orphan the first one's result future,
                 leaving its awaiter hung forever.
-            ValueError: If the dialog has nothing focusable (e.g. a
-                ``DialogConfig`` with no buttons and a plain-text body).
+            TypeError: If ``dialog`` isn't a Dialog.
+            ValueError: If the dialog has nothing focusable (e.g. buttons=[]
+                and a text body).
 
         Whatever the dialog raises while being built or opened, the
         manager is left closed, so later dialogs can still be shown.
         """
+        if not isinstance(dialog, Dialog):
+            raise TypeError(
+                f"show_dialog() takes a Dialog, got {type(dialog).__name__}. "
+                "(DialogConfig was removed in 0.4: use Dialog(title, body, "
+                "buttons, ...).)"
+            )
+
         if self._current_dialog is not None:
             raise RuntimeError(
                 "A dialog is already being shown. Wait for it to close "
@@ -609,22 +554,10 @@ class DialogManager:
         # Ensure float container is injected
         self._inject_float_container()
 
-        # Convert DialogConfig to BaseDialog if needed
-        if isinstance(dialog, DialogConfig):
-            dialog = _ConfigBasedDialog(dialog)
-
-        if isinstance(dialog.escape_result, _Unset):
-            warnings.warn(
-                "escape_result=_UNSET is deprecated; set escapable=False to "
-                "disable Escape.",
-                DeprecationWarning,
-                stacklevel=3,
-            )
-
         # Clamp dialog.height against terminal height (if height is set).
         effective_height = self._compute_effective_height(dialog)
         if effective_height is _TERMINAL_TOO_SMALL:
-            return dialog.escape_result if dialog._escape_enabled() else None
+            return dialog.escape_result if dialog.escapable else None
 
         # Everything after claiming the slot runs under the finally below:
         # if building or focusing the dialog raises (a bug in a custom

@@ -244,22 +244,54 @@ action = await session.choice_dialog("Action", "What to do?", ["Save", "Discard"
 theme = await session.dropdown_dialog("Theme", "Choose:", ["Light", "Dark", "System"])
 
 # Custom dialog
-from thinking_prompt import DialogConfig, ButtonConfig
-config = DialogConfig(
+from thinking_prompt import Dialog, ButtonConfig
+result = await session.show_dialog(Dialog(
     title="Custom",
     body="Choose an option:",
     buttons=[
-        ButtonConfig(text="Option A", result="a"),
-        ButtonConfig(text="Option B", result="b"),
+        ButtonConfig("Option A", result="a"),
+        ButtonConfig("Option B", result="b"),
     ],
-)
-result = await session.show_dialog(config)
+))
+```
+
+A button either returns a fixed `result` or runs a `handler`, which decides
+what happens: `set_result(...)` or `cancel()` closes the dialog, doing
+nothing keeps it open (e.g. while input is invalid). For custom content,
+pass any prompt_toolkit container as `body`, or subclass `Dialog` and
+override `build_body()` / `get_buttons()`:
+
+```python
+from prompt_toolkit.layout import HSplit
+from prompt_toolkit.widgets import Label, TextArea
+
+class LoginDialog(Dialog):
+    title = "Login"
+
+    def __init__(self):
+        super().__init__()
+        self.user = TextArea(multiline=False)
+
+    def build_body(self):
+        return HSplit([Label("Username:"), self.user])
+
+    def get_buttons(self):
+        return [
+            ButtonConfig("Login", handler=self.login, focused=True),
+            ButtonConfig("Cancel", handler=self.cancel),
+        ]
+
+    def login(self):
+        if self.user.text:  # stays open while empty
+            self.set_result(self.user.text)
+
+name = await session.show_dialog(LoginDialog())
 ```
 
 Escape closes any dialog and returns `None` (or the dialog's
 `escape_result`). To require a button press instead, pass
-`escapable=False` to `DialogConfig`, or set `escapable = False` on a
-`BaseDialog` subclass.
+`escapable=False` to `Dialog(...)`, or set `escapable = False` on a
+subclass.
 
 ### Settings Dialog
 
@@ -325,7 +357,7 @@ if result:
 
 **Navigation:** Up/Down moves between controls, Tab cycles through controls and buttons, Ctrl+S saves.
 
-**Fixed dialog height:** Pass `height=N` to `show_settings_dialog()` (or set `height` on a `BaseDialog`/`SettingsDialog` subclass) to allocate the full dialog area in one render frame instead of growing line-by-line. Body content that exceeds the available rows scrolls within the dialog. The value is clamped to the terminal size; if the terminal is too small for the minimum dialog (12 rows), the dialog returns its escape result without opening.
+**Fixed dialog height:** Pass `height=N` to `show_settings_dialog()` (or pass `height=` to a `Dialog`) to allocate the full dialog area in one render frame instead of growing line-by-line. Body content that exceeds the available rows scrolls within the dialog. The value is clamped to the terminal size; if the terminal is too small for the minimum dialog (12 rows), the dialog returns its escape result without opening.
 
 ```python
 result = await session.show_settings_dialog(
