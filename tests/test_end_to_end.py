@@ -326,6 +326,30 @@ class TestDialogEscape:
 class TestDialogsEndToEnd:
     """Dialogs driven with real keys on a running session."""
 
+    async def test_buttonless_dialog_with_focusable_body_closes_with_escape(self):
+        """No buttons is fine when the body can take focus: typing goes into
+        the body (not the hidden prompt), and Escape closes the dialog."""
+        from prompt_toolkit.widgets import TextArea
+
+        results: list[Any] = []
+        field = TextArea(multiline=False)
+
+        async def handler(text: str) -> None:
+            results.append(await session.show_dialog(Dialog("Note", field)))
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_open(session))
+                inp.send_text("hi")
+                await wait_until(lambda: field.text == "hi")
+                assert session.default_buffer.text == ""
+                inp.send_text(ESCAPE)
+                await wait_until(lambda: results == [None])
+
+            await run_with(session, handler, script)
+
     async def test_login_style_dialog_stays_open_until_input_is_valid(self):
         from prompt_toolkit.layout import HSplit
         from prompt_toolkit.widgets import Label, TextArea

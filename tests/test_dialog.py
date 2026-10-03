@@ -92,7 +92,6 @@ class TestButtonConfig:
         btn = ButtonConfig("OK")
         with pytest.raises(dataclasses.FrozenInstanceError):
             btn.text = "x"
-        assert Dialog().get_buttons()[0].text == "OK"
 
     def test_handler_runs_on_click_instead_of_closing(self):
         clicks: list[str] = []
@@ -400,13 +399,13 @@ class TestDialogManagerFailureRecovery:
         await self._show_and_close_message_dialog(session)
 
     async def test_dialog_with_nothing_focusable_raises_clear_error(self):
-        """With buttons=[] and a plain-text body the dialog has nothing to
-        focus, so it could never be closed."""
+        """No buttons (the default) and a plain-text body: nothing can take
+        keyboard focus, so typing would go to the hidden prompt instead."""
         from thinking_prompt import ThinkingPromptSession
 
         session = ThinkingPromptSession()
-        with pytest.raises(ValueError, match="no focusable element"):
-            await session.show_dialog(Dialog("Empty", "hi", buttons=[]))
+        with pytest.raises(ValueError, match="nothing to focus"):
+            await asyncio.wait_for(session.show_dialog(Dialog("Empty", "hi")), timeout=1)
 
         self._assert_closed(session)
         await self._show_and_close_message_dialog(session)
@@ -455,18 +454,14 @@ class TestDialogEdgeCases:
     """Edge case tests for dialogs."""
 
     def test_dialog_with_no_buttons(self):
-        """Dialog can have no custom buttons (uses default OK)."""
+        """A Dialog has no buttons unless it's given some."""
         class NoButtonDialog(Dialog):
             title = "Info"
 
             def build_body(self):
                 return Label("Just info")
 
-            # Uses default get_buttons() which returns [ButtonConfig("OK")]
-
-        dialog = NoButtonDialog()
-        assert [b.text for b in dialog.get_buttons()] == ["OK"]
-        assert _click(dialog, 0) is None
+        assert NoButtonDialog().get_buttons() == []
 
     def test_dialog_escape_disabled(self):
         """A dialog opts out of Escape with escapable = False."""
@@ -522,7 +517,7 @@ class TestDialog:
     def test_defaults_come_from_class_attributes(self):
         d = Dialog()
         assert (d.title, d.body) == ("", "")
-        assert [b.text for b in d.get_buttons()] == ["OK"]
+        assert d.get_buttons() == []
         assert (d.escape_result, d.escapable) == (None, True)
         assert (d.width, d.top, d.height) == (None, None, None)
 
@@ -575,7 +570,10 @@ class TestDialog:
         assert Dialog("T", "B", buttons=[]).get_buttons() == []
 
     def test_get_buttons_returns_a_fresh_list(self):
-        d = Dialog()
+        class WithOk(Dialog):
+            buttons = (ButtonConfig("OK"),)
+
+        d = WithOk()
         d.get_buttons().append(ButtonConfig("Extra"))
         assert [b.text for b in d.get_buttons()] == ["OK"]
 
