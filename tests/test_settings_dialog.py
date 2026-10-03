@@ -5,7 +5,6 @@ import pytest
 from prompt_toolkit.layout import BufferControl, HSplit, Window
 from prompt_toolkit.layout.processors import PasswordProcessor
 
-from thinking_prompt.dialog import _UNSET
 from thinking_prompt.settings_dialog import (
     CheckboxItem,
     DropdownItem,
@@ -142,7 +141,8 @@ class TestSettingsDialogState:
         show_settings_dialog() — violating its dict-or-None contract
         (callers iterating result.items() would crash on a str)."""
         dialog = SettingsDialog(title="Settings", items=[], can_cancel=False)
-        assert isinstance(dialog.escape_result, type(_UNSET))
+        assert dialog.escapable is False
+        assert dialog.escape_result is None
 
 
 class TestSettingsDialogLayout:
