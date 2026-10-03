@@ -277,7 +277,7 @@ class LoginDialog(Dialog):
 
     def get_buttons(self):
         return [
-            ButtonConfig("Login", handler=self.login, focused=True),
+            ButtonConfig("Login", handler=self.login),
             ButtonConfig("Cancel", handler=self.cancel),
         ]
 
@@ -292,6 +292,19 @@ Escape closes any dialog and returns `None` (or the dialog's
 `escape_result`). To require a button press instead, pass
 `escapable=False` to `Dialog(...)`, or set `escapable = False` on a
 subclass.
+
+A `Dialog` without `buttons` shows one OK button that returns `None`; pass
+`buttons=[]` for none (e.g. a focusable body closed by Escape). Other options:
+`escape_result`, `escapable`, `width`, `top`, `height`.
+
+**Upgrading from 0.3:** `DialogConfig` and `BaseDialog` were removed.
+
+| 0.3 | 0.4 |
+|---|---|
+| `DialogConfig(title, body, buttons, ...)` | `Dialog(title, body, buttons, ...)` |
+| `class MyDialog(BaseDialog)` | `class MyDialog(Dialog)` |
+| `get_buttons()` returning `("OK", handler)` | `ButtonConfig("OK", handler=handler)` |
+| `escape_result = _UNSET` | `escapable = False` |
 
 ### Settings Dialog
 

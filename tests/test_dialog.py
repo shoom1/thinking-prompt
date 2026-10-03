@@ -7,8 +7,9 @@ async fixtures and simulate button clicks via the result future.
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Callable, List
-from unittest.mock import MagicMock, patch
+import dataclasses
+from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 from prompt_toolkit.layout import HSplit, Window
@@ -80,6 +81,19 @@ class TestButtonConfig:
         with pytest.raises(ValueError, match="result or a handler, not both"):
             ButtonConfig(text="OK", result=1, handler=lambda: None)
 
+    def test_async_handler_raises_at_construction(self):
+        async def fn() -> None:
+            pass
+
+        with pytest.raises(TypeError, match="not async"):
+            ButtonConfig(text="Go", handler=fn)
+
+    def test_frozen_rejects_attribute_assignment(self):
+        btn = ButtonConfig("OK")
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            btn.text = "x"
+        assert Dialog().get_buttons()[0].text == "OK"
+
     def test_handler_runs_on_click_instead_of_closing(self):
         clicks: list[str] = []
         dialog = Dialog("T", "B", [
@@ -117,7 +131,7 @@ class TestDialogSubclass:
         assert dialog.title == "My Dialog"
         assert dialog.escape_result == "cancelled"
 
-    def test_base_dialog_build_widget(self):
+    def test_dialog_build_widget(self):
         """Dialog._build_widget creates Dialog widget."""
         class TestDialog(Dialog):
             title = "Test"
@@ -133,7 +147,7 @@ class TestDialogSubclass:
         assert dialog._widget is widget
         assert widget is not None
 
-    def test_base_dialog_set_result(self):
+    def test_dialog_set_result(self):
         """Dialog.set_result sets the future."""
         class TestDialog(Dialog):
             title = "Test"
@@ -156,7 +170,7 @@ class TestDialogSubclass:
         finally:
             loop.close()
 
-    def test_base_dialog_cancel(self):
+    def test_dialog_cancel(self):
         """Dialog.cancel sets escape_result."""
         class TestDialog(Dialog):
             title = "Test"
@@ -448,7 +462,7 @@ class TestDialogEdgeCases:
             def build_body(self):
                 return Label("Just info")
 
-            # Uses default get_buttons() which returns [("OK", ...)]
+            # Uses default get_buttons() which returns [ButtonConfig("OK")]
 
         dialog = NoButtonDialog()
         assert [b.text for b in dialog.get_buttons()] == ["OK"]
@@ -464,7 +478,7 @@ class TestDialogEdgeCases:
                 return Label("Must click button")
 
             def get_buttons(self):
-                return [("Acknowledge", lambda: self.set_result(True))]
+                return [ButtonConfig("Acknowledge", result=True)]
 
         assert NoEscapeDialog().escapable is False
         assert Dialog.escapable is True
@@ -640,6 +654,37 @@ class TestDialogButtons:
         assert last.text == "[ERROR] Dialog button error: KeyError: 'x'\n"
         assert any(r.exc_info and r.exc_info[0] is KeyError for r in caplog.records)
 
+    async def test_handler_returning_awaitable_is_closed_and_reported(self, caplog):
+        import logging
+
+        from thinking_prompt import ThinkingPromptSession
+
+        coros: list[Any] = []
+
+        async def coro_fn() -> None:
+            pass
+
+        def make_coro() -> Any:
+            coro = coro_fn()
+            coros.append(coro)
+            return coro
+
+        session = ThinkingPromptSession()
+        d = Dialog("T", "B", [ButtonConfig("Go", handler=lambda: make_coro())])
+        d._prepare(session._dialogs)
+        d._build_widget()
+        with caplog.at_level(logging.ERROR, logger="thinking_prompt"):
+            d._buttons[0].handler()
+
+        assert d._result_future is not None and not d._result_future.done()
+        last = session._display.history.iter_entries()[-1]
+        assert last.text == (
+            "[ERROR] Dialog button error: TypeError: button handler returned "
+            "an awaitable; handlers must be regular functions\n"
+        )
+        coro = coros[0]
+        assert coro.cr_frame is None
+
     async def test_same_dialog_can_be_shown_twice(self):
         from thinking_prompt import ThinkingPromptSession
 
@@ -672,6 +717,27 @@ class TestRemovedApi:
         from thinking_prompt import ThinkingPromptSession
 
         session = ThinkingPromptSession()
-        with pytest.raises(TypeError, match=r"takes a Dialog, got dict.*DialogConfig was removed"):
+        with pytest.raises(
+            TypeError, match=r"takes a thinking_prompt\.Dialog, got dict\..*DialogConfig was removed"
+        ):
             await session.show_dialog({"title": "x"})
+        assert session._dialogs._current_dialog is None
+
+    async def test_show_dialog_rejects_prompt_toolkit_dialog_widget(self):
+        from prompt_toolkit.widgets import Dialog as PTDialog
+        from prompt_toolkit.widgets import Label
+
+        from thinking_prompt import ThinkingPromptSession
+
+        session = ThinkingPromptSession()
+        with pytest.raises(TypeError, match=r"got prompt_toolkit\.widgets\.dialogs\.Dialog"):
+            await session.show_dialog(PTDialog(body=Label("x")))
+        assert session._dialogs._current_dialog is None
+
+    async def test_show_dialog_rejects_the_class_itself(self):
+        from thinking_prompt import ThinkingPromptSession
+
+        session = ThinkingPromptSession()
+        with pytest.raises(TypeError, match=r"takes a Dialog instance, got the class Dialog"):
+            await session.show_dialog(Dialog)
         assert session._dialogs._current_dialog is None

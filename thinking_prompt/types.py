@@ -99,6 +99,11 @@ def truncate_to_lines(
     return '\n'.join(lines[:max_lines]) + '\n' + suffix
 
 
+def format_exception_detail(exc: BaseException) -> str:
+    """Format an exception as "Type: message", or just "Type" if message is empty."""
+    return f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
+
+
 def truncate_ansi_to_lines(
     content: str, max_lines: int, overflow: Overflow = "head"
 ) -> str:

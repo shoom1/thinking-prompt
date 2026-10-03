@@ -53,7 +53,7 @@ class LoginDialog(Dialog):
 
     def get_buttons(self):
         return [
-            ButtonConfig("Login", handler=self.on_login, focused=True),
+            ButtonConfig("Login", handler=self.on_login),
             ButtonConfig("Cancel", handler=self.cancel),
         ]
 
