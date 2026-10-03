@@ -17,7 +17,7 @@ from prompt_toolkit.application import create_app_session
 from prompt_toolkit.input import PipeInput, create_pipe_input
 from prompt_toolkit.output import DummyOutput
 
-from thinking_prompt import ButtonConfig, DialogConfig, TextItem, ThinkingPromptSession
+from thinking_prompt import ButtonConfig, Dialog, TextItem, ThinkingPromptSession
 
 CTRL_A = "\x01"
 CTRL_C = "\x03"
@@ -25,6 +25,9 @@ CTRL_D = "\x04"
 CTRL_S = "\x13"
 ENTER = "\r"
 ESCAPE = "\x1b"
+TAB = "\t"
+SHIFT_TAB = "\x1b[Z"
+DOWN = "\x1b[B"
 
 
 @contextmanager
@@ -56,6 +59,19 @@ def echoed_inputs(session: ThinkingPromptSession) -> list[str]:
         for entry in session._display.history.iter_entries()
         if entry.kind == "formatted"
     ]
+
+
+def dialog_open(session: ThinkingPromptSession) -> bool:
+    dm = session._dialog_manager
+    return dm is not None and dm._visible
+
+
+def dialog_rendered(session: ThinkingPromptSession) -> bool:
+    """The open dialog has been drawn at least once. prompt_toolkit's Tab
+    navigation only considers windows visible in the last render, so send
+    navigation keys (Tab/Shift-Tab) only after this holds."""
+    layout = session.app.layout
+    return dialog_open(session) and layout.current_window in layout.visible_windows
 
 
 async def run_with(
@@ -239,8 +255,7 @@ class TestCtrlDInDialog:
 
             async def script(run: asyncio.Task[None]) -> None:
                 inp.send_text("go" + ENTER)
-                await wait_until(lambda: session._dialog_manager is not None
-                                 and session._dialog_manager._visible)
+                await wait_until(lambda: dialog_rendered(session))
                 inp.send_text(ENTER)
                 await wait_until(editing)
                 inp.send_text(CTRL_A + CTRL_D)
@@ -271,26 +286,19 @@ class TestCtrlDInDialog:
             await run_with(session, handler, script)
 
 
-def dialog_open(session: ThinkingPromptSession) -> bool:
-    dm = session._dialog_manager
-    return dm is not None and dm._visible
-
-
 class TestDialogEscape:
     """Escape closes a dialog with its escape_result (None by default) —
-    config-based dialogs included — unless the dialog sets escapable=False."""
+    dialogs built with arguments included — unless the dialog sets escapable=False."""
 
     @staticmethod
-    def _config(**kwargs: Any) -> DialogConfig:
-        return DialogConfig(
-            title="Pick", body="Choose", buttons=[ButtonConfig("OK", result="ok")], **kwargs
-        )
+    def _dialog(**kwargs: Any) -> Dialog:
+        return Dialog("Pick", "Choose", [ButtonConfig("OK", result="ok")], **kwargs)
 
-    async def test_escape_closes_config_dialog_with_none_by_default(self):
+    async def test_escape_closes_dialog_with_none_by_default(self):
         results: list[Any] = []
 
         async def handler(text: str) -> None:
-            results.append(await session.show_dialog(self._config()))
+            results.append(await session.show_dialog(self._dialog()))
 
         with piped_session() as (session, inp):
 
@@ -306,7 +314,7 @@ class TestDialogEscape:
         results: list[Any] = []
 
         async def handler(text: str) -> None:
-            results.append(await session.show_dialog(self._config(escapable=False)))
+            results.append(await session.show_dialog(self._dialog(escapable=False)))
 
         with piped_session() as (session, inp):
 
@@ -318,5 +326,170 @@ class TestDialogEscape:
                 assert results == [] and dialog_open(session)
                 inp.send_text(ENTER)  # the focused OK button
                 await wait_until(lambda: results == ["ok"])
+
+            await run_with(session, handler, script)
+
+
+class TestDialogsEndToEnd:
+    """Dialogs driven with real keys on a running session."""
+
+    async def test_buttonless_dialog_with_focusable_body_closes_with_escape(self):
+        """No buttons is fine when the body can take focus: typing goes into
+        the body (not the hidden prompt), and Escape closes the dialog."""
+        from prompt_toolkit.widgets import TextArea
+
+        results: list[Any] = []
+        field = TextArea(multiline=False)
+
+        async def handler(text: str) -> None:
+            results.append(await session.show_dialog(Dialog("Note", field)))
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_open(session))
+                inp.send_text("hi")
+                await wait_until(lambda: field.text == "hi")
+                assert session.default_buffer.text == ""
+                inp.send_text(ESCAPE)
+                await wait_until(lambda: results == [None])
+
+            await run_with(session, handler, script)
+
+    async def test_login_style_dialog_stays_open_until_input_is_valid(self):
+        from prompt_toolkit.layout import HSplit
+        from prompt_toolkit.widgets import Label, TextArea
+
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            user = TextArea(multiline=False)
+
+            def login() -> None:
+                if user.text:
+                    dlg.set_result(user.text)
+
+            dlg = Dialog(
+                "Login",
+                HSplit([Label("User:"), user]),
+                [ButtonConfig("Login", handler=login), ButtonConfig("Cancel")],
+            )
+            results.append(await session.show_dialog(dlg))
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                inp.send_text(TAB + ENTER)  # Login with the field still empty
+                await asyncio.sleep(0.2)
+                assert results == [] and dialog_open(session)
+                inp.send_text(SHIFT_TAB + "alice" + TAB + ENTER)
+                await wait_until(lambda: results == ["alice"])
+
+            await run_with(session, handler, script)
+
+    async def test_subclassed_login_dialog_types_into_its_field(self):
+        """Pins the documented subclass pattern (README's LoginDialog):
+        focus must start on the field, not a button, or typed text never
+        reaches it."""
+        from prompt_toolkit.layout import HSplit
+        from prompt_toolkit.widgets import Label, TextArea
+
+        class LoginDialog(Dialog):
+            title = "Login"
+
+            def __init__(self):
+                super().__init__()
+                self.user = TextArea(multiline=False)
+
+            def build_body(self):
+                return HSplit([Label("Username:"), self.user])
+
+            def get_buttons(self):
+                return [
+                    ButtonConfig("Login", handler=self.login),
+                    ButtonConfig("Cancel", handler=self.cancel),
+                ]
+
+            def login(self):
+                if self.user.text:
+                    self.set_result(self.user.text)
+
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.show_dialog(LoginDialog()))
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                inp.send_text(TAB + ENTER)  # Login with the field still empty
+                await asyncio.sleep(0.2)
+                assert results == [] and dialog_open(session)
+                inp.send_text(SHIFT_TAB + "alice" + TAB + ENTER)
+                await wait_until(lambda: results == ["alice"])
+
+            await run_with(session, handler, script)
+
+    async def test_dropdown_dialog_returns_option_chosen_with_arrow_keys(self):
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(
+                await session.dropdown_dialog("Theme", "Pick:", ["Light", "Dark", "System"])
+            )
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                inp.send_text(DOWN + ENTER + TAB + ENTER)  # select "Dark", then OK
+                await wait_until(lambda: results == ["Dark"])
+
+            await run_with(session, handler, script)
+
+    async def test_keys_pressed_before_first_render_dont_break_navigation(self):
+        """Keys pressed in the instant between a dialog opening and its first
+        render (typed ahead) reach the focused control, and don't break the
+        dialog's Tab navigation once it's drawn. A delayed redraw makes the
+        window deterministic."""
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(
+                await session.dropdown_dialog("Theme", "Pick:", ["Light", "Dark", "System"])
+            )
+
+        with piped_session() as (session, inp):
+            session.app.min_redraw_interval = 0.5  # render lags behind input
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_open(session))
+                inp.send_text(DOWN + ENTER)  # before the dialog's first render
+                await wait_until(lambda: dialog_rendered(session), timeout=3)
+                inp.send_text(TAB + ENTER)  # OK
+                await wait_until(lambda: results == ["Dark"], timeout=3)
+
+            await run_with(session, handler, script)
+
+    async def test_escape_on_yes_no_dialog_returns_false(self):
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.yes_no_dialog("Question", "Sure?"))
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_open(session))
+                inp.send_text(ESCAPE)
+                await wait_until(lambda: results == [False])
 
             await run_with(session, handler, script)
