@@ -17,7 +17,7 @@ from prompt_toolkit.application import create_app_session
 from prompt_toolkit.input import PipeInput, create_pipe_input
 from prompt_toolkit.output import DummyOutput
 
-from thinking_prompt import ButtonConfig, Dialog, DialogConfig, TextItem, ThinkingPromptSession
+from thinking_prompt import ButtonConfig, Dialog, TextItem, ThinkingPromptSession
 
 CTRL_A = "\x01"
 CTRL_C = "\x03"
@@ -284,10 +284,8 @@ class TestDialogEscape:
     config-based dialogs included — unless the dialog sets escapable=False."""
 
     @staticmethod
-    def _config(**kwargs: Any) -> DialogConfig:
-        return DialogConfig(
-            title="Pick", body="Choose", buttons=[ButtonConfig("OK", result="ok")], **kwargs
-        )
+    def _config(**kwargs: Any) -> Dialog:
+        return Dialog("Pick", "Choose", [ButtonConfig("OK", result="ok")], **kwargs)
 
     async def test_escape_closes_config_dialog_with_none_by_default(self):
         results: list[Any] = []

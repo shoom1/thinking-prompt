@@ -36,10 +36,8 @@ import logging
 
 from .app_info import AppInfo
 from .dialog import (
-    BaseDialog,
     ButtonConfig,
     Dialog,
-    DialogConfig,
 )
 from .layout import ThinkingHeader
 from .rich_utils import _renderable_to_ansi as rich_to_ansi
@@ -91,9 +89,7 @@ __all__ = [
     "InputHandler",
     # Dialog
     "Dialog",
-    "DialogConfig",
     "ButtonConfig",
-    "BaseDialog",
     # Settings Dialog
     "SettingsItem",
     "DropdownItem",

@@ -24,7 +24,7 @@ from typing import (
 )
 
 if TYPE_CHECKING:
-    from .dialog import BaseDialog, DialogConfig, DialogManager
+    from .dialog import Dialog, DialogManager
     from .settings_dialog import SettingsItem
     from .types import ContentFormat, Overflow
 
@@ -1427,44 +1427,39 @@ class ThinkingPromptSession:
         dialog = _dropdown_dialog(title, text, options, default)
         return cast(Optional[str], await self._dialogs.show(dialog))
 
-    async def show_dialog(
-        self,
-        dialog: DialogConfig | BaseDialog,
-    ) -> Any:
+    async def show_dialog(self, dialog: Dialog) -> Any:
         """
-        Show a custom dialog.
+        Show a dialog and wait for its result.
 
         Args:
-            dialog: Either a DialogConfig for simple dialogs,
-                   or a BaseDialog subclass for complex dialogs.
+            dialog: A Dialog, built with arguments or a subclass instance.
 
         Returns:
-            The result value set by the dialog.
+            The result value set by the dialog (a button or Escape).
 
-        Example with DialogConfig:
-            from thinking_prompt.dialog import DialogConfig, ButtonConfig
+        Example (built with arguments):
+            from thinking_prompt import ButtonConfig, Dialog
 
-            config = DialogConfig(
+            result = await session.show_dialog(Dialog(
                 title="Custom",
                 body="Choose an option:",
                 buttons=[
-                    ButtonConfig(text="Option A", result="a"),
-                    ButtonConfig(text="Option B", result="b"),
+                    ButtonConfig("Option A", result="a"),
+                    ButtonConfig("Option B", result="b"),
                 ],
-            )
-            result = await session.show_dialog(config)
+            ))
 
-        Example with BaseDialog subclass:
-            from thinking_prompt.dialog import BaseDialog
+        Example (subclass):
+            from thinking_prompt import ButtonConfig, Dialog
 
-            class MyDialog(BaseDialog):
+            class MyDialog(Dialog):
                 title = "My Dialog"
 
                 def build_body(self):
                     return Label("Custom content")
 
                 def get_buttons(self):
-                    return [("OK", lambda: self.set_result(True))]
+                    return [ButtonConfig("OK", result=True)]
 
             result = await session.show_dialog(MyDialog())
         """
