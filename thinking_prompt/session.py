@@ -1341,8 +1341,8 @@ class ThinkingPromptSession:
             if await session.yes_no_dialog("Confirm", "Delete this file?"):
                 delete_file()
         """
-        from .dialog import _YesNoDialog
-        dialog = _YesNoDialog(title, text, yes_text, no_text)
+        from .dialog import _yes_no_dialog
+        dialog = _yes_no_dialog(title, text, yes_text, no_text)
         return cast(bool, await self._dialogs.show(dialog))
 
     async def message_dialog(
@@ -1362,8 +1362,8 @@ class ThinkingPromptSession:
         Example:
             await session.message_dialog("Info", "Operation completed.")
         """
-        from .dialog import _MessageDialog
-        dialog = _MessageDialog(title, text, ok_text)
+        from .dialog import _message_dialog
+        dialog = _message_dialog(title, text, ok_text)
         await self._dialogs.show(dialog)
 
     async def choice_dialog(
@@ -1392,8 +1392,8 @@ class ThinkingPromptSession:
             if action == "Save":
                 save_file()
         """
-        from .dialog import _ChoiceDialog
-        dialog = _ChoiceDialog(title, text, choices)
+        from .dialog import _choice_dialog
+        dialog = _choice_dialog(title, text, choices)
         return cast(Optional[str], await self._dialogs.show(dialog))
 
     async def dropdown_dialog(
@@ -1423,8 +1423,8 @@ class ThinkingPromptSession:
                 default="System",
             )
         """
-        from .dialog import _DropdownDialog
-        dialog = _DropdownDialog(title, text, options, default)
+        from .dialog import _dropdown_dialog
+        dialog = _dropdown_dialog(title, text, options, default)
         return cast(Optional[str], await self._dialogs.show(dialog))
 
     async def show_dialog(

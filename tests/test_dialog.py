@@ -17,14 +17,15 @@ from prompt_toolkit.widgets import Label
 from thinking_prompt.dialog import (
     BaseDialog,
     ButtonConfig,
+    Dialog,
     DialogConfig,
     DialogManager,
     _UNSET,
     _ConfigBasedDialog,
-    _YesNoDialog,
-    _MessageDialog,
-    _ChoiceDialog,
-    _DropdownDialog,
+    _choice_dialog,
+    _dropdown_dialog,
+    _message_dialog,
+    _yes_no_dialog,
 )
 
 _STILL_OPEN = object()  # _click() result when the click didn't close the dialog
@@ -155,11 +156,6 @@ class TestDialogConfig:
 class TestBaseDialog:
     """Tests for BaseDialog class."""
 
-    def test_base_dialog_is_abstract(self):
-        """BaseDialog cannot be instantiated directly."""
-        with pytest.raises(TypeError):
-            BaseDialog()
-
     def test_custom_dialog_subclass(self):
         """Custom dialog subclass works correctly."""
         class MyDialog(BaseDialog):
@@ -171,8 +167,8 @@ class TestBaseDialog:
 
             def get_buttons(self):
                 return [
-                    ("OK", lambda: self.set_result("ok")),
-                    ("Cancel", self.cancel),
+                    ButtonConfig("OK", result="ok"),
+                    ButtonConfig("Cancel", handler=self.cancel),
                 ]
 
         dialog = MyDialog()
@@ -188,7 +184,7 @@ class TestBaseDialog:
                 return Label("Body")
 
             def get_buttons(self):
-                return [("OK", lambda: None)]
+                return [ButtonConfig("OK")]
 
         dialog = TestDialog()
         widget = dialog._build_widget()
@@ -245,96 +241,44 @@ class TestBaseDialog:
 # Built-in Dialog Tests
 # =============================================================================
 
-class TestYesNoDialog:
-    """Tests for Yes/No dialog."""
+class TestBuiltinDialogs:
+    """The session's built-in dialogs are plain Dialogs."""
 
-    def test_yes_no_dialog_creation(self):
-        """Yes/No dialog is created correctly."""
-        dialog = _YesNoDialog("Confirm", "Are you sure?")
-        assert dialog.title == "Confirm"
-        assert dialog.escape_result is False
+    @staticmethod
+    def _results(dialog: Dialog) -> list[Any]:
+        return [_click(dialog, i) for i in range(len(dialog.get_buttons()))]
 
-    def test_yes_no_dialog_custom_buttons(self):
-        """Yes/No dialog supports custom button text."""
-        dialog = _YesNoDialog(
-            title="Delete",
-            text="Delete file?",
-            yes_text="Delete",
-            no_text="Keep",
-        )
-        buttons = dialog.get_buttons()
-        assert buttons[0][0] == "Delete"
-        assert buttons[1][0] == "Keep"
+    def test_yes_no(self):
+        d = _yes_no_dialog("Delete", "Delete file?", yes_text="Delete", no_text="Keep")
+        assert isinstance(d, Dialog) and d.title == "Delete"
+        assert isinstance(d.build_body(), Label)
+        assert [b.text for b in d.get_buttons()] == ["Delete", "Keep"]
+        assert self._results(d) == [True, False]
+        assert (d.escape_result, d.escapable) == (False, True)
 
-    def test_yes_no_dialog_body(self):
-        """Yes/No dialog body is a Label."""
-        dialog = _YesNoDialog("Test", "Body text")
-        body = dialog.build_body()
-        assert isinstance(body, Label)
+    def test_message(self):
+        d = _message_dialog("Alert", "Warning!", ok_text="Got it")
+        assert [b.text for b in d.get_buttons()] == ["Got it"]
+        assert self._results(d) == [None]
+        assert d.escape_result is None
 
+    def test_choice(self):
+        d = _choice_dialog("Action", "Choose:", ["A", "B", "C"])
+        assert self._results(d) == ["A", "B", "C"]
+        assert d.escape_result is None
 
-class TestMessageDialog:
-    """Tests for message dialog."""
+    def test_dropdown_preselects_default_and_ok_returns_selection(self):
+        d = _dropdown_dialog("Theme", "Select:", ["Light", "Dark", "System"], default="Dark")
+        assert isinstance(d.build_body(), HSplit)
+        assert [b.text for b in d.get_buttons()] == ["OK", "Cancel"]
+        assert self._results(d) == ["Dark", None]
 
-    def test_message_dialog_creation(self):
-        """Message dialog is created correctly."""
-        dialog = _MessageDialog("Info", "Done!")
-        assert dialog.title == "Info"
-        assert dialog.escape_result is None
+    def test_dropdown_without_default_selects_first(self):
+        assert _click(_dropdown_dialog("Theme", "Select:", ["Light", "Dark"]), 0) == "Light"
 
-    def test_message_dialog_custom_ok(self):
-        """Message dialog supports custom OK text."""
-        dialog = _MessageDialog("Alert", "Warning!", ok_text="Got it")
-        buttons = dialog.get_buttons()
-        assert buttons[0][0] == "Got it"
-
-
-class TestChoiceDialog:
-    """Tests for choice dialog."""
-
-    def test_choice_dialog_creation(self):
-        """Choice dialog is created correctly."""
-        dialog = _ChoiceDialog("Action", "Choose:", ["A", "B", "C"])
-        assert dialog.title == "Action"
-        buttons = dialog.get_buttons()
-        assert len(buttons) == 3
-        assert buttons[0][0] == "A"
-        assert buttons[1][0] == "B"
-        assert buttons[2][0] == "C"
-
-    def test_choice_dialog_escape_returns_none(self):
-        """Choice dialog returns None on escape."""
-        dialog = _ChoiceDialog("Test", "Choose:", ["X", "Y"])
-        assert dialog.escape_result is None
-
-
-class TestDropdownDialog:
-    """Tests for dropdown dialog."""
-
-    def test_dropdown_dialog_creation(self):
-        """Dropdown dialog is created correctly."""
-        dialog = _DropdownDialog(
-            "Theme",
-            "Select:",
-            ["Light", "Dark", "System"],
-        )
-        assert dialog.title == "Theme"
-
-    def test_dropdown_dialog_with_default(self):
-        """Dropdown dialog respects default selection."""
-        dialog = _DropdownDialog(
-            "Theme",
-            "Select:",
-            ["Light", "Dark", "System"],
-            default="Dark",
-        )
-        assert dialog._radio_list.current_value == "Dark"
-
-    def test_dropdown_dialog_body_has_radiolist(self):
-        """Dropdown dialog body contains RadioList."""
-        dialog = _DropdownDialog("Test", "Select:", ["A", "B"])
-        body = dialog.build_body()
-        assert isinstance(body, HSplit)
+    def test_dropdown_needs_at_least_one_option(self):
+        with pytest.raises(ValueError, match="at least one option"):
+            _dropdown_dialog("Theme", "Select:", [])
 
 
 # =============================================================================
@@ -378,10 +322,7 @@ class TestConfigBasedDialog:
             ],
         )
         dialog = _ConfigBasedDialog(config)
-        buttons = dialog.get_buttons()
-        assert len(buttons) == 2
-        assert buttons[0][0] == "Save"
-        assert buttons[1][0] == "Cancel"
+        assert [b.text for b in dialog.get_buttons()] == ["Save", "Cancel"]
 
     def test_config_based_dialog_escape_result(self):
         """ConfigBasedDialog inherits escape_result from config."""
@@ -519,7 +460,7 @@ class TestDialogManager:
         mock_session.app.key_bindings = None
         manager = DialogManager(mock_session)
 
-        first = _MessageDialog("First", "body")
+        first = _message_dialog("First", "body")
         show_task = asyncio.create_task(manager.show(first))
 
         # Let show() advance to awaiting the first dialog's result.
@@ -530,7 +471,7 @@ class TestDialogManager:
         assert manager._current_dialog is first
 
         with pytest.raises(RuntimeError, match="already being shown"):
-            await manager.show(_MessageDialog("Second", "body"))
+            await manager.show(_message_dialog("Second", "body"))
 
         # The first dialog is unaffected and still resolvable.
         first.set_result("done")
@@ -594,7 +535,7 @@ class TestDialogIntegration:
     """Integration tests for dialog result flow."""
 
     def test_dialog_result_flow(self):
-        """Dialog result is properly passed through future."""
+        """A subclass button's result reaches the awaiter."""
         class ResultDialog(BaseDialog):
             title = "Test"
 
@@ -602,30 +543,12 @@ class TestDialogIntegration:
                 return Label("Test")
 
             def get_buttons(self):
-                return [("OK", lambda: self.set_result({"key": "value"}))]
+                return [ButtonConfig("OK", result={"key": "value"})]
 
-        dialog = ResultDialog()
-
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            # Simulate prepare
-            future = loop.create_future()
-            dialog._result_future = future
-
-            # Simulate button click
-            buttons = dialog.get_buttons()
-            buttons[0][1]()  # Click OK
-
-            assert future.done()
-            assert future.result() == {"key": "value"}
-        finally:
-            loop.close()
+        assert _click(ResultDialog(), 0) == {"key": "value"}
 
     def test_multiple_buttons_return_correct_results(self):
         """Each button returns its configured result."""
-        results = []
-
         class MultiButtonDialog(BaseDialog):
             title = "Test"
 
@@ -633,26 +556,10 @@ class TestDialogIntegration:
                 return Label("Choose")
 
             def get_buttons(self):
-                return [
-                    ("A", lambda: self.set_result("a")),
-                    ("B", lambda: self.set_result("b")),
-                    ("C", lambda: self.set_result("c")),
-                ]
+                return [ButtonConfig(t, result=t.lower()) for t in ("A", "B", "C")]
 
-        for expected, idx in [("a", 0), ("b", 1), ("c", 2)]:
-            dialog = MultiButtonDialog()
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                future = loop.create_future()
-                dialog._result_future = future
-
-                buttons = dialog.get_buttons()
-                buttons[idx][1]()  # Click button
-
-                assert future.result() == expected
-            finally:
-                loop.close()
+        dialog = MultiButtonDialog()
+        assert [_click(dialog, i) for i in range(3)] == ["a", "b", "c"]
 
 
 # =============================================================================
@@ -673,9 +580,8 @@ class TestDialogEdgeCases:
             # Uses default get_buttons() which returns [("OK", ...)]
 
         dialog = NoButtonDialog()
-        buttons = dialog.get_buttons()
-        assert len(buttons) == 1
-        assert buttons[0][0] == "OK"
+        assert [b.text for b in dialog.get_buttons()] == ["OK"]
+        assert _click(dialog, 0) is None
 
     def test_dialog_escape_disabled(self):
         """A dialog opts out of Escape with escapable = False."""
@@ -726,24 +632,7 @@ class TestDialogEdgeCases:
             ],
         )
         dialog = _ConfigBasedDialog(config)
-        buttons = dialog.get_buttons()
-
-        # Test each button
-        for expected, idx in [(1, 0), (2, 1), (3, 2)]:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                future = loop.create_future()
-                dialog._result_future = future
-
-                buttons[idx][1]()  # Click button
-
-                assert future.result() == expected
-
-                # Reset for next iteration
-                dialog._result_future = None
-            finally:
-                loop.close()
+        assert [_click(dialog, i) for i in range(3)] == [1, 2, 3]
 
 
 
@@ -761,7 +650,7 @@ class TestDeprecatedUnsetEscape:
                 return Label("body")
 
             def get_buttons(self):
-                return [("OK", lambda: self.set_result("ok")), ("Cancel", self.cancel)]
+                return [ButtonConfig("OK", result="ok"), ButtonConfig("Cancel", handler=self.cancel)]
 
         return Legacy()
 
@@ -796,3 +685,157 @@ class TestDeprecatedUnsetEscape:
             assert dialog._result_future.result() is None
         finally:
             loop.close()
+
+
+class TestDialog:
+    """Dialog is concrete: built from arguments or subclassed. Its class
+    attributes are the only defaults."""
+
+    def test_defaults_come_from_class_attributes(self):
+        d = Dialog()
+        assert (d.title, d.body) == ("", "")
+        assert [b.text for b in d.get_buttons()] == ["OK"]
+        assert (d.escape_result, d.escapable) == (None, True)
+        assert (d.width, d.top, d.height) == (None, None, None)
+
+    def test_positional_title_body_buttons(self):
+        buttons = [ButtonConfig("Yes", result=True)]
+        d = Dialog("Delete?", "Sure?", buttons)
+        assert (d.title, d.body) == ("Delete?", "Sure?")
+        assert d.get_buttons() == buttons
+
+    def test_constructor_overrides_only_passed_options(self):
+        class Wide(Dialog):
+            width = 70
+            escape_result = "dismissed"
+
+        d = Wide(title="T", top=2)
+        assert (d.title, d.top) == ("T", 2)
+        assert (d.width, d.escape_result) == (70, "dismissed")
+
+    def test_explicit_none_overrides_a_class_default(self):
+        class Wide(Dialog):
+            width = 70
+            top = 3
+            escape_result = "dismissed"
+
+        d = Wide(width=None, top=None, escape_result=None)
+        assert (d.width, d.top, d.escape_result) == (None, None, None)
+
+    def test_subclass_attributes_and_super_init_arguments(self):
+        class Confirm(Dialog):
+            title = "Confirm"
+            escapable = False
+
+            def __init__(self) -> None:
+                super().__init__(width=50)
+
+        d = Confirm()
+        assert (d.title, d.escapable, d.width) == ("Confirm", False, 50)
+
+    def test_text_body_becomes_label_container_body_is_kept(self):
+        assert isinstance(Dialog(body="hi").build_body(), Label)
+        container = HSplit([Label("x")])
+        assert Dialog(body=container).build_body() is container
+
+    def test_formatted_text_body_becomes_label(self):
+        from prompt_toolkit.formatted_text import HTML
+
+        assert isinstance(Dialog(body=HTML("<b>hi</b>")).build_body(), Label)
+
+    def test_explicit_empty_buttons_means_no_buttons(self):
+        assert Dialog("T", "B", buttons=[]).get_buttons() == []
+
+    def test_get_buttons_returns_a_fresh_list(self):
+        d = Dialog()
+        d.get_buttons().append(ButtonConfig("Extra"))
+        assert [b.text for b in d.get_buttons()] == ["OK"]
+
+
+class TestDialogButtons:
+    """One button form: ButtonConfig, with a fixed result or a handler."""
+
+    def test_result_button_closes_with_its_result(self):
+        d = Dialog("T", "B", [ButtonConfig("A", result="a"), ButtonConfig("B", result="b")])
+        assert [_click(d, 0), _click(d, 1)] == ["a", "b"]
+
+    def test_handler_runs_and_can_leave_the_dialog_open(self):
+        attempts: list[str] = []
+
+        def submit() -> None:
+            attempts.append("submit")
+            if len(attempts) == 2:
+                d.set_result("done")
+
+        d = Dialog("T", "B", [ButtonConfig("Submit", handler=submit)])
+        assert _click(d, 0) is _STILL_OPEN
+        assert _click(d, 0) == "done"
+        assert attempts == ["submit", "submit"]
+
+    def test_handler_can_cancel(self):
+        class Asks(Dialog):
+            escape_result = "dismissed"
+
+            def get_buttons(self):
+                return [ButtonConfig("Cancel", handler=self.cancel)]
+
+        assert _click(Asks(), 0) == "dismissed"
+
+    def test_focused_and_style_apply_in_subclass_dialogs(self):
+        from prompt_toolkit.application import create_app_session
+        from prompt_toolkit.input import create_pipe_input
+        from prompt_toolkit.output import DummyOutput
+
+        class Styled(Dialog):
+            def get_buttons(self):
+                return [ButtonConfig("One"), ButtonConfig("Two", focused=True, style="class:danger")]
+
+        d = Styled()
+        d._build_widget()
+        assert d._focused_button is d._buttons[1]
+        assert d._initial_focus is d._buttons[1].window
+        with create_pipe_input() as inp, create_app_session(input=inp, output=DummyOutput()):
+            style = d._buttons[1].window.style
+            assert "class:danger" in (style() if callable(style) else style)
+
+    def test_tuple_buttons_raise_with_migration_hint(self):
+        class Old(Dialog):
+            def get_buttons(self):
+                return [("OK", lambda: None)]
+
+        with pytest.raises(TypeError, match=r"Use ButtonConfig\(label, handler=\.\.\.\)"):
+            Old()._build_widget()
+
+    async def test_handler_exception_is_reported_and_dialog_stays_open(self, caplog):
+        import logging
+
+        from thinking_prompt import ThinkingPromptSession
+
+        def boom() -> None:
+            raise KeyError("x")
+
+        session = ThinkingPromptSession()
+        d = Dialog("T", "B", [ButtonConfig("Go", handler=boom)])
+        d._prepare(session._dialogs)
+        d._build_widget()
+        with caplog.at_level(logging.ERROR, logger="thinking_prompt"):
+            d._buttons[0].handler()
+
+        assert d._result_future is not None and not d._result_future.done()
+        last = session._display.history.iter_entries()[-1]
+        assert last.text == "[ERROR] Dialog button error: KeyError: 'x'\n"
+        assert any(r.exc_info and r.exc_info[0] is KeyError for r in caplog.records)
+
+    async def test_same_dialog_can_be_shown_twice(self):
+        from thinking_prompt import ThinkingPromptSession
+
+        session = ThinkingPromptSession()
+        d = Dialog("T", "B", [ButtonConfig("OK", result="ok")])
+        for expected in ("first", "second"):
+            task = asyncio.create_task(session.show_dialog(d))
+            for _ in range(20):
+                await asyncio.sleep(0)
+                if session._dialogs._current_dialog is d:
+                    break
+            d.set_result(expected)
+            assert await asyncio.wait_for(task, timeout=1) == expected

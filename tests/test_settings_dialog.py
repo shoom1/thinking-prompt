@@ -503,3 +503,22 @@ class TestSettingsDialogRefactored:
         body = dialog.build_body()
 
         assert isinstance(body, HSplit)
+
+
+class TestSettingsDialogIsADialog:
+    def test_options_pass_through_to_dialog(self):
+        from thinking_prompt.dialog import Dialog
+
+        d = SettingsDialog(title="S", items=[], width=40, top=1, height=15, can_cancel=False)
+        assert isinstance(d, Dialog)
+        assert (d.title, d.width, d.top, d.height, d.escapable) == ("S", 40, 1, 15, False)
+
+    @pytest.mark.parametrize(
+        "can_cancel,labels", [(True, ["Save", "Cancel"]), (False, ["Done"])]
+    )
+    def test_buttons_are_button_configs(self, can_cancel, labels):
+        from thinking_prompt.dialog import ButtonConfig
+
+        buttons = SettingsDialog(title="S", items=[], can_cancel=can_cancel).get_buttons()
+        assert all(isinstance(b, ButtonConfig) for b in buttons)
+        assert [b.text for b in buttons] == labels
