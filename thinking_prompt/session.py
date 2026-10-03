@@ -51,7 +51,7 @@ from .layout import create_layout
 from .manager import ThinkingBoxManager
 from .rich_utils import _is_rich_renderable
 from .styles import DEFAULT_STYLES, ThinkingPromptStyles, resolve_theme
-from .types import ThinkingContext
+from .types import ThinkingContext, format_exception_detail
 
 logger = logging.getLogger(__name__)
 
@@ -1240,7 +1240,7 @@ class ThinkingPromptSession:
         ``thinking_prompt`` logger, visible once the app configures logging.
         """
         logger.error("Input handler raised", exc_info=exc)
-        detail = f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
+        detail = format_exception_detail(exc)
         self.add_error(f"Handler error: {detail}")
 
     def _exit_app(self) -> None:

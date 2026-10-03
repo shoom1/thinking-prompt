@@ -34,6 +34,7 @@ Example usage:
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -63,6 +64,8 @@ from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.widgets import Button, Label, RadioList
 from prompt_toolkit.widgets import Dialog as _DialogWidget
 
+from .types import format_exception_detail
+
 if TYPE_CHECKING:
     from .session import ThinkingPromptSession
 
@@ -74,7 +77,7 @@ logger = logging.getLogger(__name__)
 _TERMINAL_TOO_SMALL = object()
 
 
-@dataclass
+@dataclass(frozen=True)
 class ButtonConfig:
     """
     A dialog button.
@@ -100,6 +103,12 @@ class ButtonConfig:
             raise ValueError(
                 "ButtonConfig takes a result or a handler, not both: a handler "
                 "decides the result itself (dialog.set_result(...))."
+            )
+        if inspect.iscoroutinefunction(self.handler):
+            raise TypeError(
+                "ButtonConfig handler must be a regular function, not async: "
+                "start async work from it (e.g. asyncio.ensure_future(...)) "
+                "and call dialog.set_result(...) when it's done."
             )
 
 
@@ -161,7 +170,7 @@ class Dialog:
 
             def get_buttons(self):
                 return [
-                    ButtonConfig("Login", handler=self.on_login, focused=True),
+                    ButtonConfig("Login", handler=self.on_login),
                     ButtonConfig("Cancel", handler=self.cancel),
                 ]
 
@@ -348,11 +357,18 @@ class Dialog:
 
         def click() -> None:
             try:
-                handler()
+                result = handler()
+                if inspect.isawaitable(result):
+                    if hasattr(result, "close"):
+                        result.close()
+                    raise TypeError(
+                        "button handler returned an awaitable; handlers "
+                        "must be regular functions"
+                    )
             except Exception as exc:
                 logger.error("Dialog button handler raised", exc_info=exc)
                 if self._manager is not None:
-                    detail = f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
+                    detail = format_exception_detail(exc)
                     self._manager._session.add_error(f"Dialog button error: {detail}")
 
         return click
@@ -539,8 +555,16 @@ class DialogManager:
         manager is left closed, so later dialogs can still be shown.
         """
         if not isinstance(dialog, Dialog):
+            if isinstance(dialog, type) and issubclass(dialog, Dialog):
+                raise TypeError(
+                    f"show_dialog() takes a Dialog instance, got the class "
+                    f"{dialog.__qualname__}: call it, e.g. "
+                    f"show_dialog({dialog.__qualname__}())."
+                )
+            t = type(dialog)
+            name = t.__qualname__ if t.__module__ == "builtins" else f"{t.__module__}.{t.__qualname__}"
             raise TypeError(
-                f"show_dialog() takes a Dialog, got {type(dialog).__name__}. "
+                f"show_dialog() takes a thinking_prompt.Dialog, got {name}. "
                 "(DialogConfig was removed in 0.4: use Dialog(title, body, "
                 "buttons, ...).)"
             )

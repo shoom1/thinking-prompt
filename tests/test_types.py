@@ -399,3 +399,17 @@ class TestTruncateTail:
         assert fragment_list_to_text(frags) == "...\nc"
         assert all("ansired" not in s for s, t in frags if t == ".")
         assert all("ansired" in s for s, t in frags if t == "c")
+
+
+class TestFormatExceptionDetail:
+    """format_exception_detail(): one formatter for exception detail lines."""
+
+    def test_exception_with_message_includes_type_and_message(self):
+        from thinking_prompt.types import format_exception_detail
+
+        assert format_exception_detail(KeyError("x")) == "KeyError: 'x'"
+
+    def test_exception_without_message_is_just_the_type_name(self):
+        from thinking_prompt.types import format_exception_detail
+
+        assert format_exception_detail(RuntimeError()) == "RuntimeError"

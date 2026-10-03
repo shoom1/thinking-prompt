@@ -281,17 +281,17 @@ def dialog_open(session: ThinkingPromptSession) -> bool:
 
 class TestDialogEscape:
     """Escape closes a dialog with its escape_result (None by default) —
-    config-based dialogs included — unless the dialog sets escapable=False."""
+    dialogs built with arguments included — unless the dialog sets escapable=False."""
 
     @staticmethod
-    def _config(**kwargs: Any) -> Dialog:
+    def _dialog(**kwargs: Any) -> Dialog:
         return Dialog("Pick", "Choose", [ButtonConfig("OK", result="ok")], **kwargs)
 
-    async def test_escape_closes_config_dialog_with_none_by_default(self):
+    async def test_escape_closes_dialog_with_none_by_default(self):
         results: list[Any] = []
 
         async def handler(text: str) -> None:
-            results.append(await session.show_dialog(self._config()))
+            results.append(await session.show_dialog(self._dialog()))
 
         with piped_session() as (session, inp):
 
@@ -307,7 +307,7 @@ class TestDialogEscape:
         results: list[Any] = []
 
         async def handler(text: str) -> None:
-            results.append(await session.show_dialog(self._config(escapable=False)))
+            results.append(await session.show_dialog(self._dialog(escapable=False)))
 
         with piped_session() as (session, inp):
 
@@ -345,6 +345,51 @@ class TestDialogsEndToEnd:
                 [ButtonConfig("Login", handler=login), ButtonConfig("Cancel")],
             )
             results.append(await session.show_dialog(dlg))
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_open(session))
+                inp.send_text(TAB + ENTER)  # Login with the field still empty
+                await asyncio.sleep(0.2)
+                assert results == [] and dialog_open(session)
+                inp.send_text(SHIFT_TAB + "alice" + TAB + ENTER)
+                await wait_until(lambda: results == ["alice"])
+
+            await run_with(session, handler, script)
+
+    async def test_subclassed_login_dialog_types_into_its_field(self):
+        """Pins the documented subclass pattern (README's LoginDialog):
+        focus must start on the field, not a button, or typed text never
+        reaches it."""
+        from prompt_toolkit.layout import HSplit
+        from prompt_toolkit.widgets import Label, TextArea
+
+        class LoginDialog(Dialog):
+            title = "Login"
+
+            def __init__(self):
+                super().__init__()
+                self.user = TextArea(multiline=False)
+
+            def build_body(self):
+                return HSplit([Label("Username:"), self.user])
+
+            def get_buttons(self):
+                return [
+                    ButtonConfig("Login", handler=self.login),
+                    ButtonConfig("Cancel", handler=self.cancel),
+                ]
+
+            def login(self):
+                if self.user.text:
+                    self.set_result(self.user.text)
+
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.show_dialog(LoginDialog()))
 
         with piped_session() as (session, inp):
 
