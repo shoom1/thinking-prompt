@@ -86,18 +86,30 @@ _TERMINAL_TOO_SMALL = object()
 @dataclass
 class ButtonConfig:
     """
-    Configuration for a dialog button.
+    A dialog button.
 
     Attributes:
         text: Button label text.
-        result: Value returned when this button is clicked.
-        focused: If True, this button gets initial focus.
-        style: Optional style class for the button.
+        result: Value the dialog returns when this button is clicked.
+        focused: If True, this button gets initial focus (the first one wins).
+        style: Optional extra style for the button.
+        handler: Optional function run on click instead of returning
+            ``result``. It decides what happens: call ``set_result(...)`` or
+            ``cancel()`` on the dialog to close it, or return without closing
+            (e.g. while input fails validation).
     """
     text: str
     result: Any = None
     focused: bool = False
     style: str = ""
+    handler: Callable[[], None] | None = None
+
+    def __post_init__(self) -> None:
+        if self.handler is not None and self.result is not None:
+            raise ValueError(
+                "ButtonConfig takes a result or a handler, not both: a handler "
+                "decides the result itself (dialog.set_result(...))."
+            )
 
 
 @dataclass
@@ -356,13 +368,15 @@ class _ConfigBasedDialog(BaseDialog):
 
     def _build_buttons(self) -> list[Button]:
         """Build Button widgets, applying per-button style and focus flag."""
-        def _make_handler(result: Any) -> Callable[[], None]:
-            return lambda: self.set_result(result)
+        def _make_handler(cfg: ButtonConfig) -> Callable[[], None]:
+            if cfg.handler is not None:
+                return cfg.handler
+            return lambda: self.set_result(cfg.result)
 
         widgets: list[Button] = []
         focused: Button | None = None
         for cfg in self._config.buttons:
-            btn = Button(text=cfg.text, handler=_make_handler(cfg.result))
+            btn = Button(text=cfg.text, handler=_make_handler(cfg))
             _apply_button_style(btn, cfg.style)
             if cfg.focused and focused is None:
                 focused = btn
