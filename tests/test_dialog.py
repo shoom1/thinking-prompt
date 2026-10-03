@@ -87,10 +87,11 @@ class TestDialogConfig:
         )
         assert config.body is container
 
-    def test_dialog_config_escape_disabled_by_default(self):
-        """DialogConfig has escape disabled by default."""
+    def test_dialog_config_escape_enabled_by_default(self):
+        """Like every other dialog, a DialogConfig closes on Escape with None."""
         config = DialogConfig(title="Test", body="Body")
-        assert isinstance(config.escape_result, type(_UNSET))
+        assert config.escapable is True
+        assert config.escape_result is None
 
     def test_dialog_config_escape_enabled(self):
         """DialogConfig can enable escape with result."""
@@ -641,10 +642,10 @@ class TestDialogEdgeCases:
         assert buttons[0][0] == "OK"
 
     def test_dialog_escape_disabled(self):
-        """Dialog with escape disabled doesn't set result."""
+        """A dialog opts out of Escape with escapable = False."""
         class NoEscapeDialog(BaseDialog):
             title = "Important"
-            escape_result = _UNSET  # Escape disabled
+            escapable = False
 
             def build_body(self):
                 return Label("Must click button")
@@ -652,9 +653,8 @@ class TestDialogEdgeCases:
             def get_buttons(self):
                 return [("Acknowledge", lambda: self.set_result(True))]
 
-        dialog = NoEscapeDialog()
-        from thinking_prompt.dialog import _Unset
-        assert isinstance(dialog.escape_result, _Unset)
+        assert NoEscapeDialog().escapable is False
+        assert BaseDialog.escapable is True
 
     def test_set_result_only_works_once(self):
         """Setting result multiple times doesn't change first result."""
@@ -708,3 +708,55 @@ class TestDialogEdgeCases:
                 dialog._result_future = None
             finally:
                 loop.close()
+
+
+
+class TestDeprecatedUnsetEscape:
+    """escape_result=_UNSET (the old, private way to disable Escape) still
+    works, but warns — and its sentinel never reaches the caller."""
+
+    @staticmethod
+    def _unset_dialog():
+        class Legacy(BaseDialog):
+            title = "Legacy"
+            escape_result = _UNSET
+
+            def build_body(self):
+                return Label("body")
+
+            def get_buttons(self):
+                return [("OK", lambda: self.set_result("ok")), ("Cancel", self.cancel)]
+
+        return Legacy()
+
+    async def test_unset_disables_escape_and_warns(self):
+        from prompt_toolkit.keys import Keys
+
+        from thinking_prompt import ThinkingPromptSession
+
+        session = ThinkingPromptSession()
+        dialog = self._unset_dialog()
+        with pytest.warns(DeprecationWarning, match="escapable"):
+            task = asyncio.create_task(session.show_dialog(dialog))
+            for _ in range(20):
+                await asyncio.sleep(0)
+                if session._dialogs._current_dialog is dialog:
+                    break
+        escape = next(
+            b for b in session._dialogs._key_bindings.bindings if b.keys == (Keys.Escape,)
+        )
+        escape.handler(MagicMock())
+        await asyncio.sleep(0)
+        assert not task.done()
+        dialog.set_result("ok")
+        assert await asyncio.wait_for(task, timeout=1) == "ok"
+
+    def test_cancel_returns_none_not_the_sentinel(self):
+        dialog = self._unset_dialog()
+        loop = asyncio.new_event_loop()
+        try:
+            dialog._result_future = loop.create_future()
+            dialog.cancel()
+            assert dialog._result_future.result() is None
+        finally:
+            loop.close()

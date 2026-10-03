@@ -256,6 +256,11 @@ config = DialogConfig(
 result = await session.show_dialog(config)
 ```
 
+Escape closes any dialog and returns `None` (or the dialog's
+`escape_result`). To require a button press instead, pass
+`escapable=False` to `DialogConfig`, or set `escapable = False` on a
+`BaseDialog` subclass.
+
 ### Settings Dialog
 
 A form-based dialog for configuring multiple settings at once:

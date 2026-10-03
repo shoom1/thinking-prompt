@@ -17,13 +17,14 @@ from prompt_toolkit.application import create_app_session
 from prompt_toolkit.input import PipeInput, create_pipe_input
 from prompt_toolkit.output import DummyOutput
 
-from thinking_prompt import TextItem, ThinkingPromptSession
+from thinking_prompt import ButtonConfig, DialogConfig, TextItem, ThinkingPromptSession
 
 CTRL_A = "\x01"
 CTRL_C = "\x03"
 CTRL_D = "\x04"
 CTRL_S = "\x13"
 ENTER = "\r"
+ESCAPE = "\x1b"
 
 
 @contextmanager
@@ -266,5 +267,56 @@ class TestCtrlDInDialog:
                 inp.send_text(draft + CTRL_D)
                 await asyncio.sleep(0.2)
                 assert run.done() is (draft == "")
+
+            await run_with(session, handler, script)
+
+
+def dialog_open(session: ThinkingPromptSession) -> bool:
+    dm = session._dialog_manager
+    return dm is not None and dm._visible
+
+
+class TestDialogEscape:
+    """Escape closes a dialog with its escape_result (None by default) —
+    config-based dialogs included — unless the dialog sets escapable=False."""
+
+    @staticmethod
+    def _config(**kwargs: Any) -> DialogConfig:
+        return DialogConfig(
+            title="Pick", body="Choose", buttons=[ButtonConfig("OK", result="ok")], **kwargs
+        )
+
+    async def test_escape_closes_config_dialog_with_none_by_default(self):
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.show_dialog(self._config()))
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_open(session))
+                inp.send_text(ESCAPE)
+                await wait_until(lambda: results == [None])
+
+            await run_with(session, handler, script)
+
+    async def test_not_escapable_dialog_ignores_escape(self):
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.show_dialog(self._config(escapable=False)))
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_open(session))
+                inp.send_text(ESCAPE)
+                await asyncio.sleep(1.0)  # past prompt_toolkit's Escape timeout
+                assert results == [] and dialog_open(session)
+                inp.send_text(ENTER)  # the focused OK button
+                await wait_until(lambda: results == ["ok"])
 
             await run_with(session, handler, script)

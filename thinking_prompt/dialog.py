@@ -38,6 +38,7 @@ Example usage:
 from __future__ import annotations
 
 import asyncio
+import warnings
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -67,9 +68,10 @@ if TYPE_CHECKING:
     from .session import ThinkingPromptSession
 
 
-# Sentinel value for "escape disabled"
+# Legacy sentinel: escape_result=_UNSET used to be the (private) way to
+# disable Escape. Deprecated in favor of escapable=False; still honored.
 class _Unset:
-    """Sentinel for unset escape_result (meaning escape is disabled)."""
+    """Legacy escape_result sentinel meaning "Escape disabled" (deprecated)."""
     pass
 
 
@@ -107,14 +109,16 @@ class DialogConfig:
         title: Dialog title displayed in the border.
         body: Dialog body - either a string or a prompt_toolkit Container.
         buttons: List of ButtonConfig objects defining the buttons.
-        escape_result: Value returned when Escape is pressed.
-                      Use _UNSET (default) to disable Escape key.
+        escape_result: Value returned when Escape is pressed (default None).
+        escapable: If False, Escape does nothing; only a button closes the
+                   dialog. Default True, as for every other dialog.
         width: Optional fixed width for the dialog.
     """
     title: str
     body: str | AnyContainer
     buttons: list[ButtonConfig] = field(default_factory=list)
-    escape_result: Any = _UNSET
+    escape_result: Any = None
+    escapable: bool = True
     width: int | None = None
 
 
@@ -127,8 +131,9 @@ class BaseDialog(ABC):
 
     Attributes:
         title: Dialog title (class attribute or property).
-        escape_result: Value returned when Escape is pressed.
-                      Set to _UNSET to disable Escape key.
+        escape_result: Value returned when Escape is pressed, or by cancel()
+                      (default None).
+        escapable: If False, Escape does nothing (default True).
 
     Example:
         class LoginDialog(BaseDialog):
@@ -158,6 +163,7 @@ class BaseDialog(ABC):
 
     title: str = "Dialog"
     escape_result: Any = None
+    escapable: bool = True
     width: int | None = None  # None/0=auto, >0=min width, -1=max width
     # Vertical position: None=center, 0+=from top, negative=from bottom
     top: int | None = None
@@ -235,9 +241,18 @@ class BaseDialog(ABC):
         """
         Cancel the dialog and return escape_result.
 
-        Convenience method for cancel buttons.
+        Convenience method for cancel buttons. Works whether or not the
+        dialog is escapable.
         """
-        self.set_result(self.escape_result)
+        self.set_result(self._escape_value())
+
+    def _escape_value(self) -> Any:
+        """escape_result — never the legacy _UNSET sentinel (that means None)."""
+        return None if isinstance(self.escape_result, _Unset) else self.escape_result
+
+    def _escape_enabled(self) -> bool:
+        """Whether Escape closes the dialog (escapable, and not legacy _UNSET)."""
+        return self.escapable and not isinstance(self.escape_result, _Unset)
 
     # Chrome height = title bar (2) + button row (2) + padding (1) around the body.
     # Used when `height` is set to compute the body area from the total.
@@ -321,6 +336,7 @@ class _ConfigBasedDialog(BaseDialog):
         self._config = config
         self.title = config.title
         self.escape_result = config.escape_result
+        self.escapable = config.escapable
         self.width = config.width
 
     def build_body(self) -> AnyContainer:
@@ -524,10 +540,9 @@ class DialogManager:
 
         @kb.add("escape", filter=Condition(lambda: self._visible))
         def handle_escape(event: Any) -> None:
-            if self._current_dialog:
-                escape_result = self._current_dialog.escape_result
-                if not isinstance(escape_result, _Unset):
-                    self._current_dialog.set_result(escape_result)
+            dialog = self._current_dialog
+            if dialog and dialog._escape_enabled():
+                dialog.set_result(dialog.escape_result)
 
         return kb
 
@@ -577,8 +592,8 @@ class DialogManager:
             The result value set by the dialog (via button click or Escape).
             If the dialog's ``height`` is set and the terminal is too small
             to fit the minimum viable dialog, shows an error to the user and
-            returns ``dialog.escape_result`` (or None if escape is disabled)
-            without showing the dialog.
+            returns ``dialog.escape_result`` (or None if the dialog isn't
+            escapable) without showing the dialog.
 
         Raises:
             RuntimeError: If a dialog is already being shown. Showing a
@@ -603,11 +618,18 @@ class DialogManager:
         if isinstance(dialog, DialogConfig):
             dialog = _ConfigBasedDialog(dialog)
 
+        if isinstance(dialog.escape_result, _Unset):
+            warnings.warn(
+                "escape_result=_UNSET is deprecated; set escapable=False to "
+                "disable Escape.",
+                DeprecationWarning,
+                stacklevel=3,
+            )
+
         # Clamp dialog.height against terminal height (if height is set).
         effective_height = self._compute_effective_height(dialog)
         if effective_height is _TERMINAL_TOO_SMALL:
-            escape = dialog.escape_result
-            return None if isinstance(escape, _Unset) else escape
+            return dialog.escape_result if dialog._escape_enabled() else None
 
         # Everything after claiming the slot runs under the finally below:
         # if building or focusing the dialog raises (a bug in a custom
