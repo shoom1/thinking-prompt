@@ -38,6 +38,7 @@ from .app_info import AppInfo
 from .dialog import (
     BaseDialog,
     ButtonConfig,
+    Dialog,
     DialogConfig,
 )
 from .layout import ThinkingHeader
@@ -89,6 +90,7 @@ __all__ = [
     "MessageRole",
     "InputHandler",
     # Dialog
+    "Dialog",
     "DialogConfig",
     "ButtonConfig",
     "BaseDialog",
