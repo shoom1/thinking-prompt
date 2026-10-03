@@ -24,7 +24,7 @@ from typing import (
 )
 
 if TYPE_CHECKING:
-    from .dialog import BaseDialog, DialogConfig, DialogManager
+    from .dialog import Dialog, DialogManager
     from .settings_dialog import SettingsItem
     from .types import ContentFormat, Overflow
 
@@ -51,7 +51,7 @@ from .layout import create_layout
 from .manager import ThinkingBoxManager
 from .rich_utils import _is_rich_renderable
 from .styles import DEFAULT_STYLES, ThinkingPromptStyles, resolve_theme
-from .types import ThinkingContext
+from .types import ThinkingContext, format_exception_detail
 
 logger = logging.getLogger(__name__)
 
@@ -1240,7 +1240,7 @@ class ThinkingPromptSession:
         ``thinking_prompt`` logger, visible once the app configures logging.
         """
         logger.error("Input handler raised", exc_info=exc)
-        detail = f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
+        detail = format_exception_detail(exc)
         self.add_error(f"Handler error: {detail}")
 
     def _exit_app(self) -> None:
@@ -1341,8 +1341,8 @@ class ThinkingPromptSession:
             if await session.yes_no_dialog("Confirm", "Delete this file?"):
                 delete_file()
         """
-        from .dialog import _YesNoDialog
-        dialog = _YesNoDialog(title, text, yes_text, no_text)
+        from .dialog import _yes_no_dialog
+        dialog = _yes_no_dialog(title, text, yes_text, no_text)
         return cast(bool, await self._dialogs.show(dialog))
 
     async def message_dialog(
@@ -1362,8 +1362,8 @@ class ThinkingPromptSession:
         Example:
             await session.message_dialog("Info", "Operation completed.")
         """
-        from .dialog import _MessageDialog
-        dialog = _MessageDialog(title, text, ok_text)
+        from .dialog import _message_dialog
+        dialog = _message_dialog(title, text, ok_text)
         await self._dialogs.show(dialog)
 
     async def choice_dialog(
@@ -1392,8 +1392,8 @@ class ThinkingPromptSession:
             if action == "Save":
                 save_file()
         """
-        from .dialog import _ChoiceDialog
-        dialog = _ChoiceDialog(title, text, choices)
+        from .dialog import _choice_dialog
+        dialog = _choice_dialog(title, text, choices)
         return cast(Optional[str], await self._dialogs.show(dialog))
 
     async def dropdown_dialog(
@@ -1423,48 +1423,43 @@ class ThinkingPromptSession:
                 default="System",
             )
         """
-        from .dialog import _DropdownDialog
-        dialog = _DropdownDialog(title, text, options, default)
+        from .dialog import _dropdown_dialog
+        dialog = _dropdown_dialog(title, text, options, default)
         return cast(Optional[str], await self._dialogs.show(dialog))
 
-    async def show_dialog(
-        self,
-        dialog: DialogConfig | BaseDialog,
-    ) -> Any:
+    async def show_dialog(self, dialog: Dialog) -> Any:
         """
-        Show a custom dialog.
+        Show a dialog and wait for its result.
 
         Args:
-            dialog: Either a DialogConfig for simple dialogs,
-                   or a BaseDialog subclass for complex dialogs.
+            dialog: A Dialog, built with arguments or a subclass instance.
 
         Returns:
-            The result value set by the dialog.
+            The result value set by the dialog (a button or Escape).
 
-        Example with DialogConfig:
-            from thinking_prompt.dialog import DialogConfig, ButtonConfig
+        Example (built with arguments):
+            from thinking_prompt import ButtonConfig, Dialog
 
-            config = DialogConfig(
+            result = await session.show_dialog(Dialog(
                 title="Custom",
                 body="Choose an option:",
                 buttons=[
-                    ButtonConfig(text="Option A", result="a"),
-                    ButtonConfig(text="Option B", result="b"),
+                    ButtonConfig("Option A", result="a"),
+                    ButtonConfig("Option B", result="b"),
                 ],
-            )
-            result = await session.show_dialog(config)
+            ))
 
-        Example with BaseDialog subclass:
-            from thinking_prompt.dialog import BaseDialog
+        Example (subclass):
+            from thinking_prompt import ButtonConfig, Dialog
 
-            class MyDialog(BaseDialog):
+            class MyDialog(Dialog):
                 title = "My Dialog"
 
                 def build_body(self):
                     return Label("Custom content")
 
                 def get_buttons(self):
-                    return [("OK", lambda: self.set_result(True))]
+                    return [ButtonConfig("OK", result=True)]
 
             result = await session.show_dialog(MyDialog())
         """

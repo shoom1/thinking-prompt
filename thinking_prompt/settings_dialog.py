@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Callable, Generic, TypeVar
+from typing import Any, Generic, TypeVar
 
 from prompt_toolkit.application.current import get_app
 from prompt_toolkit.buffer import Buffer
@@ -34,7 +34,7 @@ from prompt_toolkit.layout.margins import ScrollbarMargin
 from prompt_toolkit.layout.processors import PasswordProcessor
 from prompt_toolkit.widgets import Frame
 
-from .dialog import BaseDialog
+from .dialog import ButtonConfig, Dialog
 
 
 @dataclass
@@ -688,7 +688,7 @@ class TextControl(SettingControl[TextItem]):
         return kb
 
 
-class SettingsDialog(BaseDialog):
+class SettingsDialog(Dialog):
     """
     A settings dialog using individual controls per setting type.
 
@@ -713,14 +713,14 @@ class SettingsDialog(BaseDialog):
         top: int | None = None,
         height: int | None = None,
     ) -> None:
-        super().__init__()
-        self.title = title
+        # escapable: with can_cancel=False there is no cancel concept, so
+        # Escape is disabled (the Done button is the only way out).
+        # escape_result stays the default None, so nothing but a dict or None
+        # can come back from show_settings_dialog().
+        super().__init__(title, width=width, top=top, height=height, escapable=can_cancel)
         self._items = items
         self._can_cancel = can_cancel
         self._styles = styles or {}
-        self.width = width
-        self.top = top
-        self.height = height
 
         # Original values for change detection
         self._original_values: dict[str, Any] = {}
@@ -735,13 +735,6 @@ class SettingsDialog(BaseDialog):
 
         # Navigation state
         self._focus_index = 0
-
-        # Escape behavior. With can_cancel=False there is no cancel concept:
-        # disable Escape entirely (the Done button is the only way out).
-        # escape_result stays None either way, so nothing but a dict or None
-        # can come back from show_settings_dialog().
-        self.escape_result = None
-        self.escapable = can_cancel
 
     def _create_control(self, item: SettingsItem) -> SettingControl:
         """Create the appropriate control for a settings item."""
@@ -890,12 +883,11 @@ class SettingsDialog(BaseDialog):
         else:
             return controls_container
 
-    def get_buttons(self) -> list[tuple[str, Callable[[], None]]]:
+    def get_buttons(self) -> list[ButtonConfig]:
         """Return dialog buttons."""
         if self._can_cancel:
             return [
-                ("Save", self._on_save),
-                ("Cancel", self.cancel),
+                ButtonConfig("Save", handler=self._on_save),
+                ButtonConfig("Cancel", handler=self.cancel),
             ]
-        else:
-            return [("Done", self._on_save)]
+        return [ButtonConfig("Done", handler=self._on_save)]
