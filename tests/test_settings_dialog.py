@@ -366,6 +366,37 @@ class TestInlineSelectControl:
         assert "gpt-4" in text
 
 
+def _style_of(line, text: str) -> list[str]:
+    """Style classes of the one fragment whose text, stripped, is `text`."""
+    (style,) = [s for s, t in line if t.strip() == text]
+    return style.split()
+
+
+class TestSelectArrows:
+    """Select rows draw their arrows with class:select-arrow (select_arrow)."""
+
+    def test_inline_select_arrows(self):
+        from thinking_prompt.settings_dialog import InlineSelectControl
+
+        item = InlineSelectItem(key="m", label="M", options=["a", "b", "c"], default="b")
+        line = InlineSelectControl(item).create_content(width=40, height=1).get_line(0)
+
+        assert "".join(t for _, t in line).endswith("◀ b ▶")
+        assert "class:select-arrow" in _style_of(line, "◀")
+        assert "class:select-arrow" in _style_of(line, "▶")
+        assert "class:select-arrow" not in _style_of(line, "b")
+
+    def test_dropdown_arrow(self):
+        from thinking_prompt.settings_dialog import DropdownControl
+
+        item = DropdownItem(key="m", label="M", options=["a", "b"], default="b")
+        line = DropdownControl(item).create_content(width=40, height=1).get_line(0)
+
+        assert "".join(t for _, t in line).endswith("b ▼")
+        assert "class:select-arrow" in _style_of(line, "▼")
+        assert "class:select-arrow" not in _style_of(line, "b")
+
+
 class TestTextControl:
     """Tests for TextControl."""
 
