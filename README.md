@@ -228,6 +228,11 @@ session.add_message("system", "Connecting to server...")
 
 ### Dialogs
 
+Dialogs open over a running session: call them from an input handler, or
+from a task started while `run()`/`run_async()` is running. On a session
+that isn't running they raise `RuntimeError`. If the session exits while a
+dialog is open, awaiting it raises `asyncio.CancelledError`.
+
 ```python
 # Yes/No confirmation
 result = await session.yes_no_dialog("Confirm", "Delete this item?")

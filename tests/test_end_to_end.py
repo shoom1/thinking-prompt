@@ -493,3 +493,47 @@ class TestDialogsEndToEnd:
                 await wait_until(lambda: results == [False])
 
             await run_with(session, handler, script)
+
+
+class TestDialogLifetime:
+    """A dialog lives only as long as the app that can answer it."""
+
+    @staticmethod
+    def _dialog() -> Dialog:
+        return Dialog("T", "B", [ButtonConfig("OK", result="ok")])
+
+    async def test_app_exit_cancels_a_dialog_opened_outside_the_handler(self):
+        """A dialog awaited by the input handler is cancelled with it on exit.
+        One opened from another task used to wait forever once the app
+        exited, and the manager kept it, refusing every later dialog."""
+        background: list[asyncio.Future[Any]] = []
+
+        def handler(text: str) -> None:
+            background.append(asyncio.ensure_future(session.show_dialog(self._dialog())))
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_open(session))
+                session.exit()
+                await asyncio.wait_for(run, timeout=2)
+
+            await run_with(session, handler, script)
+
+            (task,) = background
+            with pytest.raises(asyncio.CancelledError):
+                await asyncio.wait_for(task, timeout=1)
+            assert session._dialogs._current_dialog is None
+
+    async def test_show_dialog_after_exit_raises(self):
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                session.exit()
+                await asyncio.wait_for(run, timeout=2)
+
+            await run_with(session, lambda text: None, script)
+
+            with pytest.raises(RuntimeError, match="needs a running session"):
+                await asyncio.wait_for(session.show_dialog(self._dialog()), timeout=1)
