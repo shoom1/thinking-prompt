@@ -366,6 +366,37 @@ class TestInlineSelectControl:
         assert "gpt-4" in text
 
 
+def _style_of(line, text: str) -> list[str]:
+    """Style classes of the one fragment whose text, stripped, is `text`."""
+    (style,) = [s for s, t in line if t.strip() == text]
+    return style.split()
+
+
+class TestSelectArrows:
+    """Select rows draw their arrows with class:select-arrow (select_arrow)."""
+
+    def test_inline_select_arrows(self):
+        from thinking_prompt.settings_dialog import InlineSelectControl
+
+        item = InlineSelectItem(key="m", label="M", options=["a", "b", "c"], default="b")
+        line = InlineSelectControl(item).create_content(width=40, height=1).get_line(0)
+
+        assert "".join(t for _, t in line).endswith("◀ b ▶")
+        assert "class:select-arrow" in _style_of(line, "◀")
+        assert "class:select-arrow" in _style_of(line, "▶")
+        assert "class:select-arrow" not in _style_of(line, "b")
+
+    def test_dropdown_arrow(self):
+        from thinking_prompt.settings_dialog import DropdownControl
+
+        item = DropdownItem(key="m", label="M", options=["a", "b"], default="b")
+        line = DropdownControl(item).create_content(width=40, height=1).get_line(0)
+
+        assert "".join(t for _, t in line).endswith("b ▼")
+        assert "class:select-arrow" in _style_of(line, "▼")
+        assert "class:select-arrow" not in _style_of(line, "b")
+
+
 class TestTextControl:
     """Tests for TextControl."""
 
@@ -522,3 +553,52 @@ class TestSettingsDialogIsADialog:
         buttons = SettingsDialog(title="S", items=[], can_cancel=can_cancel).get_buttons()
         assert all(isinstance(b, ButtonConfig) for b in buttons)
         assert [b.text for b in buttons] == labels
+
+
+class TestSettingsDialogOptions:
+    """0.4 removes styles= (it was never read) and makes the layout options
+    keyword-only: before 0.4 the fourth positional was styles, so a stale
+    positional call must fail instead of shifting into width/top/height."""
+
+    def test_styles_is_gone(self):
+        with pytest.raises(TypeError, match="styles"):
+            SettingsDialog(title="S", items=[], styles={})
+
+    def test_layout_options_are_keyword_only(self):
+        with pytest.raises(TypeError):
+            SettingsDialog("S", [], True, None)
+
+    @pytest.fixture
+    def capturing_session(self, monkeypatch):
+        """A session whose show_settings_dialog() records the dialog instead
+        of opening it (there is no running app to answer it)."""
+        from thinking_prompt import ThinkingPromptSession
+
+        session = ThinkingPromptSession()
+        shown: list = []
+
+        async def capture(dialog):
+            shown.append(dialog)
+
+        monkeypatch.setattr(session._dialogs, "show", capture)
+        return session, shown
+
+    async def test_session_helper_passes_options_through(self, capturing_session):
+        session, shown = capturing_session
+        await session.show_settings_dialog("S", [], False, width=40, top=1, height=15)
+
+        (dialog,) = shown
+        assert (dialog.title, dialog.width, dialog.top, dialog.height) == ("S", 40, 1, 15)
+        assert dialog.escapable is False
+
+    async def test_session_helper_rejects_styles(self, capturing_session):
+        session, shown = capturing_session
+        with pytest.raises(TypeError, match="styles"):
+            await session.show_settings_dialog("S", [], styles={})
+        assert shown == []
+
+    async def test_session_helper_layout_options_are_keyword_only(self, capturing_session):
+        session, shown = capturing_session
+        with pytest.raises(TypeError):
+            await session.show_settings_dialog("S", [], True, None)
+        assert shown == []
