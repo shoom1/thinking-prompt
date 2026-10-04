@@ -342,6 +342,9 @@ class TestDialogManager:
         # MagicMock is rejected by FloatContainer, so provide a real one.
         mock_session.app.layout.container = Window()
         mock_session.app.key_bindings = None
+        # A running app: show() refuses to open a dialog without one.
+        mock_session.app.is_running = True
+        mock_session.app.future = asyncio.get_running_loop().create_future()
         manager = DialogManager(mock_session)
 
         first = _message_dialog("First", "body")
@@ -361,6 +364,32 @@ class TestDialogManager:
         first.set_result("done")
         assert await asyncio.wait_for(show_task, timeout=1) == "done"
         assert manager._current_dialog is None
+
+
+class TestDialogNeedsRunningSession:
+    """A dialog is answered through the running app's key bindings. Without
+    a running app nothing can ever answer it, so show() used to wait
+    forever. (wait_for turns such a hang into a test failure.)"""
+
+    @pytest.mark.parametrize(
+        "open_dialog",
+        [
+            lambda s: s.show_dialog(Dialog("T", "B", [ButtonConfig("OK")])),
+            lambda s: s.yes_no_dialog("T", "B"),
+            lambda s: s.message_dialog("T", "B"),
+            lambda s: s.choice_dialog("T", "B", ["a"]),
+            lambda s: s.dropdown_dialog("T", "B", ["a"]),
+            lambda s: s.show_settings_dialog("T", []),
+        ],
+        ids=["show_dialog", "yes_no", "message", "choice", "dropdown", "settings"],
+    )
+    async def test_raises_before_the_session_runs(self, open_dialog):
+        from thinking_prompt import ThinkingPromptSession
+
+        session = ThinkingPromptSession()
+        with pytest.raises(RuntimeError, match="needs a running session"):
+            await asyncio.wait_for(open_dialog(session), timeout=1)
+        assert session._dialogs._current_dialog is None
 
 
 class TestDialogManagerFailureRecovery:
@@ -384,26 +413,22 @@ class TestDialogManagerFailureRecovery:
         assert manager._visible is False
         assert session.app.layout.has_focus(session.default_buffer)
 
-    async def test_failing_build_body_does_not_block_next_dialog(self):
-        from thinking_prompt import ThinkingPromptSession
-
+    async def test_failing_build_body_does_not_block_next_dialog(self, running_session):
         class Broken(Dialog):
             def build_body(self):
                 raise RuntimeError("bug in build_body")
 
-        session = ThinkingPromptSession()
+        session = running_session
         with pytest.raises(RuntimeError, match="bug in build_body"):
             await session.show_dialog(Broken())
 
         self._assert_closed(session)
         await self._show_and_close_message_dialog(session)
 
-    async def test_dialog_with_nothing_focusable_raises_clear_error(self):
+    async def test_dialog_with_nothing_focusable_raises_clear_error(self, running_session):
         """No buttons (the default) and a plain-text body: nothing can take
         keyboard focus, so typing would go to the hidden prompt instead."""
-        from thinking_prompt import ThinkingPromptSession
-
-        session = ThinkingPromptSession()
+        session = running_session
         with pytest.raises(ValueError, match="nothing to focus"):
             await asyncio.wait_for(session.show_dialog(Dialog("Empty", "hi")), timeout=1)
 
@@ -683,10 +708,8 @@ class TestDialogButtons:
         coro = coros[0]
         assert coro.cr_frame is None
 
-    async def test_same_dialog_can_be_shown_twice(self):
-        from thinking_prompt import ThinkingPromptSession
-
-        session = ThinkingPromptSession()
+    async def test_same_dialog_can_be_shown_twice(self, running_session):
+        session = running_session
         d = Dialog("T", "B", [ButtonConfig("OK", result="ok")])
         for expected in ("first", "second"):
             task = asyncio.create_task(session.show_dialog(d))

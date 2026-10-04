@@ -546,9 +546,13 @@ class DialogManager:
             escapable) without showing the dialog.
 
         Raises:
-            RuntimeError: If a dialog is already being shown. Showing a
-                second dialog would orphan the first one's result future,
-                leaving its awaiter hung forever.
+            RuntimeError: If the session isn't running (not started yet, or
+                ended): only the running app can answer a dialog, so it
+                would wait forever. Also if a dialog is already being
+                shown: a second one would orphan the first one's result
+                future, leaving its awaiter hung forever.
+            asyncio.CancelledError: If the app exits while the dialog is
+                open (e.g. one opened from a background task).
             TypeError: If ``dialog`` isn't a Dialog.
             ValueError: If the dialog has nothing focusable (e.g. no buttons
                 and a text body).
@@ -569,6 +573,16 @@ class DialogManager:
                 f"show_dialog() takes a thinking_prompt.Dialog, got {name}. "
                 "(DialogConfig was removed in 0.4: use Dialog(title, body, "
                 "buttons, ...).)"
+            )
+
+        # Only the running app can answer a dialog (its buttons and Escape
+        # are key bindings). prompt_toolkit sets app.future for the length
+        # of a run, so it also tells us when the app exits.
+        app_done = self._session.app.future
+        if not self._session.app.is_running or app_done is None or app_done.done():
+            raise RuntimeError(
+                "show_dialog() needs a running session: call it while run() "
+                "or run_async() is running, e.g. from an input handler."
             )
 
         if self._current_dialog is not None:
@@ -632,8 +646,18 @@ class DialogManager:
                 self._session.app.layout.focus(dialog._initial_focus)
             self._session.app.invalidate()
 
-            # Wait for result
-            result = await future
+            # Wait for result. If the app exits first, nobody can answer the
+            # dialog any more: cancel it, so the awaiter gets CancelledError
+            # instead of waiting forever.
+            def abandon(_app_done: object) -> None:
+                if not future.done():
+                    future.cancel()
+
+            app_done.add_done_callback(abandon)
+            try:
+                result = await future
+            finally:
+                app_done.remove_done_callback(abandon)
         finally:
             # Hide dialog and restore focus
             self._visible = False

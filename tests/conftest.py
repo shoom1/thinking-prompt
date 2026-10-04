@@ -3,10 +3,15 @@ Shared fixtures for thinking_prompt tests.
 """
 from __future__ import annotations
 
+import asyncio
 import pytest
-from typing import Callable, List
+from typing import AsyncIterator, Callable, List
 
-from thinking_prompt import ThinkingPromptStyles
+from prompt_toolkit.application import create_app_session
+from prompt_toolkit.input import create_pipe_input
+from prompt_toolkit.output import DummyOutput
+
+from thinking_prompt import ThinkingPromptSession, ThinkingPromptStyles
 from thinking_prompt.thinking import ThinkingBoxControl
 from thinking_prompt.history import FormattedTextHistory
 
@@ -64,3 +69,24 @@ def multiline_content() -> str:
 def short_content() -> str:
     """Generate short content that fits in collapsed view."""
     return "\n".join([f"Line {i}" for i in range(3)])
+
+
+@pytest.fixture
+async def running_session() -> AsyncIterator[ThinkingPromptSession]:
+    """A session whose app is running (piped input, no output).
+
+    Dialogs need one: only a running app can answer them, so show_dialog()
+    refuses to open on a session that isn't running.
+    """
+    with create_pipe_input() as inp, create_app_session(input=inp, output=DummyOutput()):
+        session = ThinkingPromptSession()
+        run = asyncio.ensure_future(session.run_async(lambda text: None))
+        deadline = asyncio.get_running_loop().time() + 2
+        while not (session.app.is_running and session.app.future is not None):
+            assert asyncio.get_running_loop().time() < deadline, "app didn't start"
+            await asyncio.sleep(0.01)
+        try:
+            yield session
+        finally:
+            session.exit()
+            await asyncio.wait_for(run, timeout=2)
