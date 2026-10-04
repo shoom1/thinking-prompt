@@ -455,6 +455,14 @@ new theme; output from `add_rich()` and raw ANSI keeps its original colors.
 `NO_COLOR` (non-empty, checked at startup — see no-color.org) forces
 colorless rendering regardless of theme, while keeping bold/italic.
 
+**Upgrading from 0.3:** style settings that did nothing were removed.
+
+| 0.3 | 0.4 |
+|---|---|
+| `ThinkingPromptSession(styles=s)` | `ThinkingPromptSession(theme=s)` |
+| `show_settings_dialog(..., styles=...)`, `SettingsDialog(..., styles=...)` | Drop it (it was never applied). `width=`, `top=` and `height=` are now keyword-only. |
+| `assistant_prefix`, `select_value`, `checkbox_mark`, `user_separator` | Removed: no component drew with them. |
+
 Bound history growth for long sessions:
 
 ```python
