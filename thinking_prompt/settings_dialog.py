@@ -160,12 +160,12 @@ class SettingControl(UIControl, ABC, Generic[T]):
     def _build_setting_row(
         self,
         width: int,
-        value_text: str,
-        value_style: str,
+        value: list[tuple[str, str]],
         is_selected: bool,
     ) -> list[FormattedText]:
         """Build the standard setting row with optional description.
 
+        `value` is the right-aligned value as (style, text) fragments.
         Returns a list of FormattedText lines (1 or 2 depending on description).
         """
         indicator = "> " if is_selected else "  "
@@ -173,14 +173,15 @@ class SettingControl(UIControl, ABC, Generic[T]):
         label_style = "class:setting-label-selected" if is_selected else "class:setting-label"
 
         label_text = self._item.label
-        available = width - len(indicator) - len(label_text) - len(value_text) - 1
+        value_len = sum(len(text) for _, text in value)
+        available = width - len(indicator) - len(label_text) - value_len - 1
         padding = max(1, available)
 
         row: list[tuple[str, str]] = [
             (indicator_style, indicator),
             (label_style, label_text),
             ("", " " * padding),
-            (value_style, value_text),
+            *value,
         ]
 
         lines = [FormattedText(row)]
@@ -219,7 +220,7 @@ class CheckboxControl(SettingControl[CheckboxItem]):
             value_text = "false"
             value_style = "class:setting-value-false-selected" if is_selected else "class:setting-value-false"
 
-        lines = self._build_setting_row(width, value_text, value_style, is_selected)
+        lines = self._build_setting_row(width, [(value_style, value_text)], is_selected)
 
         def get_line(i: int) -> FormattedText:
             return lines[i] if i < len(lines) else FormattedText([])
@@ -282,11 +283,13 @@ class InlineSelectControl(SettingControl[InlineSelectItem]):
         except ValueError:
             idx = 0
 
-        left_arrow = "  " if idx == 0 else "◀ "
-        right_arrow = "  " if idx == len(options) - 1 else " ▶"
-        value_with_arrows = f"{left_arrow}{value_text}{right_arrow}"
+        # Arrows layer class:select-arrow over the value style; at either
+        # end the missing arrow's place is kept blank.
+        arrow_style = f"{value_style} class:select-arrow"
+        left = (value_style, "  ") if idx == 0 else (arrow_style, "◀ ")
+        right = (value_style, "  ") if idx == len(options) - 1 else (arrow_style, " ▶")
 
-        lines = self._build_setting_row(width, value_with_arrows, value_style, is_selected)
+        lines = self._build_setting_row(width, [left, (value_style, value_text), right], is_selected)
 
         def get_line(i: int) -> FormattedText:
             return lines[i] if i < len(lines) else FormattedText([])
@@ -418,9 +421,12 @@ class DropdownControl(SettingControl[DropdownItem]):
 
         value_text = str(self._value) if self._value else ""
         # Right-align value within dropdown width, add dropdown indicator
-        value_with_arrow = f"{value_text.rjust(self._get_dropdown_width())} ▼"
+        value = [
+            (value_style, f"{value_text.rjust(self._get_dropdown_width())} "),
+            (f"{value_style} class:select-arrow", "▼"),
+        ]
 
-        lines = self._build_setting_row(width, value_with_arrow, value_style, is_selected)
+        lines = self._build_setting_row(width, value, is_selected)
 
         def get_line(i: int) -> FormattedText:
             return lines[i] if i < len(lines) else FormattedText([])
@@ -604,7 +610,7 @@ class TextControl(SettingControl[TextItem]):
         else:
             value_style = "class:setting-value-selected" if is_selected else "class:setting-value"
 
-        lines = self._build_setting_row(width, value_text, value_style, is_selected)
+        lines = self._build_setting_row(width, [(value_style, value_text)], is_selected)
 
         def get_line(i: int) -> FormattedText:
             return lines[i] if i < len(lines) else FormattedText([])
