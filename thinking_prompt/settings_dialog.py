@@ -714,7 +714,7 @@ class SettingsDialog(Dialog):
         title: str,
         items: list[SettingsItem],
         can_cancel: bool = True,
-        styles: dict | None = None,
+        *,
         width: int | None = 60,
         top: int | None = None,
         height: int | None = None,
@@ -726,7 +726,6 @@ class SettingsDialog(Dialog):
         super().__init__(title, width=width, top=top, height=height, escapable=can_cancel)
         self._items = items
         self._can_cancel = can_cancel
-        self._styles = styles or {}
 
         # Original values for change detection
         self._original_values: dict[str, Any] = {}

@@ -553,3 +553,52 @@ class TestSettingsDialogIsADialog:
         buttons = SettingsDialog(title="S", items=[], can_cancel=can_cancel).get_buttons()
         assert all(isinstance(b, ButtonConfig) for b in buttons)
         assert [b.text for b in buttons] == labels
+
+
+class TestSettingsDialogOptions:
+    """0.4 removes styles= (it was never read) and makes the layout options
+    keyword-only: before 0.4 the fourth positional was styles, so a stale
+    positional call must fail instead of shifting into width/top/height."""
+
+    def test_styles_is_gone(self):
+        with pytest.raises(TypeError, match="styles"):
+            SettingsDialog(title="S", items=[], styles={})
+
+    def test_layout_options_are_keyword_only(self):
+        with pytest.raises(TypeError):
+            SettingsDialog("S", [], True, None)
+
+    @pytest.fixture
+    def capturing_session(self, monkeypatch):
+        """A session whose show_settings_dialog() records the dialog instead
+        of opening it (there is no running app to answer it)."""
+        from thinking_prompt import ThinkingPromptSession
+
+        session = ThinkingPromptSession()
+        shown: list = []
+
+        async def capture(dialog):
+            shown.append(dialog)
+
+        monkeypatch.setattr(session._dialogs, "show", capture)
+        return session, shown
+
+    async def test_session_helper_passes_options_through(self, capturing_session):
+        session, shown = capturing_session
+        await session.show_settings_dialog("S", [], False, width=40, top=1, height=15)
+
+        (dialog,) = shown
+        assert (dialog.title, dialog.width, dialog.top, dialog.height) == ("S", 40, 1, 15)
+        assert dialog.escapable is False
+
+    async def test_session_helper_rejects_styles(self, capturing_session):
+        session, shown = capturing_session
+        with pytest.raises(TypeError, match="styles"):
+            await session.show_settings_dialog("S", [], styles={})
+        assert shown == []
+
+    async def test_session_helper_layout_options_are_keyword_only(self, capturing_session):
+        session, shown = capturing_session
+        with pytest.raises(TypeError):
+            await session.show_settings_dialog("S", [], True, None)
+        assert shown == []
