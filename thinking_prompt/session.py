@@ -1470,7 +1470,7 @@ class ThinkingPromptSession:
         title: str,
         items: list[SettingsItem],
         can_cancel: bool = True,
-        styles: dict | None = None,
+        *,
         width: int | None = 60,
         top: int | None = None,
         height: int | None = None,
@@ -1483,7 +1483,6 @@ class ThinkingPromptSession:
             items: List of SettingsItem objects defining the form.
             can_cancel: If True (default), shows Save/Cancel buttons.
                        If False, shows only Done button.
-            styles: Optional style overrides.
             width: Dialog width control:
                    - None or 0: auto-size to content
                    - positive int: minimum width (default 60)
@@ -1518,7 +1517,7 @@ class ThinkingPromptSession:
         """
         from .settings_dialog import SettingsDialog
         dialog = SettingsDialog(
-            title, items, can_cancel, styles, width, top, height
+            title, items, can_cancel, width=width, top=top, height=height
         )
         return cast(
             "dict[str, Any] | None", await self._dialogs.show(dialog)
