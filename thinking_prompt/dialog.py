@@ -48,33 +48,17 @@ from typing import (
 from prompt_toolkit.filters import Condition
 from prompt_toolkit.formatted_text import AnyFormattedText
 from prompt_toolkit.key_binding import KeyBindings, merge_key_bindings
-from prompt_toolkit.layout import (
-    AnyContainer,
-    ConditionalContainer,
-    DynamicContainer,
-    Float,
-    FloatContainer,
-    HSplit,
-    ScrollablePane,
-    Window,
-    to_container,
-)
+from prompt_toolkit.layout import AnyContainer, HSplit
 from prompt_toolkit.layout.containers import is_container
-from prompt_toolkit.layout.dimension import Dimension
-from prompt_toolkit.widgets import Button, Label, RadioList
-from prompt_toolkit.widgets import Dialog as _DialogWidget
+from prompt_toolkit.widgets import Label, RadioList
 
+from .dialog_box import TERMINAL_TOO_SMALL, BoxPresenter
 from .types import format_exception_detail
 
 if TYPE_CHECKING:
     from .session import ThinkingPromptSession
 
 logger = logging.getLogger(__name__)
-
-
-# Sentinel returned by _compute_effective_height when the terminal is
-# too small to show the dialog. Caller aborts without building the widget.
-_TERMINAL_TOO_SMALL = object()
 
 
 @dataclass(frozen=True)
@@ -130,9 +114,10 @@ class Dialog:
     A dialog shown over the running session that returns a result.
 
     Build one with arguments for simple dialogs, or subclass it and
-    override build_body() / get_buttons() for custom ones. prompt_toolkit's
-    ``Dialog`` widget draws it; this class adds the result, Escape handling
-    and the options below.
+    override build_body() / get_buttons() for custom ones. It's drawn as a
+    box (prompt_toolkit's ``Dialog`` widget); this class holds what the
+    dialog asks and returns: the result, Escape handling and the options
+    below.
 
     The class attributes are the only defaults: constructor arguments
     override them per instance, subclasses override them as class attributes.
@@ -220,30 +205,7 @@ class Dialog:
                 setattr(self, name, value)
 
         self._result_future: asyncio.Future | None = None
-        self._widget: _DialogWidget | None = None
         self._manager: DialogManager | None = None
-        # Populated by _build_widget. _initial_focus, when non-None, is the
-        # Window the DialogManager focuses after the dialog opens (the first
-        # ButtonConfig(focused=True)). _focused_button is the matching Button
-        # widget; _buttons is the full list, for inspection and testing.
-        self._buttons: list[Button] = []
-        self._focused_button: Button | None = None
-        self._initial_focus: Window | None = None
-
-    def _get_width_dimension(self) -> Dimension | None:
-        """Convert width setting to prompt_toolkit Dimension.
-
-        Returns:
-            None for auto-size, Dimension for preferred width.
-        """
-        if self.width is None or self.width == 0:
-            return None  # Auto-size
-        elif self.width == -1:
-            # Max width - use large preferred with no max constraint
-            return Dimension(preferred=9999)
-        else:
-            # Preferred width (allows shrinking if terminal is smaller)
-            return Dimension(preferred=self.width)
 
     def build_body(self) -> AnyContainer:
         """
@@ -288,64 +250,21 @@ class Dialog:
         """
         self.set_result(self.escape_result)
 
-    # Chrome height = title bar (2) + button row (2) + padding (1) around the body.
-    # Used when `height` is set to compute the body area from the total.
-    _CHROME_HEIGHT = 5
+    def _button_configs(self) -> list[ButtonConfig]:
+        """get_buttons(), checked: every item must be a ButtonConfig.
 
-    def _build_widget(self, effective_height: int | None = None) -> _DialogWidget:
-        """Build the prompt_toolkit Dialog widget.
-
-        Args:
-            effective_height: Caller-computed height after any terminal
-                clamping. Overrides ``self.height`` for body-wrapping
-                purposes. None means use ``self.height`` directly.
+        One check for every presentation, so a dialog built for 0.3 fails
+        with a hint wherever it's shown.
         """
-        body = self.build_body()
-
-        # Pin body height so the Dialog renders in one shot (opt-in via
-        # the ``height`` attribute). Overflow scrolls within the pane.
-        h = effective_height if effective_height is not None else self.height
-        if h is not None and h > 0:
-            body_height = max(1, h - self._CHROME_HEIGHT)
-            body = HSplit(
-                [ScrollablePane(to_container(body), show_scrollbar=True)],
-                height=Dimension.exact(body_height),
-            )
-
-        self._buttons = self._build_buttons()
-
-        self._widget = _DialogWidget(
-            title=self.title,
-            body=body,
-            buttons=self._buttons,
-            width=self._get_width_dimension(),
-            with_background=False,  # Use styled dialog, no light overlay
-        )
-        return self._widget
-
-    def _build_buttons(self) -> list[Button]:
-        """Build the prompt_toolkit Button widgets from get_buttons().
-
-        One implementation for every dialog: each ButtonConfig's style and
-        focused flag apply however the dialog was made.
-        """
-        widgets: list[Button] = []
-        self._focused_button = None
-        self._initial_focus = None
-        for cfg in self.get_buttons():
+        configs = self.get_buttons()
+        for cfg in configs:
             if not isinstance(cfg, ButtonConfig):
                 raise TypeError(
                     "get_buttons() must return ButtonConfig items; got "
                     f"{type(cfg).__name__}. Use ButtonConfig(label, "
                     "handler=...) instead of (label, handler)."
                 )
-            button = Button(text=cfg.text, handler=self._click_handler(cfg))
-            _apply_button_style(button, cfg.style)
-            if cfg.focused and self._focused_button is None:
-                self._focused_button = button
-                self._initial_focus = button.window
-            widgets.append(button)
-        return widgets
+        return configs
 
     def _click_handler(self, cfg: ButtonConfig) -> Callable[[], None]:
         """What clicking ``cfg`` does: run its handler, or close with its result.
@@ -381,24 +300,6 @@ class Dialog:
         loop = asyncio.get_running_loop()
         self._result_future = loop.create_future()
         return self._result_future
-
-
-def _apply_button_style(button: Button, extra_style: str) -> None:
-    """Append ``extra_style`` to a Button's style classes.
-
-    The Button widget builds its own style callable that toggles between
-    ``class:button`` and ``class:button.focused`` based on focus. We wrap
-    that callable to append the user's style so focus styling still works.
-    """
-    if not extra_style:
-        return
-    original = button.window.style
-    if callable(original):
-        def combined() -> str:
-            return f"{original()} {extra_style}".strip()
-        button.window.style = combined
-    else:
-        button.window.style = f"{original} {extra_style}".strip()
 
 
 def _yes_no_dialog(
@@ -442,47 +343,35 @@ def _dropdown_dialog(
     return dialog
 
 
+def _nothing_to_focus(dialog: Dialog) -> str:
+    return (
+        f"Dialog {dialog.title!r} has nothing to focus: give it a "
+        "button (buttons=[ButtonConfig(...)]) or a focusable body."
+    )
+
+
 class DialogManager:
     """
-    Manages dialog display within a ThinkingPromptSession.
+    Opens and closes dialogs within a ThinkingPromptSession.
 
-    This class handles:
-    - Injecting a FloatContainer into the session's layout
-    - Showing/hiding dialogs
-    - Focus management
-    - Escape key handling
+    One dialog at a time: it claims the slot, waits for the result (cancelled
+    if the app exits) and always restores focus to the prompt. Drawing is
+    delegated to a presenter: BoxPresenter floats a framed dialog over the
+    layout.
 
     The DialogManager is created lazily by ThinkingPromptSession
     when dialogs are first used.
     """
 
-    # Rows reserved below/above the dialog: prompt area, status bar, margin.
-    # When a dialog's ``height`` is set, the effective height is clamped to
-    # ``terminal_height - _TERMINAL_BUFFER_ROWS`` so the dialog doesn't
-    # cover the prompt or overflow the screen.
-    _TERMINAL_BUFFER_ROWS = 4
-
-    # Smallest total dialog height (chrome + body) that's considered usable.
-    # With _TERMINAL_BUFFER_ROWS = 4, this implies a minimum terminal height
-    # of _MIN_DIALOG_HEIGHT + _TERMINAL_BUFFER_ROWS = 12 rows.
-    _MIN_DIALOG_HEIGHT = 8
-
     def __init__(self, session: ThinkingPromptSession) -> None:
         self._session = session
-        self._visible = False
+        self._visible = False  # a dialog is open
         self._current_dialog: Dialog | None = None
         self._injected = False
-        self._dialog_container = DynamicContainer(self._get_dialog_content)
-        self._dialog_float: Float | None = None
+        self._box = BoxPresenter(session)
 
         # Create and register key bindings
         self._key_bindings = self._create_key_bindings()
-
-    def _get_dialog_content(self) -> AnyContainer:
-        """Return current dialog widget or empty window."""
-        if self._current_dialog and self._current_dialog._widget:
-            return self._current_dialog._widget
-        return Window()
 
     def _create_key_bindings(self) -> KeyBindings:
         """Create key bindings for dialog (Escape handler)."""
@@ -497,27 +386,11 @@ class DialogManager:
         return kb
 
     def _inject_float_container(self) -> None:
-        """Inject FloatContainer into session layout (one-time)."""
+        """Install the box dialogs' float and the Escape binding (one-time)."""
         if self._injected:
             return
 
-        original_container = self._session.app.layout.container
-
-        # Create initial Float with no positioning (centered)
-        self._dialog_float = Float(
-            content=ConditionalContainer(
-                content=self._dialog_container,
-                filter=Condition(lambda: self._visible),
-            ),
-            allow_cover_cursor=True,
-        )
-
-        float_container = FloatContainer(
-            content=original_container,
-            floats=[self._dialog_float],
-        )
-
-        self._session.app.layout.container = float_container
+        self._box.install()
 
         # Merge key bindings with existing app key bindings
         existing_kb = self._session.app.key_bindings
@@ -591,12 +464,11 @@ class DialogManager:
                 "before showing another one."
             )
 
-        # Ensure float container is injected
         self._inject_float_container()
 
         # Clamp dialog.height against terminal height (if height is set).
-        effective_height = self._compute_effective_height(dialog)
-        if effective_height is _TERMINAL_TOO_SMALL:
+        effective_height = self._box.effective_height(dialog)
+        if effective_height is TERMINAL_TOO_SMALL:
             return dialog.escape_result if dialog.escapable else None
 
         # Everything after claiming the slot runs under the finally below:
@@ -606,44 +478,16 @@ class DialogManager:
         self._current_dialog = dialog
         try:
             future = dialog._prepare(self)
-            dialog._build_widget(effective_height=effective_height)
+            view = self._box.open(dialog, effective_height)
+            # A ButtonConfig(focused=True) button, else the first focusable
+            # element of the dialog.
+            target: AnyContainer = view.initial_focus or view.widget
 
-            # Update Float positioning based on dialog's top attribute
-            if self._dialog_float:
-                if dialog.top is None:
-                    # Center: no top or bottom constraint
-                    self._dialog_float.top = None
-                    self._dialog_float.bottom = None
-                elif dialog.top >= 0:
-                    # Offset from top
-                    self._dialog_float.top = dialog.top
-                    self._dialog_float.bottom = None
-                else:
-                    # Negative = offset from bottom
-                    self._dialog_float.top = None
-                    self._dialog_float.bottom = abs(dialog.top)
-
-                # Pin Float height so prompt_toolkit allocates the full
-                # height in one render frame instead of measuring dialog
-                # content over multiple ticks.
-                if effective_height is not None:
-                    self._dialog_float.height = effective_height
-                else:
-                    self._dialog_float.height = None
-
-            # Show dialog
             self._visible = True
-            assert dialog._widget is not None  # _build_widget set this above
             try:
-                self._session.app.layout.focus(dialog._widget)
+                self._session.app.layout.focus(target)
             except ValueError as exc:
-                raise ValueError(
-                    f"Dialog {dialog.title!r} has nothing to focus: give it a "
-                    "button (buttons=[ButtonConfig(...)]) or a focusable body."
-                ) from exc
-            # Override default focus when a button opted in via ButtonConfig.focused.
-            if dialog._initial_focus is not None:
-                self._session.app.layout.focus(dialog._initial_focus)
+                raise ValueError(_nothing_to_focus(dialog)) from exc
             self._session.app.invalidate()
 
             # Wait for result. If the app exits first, nobody can answer the
@@ -662,35 +506,8 @@ class DialogManager:
             # Hide dialog and restore focus
             self._visible = False
             self._current_dialog = None
+            self._box.close()
             self._session.app.layout.focus(self._session.default_buffer)
             self._session.app.invalidate()
 
         return result
-
-    def _compute_effective_height(self, dialog: Dialog) -> Any:
-        """Clamp dialog.height to the terminal and return the value to use.
-
-        Returns:
-            - ``None`` if the dialog didn't request a fixed height.
-            - ``_TERMINAL_TOO_SMALL`` sentinel if the terminal can't fit
-              the minimum viable dialog; caller should abort with an
-              error message.
-            - otherwise the clamped height to pass through to build_widget
-              and Float.height.
-        """
-        if dialog.height is None or dialog.height <= 0:
-            return None
-
-        import shutil
-        term_height = shutil.get_terminal_size().lines
-        max_allowed = term_height - self._TERMINAL_BUFFER_ROWS
-
-        if max_allowed < self._MIN_DIALOG_HEIGHT:
-            required = self._MIN_DIALOG_HEIGHT + self._TERMINAL_BUFFER_ROWS
-            self._session.add_error(
-                f"Not enough room to show dialog: need at least {required} "
-                f"terminal rows, have {term_height}."
-            )
-            return _TERMINAL_TOO_SMALL
-
-        return min(dialog.height, max_allowed)

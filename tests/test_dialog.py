@@ -29,15 +29,14 @@ _STILL_OPEN = object()  # _click() result when the click didn't close the dialog
 
 
 def _click(dialog: Any, index: int) -> Any:
-    """Build the dialog's widget and click button ``index``.
+    """Click button ``index`` (run the dialog's click logic for it).
 
     Returns the dialog's result, or _STILL_OPEN if the click didn't close it.
     """
     loop = asyncio.new_event_loop()
     try:
         dialog._result_future = loop.create_future()
-        dialog._build_widget()
-        dialog._buttons[index].handler()
+        dialog._click_handler(dialog._button_configs()[index])()
         future = dialog._result_future
         return future.result() if future.done() else _STILL_OPEN
     finally:
@@ -130,22 +129,6 @@ class TestDialogSubclass:
         assert dialog.title == "My Dialog"
         assert dialog.escape_result == "cancelled"
 
-    def test_dialog_build_widget(self):
-        """Dialog._build_widget creates Dialog widget."""
-        class TestDialog(Dialog):
-            title = "Test"
-
-            def build_body(self):
-                return Label("Body")
-
-            def get_buttons(self):
-                return [ButtonConfig("OK")]
-
-        dialog = TestDialog()
-        widget = dialog._build_widget()
-        assert dialog._widget is widget
-        assert widget is not None
-
     def test_dialog_set_result(self):
         """Dialog.set_result sets the future."""
         class TestDialog(Dialog):
@@ -234,71 +217,6 @@ class TestBuiltinDialogs:
     def test_dropdown_needs_at_least_one_option(self):
         with pytest.raises(ValueError, match="at least one option"):
             _dropdown_dialog("Theme", "Select:", [])
-
-
-class TestButtonConfigBehavior:
-    """ButtonConfig.focused and ButtonConfig.style must affect the built widget."""
-
-    def _build(self, buttons):
-        dialog = Dialog("T", "B", buttons)
-        widget = dialog._build_widget()
-        return dialog, widget
-
-    def test_focused_button_recorded_for_initial_focus(self):
-        """ButtonConfig(focused=True) marks that button as the initial focus target."""
-        buttons = [
-            ButtonConfig(text="One", result=1),
-            ButtonConfig(text="Two", result=2, focused=True),
-            ButtonConfig(text="Three", result=3),
-        ]
-        dialog, _ = self._build(buttons)
-
-        # Dialog should expose the button window that wants focus on show.
-        # `_initial_focus` is None when no button is focused; otherwise it is
-        # the button's containing Window so DialogManager can call
-        # app.layout.focus(...) on it.
-        assert dialog._initial_focus is not None
-        # And the focused-flag positions the second button:
-        from prompt_toolkit.widgets import Button
-        assert isinstance(dialog._focused_button, Button)
-        assert dialog._focused_button.text == "Two"
-
-    def test_no_focused_flag_means_no_initial_focus_override(self):
-        """Without focused=True on any button, _initial_focus stays None."""
-        buttons = [
-            ButtonConfig(text="One", result=1),
-            ButtonConfig(text="Two", result=2),
-        ]
-        dialog, _ = self._build(buttons)
-        assert dialog._initial_focus is None
-        assert dialog._focused_button is None
-
-    def test_button_style_applied_to_window(self):
-        """ButtonConfig.style is appended to the Button window's style classes."""
-        from prompt_toolkit.application import create_app_session
-        from prompt_toolkit.input.defaults import create_pipe_input
-        from prompt_toolkit.output import DummyOutput
-
-        buttons = [ButtonConfig(text="Danger", result=1, style="class:danger")]
-        dialog, _ = self._build(buttons)
-
-        # Find the Button window we built. _build_widget caches the buttons
-        # in the Dialog body; we walk the get_buttons output and rebuild
-        # is wasteful, so we expose the styled buttons via dialog._buttons.
-        from prompt_toolkit.widgets import Button
-        assert hasattr(dialog, "_buttons")
-        btns = dialog._buttons
-        assert len(btns) == 1
-        btn = btns[0]
-        assert isinstance(btn, Button)
-
-        # Button.window.style is callable. Resolve it inside an app session
-        # so get_app() works.
-        with create_pipe_input() as inp:
-            with create_app_session(input=inp, output=DummyOutput()):
-                style = btn.window.style
-                resolved = style() if callable(style) else style
-                assert "class:danger" in resolved
 
 
 # =============================================================================
@@ -632,30 +550,13 @@ class TestDialogButtons:
 
         assert _click(Asks(), 0) == "dismissed"
 
-    def test_focused_and_style_apply_in_subclass_dialogs(self):
-        from prompt_toolkit.application import create_app_session
-        from prompt_toolkit.input import create_pipe_input
-        from prompt_toolkit.output import DummyOutput
-
-        class Styled(Dialog):
-            def get_buttons(self):
-                return [ButtonConfig("One"), ButtonConfig("Two", focused=True, style="class:danger")]
-
-        d = Styled()
-        d._build_widget()
-        assert d._focused_button is d._buttons[1]
-        assert d._initial_focus is d._buttons[1].window
-        with create_pipe_input() as inp, create_app_session(input=inp, output=DummyOutput()):
-            style = d._buttons[1].window.style
-            assert "class:danger" in (style() if callable(style) else style)
-
     def test_tuple_buttons_raise_with_migration_hint(self):
         class Old(Dialog):
             def get_buttons(self):
                 return [("OK", lambda: None)]
 
         with pytest.raises(TypeError, match=r"Use ButtonConfig\(label, handler=\.\.\.\)"):
-            Old()._build_widget()
+            Old()._button_configs()
 
     async def test_handler_exception_is_reported_and_dialog_stays_open(self, caplog):
         import logging
@@ -668,9 +569,8 @@ class TestDialogButtons:
         session = ThinkingPromptSession()
         d = Dialog("T", "B", [ButtonConfig("Go", handler=boom)])
         d._prepare(session._dialogs)
-        d._build_widget()
         with caplog.at_level(logging.ERROR, logger="thinking_prompt"):
-            d._buttons[0].handler()
+            d._click_handler(d._button_configs()[0])()
 
         assert d._result_future is not None and not d._result_future.done()
         last = session._display.history.iter_entries()[-1]
@@ -695,9 +595,8 @@ class TestDialogButtons:
         session = ThinkingPromptSession()
         d = Dialog("T", "B", [ButtonConfig("Go", handler=lambda: make_coro())])
         d._prepare(session._dialogs)
-        d._build_widget()
         with caplog.at_level(logging.ERROR, logger="thinking_prompt"):
-            d._buttons[0].handler()
+            d._click_handler(d._button_configs()[0])()
 
         assert d._result_future is not None and not d._result_future.done()
         last = session._display.history.iter_entries()[-1]
