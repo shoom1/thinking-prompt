@@ -115,8 +115,6 @@ class ThinkingPromptStyles:
     history: str = ""
     user_prefix: str = ""  # Defaults to color_accent on color_bg_input
     user_message: str = ""  # Defaults to color_text_bright on color_bg_input italic
-    user_separator: str = ""  # Defaults to color_text_muted
-    assistant_prefix: str = "fg:cyan bold"
     assistant_message: str = ""  # Defaults to color_text_bright
     thinking_message: str = ""
     system_message: str = ""  # Defaults to color_warning
@@ -153,9 +151,7 @@ class ThinkingPromptStyles:
     checkbox_list: str = ""  # Defaults to color_text on color_bg_dialog
     checkbox_selected: str = ""  # Defaults to color_accent bold
     text_area: str = ""  # Defaults to color_text_bright on color_bg_input
-    select_value: str = ""  # Defaults to color_accent
     select_arrow: str = ""  # Defaults to color_text_muted
-    checkbox_mark: str = ""  # Defaults to color_accent
 
     # ==========================================================================
     # Settings list
@@ -235,7 +231,6 @@ class ThinkingPromptStyles:
             color_bg_button="#d1d5db",
             color_bg_selected="#cbd5e1",
             color_shadow="#9ca3af",
-            assistant_prefix="fg:#0e7490 bold",
             code_theme="default",
         )
 
@@ -259,7 +254,6 @@ class ThinkingPromptStyles:
             setting_label_selected="bold",
             setting_value_selected="italic",
             setting_desc_selected="italic",
-            assistant_prefix="bold",
             status_bar="reverse",
             color_depth=ColorDepth.DEPTH_1_BIT,
         )
@@ -286,7 +280,6 @@ class ThinkingPromptStyles:
             menu_item_selected="reverse",
             menu_meta_selected="reverse",
             dialog_button_focused="bold reverse",
-            assistant_prefix="fg:ansicyan bold",
             code_theme="ansi_dark",
         )
 
@@ -322,7 +315,6 @@ class ThinkingPromptStyles:
             "user_message": _style_str(
                 _fg(self.color_text_bright), _bg(self.color_bg_input), "italic"
             ),
-            "user_separator": _fg(self.color_text_muted),
             "assistant_message": _fg(self.color_text_bright),
             "system_message": _fg(self.color_warning),
             # Status messages
@@ -344,9 +336,7 @@ class ThinkingPromptStyles:
             "checkbox_list": _style_str(_bg(self.color_bg_dialog), _fg(self.color_text)),
             "checkbox_selected": _style_str(_fg(self.color_accent), "bold"),
             "text_area": _style_str(_bg(self.color_bg_input), _fg(self.color_text_bright)),
-            "select_value": _fg(self.color_accent),
             "select_arrow": _fg(self.color_text_muted),
-            "checkbox_mark": _fg(self.color_accent),
             # Settings list
             "setting_indicator": _fg(self.color_accent),
             "setting_label": _fg(self.color_text),
@@ -388,8 +378,6 @@ class ThinkingPromptStyles:
             'history': r("history"),
             'history.user-prefix': r("user_prefix"),
             'history.user-message': r("user_message"),
-            'history.user-separator': r("user_separator"),
-            'history.assistant-prefix': r("assistant_prefix"),
             'history.assistant-message': r("assistant_message"),
             'history.thinking': r("thinking_message"),
             'history.system': r("system_message"),
@@ -412,9 +400,7 @@ class ThinkingPromptStyles:
             'checkbox-list': r("checkbox_list"),
             'checkbox-selected': r("checkbox_selected"),
             'text-area': r("text_area"),
-            'select-value': r("select_value"),
             'select-arrow': r("select_arrow"),
-            'checkbox-mark': r("checkbox_mark"),
             # Settings list
             'setting-indicator': r("setting_indicator"),
             'setting-label': r("setting_label"),
@@ -437,7 +423,6 @@ class ThinkingPromptStyles:
             'completion-menu.completion': r("menu_item"),
             'completion-menu.completion.current': r("menu_item_selected"),
             'completion-menu.meta': r("menu_meta"),
-            'completion-menu.meta.current': r("menu_meta_selected"),
             'completion-menu.meta.completion': r("menu_meta"),
             'completion-menu.meta.completion.current': r("menu_meta_selected"),
             'scrollbar.background': r("scrollbar_background"),
