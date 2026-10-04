@@ -50,7 +50,7 @@ from .display import Display
 from .layout import create_layout
 from .manager import ThinkingBoxManager
 from .rich_utils import _is_rich_renderable
-from .styles import DEFAULT_STYLES, ThinkingPromptStyles, resolve_theme
+from .styles import ThinkingPromptStyles, resolve_theme
 from .types import ThinkingContext, format_exception_detail
 
 logger = logging.getLogger(__name__)
@@ -139,10 +139,9 @@ class ThinkingPromptSession:
         self._message = message
         self._app_info = app_info
 
-        if theme is not None:
-            self._styles = resolve_theme(theme)
-        else:
-            self._styles = DEFAULT_STYLES
+        # A fresh instance per session: sharing DEFAULT_STYLES would let a
+        # tweak to one session's styles restyle every other session.
+        self._styles = resolve_theme(theme) if theme is not None else ThinkingPromptStyles()
 
         # NO_COLOR is read once at construction (no-color.org: non-empty).
         self._no_color = bool(os.environ.get("NO_COLOR"))
