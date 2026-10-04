@@ -97,7 +97,6 @@ class ThinkingPromptSession:
         self,
         message: AnyFormattedText = ">>> ",
         app_info: AppInfo | None = None,
-        styles: ThinkingPromptStyles | None = None,
         theme: str | ThinkingPromptStyles | None = None,
         history: History | None = None,
         completer: Completer | None = None,
@@ -116,9 +115,8 @@ class ThinkingPromptSession:
         Args:
             message: The prompt message to display.
             app_info: Application info (name, version, welcome message).
-            styles: Custom styles for the session.
             theme: Theme name ('dark', 'light', 'mono', 'terminal', 'auto') or
-                   ThinkingPromptStyles instance. Cannot be used with styles=.
+                   ThinkingPromptStyles instance. Default: 'dark'.
             history: History object for input history.
             completer: Completer for input autocompletion.
             complete_while_typing: Show completions automatically while typing.
@@ -132,8 +130,8 @@ class ThinkingPromptSession:
                           and repaint; oldest trimmed. None = unbounded.
 
         Raises:
-            ValueError: If max_thinking_height is less than 2, or if both theme=
-                       and styles= are provided.
+            ValueError: If max_thinking_height is less than 2, or theme= names
+                       an unknown theme.
         """
         if max_thinking_height < 2:
             raise ValueError("max_thinking_height must be at least 2")
@@ -141,17 +139,10 @@ class ThinkingPromptSession:
         self._message = message
         self._app_info = app_info
 
-        # Handle theme vs styles parameters
-        if theme is not None and styles is not None:
-            raise ValueError(
-                "Pass either theme= or styles=, not both. theme= accepts a "
-                "name ('dark', 'light', 'mono', 'terminal', 'auto') or a "
-                "ThinkingPromptStyles instance."
-            )
         if theme is not None:
             self._styles = resolve_theme(theme)
         else:
-            self._styles = styles or DEFAULT_STYLES
+            self._styles = DEFAULT_STYLES
 
         # NO_COLOR is read once at construction (no-color.org: non-empty).
         self._no_color = bool(os.environ.get("NO_COLOR"))

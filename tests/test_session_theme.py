@@ -17,10 +17,6 @@ class TestThemeParam:
         s = ThinkingPromptSession(theme=styles)
         assert s.styles is styles
 
-    def test_theme_and_styles_together_raises(self):
-        with pytest.raises(ValueError, match="theme"):
-            ThinkingPromptSession(theme="dark", styles=ThinkingPromptStyles())
-
     def test_unknown_theme_raises(self):
         with pytest.raises(ValueError, match="Valid themes"):
             ThinkingPromptSession(theme="solarized")
@@ -29,10 +25,10 @@ class TestThemeParam:
         s = ThinkingPromptSession()
         assert s.styles == ThinkingPromptStyles.dark()
 
-    def test_styles_param_still_works(self):
-        styles = ThinkingPromptStyles(color_accent="#ff6600")
-        s = ThinkingPromptSession(styles=styles)
-        assert s.styles is styles
+    def test_styles_param_is_gone(self):
+        """0.4 removes styles= (no deprecation): theme= takes the instance."""
+        with pytest.raises(TypeError, match="styles"):
+            ThinkingPromptSession(styles=ThinkingPromptStyles())
 
 
 class TestEffectiveColorDepth:
