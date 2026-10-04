@@ -17,10 +17,6 @@ class TestThemeParam:
         s = ThinkingPromptSession(theme=styles)
         assert s.styles is styles
 
-    def test_theme_and_styles_together_raises(self):
-        with pytest.raises(ValueError, match="theme"):
-            ThinkingPromptSession(theme="dark", styles=ThinkingPromptStyles())
-
     def test_unknown_theme_raises(self):
         with pytest.raises(ValueError, match="Valid themes"):
             ThinkingPromptSession(theme="solarized")
@@ -29,10 +25,23 @@ class TestThemeParam:
         s = ThinkingPromptSession()
         assert s.styles == ThinkingPromptStyles.dark()
 
-    def test_styles_param_still_works(self):
-        styles = ThinkingPromptStyles(color_accent="#ff6600")
-        s = ThinkingPromptSession(styles=styles)
-        assert s.styles is styles
+    def test_default_styles_are_not_shared(self, monkeypatch):
+        """Without theme=, each session gets its own default styles, so
+        tweaking one session's styles doesn't restyle the next session or
+        the module-level DEFAULT_STYLES. (monkeypatch restores the field
+        even when the instance is shared.)"""
+        from thinking_prompt import DEFAULT_STYLES
+
+        first = ThinkingPromptSession()
+        monkeypatch.setattr(first.styles, "color_accent", "#ff0000")
+
+        assert ThinkingPromptSession().styles.color_accent != "#ff0000"
+        assert DEFAULT_STYLES.color_accent != "#ff0000"
+
+    def test_styles_param_is_gone(self):
+        """0.4 removes styles= (no deprecation): theme= takes the instance."""
+        with pytest.raises(TypeError, match="styles"):
+            ThinkingPromptSession(styles=ThinkingPromptStyles())
 
 
 class TestEffectiveColorDepth:

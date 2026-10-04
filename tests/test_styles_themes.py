@@ -21,7 +21,7 @@ class TestTokenCompletion:
         assert d["dialog shadow"] == "bg:#000000"
         assert d["button"] == "bg:#404040 fg:#e0e0e0"
         assert d["completion-menu.completion.current"] == "fg:#88c0d0 bg:#454545 noreverse"
-        assert d["completion-menu.meta.current"] == "fg:#88c0d0 bg:#454545 noreverse"
+        assert d["completion-menu.meta.completion.current"] == "fg:#88c0d0 bg:#454545 noreverse"
 
     def test_new_tokens_drive_derivation(self):
         d = ThinkingPromptStyles(
@@ -120,7 +120,7 @@ class TestThemeFactories:
         d = ThinkingPromptStyles.mono().to_style_dict()
         pairs = [
             (d["completion-menu.completion"], d["completion-menu.completion.current"]),
-            (d["completion-menu.meta"], d["completion-menu.meta.current"]),
+            (d["completion-menu.meta.completion"], d["completion-menu.meta.completion.current"]),
             (d["button"], d["button.focused"]),
             (d["setting-label"], d["setting-label-selected"]),
             (d["setting-value"], d["setting-value-selected"]),
@@ -214,3 +214,41 @@ class TestStyleClassesDefined:
 
         assert used, "scan found no style classes — scanner broken?"
         assert used - set(ThinkingPromptStyles().to_style_dict()) == set()
+
+    def test_every_themed_class_is_used(self):
+        """The reverse: a style field whose class nothing draws with is a
+        setting that silently does nothing (assistant_prefix, select_value,
+        checkbox_mark and user_separator were, until 0.4). Classes count as
+        used when this package or prompt_toolkit's widgets name them, or
+        name a dotted child (class:a.b.c also carries a and a.b)."""
+        import pathlib
+        import re
+
+        import prompt_toolkit
+
+        import thinking_prompt
+
+        used: set[str] = set()
+        for package in (thinking_prompt, prompt_toolkit):
+            for path in pathlib.Path(package.__file__).parent.rglob("*.py"):
+                for name in re.findall(r"class:([A-Za-z0-9_.-]+)", path.read_text()):
+                    parts = name.split(".")
+                    used.update(".".join(parts[:i]) for i in range(1, len(parts) + 1))
+
+        unused = {
+            selector
+            for selector in ThinkingPromptStyles().to_style_dict()
+            if any(cls not in used for cls in selector.split())
+        }
+        assert unused == set()
+
+
+class TestRemovedStyleFields:
+    """0.4 removes style fields no component drew with (no deprecation)."""
+
+    @pytest.mark.parametrize(
+        "name", ["assistant_prefix", "select_value", "checkbox_mark", "user_separator"]
+    )
+    def test_field_is_gone(self, name):
+        with pytest.raises(TypeError, match=name):
+            ThinkingPromptStyles(**{name: "bold"})

@@ -50,7 +50,7 @@ from .display import Display
 from .layout import create_layout
 from .manager import ThinkingBoxManager
 from .rich_utils import _is_rich_renderable
-from .styles import DEFAULT_STYLES, ThinkingPromptStyles, resolve_theme
+from .styles import ThinkingPromptStyles, resolve_theme
 from .types import ThinkingContext, format_exception_detail
 
 logger = logging.getLogger(__name__)
@@ -97,7 +97,6 @@ class ThinkingPromptSession:
         self,
         message: AnyFormattedText = ">>> ",
         app_info: AppInfo | None = None,
-        styles: ThinkingPromptStyles | None = None,
         theme: str | ThinkingPromptStyles | None = None,
         history: History | None = None,
         completer: Completer | None = None,
@@ -116,9 +115,8 @@ class ThinkingPromptSession:
         Args:
             message: The prompt message to display.
             app_info: Application info (name, version, welcome message).
-            styles: Custom styles for the session.
             theme: Theme name ('dark', 'light', 'mono', 'terminal', 'auto') or
-                   ThinkingPromptStyles instance. Cannot be used with styles=.
+                   ThinkingPromptStyles instance. Default: 'dark'.
             history: History object for input history.
             completer: Completer for input autocompletion.
             complete_while_typing: Show completions automatically while typing.
@@ -132,8 +130,8 @@ class ThinkingPromptSession:
                           and repaint; oldest trimmed. None = unbounded.
 
         Raises:
-            ValueError: If max_thinking_height is less than 2, or if both theme=
-                       and styles= are provided.
+            ValueError: If max_thinking_height is less than 2, or theme= names
+                       an unknown theme.
         """
         if max_thinking_height < 2:
             raise ValueError("max_thinking_height must be at least 2")
@@ -141,17 +139,9 @@ class ThinkingPromptSession:
         self._message = message
         self._app_info = app_info
 
-        # Handle theme vs styles parameters
-        if theme is not None and styles is not None:
-            raise ValueError(
-                "Pass either theme= or styles=, not both. theme= accepts a "
-                "name ('dark', 'light', 'mono', 'terminal', 'auto') or a "
-                "ThinkingPromptStyles instance."
-            )
-        if theme is not None:
-            self._styles = resolve_theme(theme)
-        else:
-            self._styles = styles or DEFAULT_STYLES
+        # A fresh instance per session: sharing DEFAULT_STYLES would let a
+        # tweak to one session's styles restyle every other session.
+        self._styles = resolve_theme(theme) if theme is not None else ThinkingPromptStyles()
 
         # NO_COLOR is read once at construction (no-color.org: non-empty).
         self._no_color = bool(os.environ.get("NO_COLOR"))
@@ -1470,7 +1460,7 @@ class ThinkingPromptSession:
         title: str,
         items: list[SettingsItem],
         can_cancel: bool = True,
-        styles: dict | None = None,
+        *,
         width: int | None = 60,
         top: int | None = None,
         height: int | None = None,
@@ -1483,7 +1473,6 @@ class ThinkingPromptSession:
             items: List of SettingsItem objects defining the form.
             can_cancel: If True (default), shows Save/Cancel buttons.
                        If False, shows only Done button.
-            styles: Optional style overrides.
             width: Dialog width control:
                    - None or 0: auto-size to content
                    - positive int: minimum width (default 60)
@@ -1518,7 +1507,7 @@ class ThinkingPromptSession:
         """
         from .settings_dialog import SettingsDialog
         dialog = SettingsDialog(
-            title, items, can_cancel, styles, width, top, height
+            title, items, can_cancel, width=width, top=top, height=height
         )
         return cast(
             "dict[str, Any] | None", await self._dialogs.show(dialog)
