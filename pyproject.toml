@@ -60,7 +60,8 @@ testpaths = ["tests"]
 addopts = "-v --tb=short"
 
 [tool.mypy]
-python_version = "3.9"
+# No python_version: each CI job checks against its own interpreter. mypy 2
+# requires 3.10+, so the 3.9 job installs mypy 1.x, which still checks 3.9.
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
@@ -69,10 +70,6 @@ check_untyped_defs = true
 strict_optional = true
 warn_redundant_casts = true
 warn_unused_ignores = true
-
-[[tool.mypy.overrides]]
-module = "tests.*"
-disallow_untyped_defs = false
 
 [tool.ruff]
 line-length = 100
