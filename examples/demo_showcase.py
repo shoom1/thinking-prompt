@@ -9,6 +9,7 @@ This demo combines multiple features:
 - Console messages during thinking
 - Markdown and code output
 - Slash command completion dropdown
+- Dialogs drawn inline under the prompt, or as boxes (/inline toggles)
 
 Perfect for creating demo GIFs and screenshots.
 
@@ -27,6 +28,8 @@ from thinking_prompt.settings_dialog import (
     InlineSelectItem,
     TextItem,
     CheckboxItem,
+    ChecklistItem,
+    RadioItem,
 )
 
 # Check if rich is available for fancy welcome
@@ -50,6 +53,8 @@ class SlashCommandCompleter(Completer):
         "info": "Message dialog demo",
         "action": "Choice dialog demo",
         "theme": "Dropdown dialog demo",
+        "tools": "Check list dialog demo",
+        "inline": "Toggle inline / box dialogs",
         "tasks": "Multi-box task progress demo",
         "settings": "Settings dialog demo",
         "clear": "Clear the screen",
@@ -88,7 +93,7 @@ def create_welcome_message():
         title = Text(ascii_art, style="bold cyan")
         subtitle = Text.from_markup(
             "\n[dim]A [bold]prompt_toolkit[/bold] extension for AI thinking visualization[/dim]\n"
-            "[green]Features:[/green] Real-time streaming • Animated separator • Rich output\n"
+            "[green]Features:[/green] Real-time streaming • Animated separator • Rich output • Inline dialogs\n"
             "[yellow]Controls:[/yellow] [bold]Ctrl+T[/bold] expand • [bold]Ctrl+C[/bold] cancel • [bold]Ctrl+D[/bold] exit • [bold]/[/bold] for commands"
         )
         content = Group(Align.center(title), Align.center(subtitle))
@@ -101,7 +106,7 @@ def create_welcome_message():
         return (
             ascii_art +
             "\n  A prompt_toolkit extension for AI thinking visualization\n"
-            "  Features: Real-time streaming • Animated separator • Rich output\n"
+            "  Features: Real-time streaming • Animated separator • Rich output • Inline dialogs\n"
             "  Controls: Ctrl+T expand • Ctrl+C cancel • Ctrl+D exit • / for commands"
         )
 
@@ -116,6 +121,13 @@ async def main():
         thinking_animation_position="before",
     )
 
+    # How the dialog commands draw their dialogs: "inline" (rows under the
+    # prompt) or "box"; /inline toggles it. Each call passes placement=.
+    placement = "inline"
+
+    def ready_status() -> str:
+        return f"Ready · Dialogs: {placement}"
+
     session = ThinkingPromptSession(
         app_info=app_info,
         message=">>> ",
@@ -124,12 +136,13 @@ async def main():
         complete_while_typing=True,
         completions_menu_height=5,
         enable_status_bar=True,
-        status_text="Ready",
+        status_text=ready_status(),
     )
 
     @session.on_input
     async def handle(user_input: str):
         """Process user input with a rich demonstration."""
+        nonlocal placement
         if not user_input.strip():
             return
 
@@ -152,6 +165,8 @@ async def main():
                 "- **/info** - Message dialog demo\n"
                 "- **/action** - Choice dialog demo\n"
                 "- **/theme** - Dropdown dialog demo\n"
+                "- **/tools** - Check list dialog demo\n"
+                "- **/inline** - Toggle inline / box dialogs\n"
                 "- **/tasks** - Multi-box task progress demo\n"
                 "- **/settings** - Settings dialog demo\n"
                 "- **/clear** - Clear the screen\n"
@@ -163,6 +178,12 @@ async def main():
 
         if cmd == "clear":
             session.clear()
+            return
+
+        if cmd == "inline":
+            placement = "box" if placement == "inline" else "inline"
+            session.set_status(ready_status())
+            session.add_response(f"Dialogs are now drawn **{placement}**.", markdown=True)
             return
 
         if cmd == "quit":
@@ -272,6 +293,7 @@ async def main():
             result = await session.yes_no_dialog(
                 title="Confirmation",
                 text="Do you want to enable advanced mode?",
+                placement=placement,
             )
             session.add_response(f"Advanced mode: **{'enabled' if result else 'disabled'}**", markdown=True)
             return
@@ -280,6 +302,7 @@ async def main():
             await session.message_dialog(
                 title="Information",
                 text="ThinkingBox is ready for action!\nAll systems operational.",
+                placement=placement,
             )
             session.add_response("Message acknowledged ✓")
             return
@@ -289,6 +312,7 @@ async def main():
                 title="Select Action",
                 text="What would you like to do?",
                 choices=["Save", "Discard", "Cancel"],
+                placement=placement,
             )
             if result:
                 session.add_response(f"Action selected: **{result}**", markdown=True)
@@ -302,11 +326,28 @@ async def main():
                 text="Choose your preferred theme:",
                 options=["Light", "Dark", "System", "High Contrast"],
                 default="System",
+                placement=placement,
             )
             if result:
                 session.add_response(f"Theme set to: **{result}**", markdown=True)
             else:
                 session.add_response("Theme selection cancelled")
+            return
+
+        if cmd == "tools":
+            result = await session.checklist_dialog(
+                title="Tools",
+                text="Which tools can the assistant use?",
+                options=["Web search", "Code execution", "File access", "Image generation"],
+                defaults=["Web search"],
+                placement=placement,
+            )
+            if result is None:
+                session.add_response("Tool selection cancelled")
+            else:
+                session.add_response(
+                    f"Tools enabled: **{', '.join(result) or 'none'}**", markdown=True
+                )
             return
 
         if cmd == "settings":
@@ -351,12 +392,25 @@ async def main():
                     label="Auto Save",
                     default=False,
                 ),
+                RadioItem(
+                    key="style",
+                    label="Response Style",
+                    options=["Concise", "Detailed"],
+                    default="Concise",
+                ),
+                ChecklistItem(
+                    key="tools",
+                    label="Tools",
+                    options=["Web search", "Code execution", "File access"],
+                    default=("Web search",),
+                ),
             ]
             dialog = SettingsDialog(
                 title="Settings",
                 items=settings_items,
-                height=16,
+                height=16,  # box only; inline dialogs size to their content
                 width=60,
+                placement=placement,
             )
             result = await session.show_dialog(dialog)
             if result:
@@ -437,7 +491,7 @@ async def main():
             await asyncio.sleep(0.3)
 
         # Reset status bar after thinking
-        session.set_status("Ready")
+        session.set_status(ready_status())
 
         # Final output with markdown
         session.add_response(

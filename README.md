@@ -545,7 +545,7 @@ See the `examples/` directory for complete demos:
 - `demo_task_progress.py` - Rich-styled task progress with in-place status updates
 - `dialog_test.py` - Dialog system demo (yes/no, message, choice, dropdown)
 - `settings_dialog_demo.py` - Settings dialog with all control types
-- `demo_showcase.py` - Feature showcase for demos and screenshots
+- `demo_showcase.py` - Feature showcase for demos and screenshots; dialogs start inline, `/inline` switches to boxes
 - `completer_demo.py` - Slash-command autocompletion (like Claude Code)
 - `demo_themes.py` - Built-in themes and runtime theme switching
 - `inline_dialogs.py` - Dialogs drawn inline under the prompt (and the same ones as boxes)
