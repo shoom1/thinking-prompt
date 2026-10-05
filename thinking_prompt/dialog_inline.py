@@ -3,13 +3,16 @@ Inline presentation of dialogs: rows between the prompt and the status bar.
 
 A title, the body, one numbered row per button (ActionRow) and a key hint,
 with one cursor (RowNavigator) over the body's rows and the actions. The
-body and actions scroll within MAX_ROWS rows.
+actions, and a body with cursor stops (settings rows, a check list, a text
+field), scroll within MAX_ROWS rows; a body without (text) is drawn in full
+above them.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
+from prompt_toolkit.application.current import get_app
 from prompt_toolkit.formatted_text import FormattedText
 from prompt_toolkit.layout import (
     Container,
@@ -38,13 +41,13 @@ HINT_ORDER = ("↑↓ navigate", "←→ change", "Space toggle", "Enter select"
 
 
 class _AtMost(Container):
-    """``content`` with its preferred height capped at ``rows``.
+    """``content`` no taller than it prefers, and than ``rows`` if given.
 
     ScrollablePane alone either prefers its content's full height or, given
     a height, prefers none at all.
     """
 
-    def __init__(self, content: Container, rows: int) -> None:
+    def __init__(self, content: Container, rows: int | None = None) -> None:
         self.content = content
         self.rows = rows
 
@@ -59,12 +62,8 @@ class _AtMost(Container):
         # max is capped at the capped preferred (not self.rows): otherwise
         # HSplit would offer this container spare layout height, and it
         # would pad with blank rows up to self.rows instead of its content.
-        capped_preferred = min(wanted.preferred, self.rows)
-        return Dimension(
-            min=min(wanted.min, self.rows),
-            max=capped_preferred,
-            preferred=capped_preferred,
-        )
+        limit = wanted.preferred if self.rows is None else min(wanted.preferred, self.rows)
+        return Dimension(min=min(wanted.min, limit), max=limit, preferred=limit)
 
     def write_to_screen(
         self,
@@ -81,6 +80,34 @@ class _AtMost(Container):
 
     def get_children(self) -> list[Container]:
         return [self.content]
+
+
+class _ScrollRegion(ScrollablePane):
+    """The scrolling region: keeps the cursor row in view, and scrolls back
+    to its top while ``at_top()`` holds (the cursor is on the first stop),
+    so rows above the first stop, such as a check list's text, show again.
+    """
+
+    def __init__(self, content: Container, at_top: Callable[[], bool]) -> None:
+        super().__init__(content, show_scrollbar=False)
+        self._at_top = at_top
+
+    def write_to_screen(
+        self,
+        screen: Screen,
+        mouse_handlers: MouseHandlers,
+        write_position: WritePosition,
+        parent_style: str,
+        erase_bg: bool,
+        z_index: int | None,
+    ) -> None:
+        if self._at_top():
+            # The pane scrolls down from here only if the first stop
+            # wouldn't fit.
+            self.vertical_scroll = 0
+        super().write_to_screen(
+            screen, mouse_handlers, write_position, parent_style, erase_bg, z_index
+        )
 
 
 @dataclass
@@ -113,18 +140,26 @@ def build_inline(dialog: Dialog) -> InlineView:
         body_stops = _focusable_windows(body) if body is not None else []
         return [*body_stops, *(action.window for action in actions)]
 
-    scrolled: list[Container] = []
-    if body is not None:
-        scrolled.append(body)
-        if actions:
-            scrolled.append(Window(height=1))
-    scrolled.extend(action.window for action in actions)
+    def at_first_stop() -> bool:
+        first = stops()[:1]
+        return bool(first) and get_app().layout.has_focus(first[0])
 
     rows: list[Container] = []
     if dialog.title:
         rows.append(_text_row("class:dialog-title", dialog.title))
+
+    scrolled: list[Container] = []
+    if body is not None:
+        # A body with cursor stops scrolls with the actions; one without
+        # (text) is drawn in full above them, as a box dialog shows it.
+        has_stops = bool(_focusable_windows(body))
+        part = scrolled if has_stops else rows
+        part.append(body if has_stops else _AtMost(body))
+        if actions:
+            part.append(Window(height=1))
+    scrolled.extend(action.window for action in actions)
     if scrolled:
-        rows.append(_AtMost(ScrollablePane(HSplit(scrolled), show_scrollbar=False), MAX_ROWS))
+        rows.append(_AtMost(_ScrollRegion(HSplit(scrolled), at_first_stop), MAX_ROWS))
     hint = _hint(dialog, stops())
     if hint:
         rows.append(Window(height=1))

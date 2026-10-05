@@ -3,25 +3,52 @@ from __future__ import annotations
 
 import asyncio
 
+from prompt_toolkit.application import Application
+from prompt_toolkit.application.current import set_app
 from prompt_toolkit.formatted_text import fragment_list_to_text, to_formatted_text
-from prompt_toolkit.layout import HSplit, Window
+from prompt_toolkit.input import DummyInput
+from prompt_toolkit.layout import HSplit, Layout, ScrollablePane, Window
 from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.layout.layout import walk
-from prompt_toolkit.widgets import TextArea
+from prompt_toolkit.layout.mouse_handlers import MouseHandlers
+from prompt_toolkit.layout.screen import Screen, WritePosition
+from prompt_toolkit.output import DummyOutput
+from prompt_toolkit.widgets import Label, TextArea
 
 from thinking_prompt.dialog import ButtonConfig, Dialog
 from thinking_prompt.dialog_inline import MAX_ROWS, _AtMost, build_inline
 from thinking_prompt.rows import OptionGroup
 
 
-def _texts(view) -> list[str]:
-    """Text of every text window in the inline dialog, top to bottom."""
+def _text_windows(container) -> list[tuple[Window, str]]:
+    """Every text window under ``container`` with its text, top to bottom."""
     out = []
-    for c in walk(view.container):
+    for c in walk(container):
         if isinstance(c, Window) and isinstance(c.content, FormattedTextControl):
             text = c.content.text
-            out.append(fragment_list_to_text(to_formatted_text(text() if callable(text) else text)))
+            out.append((c, fragment_list_to_text(to_formatted_text(text() if callable(text) else text))))
     return out
+
+
+def _texts(view) -> list[str]:
+    """Text of every text window in the inline dialog, top to bottom."""
+    return [text for _, text in _text_windows(view.container)]
+
+
+def _region(view) -> ScrollablePane:
+    """The inline dialog's scrolling region."""
+    (pane,) = [c for c in walk(view.container) if isinstance(c, ScrollablePane)]
+    return pane
+
+
+def _app(layout: Layout) -> Application:
+    return Application(layout=layout, input=DummyInput(), output=DummyOutput())
+
+
+def _render(container, height: int) -> Screen:
+    screen = Screen()
+    container.write_to_screen(screen, MouseHandlers(), WritePosition(0, 0, 40, height), "", True, None)
+    return screen
 
 
 def _yes_no(**kwargs) -> Dialog:
@@ -96,3 +123,54 @@ class TestAtMost:
         short = HSplit([Window(height=1) for _ in range(3)])
         assert _AtMost(tall, MAX_ROWS).preferred_height(80, 100).max == MAX_ROWS
         assert _AtMost(short, MAX_ROWS).preferred_height(80, 100).max == 3
+
+    def test_without_a_cap_it_takes_its_full_height_and_no_more(self):
+        """A text body drawn above the scrolling region: in full, never padded."""
+        tall = HSplit([Window(height=1) for _ in range(30)])
+        extending = Window(FormattedTextControl("one\ntwo"))  # max is unbounded on its own
+        tall_dim = _AtMost(tall).preferred_height(80, 100)
+        extending_dim = _AtMost(extending).preferred_height(80, 100)
+        assert (tall_dim.preferred, tall_dim.max) == (30, 30)
+        assert (extending_dim.preferred, extending_dim.max) == (2, 2)
+
+
+class TestScrollingRegion:
+    """Rows and actions scroll within MAX_ROWS; a body without cursor stops
+    (text) is drawn in full above them."""
+
+    def test_a_text_body_is_drawn_above_the_scrolling_region(self):
+        view = build_inline(_yes_no())
+        region = list(walk(_region(view)))
+        (body,) = [w for w, text in _text_windows(view.container) if text == "This can't be undone."]
+        assert body not in region
+        assert all(action.window in region for action in view.actions)
+
+    def test_a_body_with_nothing_focusable_is_drawn_above_too(self):
+        body = HSplit([Label("one"), Label("two")])
+        view = build_inline(Dialog("T", body, [ButtonConfig("OK")]))
+        region = list(walk(_region(view)))
+        assert body not in region and body in list(walk(view.container))
+
+    def test_a_body_with_stops_scrolls_with_the_actions(self):
+        group = OptionGroup(["a", "b"], multiple=True)
+        view = build_inline(Dialog("T", HSplit([r.window for r in group.rows]), [ButtonConfig("OK")]))
+        region = list(walk(_region(view)))
+        assert all(row.window in region for row in group.rows)
+        assert view.actions[0].window in region
+
+    def test_the_first_stop_scrolls_the_region_back_to_its_top(self):
+        """Back on the first option, the text above it in the region shows again."""
+        group = OptionGroup([f"o{i}" for i in range(6)], multiple=True)
+        body = HSplit([Label("line one\nline two"), *(r.window for r in group.rows)])
+        view = build_inline(Dialog("T", body, [ButtonConfig("OK")]))
+        pane = _region(view)
+        layout = Layout(view.container)
+        with set_app(_app(layout)):
+            layout.focus(group.rows[0].window)
+            pane.vertical_scroll = 4  # as left by moving down the list and back
+            _render(pane, 4)
+            assert pane.vertical_scroll == 0
+            # Further down the list, the region keeps its scroll.
+            layout.focus(group.rows[5].window)
+            _render(pane, 4)
+            assert pane.vertical_scroll > 0

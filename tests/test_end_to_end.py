@@ -91,6 +91,33 @@ def inline_open(session: ThinkingPromptSession) -> bool:
     return dm is not None and dm.inline_view is not None
 
 
+def screen_lines(session: ThinkingPromptSession) -> list[str]:
+    """The last rendered frame as text, one stripped string per row."""
+    screen = session.app.renderer.last_rendered_screen
+    if screen is None:
+        return []
+    return [
+        "".join(screen.data_buffer[y][x].char for x in range(screen.width)).strip()
+        for y in range(screen.height)
+    ]
+
+
+def prompt_and_status_rows(session: ThinkingPromptSession) -> tuple[int, int]:
+    """The prompt's row and the status bar's row in the last rendered frame."""
+    where = session.app.renderer.last_rendered_screen.visible_windows_to_write_positions
+    prompt = next(
+        w for w in where
+        if isinstance(w.content, BufferControl) and w.content.buffer is session.default_buffer
+    )
+    status = next(w for w in where if w.style == "class:status")
+    return where[prompt].ypos, where[status].ypos
+
+
+def cursor_row(session: ThinkingPromptSession) -> str | None:
+    """The rendered row under the ❯ cursor, e.g. "❯ 1. Yes" (None if none is drawn)."""
+    return next((line for line in screen_lines(session) if line.startswith("❯")), None)
+
+
 async def run_with(
     session: ThinkingPromptSession,
     handler: Callable[[str], Any],
@@ -868,6 +895,66 @@ class TestInlineDialogs:
                 assert where[status].ypos - where[prompt].ypos <= MAX_ROWS + 5
                 inp.send_text(ENTER)
                 await wait_until(lambda: results == ["option 21"])
+
+            await run_with(session, handler, script)
+
+    async def test_a_long_text_body_is_drawn_in_full(self):
+        """A text body has no cursor stops: it's drawn above the scrolling
+        region at full height (not cut to MAX_ROWS), and the actions below
+        it stay reachable."""
+        body = [f"body line {i}" for i in range(1, 21)]
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.yes_no_dialog(
+                "Delete?", "\n".join(body), placement="inline"
+            ))
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                await wait_until(lambda: cursor_row(session) == "❯ 1. Yes")
+                prompt, status = prompt_and_status_rows(session)
+                between = screen_lines(session)[prompt + 1:status]
+                assert body[0] in between and body[-1] in between, between
+                start = between.index(body[0])
+                assert between[start:start + len(body)] == body
+                inp.send_text(DOWN + ENTER)  # 2. No
+                await wait_until(lambda: results == [False])
+
+            await run_with(session, handler, script)
+
+    async def test_back_on_the_first_option_the_text_above_it_shows_again(self):
+        """A check list's text scrolls with its options; returning to the
+        first option scrolls the region back to its top."""
+        options = [f"option {i}" for i in range(1, 15)]
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.checklist_dialog(
+                "Tools", "Pick any of these\nor none at all", options, placement="inline"
+            ))
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                inp.send_text(DOWN * 13)
+                await wait_until(lambda: cursor_row(session) == "❯ [ ] option 14")
+                assert "Pick any of these" not in screen_lines(session)  # scrolled off
+                inp.send_text(UP * 13)
+                await wait_until(lambda: cursor_row(session) == "❯ [ ] option 1")
+                lines = screen_lines(session)
+                prompt, status = prompt_and_status_rows(session)
+                first_option = lines.index("❯ [ ] option 1")
+                assert prompt < first_option < status
+                above = lines[prompt + 1:first_option]
+                assert above[-2:] == ["Pick any of these", "or none at all"], above
+                inp.send_text(" " + "1")  # check option 1, then 1. OK
+                await wait_until(lambda: results == [["option 1"]])
 
             await run_with(session, handler, script)
 
