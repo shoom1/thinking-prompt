@@ -14,6 +14,7 @@ from typing import Any, Callable
 
 import pytest
 from prompt_toolkit.application import create_app_session
+from prompt_toolkit.data_structures import Size
 from prompt_toolkit.input import PipeInput, create_pipe_input
 from prompt_toolkit.layout import BufferControl
 from prompt_toolkit.output import DummyOutput
@@ -42,10 +43,25 @@ UP = "\x1b[A"
 RIGHT = "\x1b[C"
 
 
+class _ShortOutput(DummyOutput):
+    """A DummyOutput whose terminal is ``rows`` rows tall (DummyOutput: 40)."""
+
+    def __init__(self, rows: int) -> None:
+        super().__init__()
+        self._rows = rows
+
+    def get_size(self) -> Size:
+        return Size(rows=self._rows, columns=80)
+
+
 @contextmanager
-def piped_session(**kwargs: Any) -> Iterator[tuple[ThinkingPromptSession, PipeInput]]:
-    """A session whose Application reads from a pipe and renders nowhere."""
-    with create_pipe_input() as inp, create_app_session(input=inp, output=DummyOutput()):
+def piped_session(
+    *, rows: int | None = None, **kwargs: Any
+) -> Iterator[tuple[ThinkingPromptSession, PipeInput]]:
+    """A session whose Application reads from a pipe and renders nowhere
+    (in a ``rows``-row terminal if given)."""
+    output = DummyOutput() if rows is None else _ShortOutput(rows)
+    with create_pipe_input() as inp, create_app_session(input=inp, output=output):
         yield ThinkingPromptSession(**kwargs), inp
 
 
@@ -925,6 +941,76 @@ class TestInlineDialogs:
                 assert between[start:start + len(body)] == body
                 inp.send_text(DOWN + ENTER)  # 2. No
                 await wait_until(lambda: results == [False])
+
+            await run_with(session, handler, script)
+
+    async def test_a_short_terminal_still_draws_the_cursor_row(self):
+        """In an 8-row terminal the dialog is squeezed: the blank rows give
+        way, but the scrolling region keeps one row, the cursor row."""
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.yes_no_dialog(
+                "Delete?", "3 files", placement="inline"
+            ))
+
+        with piped_session(rows=8) as (session, inp):
+
+            def cursor_drawn(row: str) -> bool:
+                lines = screen_lines(session)
+                if row not in lines:
+                    return False
+                prompt, status = prompt_and_status_rows(session)
+                return prompt < lines.index(row) < status
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                await wait_until(lambda: "Delete?" in screen_lines(session))
+                assert cursor_drawn("❯ 1. Yes"), screen_lines(session)
+                inp.send_text(DOWN)
+                await wait_until(lambda: cursor_drawn("❯ 2. No"))
+                inp.send_text(ENTER)
+                await wait_until(lambda: results == [False])
+
+            await run_with(session, handler, script)
+
+    async def test_a_tall_text_field_scrolls_with_its_own_cursor(self):
+        """A text field taller than the region, as the first stop: moving
+        its text cursor up doesn't pull the region back toward its top
+        (which kept the cursor pinned to the bottom row)."""
+        from prompt_toolkit.widgets import TextArea
+
+        field = TextArea(text="\n".join(f"line {i}" for i in range(1, 31)))
+        field.buffer.cursor_position = field.document.translate_row_col_to_index(19, 0)
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            dialog = Dialog("Notes", field, [ButtonConfig("OK", result="ok")], placement="inline")
+            results.append(await session.show_dialog(dialog))
+
+        with piped_session() as (session, inp):
+
+            def text_cursor_on(line: str) -> int | None:
+                """The text cursor's rendered row, if it's on ``line``."""
+                screen = session.app.renderer.last_rendered_screen
+                point = screen.cursor_positions.get(field.window) if screen else None
+                lines = screen_lines(session)
+                if point is None or point.y >= len(lines) or lines[point.y] != line:
+                    return None
+                prompt, status = prompt_and_status_rows(session)
+                return point.y if prompt < point.y < status else None
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                await wait_until(lambda: text_cursor_on("line 20") is not None)
+                bottom = text_cursor_on("line 20")  # opened: line 20 on the region's last row
+                inp.send_text(UP * 3)
+                await wait_until(lambda: text_cursor_on("line 17") is not None)
+                assert text_cursor_on("line 17") == bottom - 3, screen_lines(session)
+                inp.send_text(TAB + ENTER)  # 1. OK
+                await wait_until(lambda: results == ["ok"])
 
             await run_with(session, handler, script)
 

@@ -4,8 +4,8 @@ Inline presentation of dialogs: rows between the prompt and the status bar.
 A title, the body, one numbered row per button (ActionRow) and a key hint,
 with one cursor (RowNavigator) over the body's rows and the actions. The
 actions, and a body with cursor stops (settings rows, a check list, a text
-field), scroll within MAX_ROWS rows; a body without (text) is drawn in full
-above them.
+field), scroll within MAX_ROWS rows; a body without (text) is drawn above
+them at full height, clipped if the terminal is too short.
 """
 from __future__ import annotations
 
@@ -86,8 +86,8 @@ class _AtMost(Container):
 
 class _ScrollRegion(ScrollablePane):
     """The scrolling region: keeps the cursor row in view, and scrolls back
-    to its top while ``at_top()`` holds (the cursor is on the first stop),
-    so rows above the first stop, such as a check list's text, show again.
+    to its top when the cursor arrives at the first stop (``at_top()``), so
+    rows above the first stop, such as a check list's text, show again.
     """
 
     def __init__(self, content: Container, at_top: Callable[[], bool]) -> None:
@@ -97,6 +97,14 @@ class _ScrollRegion(ScrollablePane):
             content, scroll_offsets=ScrollOffsets(top=0, bottom=0), show_scrollbar=False
         )
         self._at_top = at_top
+        # The window focused at the last render.
+        self._focused: Window | None = None
+
+    def preferred_height(self, width: int, max_available_height: int) -> Dimension:
+        wanted = super().preferred_height(width, max_available_height)
+        # At least one row: squeezed by a short terminal, the region still
+        # shows the cursor row (no scroll offsets) instead of vanishing.
+        return Dimension(min=min(1, wanted.preferred), preferred=wanted.preferred)
 
     def write_to_screen(
         self,
@@ -107,10 +115,14 @@ class _ScrollRegion(ScrollablePane):
         erase_bg: bool,
         z_index: int | None,
     ) -> None:
-        if self._at_top():
-            # The pane scrolls down from here only if the first stop
-            # wouldn't fit.
+        focused = get_app().layout.current_window
+        # Only on arriving at the first stop (or opening on it): while the
+        # cursor stays there, a tall stop such as a text field scrolls with
+        # its own cursor. The pane scrolls down from the top only if the
+        # first stop wouldn't fit.
+        if focused is not self._focused and self._at_top():
             self.vertical_scroll = 0
+        self._focused = focused
         super().write_to_screen(
             screen, mouse_handlers, write_position, parent_style, erase_bg, z_index
         )
@@ -158,18 +170,18 @@ def build_inline(dialog: Dialog) -> InlineView:
     scrolled: list[Container] = []
     if body is not None:
         # A body with cursor stops scrolls with the actions; one without
-        # (text) is drawn in full above them, as a box dialog shows it.
+        # (text) is drawn above them at full height, as a box dialog shows it.
         has_stops = bool(_focusable_windows(body))
         part = scrolled if has_stops else rows
         part.append(body if has_stops else _AtMost(body))
         if actions:
-            part.append(Window(height=1))
+            part.append(_blank_row())
     scrolled.extend(action.window for action in actions)
     if scrolled:
         rows.append(_AtMost(_ScrollRegion(HSplit(scrolled), at_first_stop), MAX_ROWS))
     hint = _hint(dialog, stops())
     if hint:
-        rows.append(Window(height=1))
+        rows.append(_blank_row())
         rows.append(_text_row("class:dialog-hint", hint))
 
     navigator = RowNavigator(stops, is_editing=dialog._is_editing, tab=True, actions=actions)
@@ -182,6 +194,11 @@ def build_inline(dialog: Dialog) -> InlineView:
 
     # A one-column left margin.
     return InlineView(VSplit([Window(width=1), content]), focus, actions, hint)
+
+
+def _blank_row() -> Window:
+    """A blank separator row that a short terminal can take away."""
+    return Window(height=Dimension(min=0, preferred=1, max=1))
 
 
 def _text_row(style: str, text: str) -> Window:

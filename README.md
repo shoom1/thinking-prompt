@@ -358,8 +358,9 @@ await session.show_settings_dialog("Settings", [
 ])
 ```
 
-Long text bodies are shown in full above the list; rows and actions scroll
-within 12 rows, following the cursor. `width`, `top` and `height` apply to box
+Long text bodies are shown above the list at full height, clipped if taller
+than the space available (as in a box dialog); rows and actions scroll within
+12 rows, following the cursor. `width`, `top` and `height` apply to box
 dialogs only. Dialogs need a running session; to ask something before
 `run_async()` starts or after it ends, use prompt_toolkit's own `choice()`
 (prompt_toolkit 3.0.52 or later).

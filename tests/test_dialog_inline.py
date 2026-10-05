@@ -181,6 +181,25 @@ class TestScrollingRegion:
             _render(pane, 4)
             assert pane.vertical_scroll > 0
 
+    async def test_a_tall_first_stop_keeps_the_scroll_while_its_cursor_moves(self):
+        """The region goes back to its top when the cursor arrives at the
+        first stop, not on every redraw: in a tall text field there, the
+        text cursor isn't pinned to the region's bottom row. (Async: the
+        text field loads its history in a task while it renders.)"""
+        field = TextArea(text="\n".join(f"line {i}" for i in range(1, 31)))
+        field.buffer.cursor_position = field.document.translate_row_col_to_index(19, 0)
+        view = build_inline(Dialog("T", field, [ButtonConfig("OK")]))
+        pane = _region(view)
+        layout = Layout(view.container)
+        with set_app(_app(layout)):
+            layout.focus(field)
+            _render(pane, MAX_ROWS)
+            opened = pane.vertical_scroll
+            assert opened == 19 - (MAX_ROWS - 1)  # line 20 on the bottom row
+            field.buffer.cursor_up(count=3)
+            _render(pane, MAX_ROWS)
+            assert pane.vertical_scroll == opened  # line 17: three rows above the bottom
+
     def test_a_one_row_region_shows_the_cursor_row(self):
         """Squeezed to one row (a short terminal), the region shows the
         highlighted action, not the row above it."""
