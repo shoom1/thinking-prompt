@@ -18,7 +18,14 @@ from prompt_toolkit.input import PipeInput, create_pipe_input
 from prompt_toolkit.layout import BufferControl
 from prompt_toolkit.output import DummyOutput
 
-from thinking_prompt import ButtonConfig, Dialog, TextItem, ThinkingPromptSession
+from thinking_prompt import (
+    ButtonConfig,
+    CheckboxItem,
+    Dialog,
+    InlineSelectItem,
+    TextItem,
+    ThinkingPromptSession,
+)
 
 CTRL_A = "\x01"
 CTRL_C = "\x03"
@@ -29,6 +36,8 @@ ESCAPE = "\x1b"
 TAB = "\t"
 SHIFT_TAB = "\x1b[Z"
 DOWN = "\x1b[B"
+UP = "\x1b[A"
+RIGHT = "\x1b[C"
 
 
 @contextmanager
@@ -838,5 +847,118 @@ class TestInlineDialogs:
                 assert where[status].ypos - where[prompt].ypos <= MAX_ROWS + 5
                 inp.send_text(ENTER)
                 await wait_until(lambda: results == ["option 21"])
+
+            await run_with(session, handler, script)
+
+
+class TestInlineSettings:
+    """The settings dialog inline: settings rows, then Save / Cancel, one cursor."""
+
+    @staticmethod
+    def _items() -> list[Any]:
+        return [
+            InlineSelectItem(key="model", label="Model", options=["a", "b", "c"], default="a"),
+            CheckboxItem(key="stream", label="Stream", default=False),
+            TextItem(key="name", label="Name", default=""),
+        ]
+
+    @staticmethod
+    def _editing(session: ThinkingPromptSession) -> bool:
+        dm = session._dialog_manager
+        dialog = dm._current_dialog if dm else None
+        return dialog is not None and dialog._is_editing()
+
+    async def test_one_cursor_walks_the_settings_then_the_actions(self):
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.show_settings_dialog("Settings", self._items(), placement="inline"))
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                inp.send_text(RIGHT)           # Model: a -> b
+                inp.send_text(DOWN + " ")      # Stream: on
+                inp.send_text(DOWN + ENTER)    # Name: start editing
+                await wait_until(lambda: self._editing(session))
+                inp.send_text("bob" + ENTER)   # confirm
+                await wait_until(lambda: not self._editing(session))
+                inp.send_text(DOWN + ENTER)    # 1. Save
+                await wait_until(
+                    lambda: results == [{"model": "b", "stream": True, "name": "bob"}]
+                )
+
+            await run_with(session, handler, script)
+
+    async def test_ctrl_s_saves(self):
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.show_settings_dialog("Settings", self._items(), placement="inline"))
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                inp.send_text(DOWN + " " + CTRL_S)
+                await wait_until(lambda: results == [{"stream": True}])
+
+            await run_with(session, handler, script)
+
+    async def test_escape_while_editing_text_only_ends_the_edit(self):
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.show_settings_dialog("Settings", self._items(), placement="inline"))
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                inp.send_text(DOWN + DOWN + ENTER)
+                await wait_until(lambda: self._editing(session))
+                inp.send_text("x" + ESCAPE)
+                await wait_until(lambda: not self._editing(session), timeout=3)
+                await asyncio.sleep(0.2)
+                assert results == [] and inline_open(session)
+                inp.send_text(ESCAPE)  # now it closes the dialog
+                await wait_until(lambda: results == [None], timeout=3)
+
+            await run_with(session, handler, script)
+
+    async def test_no_settings_just_the_actions(self):
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.show_settings_dialog("Settings", [], placement="inline"))
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                inp.send_text(ENTER)  # 1. Save
+                await wait_until(lambda: results == [{}])
+
+            await run_with(session, handler, script)
+
+    async def test_box_settings_still_walk_with_arrows_and_tab_to_the_buttons(self):
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.show_settings_dialog("Settings", self._items()))
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                inp.send_text(RIGHT + DOWN + " ")  # Model: b; Stream: on
+                inp.send_text(TAB + TAB + ENTER)   # Name, then the Save button
+                await wait_until(lambda: results == [{"model": "b", "stream": True}])
 
             await run_with(session, handler, script)

@@ -1507,6 +1507,7 @@ class ThinkingPromptSession:
         width: int | None = 60,
         top: int | None = None,
         height: int | None = None,
+        placement: Placement | None = None,
     ) -> dict[str, Any] | None:
         """
         Show a settings dialog and return changed values.
@@ -1528,6 +1529,8 @@ class ThinkingPromptSession:
                     allocated the full height in one render frame instead
                     of growing line-by-line. Body overflow scrolls.
                     When None (default), the dialog sizes to its content.
+            placement: "box" or "inline"; None (default) uses the session's
+                    dialog_placement.
 
         Returns:
             Dictionary of changed values if saved, or None if cancelled.
@@ -1550,7 +1553,7 @@ class ThinkingPromptSession:
         """
         from .settings_dialog import SettingsDialog
         dialog = SettingsDialog(
-            title, items, can_cancel, width=width, top=top, height=height
+            title, items, can_cancel, width=width, top=top, height=height, placement=placement
         )
         return cast(
             "dict[str, Any] | None", await self._dialogs.show(dialog)

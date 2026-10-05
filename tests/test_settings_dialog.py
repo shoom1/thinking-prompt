@@ -1,7 +1,10 @@
 """Tests for the settings dialog system."""
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 import pytest
+from prompt_toolkit.keys import Keys
 from prompt_toolkit.layout import BufferControl, HSplit, Window
 from prompt_toolkit.layout.processors import PasswordProcessor
 
@@ -602,3 +605,75 @@ class TestSettingsDialogOptions:
         with pytest.raises(TypeError):
             await session.show_settings_dialog("S", [], True, None)
         assert shown == []
+
+    async def test_session_helper_passes_placement(self, capturing_session):
+        session, shown = capturing_session
+        await session.show_settings_dialog("S", [], placement="inline")
+        assert shown[0].placement == "inline"
+
+
+def _bindings(kb, key):
+    return kb.get_bindings_for_keys((key,))
+
+
+class TestSettingsRows:
+    """Settings controls are dialog rows: the ❯ marker, and inline/box modes."""
+
+    def test_the_highlighted_row_uses_the_marker(self):
+        from thinking_prompt.settings_dialog import CheckboxControl
+
+        control = CheckboxControl(CheckboxItem(key="s", label="Stream"))
+        (row,) = control._build_setting_row(40, [("", "true")], True)
+        assert row[0] == ("class:setting-indicator", "❯ ")
+
+    def test_inline_dropdown_is_a_selector_without_a_popup(self):
+        from thinking_prompt.settings_dialog import DropdownControl
+
+        control = DropdownControl(DropdownItem(key="m", label="Model", options=["a", "b", "c"], default="b"))
+        control.set_inline(True)
+        text = "".join(t for _, t in control.create_content(40, 1).get_line(0))
+        assert text.endswith("◀ b ▶")
+        assert control.hints == {"←→ change"}
+        kb = control.get_key_bindings()
+        (right,) = [b for b in _bindings(kb, Keys.Right) if b.filter()]
+        right.handler(MagicMock())
+        assert control.value == "c"
+        assert not any(b.filter() for b in _bindings(kb, Keys.ControlM))  # no popup
+
+    def test_box_dropdown_is_unchanged(self):
+        from thinking_prompt.settings_dialog import DropdownControl
+
+        control = DropdownControl(DropdownItem(key="m", label="Model", options=["a", "b"], default="b"))
+        text = "".join(t for _, t in control.create_content(40, 1).get_line(0))
+        assert text.endswith("b ▼")
+        assert control.hints == frozenset()
+
+    def test_inline_body_has_no_popups_and_leaves_arrows_to_the_dialog(self):
+        dialog = SettingsDialog(
+            "S",
+            [DropdownItem(key="m", label="M", options=["a", "b"]), CheckboxItem(key="c", label="C")],
+            placement="inline",
+        )
+        dialog._placement = "inline"  # as show_dialog() resolves it
+        body = dialog.build_body()
+        assert isinstance(body, HSplit)  # no FloatContainer for dropdown menus
+        assert _bindings(body.key_bindings, Keys.Down) == []
+        assert _bindings(body.key_bindings, Keys.ControlS) != []
+
+    def test_box_body_walks_settings_with_arrows(self):
+        dialog = SettingsDialog("S", [CheckboxItem(key="a", label="A"), CheckboxItem(key="b", label="B")])
+        body = dialog.build_body()
+        assert _bindings(body.key_bindings, Keys.Down) != []
+        assert len(dialog._stops()) == 2
+
+    def test_is_editing_follows_the_controls(self):
+        dialog = SettingsDialog("S", [TextItem(key="t", label="T")])
+        assert dialog._is_editing() is False
+        dialog._controls[0].enter_edit_mode()
+        assert dialog._is_editing() is True
+
+    def test_placement_goes_to_the_dialog(self):
+        assert SettingsDialog("S", [], placement="inline").placement == "inline"
+        assert SettingsDialog("S", []).placement is None
+        with pytest.raises(ValueError, match="placement must be"):
+            SettingsDialog("S", [], placement="side")
