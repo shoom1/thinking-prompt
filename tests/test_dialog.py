@@ -12,6 +12,7 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
+from prompt_toolkit.keys import Keys
 from prompt_toolkit.layout import HSplit, Window
 from prompt_toolkit.widgets import Label
 
@@ -19,6 +20,7 @@ from thinking_prompt.dialog import (
     ButtonConfig,
     Dialog,
     DialogManager,
+    _checklist_dialog,
     _choice_dialog,
     _dropdown_dialog,
     _message_dialog,
@@ -223,7 +225,8 @@ class TestBuiltinDialogs:
         lambda p: _message_dialog("T", "B", placement=p),
         lambda p: _choice_dialog("T", "B", ["a"], placement=p),
         lambda p: _dropdown_dialog("T", "B", ["a"], placement=p),
-    ], ids=["yes_no", "message", "choice", "dropdown"])
+        lambda p: _checklist_dialog("T", "B", ["a"], placement=p),
+    ], ids=["yes_no", "message", "choice", "dropdown", "checklist"])
     def test_builders_pin_the_placement_they_built_for(self, build):
         assert build("inline").placement == "inline"
         assert build("box").placement == "box"
@@ -237,6 +240,22 @@ class TestBuiltinDialogs:
         assert [b.focused for b in buttons] == [False, True, False]
         assert self._results(d) == ["Light", "Dark", "System"]
         assert d.escape_result is None
+
+    def test_checklist_ok_returns_the_checked_options_cancel_none(self):
+        d = _checklist_dialog("Tools", "Pick any", ["a", "b", "c"], defaults=["c", "a", "z"])
+        assert [b.text for b in d.get_buttons()] == ["OK", "Cancel"]
+        assert self._results(d) == [["a", "c"], None]
+        assert d.escape_result is None
+
+    def test_checklist_needs_options(self):
+        with pytest.raises(ValueError, match="at least one option"):
+            _checklist_dialog("Tools", "Pick any", [])
+
+    def test_checklist_rows_walk_with_arrows_in_a_box_only(self):
+        box = _checklist_dialog("T", "", ["a", "b"], placement="box").build_body()
+        assert box.key_bindings.get_bindings_for_keys((Keys.Down,)) != []
+        inline = _checklist_dialog("T", "", ["a", "b"], placement="inline").build_body()
+        assert inline.key_bindings is None
 
 
 # =============================================================================
@@ -318,9 +337,10 @@ class TestDialogNeedsRunningSession:
             lambda s: s.message_dialog("T", "B"),
             lambda s: s.choice_dialog("T", "B", ["a"]),
             lambda s: s.dropdown_dialog("T", "B", ["a"]),
+            lambda s: s.checklist_dialog("T", "B", ["a"]),
             lambda s: s.show_settings_dialog("T", []),
         ],
-        ids=["show_dialog", "yes_no", "message", "choice", "dropdown", "settings"],
+        ids=["show_dialog", "yes_no", "message", "choice", "dropdown", "checklist", "settings"],
     )
     async def test_raises_before_the_session_runs(self, open_dialog):
         from thinking_prompt import ThinkingPromptSession
@@ -788,7 +808,8 @@ class TestHelperPlacement:
         lambda s, **kw: s.message_dialog("T", "B", **kw),
         lambda s, **kw: s.choice_dialog("T", "B", ["a"], **kw),
         lambda s, **kw: s.dropdown_dialog("T", "B", ["a"], **kw),
-    ], ids=["yes_no", "message", "choice", "dropdown"])
+        lambda s, **kw: s.checklist_dialog("T", "B", ["a"], **kw),
+    ], ids=["yes_no", "message", "choice", "dropdown", "checklist"])
     async def test_session_default_and_per_call_override(self, captured, call):
         session, shown = captured(dialog_placement="inline")
         await call(session)

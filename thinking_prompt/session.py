@@ -1460,6 +1460,41 @@ class ThinkingPromptSession:
         dialog = _dropdown_dialog(title, text, options, default, self._resolve_placement(placement))
         return cast(Optional[str], await self._dialogs.show(dialog))
 
+    async def checklist_dialog(
+        self,
+        title: str,
+        text: str,
+        options: Sequence[str],
+        defaults: Sequence[str] = (),
+        *,
+        placement: Placement | None = None,
+    ) -> list[str] | None:
+        """
+        Show a check list: any number of options, one per line.
+
+        Args:
+            title: Dialog title.
+            text: Text above the options ("" for none).
+            options: The options to check.
+            defaults: Options checked at first (others are ignored).
+            placement: "box" or "inline"; None (default) uses the session's
+                dialog_placement.
+
+        Returns:
+            The checked options in option order, or None if cancelled.
+
+        Raises:
+            ValueError: If ``options`` is empty.
+
+        Example:
+            tools = await session.checklist_dialog(
+                "Tools", "Enable any:", ["search", "code", "files"], defaults=["search"]
+            )
+        """
+        from .dialog import _checklist_dialog
+        dialog = _checklist_dialog(title, text, options, defaults, self._resolve_placement(placement))
+        return cast("list[str] | None", await self._dialogs.show(dialog))
+
     async def show_dialog(self, dialog: Dialog) -> Any:
         """
         Show a dialog and wait for its result.

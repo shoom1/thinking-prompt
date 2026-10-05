@@ -54,6 +54,7 @@ from prompt_toolkit.widgets import Label, RadioList
 
 from .dialog_box import TERMINAL_TOO_SMALL, BoxPresenter
 from .dialog_inline import InlinePresenter, InlineView
+from .rows import OptionGroup, RowNavigator
 from .types import Placement, check_placement, format_exception_detail
 
 if TYPE_CHECKING:
@@ -392,6 +393,34 @@ def _dropdown_dialog(
     # Buttons set after construction: OK's handler needs the dialog itself.
     dialog.buttons = [
         ButtonConfig("OK", handler=lambda: dialog.set_result(radio.current_value)),
+        ButtonConfig("Cancel"),
+    ]
+    return dialog
+
+
+def _checklist_dialog(
+    title: str,
+    text: str,
+    options: Sequence[str],
+    defaults: Sequence[str] = (),
+    placement: Placement = "box",
+) -> Dialog:
+    """Check any number of options, one per line: OK returns the checked ones
+    (in option order), Cancel and Escape None."""
+    if not options:
+        raise ValueError("checklist_dialog() needs at least one option")
+    group = OptionGroup(options, multiple=True, selected=defaults)
+    rows = [row.window for row in group.rows]
+    # A box dialog's buttons take Tab, so the rows get their own ↑↓; inline,
+    # the dialog's cursor walks the rows and the actions alike.
+    navigation = RowNavigator(lambda: rows).key_bindings() if placement == "box" else None
+    option_list = HSplit(rows, key_bindings=navigation)
+    body = HSplit([Label(text=text), option_list]) if text else option_list
+
+    dialog = Dialog(title, body, placement=placement)
+    # Buttons set after construction: OK's handler needs the dialog itself.
+    dialog.buttons = [
+        ButtonConfig("OK", handler=lambda: dialog.set_result(group.checked)),
         ButtonConfig("Cancel"),
     ]
     return dialog

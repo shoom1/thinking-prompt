@@ -1008,3 +1008,45 @@ class TestInlineSettings:
                 )
 
             await run_with(session, handler, script)
+
+
+class TestChecklistDialog:
+    async def test_inline(self):
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.checklist_dialog(
+                "Tools", "Pick any", ["search", "code", "files"], defaults=["search"],
+                placement="inline",
+            ))
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                # Stops: search, code, files, OK, Cancel
+                inp.send_text(" " + DOWN + " ")  # uncheck search, check code
+                inp.send_text(DOWN + DOWN + ENTER)  # 1. OK
+                await wait_until(lambda: results == [["code"]])
+
+            await run_with(session, handler, script)
+
+    async def test_box(self):
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.checklist_dialog(
+                "Tools", "Pick any", ["search", "code", "files"], defaults=["search"]
+            ))
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                inp.send_text(" " + DOWN + " ")  # uncheck search, check code
+                inp.send_text(TAB + TAB + ENTER)  # files, then the OK button
+                await wait_until(lambda: results == [["code"]])
+
+            await run_with(session, handler, script)
