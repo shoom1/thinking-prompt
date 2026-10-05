@@ -18,6 +18,7 @@ from prompt_toolkit.data_structures import Point
 from prompt_toolkit.filters import Condition
 from prompt_toolkit.formatted_text import AnyFormattedText, FormattedText
 from prompt_toolkit.layout import (
+    AnyContainer,
     BufferControl,
     DynamicContainer,
     Float,
@@ -274,6 +275,7 @@ def create_layout(
     is_status_bar_enabled: Callable[[], bool],
     thinking_manager: ThinkingBoxManager | None = None,
     completions_menu_height: int = 5,
+    inline_dialog: AnyContainer | None = None,
 ) -> Layout:
     """
     Create the layout with chat history, thinking box, and input.
@@ -288,6 +290,8 @@ def create_layout(
         is_status_bar_enabled: Callable that returns status bar visibility.
         thinking_manager: ThinkingBoxManager instance for managing thinking boxes.
         completions_menu_height: Maximum height of the completions dropdown menu.
+        inline_dialog: Shown between the input area and the status bar
+            (inline dialogs).
 
     Returns:
         The complete Layout.
@@ -381,6 +385,7 @@ def create_layout(
         history_window,        # Only visible in full-screen
         thinking_area,         # Only visible when thinking
         input_with_separators, # Always visible
+        *([inline_dialog] if inline_dialog is not None else []),  # Inline dialogs
         status_bar,            # Status bar at bottom
     ])
 

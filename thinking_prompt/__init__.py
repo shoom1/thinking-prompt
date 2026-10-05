@@ -44,8 +44,10 @@ from .rich_utils import _renderable_to_ansi as rich_to_ansi
 from .session import ThinkingPromptSession
 from .settings_dialog import (
     CheckboxItem,
+    ChecklistItem,
     DropdownItem,
     InlineSelectItem,
+    RadioItem,
     SettingsDialog,
     SettingsItem,
     TextItem,
@@ -60,6 +62,7 @@ from .types import (
     InputHandler,
     MessageRole,
     Overflow,
+    Placement,
     StreamingContent,
     ThinkingContext,
 )
@@ -85,6 +88,7 @@ __all__ = [
     "ContentCallback",
     "ContentFormat",
     "Overflow",
+    "Placement",
     "MessageRole",
     "InputHandler",
     # Dialog
@@ -96,6 +100,8 @@ __all__ = [
     "InlineSelectItem",
     "CheckboxItem",
     "TextItem",
+    "ChecklistItem",
+    "RadioItem",
     "SettingsDialog",
     # Layout
     "ThinkingHeader",

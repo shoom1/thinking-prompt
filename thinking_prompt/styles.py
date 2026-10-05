@@ -142,6 +142,9 @@ class ThinkingPromptStyles:
     dialog_shadow: str = ""
     dialog_button: str = ""  # Defaults to color_text on color_bg_button
     dialog_button_focused: str = ""  # Defaults to color_text_bright on color_accent_button bold
+    dialog_choice: str = ""  # Inline action rows. Defaults to color_text
+    dialog_choice_selected: str = ""  # Highlighted action row. Defaults to color_accent bold
+    dialog_hint: str = ""  # Inline dialog key hint. Defaults to color_text_muted italic
 
     # ==========================================================================
     # Form controls
@@ -152,6 +155,7 @@ class ThinkingPromptStyles:
     checkbox_selected: str = ""  # Defaults to color_accent bold
     text_area: str = ""  # Defaults to color_text_bright on color_bg_input
     select_arrow: str = ""  # Defaults to color_text_muted
+    checkbox_mark: str = ""  # [x] / (•) marks of check and radio lists. Defaults to color_accent
 
     # ==========================================================================
     # Settings list
@@ -330,6 +334,9 @@ class ThinkingPromptStyles:
             "dialog_button_focused": _style_str(
                 _bg(self.color_accent_button), _fg(self.color_text_bright), "bold"
             ),
+            "dialog_choice": _fg(self.color_text),
+            "dialog_choice_selected": _style_str(_fg(self.color_accent), "bold"),
+            "dialog_hint": _style_str(_fg(self.color_text_muted), "italic"),
             # Form controls
             "radio_list": _style_str(_bg(self.color_bg_dialog), _fg(self.color_text)),
             "radio_selected": _style_str(_fg(self.color_accent), "bold"),
@@ -337,6 +344,7 @@ class ThinkingPromptStyles:
             "checkbox_selected": _style_str(_fg(self.color_accent), "bold"),
             "text_area": _style_str(_bg(self.color_bg_input), _fg(self.color_text_bright)),
             "select_arrow": _fg(self.color_text_muted),
+            "checkbox_mark": _fg(self.color_accent),
             # Settings list
             "setting_indicator": _fg(self.color_accent),
             "setting_label": _fg(self.color_text),
@@ -390,10 +398,14 @@ class ThinkingPromptStyles:
             'dialog': r("dialog"),
             'dialog.body': r("dialog_body"),
             'dialog frame.label': r("dialog_title"),
+            'dialog-title': r("dialog_title"),  # inline dialogs
             'dialog frame.border': r("dialog_border"),
             'dialog shadow': r("dialog_shadow"),
             'button': r("dialog_button"),
             'button.focused': r("dialog_button_focused"),
+            'dialog-choice': r("dialog_choice"),
+            'dialog-choice-selected': r("dialog_choice_selected"),
+            'dialog-hint': r("dialog_hint"),
             # Form controls
             'radio-list': r("radio_list"),
             'radio-selected': r("radio_selected"),
@@ -401,6 +413,7 @@ class ThinkingPromptStyles:
             'checkbox-selected': r("checkbox_selected"),
             'text-area': r("text_area"),
             'select-arrow': r("select_arrow"),
+            'checkbox-mark': r("checkbox_mark"),
             # Settings list
             'setting-indicator': r("setting_indicator"),
             'setting-label': r("setting_label"),

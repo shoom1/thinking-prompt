@@ -5,7 +5,8 @@ from __future__ import annotations
 
 import asyncio
 import pytest
-from typing import AsyncIterator, Callable, List
+from contextlib import asynccontextmanager
+from typing import Any, AsyncIterator, Callable, List
 
 from prompt_toolkit.application import create_app_session
 from prompt_toolkit.input import create_pipe_input
@@ -71,15 +72,11 @@ def short_content() -> str:
     return "\n".join([f"Line {i}" for i in range(3)])
 
 
-@pytest.fixture
-async def running_session() -> AsyncIterator[ThinkingPromptSession]:
-    """A session whose app is running (piped input, no output).
-
-    Dialogs need one: only a running app can answer them, so show_dialog()
-    refuses to open on a session that isn't running.
-    """
+@asynccontextmanager
+async def _running(**kwargs: Any) -> AsyncIterator[ThinkingPromptSession]:
+    """A session (built with ``kwargs``) whose app runs on piped input with no output."""
     with create_pipe_input() as inp, create_app_session(input=inp, output=DummyOutput()):
-        session = ThinkingPromptSession()
+        session = ThinkingPromptSession(**kwargs)
         run = asyncio.ensure_future(session.run_async(lambda text: None))
         deadline = asyncio.get_running_loop().time() + 2
         while not (session.app.is_running and session.app.future is not None):
@@ -90,3 +87,21 @@ async def running_session() -> AsyncIterator[ThinkingPromptSession]:
         finally:
             session.exit()
             await asyncio.wait_for(run, timeout=2)
+
+
+@pytest.fixture
+async def running_session() -> AsyncIterator[ThinkingPromptSession]:
+    """A session whose app is running (piped input, no output).
+
+    Dialogs need one: only a running app can answer them, so show_dialog()
+    refuses to open on a session that isn't running.
+    """
+    async with _running() as session:
+        yield session
+
+
+@pytest.fixture
+def run_session() -> Callable[..., Any]:
+    """Like running_session, with session options:
+    ``async with run_session(dialog_placement="inline") as session``."""
+    return _running

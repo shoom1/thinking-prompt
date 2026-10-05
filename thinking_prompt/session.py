@@ -42,6 +42,7 @@ from prompt_toolkit.formatted_text import (
 from prompt_toolkit.history import History, InMemoryHistory
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.key_binding.key_processor import KeyPressEvent
+from prompt_toolkit.layout import AnyContainer, DynamicContainer, Window
 from prompt_toolkit.output import ColorDepth
 from prompt_toolkit.styles import DynamicStyle
 
@@ -51,7 +52,7 @@ from .layout import create_layout
 from .manager import ThinkingBoxManager
 from .rich_utils import _is_rich_renderable
 from .styles import ThinkingPromptStyles, resolve_theme
-from .types import ThinkingContext, format_exception_detail
+from .types import Placement, ThinkingContext, check_placement, format_exception_detail
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +109,7 @@ class ThinkingPromptSession:
         status_text: AnyFormattedText = "Ctrl+C: cancel | Ctrl+D: exit",
         echo_input: bool = True,
         history_limit: int | None = None,
+        dialog_placement: Placement = "box",
     ) -> None:
         """
         Initialize the ThinkingPromptSession.
@@ -128,16 +130,22 @@ class ThinkingPromptSession:
             echo_input: Whether to echo user input to console before thinking.
             history_limit: Max transcript entries kept for fullscreen history
                           and repaint; oldest trimmed. None = unbounded.
+            dialog_placement: How dialogs are drawn unless they say otherwise:
+                "box" (default) floats a framed dialog over the session;
+                "inline" draws rows between the prompt and the status bar.
 
         Raises:
             ValueError: If max_thinking_height is less than 2, or theme= names
-                       an unknown theme.
+                       an unknown theme, or if dialog_placement isn't 'box'
+                       or 'inline'.
         """
         if max_thinking_height < 2:
             raise ValueError("max_thinking_height must be at least 2")
 
         self._message = message
         self._app_info = app_info
+        check_placement(dialog_placement)
+        self._dialog_placement: Placement = dialog_placement
 
         # A fresh instance per session: sharing DEFAULT_STYLES would let a
         # tweak to one session's styles restyle every other session.
@@ -215,6 +223,8 @@ class ThinkingPromptSession:
 
         # Dialog manager (lazy initialization)
         self._dialog_manager: DialogManager | None = None
+        # Shown in the layout's inline-dialog slot while no inline dialog is open.
+        self._no_inline_dialog = Window(height=0)
 
         # Create components
         self.default_buffer = self._create_default_buffer()
@@ -326,6 +336,7 @@ class ThinkingPromptSession:
             is_status_bar_enabled=lambda: self._enable_status_bar,
             thinking_manager=self._manager,
             completions_menu_height=self._completions_menu_height,
+            inline_dialog=DynamicContainer(self._inline_dialog_content),
         )
 
     def _create_application(self) -> Application:
@@ -1301,6 +1312,17 @@ class ThinkingPromptSession:
     # =========================================================================
 
     @property
+    def dialog_placement(self) -> Placement:
+        """How dialogs are drawn unless the dialog (or the call) says otherwise."""
+        return self._dialog_placement
+
+    def _inline_dialog_content(self) -> AnyContainer:
+        """What the layout's inline-dialog slot shows: the open inline dialog, or nothing."""
+        manager = self._dialog_manager
+        view = manager.inline_view if manager is not None else None
+        return view.container if view is not None else self._no_inline_dialog
+
+    @property
     def _dialogs(self) -> DialogManager:
         """Get or create the dialog manager (lazy initialization)."""
         if self._dialog_manager is None:
@@ -1308,12 +1330,19 @@ class ThinkingPromptSession:
             self._dialog_manager = DialogManager(self)
         return self._dialog_manager
 
+    def _resolve_placement(self, placement: Placement | None) -> Placement:
+        """``placement``, or the session's dialog_placement when None (validated)."""
+        check_placement(placement, optional=True)
+        return placement if placement is not None else self._dialog_placement
+
     async def yes_no_dialog(
         self,
         title: str,
         text: str,
         yes_text: str = "Yes",
         no_text: str = "No",
+        *,
+        placement: Placement | None = None,
     ) -> bool:
         """
         Show a Yes/No confirmation dialog.
@@ -1323,6 +1352,8 @@ class ThinkingPromptSession:
             text: Dialog body text.
             yes_text: Text for Yes button (default: "Yes").
             no_text: Text for No button (default: "No").
+            placement: "box" or "inline"; None (default) uses the session's
+                dialog_placement.
 
         Returns:
             True if Yes was clicked, False if No or Escape.
@@ -1332,7 +1363,7 @@ class ThinkingPromptSession:
                 delete_file()
         """
         from .dialog import _yes_no_dialog
-        dialog = _yes_no_dialog(title, text, yes_text, no_text)
+        dialog = _yes_no_dialog(title, text, yes_text, no_text, self._resolve_placement(placement))
         return cast(bool, await self._dialogs.show(dialog))
 
     async def message_dialog(
@@ -1340,6 +1371,8 @@ class ThinkingPromptSession:
         title: str,
         text: str,
         ok_text: str = "OK",
+        *,
+        placement: Placement | None = None,
     ) -> None:
         """
         Show an informational message dialog.
@@ -1348,12 +1381,14 @@ class ThinkingPromptSession:
             title: Dialog title.
             text: Dialog body text.
             ok_text: Text for OK button (default: "OK").
+            placement: "box" or "inline"; None (default) uses the session's
+                dialog_placement.
 
         Example:
             await session.message_dialog("Info", "Operation completed.")
         """
         from .dialog import _message_dialog
-        dialog = _message_dialog(title, text, ok_text)
+        dialog = _message_dialog(title, text, ok_text, self._resolve_placement(placement))
         await self._dialogs.show(dialog)
 
     async def choice_dialog(
@@ -1361,6 +1396,8 @@ class ThinkingPromptSession:
         title: str,
         text: str,
         choices: Sequence[str],
+        *,
+        placement: Placement | None = None,
     ) -> str | None:
         """
         Show a dialog with multiple choice buttons.
@@ -1369,6 +1406,8 @@ class ThinkingPromptSession:
             title: Dialog title.
             text: Dialog body text.
             choices: List of choice strings (each becomes a button).
+            placement: "box" or "inline"; None (default) uses the session's
+                dialog_placement.
 
         Returns:
             The selected choice string, or None if Escape was pressed.
@@ -1383,7 +1422,7 @@ class ThinkingPromptSession:
                 save_file()
         """
         from .dialog import _choice_dialog
-        dialog = _choice_dialog(title, text, choices)
+        dialog = _choice_dialog(title, text, choices, self._resolve_placement(placement))
         return cast(Optional[str], await self._dialogs.show(dialog))
 
     async def dropdown_dialog(
@@ -1392,6 +1431,8 @@ class ThinkingPromptSession:
         text: str,
         options: Sequence[str],
         default: str | None = None,
+        *,
+        placement: Placement | None = None,
     ) -> str | None:
         """
         Show a dialog with a dropdown/radio list selection.
@@ -1401,6 +1442,8 @@ class ThinkingPromptSession:
             text: Dialog body text.
             options: List of options to choose from.
             default: Default selected option (optional).
+            placement: "box" or "inline"; None (default) uses the session's
+                dialog_placement.
 
         Returns:
             The selected option string, or None if cancelled.
@@ -1414,8 +1457,43 @@ class ThinkingPromptSession:
             )
         """
         from .dialog import _dropdown_dialog
-        dialog = _dropdown_dialog(title, text, options, default)
+        dialog = _dropdown_dialog(title, text, options, default, self._resolve_placement(placement))
         return cast(Optional[str], await self._dialogs.show(dialog))
+
+    async def checklist_dialog(
+        self,
+        title: str,
+        text: str,
+        options: Sequence[str],
+        defaults: Sequence[str] = (),
+        *,
+        placement: Placement | None = None,
+    ) -> list[str] | None:
+        """
+        Show a check list: any number of options, one per line.
+
+        Args:
+            title: Dialog title.
+            text: Text above the options ("" for none).
+            options: The options to check.
+            defaults: Options checked at first (others are ignored).
+            placement: "box" or "inline"; None (default) uses the session's
+                dialog_placement.
+
+        Returns:
+            The checked options in option order, or None if cancelled.
+
+        Raises:
+            ValueError: If ``options`` is empty.
+
+        Example:
+            tools = await session.checklist_dialog(
+                "Tools", "Enable any:", ["search", "code", "files"], defaults=["search"]
+            )
+        """
+        from .dialog import _checklist_dialog
+        dialog = _checklist_dialog(title, text, options, defaults, self._resolve_placement(placement))
+        return cast("list[str] | None", await self._dialogs.show(dialog))
 
     async def show_dialog(self, dialog: Dialog) -> Any:
         """
@@ -1464,6 +1542,7 @@ class ThinkingPromptSession:
         width: int | None = 60,
         top: int | None = None,
         height: int | None = None,
+        placement: Placement | None = None,
     ) -> dict[str, Any] | None:
         """
         Show a settings dialog and return changed values.
@@ -1485,6 +1564,8 @@ class ThinkingPromptSession:
                     allocated the full height in one render frame instead
                     of growing line-by-line. Body overflow scrolls.
                     When None (default), the dialog sizes to its content.
+            placement: "box" or "inline"; None (default) uses the session's
+                    dialog_placement.
 
         Returns:
             Dictionary of changed values if saved, or None if cancelled.
@@ -1507,7 +1588,7 @@ class ThinkingPromptSession:
         """
         from .settings_dialog import SettingsDialog
         dialog = SettingsDialog(
-            title, items, can_cancel, width=width, top=top, height=height
+            title, items, can_cancel, width=width, top=top, height=height, placement=placement
         )
         return cast(
             "dict[str, Any] | None", await self._dialogs.show(dialog)

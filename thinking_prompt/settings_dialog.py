@@ -2,13 +2,14 @@
 Settings dialog for ThinkingPromptSession.
 
 Provides a form-based dialog for configuring multiple settings at once.
-Navigation: Up/Down within controls, Tab/Shift-Tab through all elements.
-Left/Right or Space to change values. Enter to edit text in-place.
-Ctrl+S saves, Escape cancels.
+Navigation: Up/Down move between settings (and, in an inline dialog, on to
+the Save/Cancel rows), Tab/Shift-Tab too. Left/Right or Space change values,
+Enter edits text in place. Ctrl+S saves, Escape cancels.
 """
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any, Generic, TypeVar
 
@@ -17,7 +18,8 @@ from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.data_structures import Point
 from prompt_toolkit.filters import Condition
 from prompt_toolkit.formatted_text import FormattedText
-from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.key_binding import KeyBindings, merge_key_bindings
+from prompt_toolkit.key_binding.key_bindings import KeyBindingsBase
 from prompt_toolkit.layout import (
     BufferControl,
     ConditionalContainer,
@@ -35,6 +37,8 @@ from prompt_toolkit.layout.processors import PasswordProcessor
 from prompt_toolkit.widgets import Frame
 
 from .dialog import ButtonConfig, Dialog
+from .rows import MARKER, NO_MARKER, OptionGroup, RowControl, RowNavigator, has_focus
+from .types import Placement
 
 
 @dataclass
@@ -77,10 +81,53 @@ class TextItem(SettingsItem):
     edit_width: int = 15  # Width of text input field in edit mode
 
 
+@dataclass
+class ChecklistItem(SettingsItem):
+    """Any number of options, one per line; the value is the checked ones, in option order."""
+    options: list[str] = field(default_factory=list)
+    default: Sequence[str] = ()
+
+
+@dataclass
+class RadioItem(SettingsItem):
+    """One of several options, one per line; with no default nothing is picked."""
+    options: list[str] = field(default_factory=list)
+    default: str | None = None
+
+
 T = TypeVar("T", bound=SettingsItem)
 
 
-class SettingControl(UIControl, ABC, Generic[T]):
+def _cycled(options: list[str], value: Any, delta: int) -> Any:
+    """The option ``delta`` steps from ``value``, clamped to the ends.
+
+    With no current selection (no default, or a default that isn't an
+    option) any step selects the first option: moving from index 0 would
+    skip over it.
+    """
+    if not options:
+        return value
+    try:
+        idx = options.index(value)
+    except ValueError:
+        return options[0]
+    return options[max(0, min(len(options) - 1, idx + delta))]
+
+
+def _selector_value(options: list[str], value: Any, value_style: str) -> list[tuple[str, str]]:
+    """``◀ value ▶`` fragments. The arrows layer class:select-arrow over the
+    value style; at either end the missing arrow's place is kept blank."""
+    try:
+        idx = options.index(value)
+    except ValueError:
+        idx = 0
+    arrow_style = f"{value_style} class:select-arrow"
+    left = (value_style, "  ") if idx == 0 else (arrow_style, "◀ ")
+    right = (value_style, "  ") if idx == len(options) - 1 else (arrow_style, " ▶")
+    return [left, (value_style, str(value) if value else ""), right]
+
+
+class SettingControl(RowControl, ABC, Generic[T]):
     """Base class for setting controls with view/edit modes.
 
     Generic over the concrete SettingsItem subclass so subclasses get
@@ -142,6 +189,15 @@ class SettingControl(UIControl, ABC, Generic[T]):
     def is_focusable(self) -> bool:
         return True
 
+    @property
+    def row_count(self) -> int:
+        """Rows this setting takes: 1, or 2 with a description."""
+        return 2 if self._item.description else 1
+
+    def get_stops(self) -> list[Container]:
+        """Where the cursor stops in this setting: one place per row the user acts on."""
+        return [self.get_container()]
+
     def _check_focus(self) -> bool:
         """Check if this control has focus (for rendering).
 
@@ -168,7 +224,7 @@ class SettingControl(UIControl, ABC, Generic[T]):
         `value` is the right-aligned value as (style, text) fragments.
         Returns a list of FormattedText lines (1 or 2 depending on description).
         """
-        indicator = "> " if is_selected else "  "
+        indicator = MARKER if is_selected else NO_MARKER
         indicator_style = "class:setting-indicator" if is_selected else ""
         label_style = "class:setting-label-selected" if is_selected else "class:setting-label"
 
@@ -204,6 +260,10 @@ class CheckboxControl(SettingControl[CheckboxItem]):
         super().__init__(item)
         height = 2 if item.description else 1
         self._window = Window(self, height=height)
+
+    @property
+    def hints(self) -> frozenset[str]:
+        return frozenset({"Space toggle"})
 
     def toggle(self) -> None:
         """Toggle the checkbox value."""
@@ -253,43 +313,21 @@ class InlineSelectControl(SettingControl[InlineSelectItem]):
         height = 2 if item.description else 1
         self._window = Window(self, height=height)
 
+    @property
+    def hints(self) -> frozenset[str]:
+        return frozenset({"←→ change"})
+
     def cycle(self, delta: int) -> None:
         """Move through options by delta (+1 or -1), clamped to boundaries."""
-        options = self._item.options
-        if not options:
-            return
-        try:
-            idx = options.index(self._value)
-        except ValueError:
-            # No current selection (no default, or a default that isn't an
-            # option): the first press selects the first option. Moving
-            # from index 0 would skip over it.
-            self._value = options[0]
-            return
-        new_idx = max(0, min(len(options) - 1, idx + delta))
-        self._value = options[new_idx]
+        self._value = _cycled(self._item.options, self._value, delta)
 
     def create_content(self, width: int, height: int) -> UIContent:
         """Render the inline select row with left/right arrows."""
         is_selected = self._check_focus()
         value_style = "class:setting-value-selected" if is_selected else "class:setting-value"
 
-        value_text = str(self._value) if self._value else ""
-
-        # Get current index to determine arrow visibility
-        options = self._item.options
-        try:
-            idx = options.index(self._value)
-        except ValueError:
-            idx = 0
-
-        # Arrows layer class:select-arrow over the value style; at either
-        # end the missing arrow's place is kept blank.
-        arrow_style = f"{value_style} class:select-arrow"
-        left = (value_style, "  ") if idx == 0 else (arrow_style, "◀ ")
-        right = (value_style, "  ") if idx == len(options) - 1 else (arrow_style, " ▶")
-
-        lines = self._build_setting_row(width, [left, (value_style, value_text), right], is_selected)
+        value = _selector_value(self._item.options, self._value, value_style)
+        lines = self._build_setting_row(width, value, is_selected)
 
         def get_line(i: int) -> FormattedText:
             return lines[i] if i < len(lines) else FormattedText([])
@@ -331,6 +369,20 @@ class DropdownControl(SettingControl[DropdownItem]):
         self._menu_control = _DropdownMenuControl(self)
         self._menu_window: Window | None = None
         self._max_visible_height: int | None = None  # Set by parent dialog
+        # Inline dialogs show a dropdown as a ←/→ selector, with no popup menu.
+        self._inline = False
+
+    def set_inline(self, inline: bool) -> None:
+        """Show as a ←/→ selector (inline dialogs) instead of a popup menu."""
+        self._inline = inline
+
+    @property
+    def hints(self) -> frozenset[str]:
+        return frozenset({"←→ change"}) if self._inline else frozenset()
+
+    def cycle(self, delta: int) -> None:
+        """Move through options by delta (+1 or -1), clamped to the ends."""
+        self._value = _cycled(self._item.options, self._value, delta)
 
     def set_max_visible_height(self, max_height: int) -> None:
         """Limit dropdown height to fit within dialog bounds."""
@@ -420,11 +472,14 @@ class DropdownControl(SettingControl[DropdownItem]):
         value_style = "class:setting-value-selected" if is_selected else "class:setting-value"
 
         value_text = str(self._value) if self._value else ""
-        # Right-align value within dropdown width, add dropdown indicator
-        value = [
-            (value_style, f"{value_text.rjust(self._get_dropdown_width())} "),
-            (f"{value_style} class:select-arrow", "▼"),
-        ]
+        if self._inline:
+            value = _selector_value(self._item.options, self._value, value_style)
+        else:
+            # Right-align value within dropdown width, add dropdown indicator
+            value = [
+                (value_style, f"{value_text.rjust(self._get_dropdown_width())} "),
+                (f"{value_style} class:select-arrow", "▼"),
+            ]
 
         lines = self._build_setting_row(width, value, is_selected)
 
@@ -478,30 +533,42 @@ class DropdownControl(SettingControl[DropdownItem]):
         )
 
     def get_key_bindings(self) -> KeyBindings:
-        """Key bindings for dropdown control."""
+        """Popup menu keys in a box; ←/→ (and Space) cycle inline."""
         kb = KeyBindings()
+        inline = Condition(lambda: self._inline)
+        popup_closed = Condition(lambda: not self._inline and not self._editing)
+        editing = Condition(lambda: self._editing)
 
-        @kb.add("enter", filter=Condition(lambda: not self._editing))
-        @kb.add("space", filter=Condition(lambda: not self._editing))
+        @kb.add("enter", filter=popup_closed)
+        @kb.add("space", filter=popup_closed)
         def _enter_edit(event: Any) -> None:
             self.enter_edit_mode(event.app)
 
-        # Edit mode bindings (active when editing)
-        @kb.add("up", filter=Condition(lambda: self._editing))
+        # Edit mode bindings (active when the popup is open)
+        @kb.add("up", filter=editing)
         def _up(event: Any) -> None:
             self._move_selection(-1)
 
-        @kb.add("down", filter=Condition(lambda: self._editing))
+        @kb.add("down", filter=editing)
         def _down(event: Any) -> None:
             self._move_selection(1)
 
-        @kb.add("enter", filter=Condition(lambda: self._editing))
+        @kb.add("enter", filter=editing)
         def _confirm(event: Any) -> None:
             self.confirm_edit()
 
-        @kb.add("escape", filter=Condition(lambda: self._editing))
+        @kb.add("escape", filter=editing)
         def _cancel(event: Any) -> None:
             self.cancel_edit()
+
+        @kb.add("left", filter=inline)
+        def _prev(event: Any) -> None:
+            self.cycle(-1)
+
+        @kb.add("right", filter=inline)
+        @kb.add("space", filter=inline)
+        def _next(event: Any) -> None:
+            self.cycle(1)
 
         return kb
 
@@ -558,6 +625,7 @@ class TextControl(SettingControl[TextItem]):
         # Cache edit container for stable focus
         self._edit_container: Container | None = None
         self._buffer_window: Window | None = None
+        self._container = DynamicContainer(self._get_current_container)
 
     def enter_edit_mode(self, app: Any = None) -> None:
         """Enter edit mode - populate buffer with current value."""
@@ -618,8 +686,8 @@ class TextControl(SettingControl[TextItem]):
         return UIContent(get_line=get_line, line_count=len(lines))
 
     def get_container(self) -> Container:
-        """Return container that switches between view/edit modes."""
-        return DynamicContainer(self._get_current_container)
+        """Return the (cached) container that switches between view/edit modes."""
+        return self._container
 
     def _get_current_container(self) -> Container:
         """Return appropriate container based on edit state."""
@@ -634,7 +702,7 @@ class TextControl(SettingControl[TextItem]):
             return self._edit_container
 
         # Label on left, input field on right
-        label_text = f"> {self._item.label}"
+        label_text = f"{MARKER}{self._item.label}"
         label_width = len(label_text) + 2
 
         edit_kb = KeyBindings()
@@ -660,7 +728,7 @@ class TextControl(SettingControl[TextItem]):
         row = VSplit([
             Window(
                 FormattedTextControl(lambda: FormattedText([
-                    ("class:setting-indicator", "> "),
+                    ("class:setting-indicator", MARKER),
                     ("class:setting-label-selected", self._item.label),
                 ])),
                 width=label_width,
@@ -694,17 +762,71 @@ class TextControl(SettingControl[TextItem]):
         return kb
 
 
+class OptionsControl(SettingControl[Any]):
+    """A check list or radio list setting: its label row, then one OptionRow
+    per option. The options are the cursor stops; the label takes no focus."""
+
+    def __init__(self, item: ChecklistItem | RadioItem) -> None:
+        super().__init__(item)
+        if isinstance(item, ChecklistItem):
+            self._group = OptionGroup(item.options, multiple=True, selected=list(item.default), indent=2)
+        else:
+            picked = [item.default] if item.default is not None else []
+            self._group = OptionGroup(item.options, multiple=False, selected=picked, indent=2)
+        self._label_window = Window(self, height=2 if item.description else 1)
+        self._container = HSplit([self._label_window, *(row.window for row in self._group.rows)])
+
+    @property
+    def value(self) -> Any:
+        """The checked options (check list) or the picked one (radio list)."""
+        return self._group.checked if self._group.multiple else self._group.picked
+
+    @value.setter
+    def value(self, val: Any) -> None:
+        if self._group.multiple:
+            self._group.select(list(val))
+        else:
+            self._group.select([] if val is None else [val])
+
+    @property
+    def row_count(self) -> int:
+        return super().row_count + len(self._group.rows)
+
+    def is_focusable(self) -> bool:
+        return False  # the label row; the option rows take focus
+
+    def get_container(self) -> Container:
+        return self._container
+
+    def get_stops(self) -> list[Container]:
+        return [row.window for row in self._group.rows]
+
+    def create_content(self, width: int, height: int) -> UIContent:
+        """The label row (and description), highlighted while an option has focus."""
+        selected = any(has_focus(row.window) for row in self._group.rows)
+        label_style = "class:setting-label-selected" if selected else "class:setting-label"
+        lines = [FormattedText([("", NO_MARKER), (label_style, self._item.label)])]
+        if self._item.description:
+            desc_style = "class:setting-desc-selected" if selected else "class:setting-desc"
+            lines.append(FormattedText([("", "  "), (desc_style, self._item.description)]))
+
+        def get_line(i: int) -> FormattedText:
+            return lines[i] if i < len(lines) else FormattedText([])
+
+        return UIContent(get_line=get_line, line_count=len(lines))
+
+
 class SettingsDialog(Dialog):
     """
     A settings dialog using individual controls per setting type.
 
     Navigation:
-    - Up/Down: Navigate within settings controls (stops at boundaries)
-    - Tab/Shift-Tab: Navigate through all elements (controls + buttons)
-    - Left/Right or Space: Change value (dropdown/checkbox)
-    - Enter: Edit text item in-place
-    - Ctrl+S: Save and close
-    - Escape: Cancel edit or close dialog
+    - Up/Down: move between settings; inline, on to the Save/Cancel rows
+    - Tab/Shift-Tab: through the settings, then (box) to the buttons
+    - Left/Right or Space: change value (selectors, checkboxes)
+    - Enter: edit text in place (box dropdowns: open the menu)
+    - Ctrl+S: save and close
+    - Escape: cancel edit or close dialog
 
     Returns a dictionary of changed values when closed, or None if cancelled.
     """
@@ -718,32 +840,29 @@ class SettingsDialog(Dialog):
         width: int | None = 60,
         top: int | None = None,
         height: int | None = None,
+        placement: Placement | None = None,
     ) -> None:
         # escapable: with can_cancel=False there is no cancel concept, so
         # Escape is disabled (the Done button is the only way out).
         # escape_result stays the default None, so nothing but a dict or None
         # can come back from show_settings_dialog().
-        super().__init__(title, width=width, top=top, height=height, escapable=can_cancel)
+        super().__init__(
+            title, width=width, top=top, height=height, escapable=can_cancel, placement=placement
+        )
         self._items = items
         self._can_cancel = can_cancel
 
-        # Original values for change detection
-        self._original_values: dict[str, Any] = {}
-        for item in items:
-            self._original_values[item.key] = item.default
-
         # Create controls
-        self._controls: list[SettingControl] = []
-        for item in items:
-            control = self._create_control(item)
-            self._controls.append(control)
+        self._controls: list[SettingControl] = [self._create_control(item) for item in items]
 
-        # Navigation state
-        self._focus_index = 0
+        # Original values for change detection, as each control reports them.
+        self._original_values: dict[str, Any] = {c.item.key: c.value for c in self._controls}
 
     def _create_control(self, item: SettingsItem) -> SettingControl:
         """Create the appropriate control for a settings item."""
-        if isinstance(item, CheckboxItem):
+        if isinstance(item, (ChecklistItem, RadioItem)):
+            return OptionsControl(item)
+        elif isinstance(item, CheckboxItem):
             return CheckboxControl(item)
         elif isinstance(item, DropdownItem):
             return DropdownControl(item)
@@ -758,71 +877,51 @@ class SettingsDialog(Dialog):
         """Check if any control is in edit mode."""
         return any(c.is_editing for c in self._controls)
 
-    def _sync_focus_index(self, app: Any) -> None:
-        """Sync _focus_index with actual focus (for when focus changes externally)."""
-        for i, container in enumerate(self._control_containers):
-            if app.layout.has_focus(container):
-                self._focus_index = i
-                return
+    def _stops(self) -> list[Container]:
+        """Every cursor stop in the form, top to bottom."""
+        return [stop for control in self._controls for stop in control.get_stops()]
 
-    def _focus_control(self, index: int, app: Any) -> None:
-        """Focus the control at the given index and update indicators."""
-        if 0 <= index < len(self._controls):
-            self._focus_index = index
-            # Update focus indicators
-            for i, control in enumerate(self._controls):
-                control.set_has_focus(i == index)
-            # Focus the control's container
-            container = self._control_containers[index]
-            app.layout.focus(container)
+    def _is_editing(self) -> bool:
+        return self._any_editing()
+
+    def _settings_key_bindings(self) -> KeyBindingsBase:
+        """Ctrl+S saves. In a box, ↑↓ walk the settings, and so do Tab /
+        Shift+Tab, Tab going on to the buttons after the last setting.
+        Inline, the dialog's own cursor walks settings and actions alike."""
+        idle = Condition(lambda: not self._any_editing())
+        kb = KeyBindings()
+
+        @kb.add("c-s", filter=idle)
+        def _save(event: Any) -> None:
+            self._on_save()
+
+        if self._placement == "inline":
+            return kb
+
+        navigator = RowNavigator(self._stops, is_editing=self._any_editing)
+
+        @kb.add("tab", filter=idle)
+        def _tab_next(event: Any) -> None:
+            stops = self._stops()
+            index = navigator.index(event.app.layout)
+            if index is not None and index < len(stops) - 1:
+                event.app.layout.focus(stops[index + 1])
+            else:
+                # After the last setting: on to the buttons (no wrap back)
+                self._clear_focus_indicators()
+                event.app.layout.focus_next()
+
+        @kb.add("s-tab", filter=idle)
+        def _tab_prev(event: Any) -> None:
+            # At the first setting: stays put (no wrap to the buttons)
+            navigator.move(event.app.layout, -1)
+
+        return merge_key_bindings([navigator.key_bindings(), kb])
 
     def _clear_focus_indicators(self) -> None:
         """Clear all focus indicators (when leaving controls area)."""
         for control in self._controls:
             control.set_has_focus(False)
-
-    def _get_navigation_key_bindings(self) -> KeyBindings:
-        """Key bindings for navigation."""
-        kb = KeyBindings()
-
-        # Up/Down: navigate within controls only, stop at boundaries
-        @kb.add("up", filter=Condition(lambda: not self._any_editing()))
-        def _move_up(event: Any) -> None:
-            self._sync_focus_index(event.app)  # Sync in case focus changed externally
-            if self._focus_index > 0:
-                self._focus_control(self._focus_index - 1, event.app)
-
-        @kb.add("down", filter=Condition(lambda: not self._any_editing()))
-        def _move_down(event: Any) -> None:
-            self._sync_focus_index(event.app)  # Sync in case focus changed externally
-            if self._focus_index < len(self._controls) - 1:
-                self._focus_control(self._focus_index + 1, event.app)
-
-        # Tab/Shift-Tab: navigate through controls + buttons (no wrapping)
-        @kb.add("tab", filter=Condition(lambda: not self._any_editing()))
-        def _tab_next(event: Any) -> None:
-            self._sync_focus_index(event.app)  # Sync in case focus changed externally
-            if self._focus_index < len(self._controls) - 1:
-                # Move to next control
-                self._focus_control(self._focus_index + 1, event.app)
-            else:
-                # At last control, move to buttons (no wrap back)
-                self._clear_focus_indicators()
-                event.app.layout.focus_next()
-
-        @kb.add("s-tab", filter=Condition(lambda: not self._any_editing()))
-        def _tab_prev(event: Any) -> None:
-            self._sync_focus_index(event.app)  # Sync in case focus changed externally
-            if self._focus_index > 0:
-                # Move to previous control
-                self._focus_control(self._focus_index - 1, event.app)
-            # At first control: do nothing (no wrap to buttons)
-
-        @kb.add("c-s", filter=Condition(lambda: not self._any_editing()))
-        def _save(event: Any) -> None:
-            self._on_save()
-
-        return kb
 
     def _get_changed_values(self) -> dict[str, Any]:
         """Return only values that differ from original."""
@@ -838,55 +937,45 @@ class SettingsDialog(Dialog):
         self.set_result(self._get_changed_values())
 
     def build_body(self) -> Container:
-        """Build the dialog body with individual control containers."""
+        """The settings, one control each, in an HSplit with their key bindings."""
         if not self._controls:
             return Window(height=1)
 
+        inline = self._placement == "inline"
+
         # Set initial focus indicator on first control
         self._controls[0].set_has_focus(True)
-
-        # Calculate control heights and total body height
-        control_heights = []
         for control in self._controls:
-            # Height is 2 if description present, else 1
-            h = 2 if control.item.description else 1
-            control_heights.append(h)
-        total_height = sum(control_heights)
-
-        # Set max_visible_height for dropdown controls based on available space
-        cumulative_height = 0
-        for i, control in enumerate(self._controls):
             if isinstance(control, DropdownControl):
-                # Dropdown appears at top=1 relative to control's top
-                dropdown_start = cumulative_height + 1
-                available_below = total_height - dropdown_start
-                # Subtract 2 for Frame borders (top + bottom)
-                max_height = max(1, available_below - 2)
-                control.set_max_visible_height(max_height)
-            cumulative_height += control_heights[i]
+                control.set_inline(inline)
 
-        # Store containers for focus management
-        self._control_containers = [control.get_container() for control in self._controls]
-
-        # Create HSplit with navigation bindings
         # Use empty window_too_small to suppress brief "Window too small" message during layout
         controls_container = HSplit(
-            self._control_containers,
-            key_bindings=self._get_navigation_key_bindings(),
+            [control.get_container() for control in self._controls],
+            key_bindings=self._settings_key_bindings(),
             window_too_small=Window(),
         )
+        if inline:
+            return controls_container
 
-        # Collect floats from dropdown controls (so they can overlay the entire dialog)
+        # Box: dropdown menus float over the settings below them, sized to
+        # the rows available under each dropdown.
+        total_height = sum(control.row_count for control in self._controls)
+        cumulative_height = 0
         floats = []
         for control in self._controls:
             if isinstance(control, DropdownControl):
+                # Dropdown appears at top=1 relative to control's top;
+                # subtract 2 for the Frame borders (top + bottom).
+                available_below = total_height - (cumulative_height + 1)
+                control.set_max_visible_height(max(1, available_below - 2))
                 floats.append(control.get_float())
+            cumulative_height += control.row_count
 
         if floats:
             # Wrap in FloatContainer so dropdowns can overlay other controls
             return FloatContainer(content=controls_container, floats=floats)
-        else:
-            return controls_container
+        return controls_container
 
     def get_buttons(self) -> list[ButtonConfig]:
         """Return dialog buttons."""

@@ -127,6 +127,7 @@ class TestThemeFactories:
             (d["setting-desc"], d["setting-desc-selected"]),
             (d["radio-list"], d["radio-selected"]),
             (d["checkbox-list"], d["checkbox-selected"]),
+            (d["dialog-choice"], d["dialog-choice-selected"]),
         ]
         for unselected, selected in pairs:
             assert selected, "selected state must not be empty in mono"
@@ -217,8 +218,8 @@ class TestStyleClassesDefined:
 
     def test_every_themed_class_is_used(self):
         """The reverse: a style field whose class nothing draws with is a
-        setting that silently does nothing (assistant_prefix, select_value,
-        checkbox_mark and user_separator were, until 0.4). Classes count as
+        setting that silently does nothing (assistant_prefix, select_value
+        and user_separator were, until 0.4). Classes count as
         used when this package or prompt_toolkit's widgets name them, or
         name a dotted child (class:a.b.c also carries a and a.b)."""
         import pathlib
@@ -247,8 +248,23 @@ class TestRemovedStyleFields:
     """0.4 removes style fields no component drew with (no deprecation)."""
 
     @pytest.mark.parametrize(
-        "name", ["assistant_prefix", "select_value", "checkbox_mark", "user_separator"]
+        "name", ["assistant_prefix", "select_value", "user_separator"]
     )
     def test_field_is_gone(self, name):
         with pytest.raises(TypeError, match=name):
             ThinkingPromptStyles(**{name: "bold"})
+
+
+class TestDialogRowStyles:
+    """Inline dialog rows: numbered actions and check/radio marks."""
+
+    def test_dark_values(self):
+        d = ThinkingPromptStyles().to_style_dict()
+        assert d["dialog-choice"] == "fg:#e0e0e0"
+        assert d["dialog-choice-selected"] == "fg:#88c0d0 bold"
+        assert d["checkbox-mark"] == "fg:#88c0d0"
+        assert d["dialog-hint"] == "fg:#888888 italic"
+        assert d["dialog-title"] == d["dialog frame.label"]
+
+    def test_checkbox_mark_is_back(self):
+        assert ThinkingPromptStyles(checkbox_mark="bold").to_style_dict()["checkbox-mark"] == "bold"
