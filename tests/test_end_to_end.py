@@ -742,6 +742,8 @@ class TestInlineDialogs:
                 assert session.default_buffer.text == ""
                 inp.send_text(ENTER)
                 await wait_until(lambda: results == ["delete"])
+                # Keys are handled in order: "x" was handled before Enter.
+                assert session.default_buffer.text == ""
                 assert not inline_open(session)
                 assert session.app.layout.has_focus(session.default_buffer)
 
@@ -1068,6 +1070,45 @@ class TestInlineSettings:
                 inp.send_text(RIGHT + DOWN + " ")  # Model: b; Stream: on
                 inp.send_text(TAB + TAB + ENTER)   # Name, then the Save button
                 await wait_until(lambda: results == [{"model": "b", "stream": True}])
+
+            await run_with(session, handler, script)
+
+    async def test_box_settings_shift_tab_at_the_first_setting_stays_put(self):
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.show_settings_dialog("Settings", self._items()))
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                # Still on Model after Shift+Tab (not wrapped to the buttons):
+                # → changes it, and Ctrl+S, a settings key, saves.
+                inp.send_text(SHIFT_TAB + RIGHT + CTRL_S)
+                await wait_until(lambda: results == [{"model": "b"}])
+
+            await run_with(session, handler, script)
+
+    async def test_box_settings_tab_from_the_last_check_list_option_reaches_the_buttons(self):
+        results: list[Any] = []
+        items = [
+            CheckboxItem(key="stream", label="Stream", default=False),
+            ChecklistItem(key="tools", label="Tools", options=["search", "code"], default=("search",)),
+        ]
+
+        async def handler(text: str) -> None:
+            results.append(await session.show_settings_dialog("Settings", items))
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                inp.send_text(DOWN + DOWN + " ")  # the last option: check "code"
+                inp.send_text(TAB + ENTER)        # on to the Save button
+                await wait_until(lambda: results == [{"tools": ["search", "code"]}])
 
             await run_with(session, handler, script)
 
