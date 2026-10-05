@@ -260,6 +260,7 @@ class TestDialogManager:
         # MagicMock is rejected by FloatContainer, so provide a real one.
         mock_session.app.layout.container = Window()
         mock_session.app.key_bindings = None
+        mock_session.dialog_placement = "box"
         # A running app: show() refuses to open a dialog without one.
         mock_session.app.is_running = True
         mock_session.app.future = asyncio.get_running_loop().create_future()
@@ -661,3 +662,83 @@ class TestRemovedApi:
         with pytest.raises(TypeError, match=r"takes a Dialog instance, got the class Dialog"):
             await session.show_dialog(Dialog)
         assert session._dialogs._current_dialog is None
+
+
+class TestPlacement:
+    """placement: per dialog (attribute or argument), else the session default."""
+
+    def test_default_is_none_meaning_the_session_default(self):
+        assert Dialog().placement is None
+
+    def test_constructor_argument_and_class_attribute(self):
+        class Inline(Dialog):
+            placement = "inline"
+
+        assert Dialog(placement="inline").placement == "inline"
+        assert Inline().placement == "inline"
+        assert Inline(placement="box").placement == "box"
+
+    def test_invalid_placement_raises(self):
+        with pytest.raises(ValueError, match="placement must be 'box' or 'inline', got 'side'"):
+            Dialog(placement="side")
+
+    def test_session_default(self):
+        from thinking_prompt import ThinkingPromptSession
+
+        assert ThinkingPromptSession().dialog_placement == "box"
+        assert ThinkingPromptSession(dialog_placement="inline").dialog_placement == "inline"
+        with pytest.raises(ValueError, match="placement must be"):
+            ThinkingPromptSession(dialog_placement="side")
+
+    @staticmethod
+    async def _open(session, dialog) -> asyncio.Task:
+        task = asyncio.create_task(session.show_dialog(dialog))
+        for _ in range(20):
+            await asyncio.sleep(0)
+            if session._dialogs._current_dialog is dialog:
+                break
+        assert session._dialogs._current_dialog is dialog
+        return task
+
+    async def test_dialog_placement_wins_over_the_session_default(self, run_session):
+        async with run_session(dialog_placement="inline") as session:
+            boxed = Dialog("T", "B", [ButtonConfig("OK")], placement="box")
+            task = await self._open(session, boxed)
+            assert session._dialogs.inline_view is None
+            boxed.set_result("box")
+            assert await asyncio.wait_for(task, timeout=1) == "box"
+
+            default = Dialog("T", "B", [ButtonConfig("OK")])
+            task = await self._open(session, default)
+            assert session._dialogs.inline_view is not None
+            default.set_result("inline")
+            assert await asyncio.wait_for(task, timeout=1) == "inline"
+            assert default.placement is None  # showing never writes placement
+            assert session._dialogs.inline_view is None
+
+    async def test_same_dialog_inline_then_as_a_box(self, running_session):
+        dialog = Dialog("T", "B", [ButtonConfig("OK", result="ok")])
+        for placement in ("inline", "box"):
+            dialog.placement = placement
+            task = await self._open(running_session, dialog)
+            assert (running_session._dialogs.inline_view is not None) == (placement == "inline")
+            dialog.set_result(placement)
+            assert await asyncio.wait_for(task, timeout=1) == placement
+
+    async def test_bad_class_attribute_raises_when_shown(self, running_session):
+        class Bad(Dialog):
+            placement = "side"
+
+        with pytest.raises(ValueError, match="placement must be"):
+            await asyncio.wait_for(
+                running_session.show_dialog(Bad("T", "B", [ButtonConfig("OK")])), timeout=1
+            )
+        assert running_session._dialogs._current_dialog is None
+
+    async def test_inline_dialog_with_nothing_focusable_raises(self, running_session):
+        with pytest.raises(ValueError, match="nothing to focus"):
+            await asyncio.wait_for(
+                running_session.show_dialog(Dialog("Empty", "hi", placement="inline")), timeout=1
+            )
+        assert running_session._dialogs._current_dialog is None
+        assert running_session._dialogs.inline_view is None

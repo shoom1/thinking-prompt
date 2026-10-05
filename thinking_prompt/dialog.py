@@ -53,7 +53,8 @@ from prompt_toolkit.layout.containers import is_container
 from prompt_toolkit.widgets import Label, RadioList
 
 from .dialog_box import TERMINAL_TOO_SMALL, BoxPresenter
-from .types import format_exception_detail
+from .dialog_inline import InlinePresenter, InlineView
+from .types import Placement, check_placement, format_exception_detail
 
 if TYPE_CHECKING:
     from .session import ThinkingPromptSession
@@ -131,9 +132,12 @@ class Dialog:
             closed with Escape).
         escape_result: What Escape and cancel() return (default None).
         escapable: If False, Escape does nothing (default True).
-        width: None/0 = auto, >0 = preferred width, -1 = full width.
-        top: None = centered, >=0 = rows from top, <0 = rows from bottom.
-        height: Fixed total height; the body scrolls when it overflows.
+        width: None/0 = auto, >0 = preferred width, -1 = full width (box only).
+        top: None = centered, >=0 = rows from top, <0 = rows from bottom (box only).
+        height: Fixed total height; the body scrolls when it overflows (box only).
+        placement: "box" (a framed dialog floating over the session),
+            "inline" (rows between the prompt and the status bar), or None
+            (default) for the session's ``dialog_placement``.
 
     Example:
         # Built with arguments
@@ -177,6 +181,8 @@ class Dialog:
     # renders in one shot instead of growing line-by-line as the renderer
     # measures content.
     height: int | None = None
+    # "box", "inline", or None for the session's dialog_placement.
+    placement: Placement | None = None
 
     def __init__(
         self,
@@ -189,7 +195,11 @@ class Dialog:
         width: int | None | _NotPassed = _NOT_PASSED,
         top: int | None | _NotPassed = _NOT_PASSED,
         height: int | None | _NotPassed = _NOT_PASSED,
+        placement: Placement | None | _NotPassed = _NOT_PASSED,
     ) -> None:
+        if not isinstance(placement, _NotPassed):
+            check_placement(placement, optional=True)
+
         passed = {
             "title": title,
             "body": body,
@@ -199,6 +209,7 @@ class Dialog:
             "width": width,
             "top": top,
             "height": height,
+            "placement": placement,
         }
         for name, value in passed.items():
             if not isinstance(value, _NotPassed):
@@ -206,6 +217,9 @@ class Dialog:
 
         self._result_future: asyncio.Future | None = None
         self._manager: DialogManager | None = None
+        # The placement this dialog is (or was last) shown with, resolved by
+        # DialogManager; build_body() may read it (the settings dialog does).
+        self._placement: Placement = "box"
 
     def build_body(self) -> AnyContainer:
         """
@@ -249,6 +263,15 @@ class Dialog:
         dialog is escapable.
         """
         self.set_result(self.escape_result)
+
+    def _has_body(self) -> bool:
+        """False for an empty text body: an inline dialog then skips the body row."""
+        return type(self).build_body is not Dialog.build_body or self.body != ""
+
+    def _is_editing(self) -> bool:
+        """True while a row of the body is being edited (e.g. a settings
+        text field): the inline cursor stays put meanwhile."""
+        return False
 
     def _button_configs(self) -> list[ButtonConfig]:
         """get_buttons(), checked: every item must be a ButtonConfig.
@@ -294,9 +317,10 @@ class Dialog:
 
         return click
 
-    def _prepare(self, manager: DialogManager) -> asyncio.Future:
+    def _prepare(self, manager: DialogManager, placement: Placement = "box") -> asyncio.Future:
         """Prepare the dialog for showing (called by DialogManager)."""
         self._manager = manager
+        self._placement = placement
         loop = asyncio.get_running_loop()
         self._result_future = loop.create_future()
         return self._result_future
@@ -356,8 +380,9 @@ class DialogManager:
 
     One dialog at a time: it claims the slot, waits for the result (cancelled
     if the app exits) and always restores focus to the prompt. Drawing is
-    delegated to a presenter: BoxPresenter floats a framed dialog over the
-    layout.
+    delegated to a presenter picked by the dialog's placement: BoxPresenter
+    floats a framed dialog over the layout, InlinePresenter fills the
+    layout's inline slot.
 
     The DialogManager is created lazily by ThinkingPromptSession
     when dialogs are first used.
@@ -369,9 +394,15 @@ class DialogManager:
         self._current_dialog: Dialog | None = None
         self._injected = False
         self._box = BoxPresenter(session)
+        self._inline = InlinePresenter()
 
         # Create and register key bindings
         self._key_bindings = self._create_key_bindings()
+
+    @property
+    def inline_view(self) -> InlineView | None:
+        """The open inline dialog, if any: the session's inline slot shows it."""
+        return self._inline.view
 
     def _create_key_bindings(self) -> KeyBindings:
         """Create key bindings for dialog (Escape handler)."""
@@ -428,7 +459,7 @@ class DialogManager:
                 open (e.g. one opened from a background task).
             TypeError: If ``dialog`` isn't a Dialog.
             ValueError: If the dialog has nothing focusable (e.g. no buttons
-                and a text body).
+                and a text body), or its placement isn't 'box' or 'inline'.
 
         Whatever the dialog raises while being built or opened, the
         manager is left closed, so later dialogs can still be shown.
@@ -458,6 +489,12 @@ class DialogManager:
                 "or run_async() is running, e.g. from an input handler."
             )
 
+        placement = (
+            dialog.placement if dialog.placement is not None
+            else self._session.dialog_placement
+        )
+        check_placement(placement)
+
         if self._current_dialog is not None:
             raise RuntimeError(
                 "A dialog is already being shown. Wait for it to close "
@@ -466,10 +503,13 @@ class DialogManager:
 
         self._inject_float_container()
 
-        # Clamp dialog.height against terminal height (if height is set).
-        effective_height = self._box.effective_height(dialog)
-        if effective_height is TERMINAL_TOO_SMALL:
-            return dialog.escape_result if dialog.escapable else None
+        effective_height: int | None = None
+        if placement == "box":
+            # Clamp dialog.height against terminal height (if height is set).
+            clamped = self._box.effective_height(dialog)
+            if clamped is TERMINAL_TOO_SMALL:
+                return dialog.escape_result if dialog.escapable else None
+            effective_height = clamped
 
         # Everything after claiming the slot runs under the finally below:
         # if building or focusing the dialog raises (a bug in a custom
@@ -477,13 +517,19 @@ class DialogManager:
         # believing a dialog is open — it would refuse every later one.
         self._current_dialog = dialog
         try:
-            future = dialog._prepare(self)
-            view = self._box.open(dialog, effective_height)
-            # A ButtonConfig(focused=True) button, else the first focusable
-            # element of the dialog.
-            target: AnyContainer = view.initial_focus or view.widget
+            future = dialog._prepare(self, placement)
+            target: AnyContainer | None
+            if placement == "box":
+                box = self._box.open(dialog, effective_height)
+                # A ButtonConfig(focused=True) button, else the first
+                # focusable element of the dialog.
+                target = box.initial_focus or box.widget
+            else:
+                target = self._inline.open(dialog).focus
 
             self._visible = True
+            if target is None:
+                raise ValueError(_nothing_to_focus(dialog))
             try:
                 self._session.app.layout.focus(target)
             except ValueError as exc:
@@ -507,6 +553,7 @@ class DialogManager:
             self._visible = False
             self._current_dialog = None
             self._box.close()
+            self._inline.close()
             self._session.app.layout.focus(self._session.default_buffer)
             self._session.app.invalidate()
 

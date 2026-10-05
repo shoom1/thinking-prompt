@@ -60,6 +60,7 @@ from .types import (
     InputHandler,
     MessageRole,
     Overflow,
+    Placement,
     StreamingContent,
     ThinkingContext,
 )
@@ -85,6 +86,7 @@ __all__ = [
     "ContentCallback",
     "ContentFormat",
     "Overflow",
+    "Placement",
     "MessageRole",
     "InputHandler",
     # Dialog

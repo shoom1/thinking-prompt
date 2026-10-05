@@ -30,6 +30,18 @@ ContentFormat = Literal["plain", "ansi"]
 # the newest lines (streaming), "head" the first lines (e.g. a task list).
 Overflow = Literal["tail", "head"]
 
+# How a dialog is drawn: "box" floats a framed dialog over the session;
+# "inline" draws it as rows between the prompt and the status bar.
+Placement = Literal["box", "inline"]
+
+
+def check_placement(value: object, *, optional: bool = False) -> None:
+    """Raise ValueError unless ``value`` is a Placement (or None, when ``optional``)."""
+    if optional and value is None:
+        return
+    if value not in ("box", "inline"):
+        raise ValueError(f"placement must be 'box' or 'inline', got {value!r}")
+
 # Content callback type for thinking box
 ContentCallback = Callable[[], str]
 

@@ -15,6 +15,7 @@ from typing import Any, Callable
 import pytest
 from prompt_toolkit.application import create_app_session
 from prompt_toolkit.input import PipeInput, create_pipe_input
+from prompt_toolkit.layout import BufferControl
 from prompt_toolkit.output import DummyOutput
 
 from thinking_prompt import ButtonConfig, Dialog, TextItem, ThinkingPromptSession
@@ -72,6 +73,11 @@ def dialog_rendered(session: ThinkingPromptSession) -> bool:
     navigation keys (Tab/Shift-Tab) only after this holds."""
     layout = session.app.layout
     return dialog_open(session) and layout.current_window in layout.visible_windows
+
+
+def inline_open(session: ThinkingPromptSession) -> bool:
+    dm = session._dialog_manager
+    return dm is not None and dm.inline_view is not None
 
 
 async def run_with(
@@ -537,3 +543,210 @@ class TestDialogLifetime:
 
             with pytest.raises(RuntimeError, match="needs a running session"):
                 await asyncio.wait_for(session.show_dialog(self._dialog()), timeout=1)
+
+
+class TestInlineDialogs:
+    """Inline dialogs: rows between the prompt and the status bar."""
+
+    @staticmethod
+    def _dialog(**kwargs: Any) -> Dialog:
+        return Dialog(
+            "Delete 3 files?",
+            "This can't be undone.",
+            [ButtonConfig("Delete", result="delete"), ButtonConfig("Keep", result="keep")],
+            placement="inline",
+            **kwargs,
+        )
+
+    async def test_drawn_below_the_prompt_and_above_the_status_bar(self):
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.show_dialog(self._dialog()))
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                where = session.app.renderer.last_rendered_screen.visible_windows_to_write_positions
+                prompt = next(
+                    w for w in where
+                    if isinstance(w.content, BufferControl) and w.content.buffer is session.default_buffer
+                )
+                status = next(w for w in where if w.style == "class:status")
+                action = session._dialog_manager.inline_view.actions[0].window
+                assert where[prompt].ypos < where[action].ypos < where[status].ypos
+                inp.send_text(ENTER)
+                await wait_until(lambda: results == ["delete"])
+
+            await run_with(session, handler, script)
+
+    async def test_arrows_and_enter_choose_an_action(self):
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.show_dialog(self._dialog()))
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                inp.send_text(DOWN + ENTER)
+                await wait_until(lambda: results == ["keep"])
+
+            await run_with(session, handler, script)
+
+    async def test_a_digit_chooses_directly(self):
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.show_dialog(self._dialog()))
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                inp.send_text("2")
+                await wait_until(lambda: results == ["keep"])
+
+            await run_with(session, handler, script)
+
+    async def test_escape_closes_an_escapable_dialog(self):
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.show_dialog(self._dialog()))
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                inp.send_text(ESCAPE)
+                await wait_until(lambda: results == [None])
+
+            await run_with(session, handler, script)
+
+    async def test_escape_is_ignored_when_not_escapable(self):
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.show_dialog(self._dialog(escapable=False)))
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                inp.send_text(ESCAPE)
+                await asyncio.sleep(1.0)  # past prompt_toolkit's Escape timeout
+                assert results == [] and inline_open(session)
+                inp.send_text(ENTER)
+                await wait_until(lambda: results == ["delete"])
+
+            await run_with(session, handler, script)
+
+    async def test_typing_does_not_reach_the_prompt_and_focus_returns(self):
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.show_dialog(self._dialog()))
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                inp.send_text("x")
+                await asyncio.sleep(0.1)
+                assert session.default_buffer.text == ""
+                inp.send_text(ENTER)
+                await wait_until(lambda: results == ["delete"])
+                assert not inline_open(session)
+                assert session.app.layout.has_focus(session.default_buffer)
+
+            await run_with(session, handler, script)
+
+    async def test_session_default_placement_applies(self):
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            dialog = Dialog("Go?", "", [ButtonConfig("Yes", result="yes")])
+            results.append(await session.show_dialog(dialog))
+
+        with piped_session(dialog_placement="inline") as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: inline_open(session) and dialog_rendered(session))
+                inp.send_text(ENTER)
+                await wait_until(lambda: results == ["yes"])
+
+            await run_with(session, handler, script)
+
+    async def test_text_field_body_keeps_its_keys_and_tab_reaches_the_actions(self):
+        from prompt_toolkit.widgets import TextArea
+
+        results: list[Any] = []
+        field = TextArea(multiline=False)
+
+        async def handler(text: str) -> None:
+            def submit() -> None:
+                dialog.set_result(field.text)
+
+            dialog = Dialog(
+                "Name", field, [ButtonConfig("Submit", handler=submit), ButtonConfig("Cancel")],
+                placement="inline",
+            )
+            results.append(await session.show_dialog(dialog))
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                inp.send_text("a1")  # a digit types into the field, not "run action 1"
+                await wait_until(lambda: field.text == "a1")
+                inp.send_text(TAB + ENTER)  # Tab to "1. Submit"
+                await wait_until(lambda: results == ["a1"])
+
+            await run_with(session, handler, script)
+
+    async def test_ctrl_c_cancels_the_handler_and_closes_the_dialog(self):
+        async def handler(text: str) -> None:
+            await session.show_dialog(self._dialog())
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                inp.send_text(CTRL_C)
+                await wait_until(lambda: not dialog_open(session) and waiting_for_input(session))
+                assert not inline_open(session)
+
+            await run_with(session, handler, script)
+
+    async def test_app_exit_cancels_an_inline_dialog(self):
+        background: list[asyncio.Future[Any]] = []
+
+        def handler(text: str) -> None:
+            background.append(asyncio.ensure_future(session.show_dialog(self._dialog())))
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: inline_open(session))
+                session.exit()
+                await asyncio.wait_for(run, timeout=2)
+
+            await run_with(session, handler, script)
+
+            (task,) = background
+            with pytest.raises(asyncio.CancelledError):
+                await asyncio.wait_for(task, timeout=1)
+            assert not inline_open(session)

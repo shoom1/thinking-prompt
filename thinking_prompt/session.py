@@ -42,6 +42,7 @@ from prompt_toolkit.formatted_text import (
 from prompt_toolkit.history import History, InMemoryHistory
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.key_binding.key_processor import KeyPressEvent
+from prompt_toolkit.layout import AnyContainer, DynamicContainer, Window
 from prompt_toolkit.output import ColorDepth
 from prompt_toolkit.styles import DynamicStyle
 
@@ -51,7 +52,7 @@ from .layout import create_layout
 from .manager import ThinkingBoxManager
 from .rich_utils import _is_rich_renderable
 from .styles import ThinkingPromptStyles, resolve_theme
-from .types import ThinkingContext, format_exception_detail
+from .types import Placement, ThinkingContext, check_placement, format_exception_detail
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +109,7 @@ class ThinkingPromptSession:
         status_text: AnyFormattedText = "Ctrl+C: cancel | Ctrl+D: exit",
         echo_input: bool = True,
         history_limit: int | None = None,
+        dialog_placement: Placement = "box",
     ) -> None:
         """
         Initialize the ThinkingPromptSession.
@@ -128,16 +130,22 @@ class ThinkingPromptSession:
             echo_input: Whether to echo user input to console before thinking.
             history_limit: Max transcript entries kept for fullscreen history
                           and repaint; oldest trimmed. None = unbounded.
+            dialog_placement: How dialogs are drawn unless they say otherwise:
+                "box" (default) floats a framed dialog over the session;
+                "inline" draws rows between the prompt and the status bar.
 
         Raises:
             ValueError: If max_thinking_height is less than 2, or theme= names
-                       an unknown theme.
+                       an unknown theme, or if dialog_placement isn't 'box'
+                       or 'inline'.
         """
         if max_thinking_height < 2:
             raise ValueError("max_thinking_height must be at least 2")
 
         self._message = message
         self._app_info = app_info
+        check_placement(dialog_placement)
+        self._dialog_placement: Placement = dialog_placement
 
         # A fresh instance per session: sharing DEFAULT_STYLES would let a
         # tweak to one session's styles restyle every other session.
@@ -215,6 +223,8 @@ class ThinkingPromptSession:
 
         # Dialog manager (lazy initialization)
         self._dialog_manager: DialogManager | None = None
+        # Shown in the layout's inline-dialog slot while no inline dialog is open.
+        self._no_inline_dialog = Window(height=0)
 
         # Create components
         self.default_buffer = self._create_default_buffer()
@@ -326,6 +336,7 @@ class ThinkingPromptSession:
             is_status_bar_enabled=lambda: self._enable_status_bar,
             thinking_manager=self._manager,
             completions_menu_height=self._completions_menu_height,
+            inline_dialog=DynamicContainer(self._inline_dialog_content),
         )
 
     def _create_application(self) -> Application:
@@ -1299,6 +1310,17 @@ class ThinkingPromptSession:
     # =========================================================================
     # Dialog API
     # =========================================================================
+
+    @property
+    def dialog_placement(self) -> Placement:
+        """How dialogs are drawn unless the dialog (or the call) says otherwise."""
+        return self._dialog_placement
+
+    def _inline_dialog_content(self) -> AnyContainer:
+        """What the layout's inline-dialog slot shows: the open inline dialog, or nothing."""
+        manager = self._dialog_manager
+        view = manager.inline_view if manager is not None else None
+        return view.container if view is not None else self._no_inline_dialog
 
     @property
     def _dialogs(self) -> DialogManager:

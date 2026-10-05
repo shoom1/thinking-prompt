@@ -263,6 +263,8 @@ class TestDialogRowStyles:
         assert d["dialog-choice"] == "fg:#e0e0e0"
         assert d["dialog-choice-selected"] == "fg:#88c0d0 bold"
         assert d["checkbox-mark"] == "fg:#88c0d0"
+        assert d["dialog-hint"] == "fg:#888888 italic"
+        assert d["dialog-title"] == d["dialog frame.label"]
 
     def test_checkbox_mark_is_back(self):
         assert ThinkingPromptStyles(checkbox_mark="bold").to_style_dict()["checkbox-mark"] == "bold"
