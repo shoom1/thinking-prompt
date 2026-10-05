@@ -18,6 +18,7 @@ from prompt_toolkit.layout import (
     Container,
     HSplit,
     ScrollablePane,
+    ScrollOffsets,
     VSplit,
     Window,
     to_container,
@@ -89,7 +90,11 @@ class _ScrollRegion(ScrollablePane):
     """
 
     def __init__(self, content: Container, at_top: Callable[[], bool]) -> None:
-        super().__init__(content, show_scrollbar=False)
+        # No scroll offsets: squeezed to one row, the region must show the
+        # cursor row itself, not the row above it.
+        super().__init__(
+            content, scroll_offsets=ScrollOffsets(top=0, bottom=0), show_scrollbar=False
+        )
         self._at_top = at_top
 
     def write_to_screen(

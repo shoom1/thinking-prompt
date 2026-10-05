@@ -174,3 +174,14 @@ class TestScrollingRegion:
             layout.focus(group.rows[5].window)
             _render(pane, 4)
             assert pane.vertical_scroll > 0
+
+    def test_a_one_row_region_shows_the_cursor_row(self):
+        """Squeezed to one row (a short terminal), the region shows the
+        highlighted action, not the row above it."""
+        view = build_inline(Dialog("T", "", [ButtonConfig("A"), ButtonConfig("B"), ButtonConfig("C")]))
+        pane = _region(view)
+        layout = Layout(view.container)
+        with set_app(_app(layout)):
+            layout.focus(view.actions[1].window)
+            screen = _render(pane, 1)
+        assert "".join(screen.data_buffer[0][x].char for x in range(40)).strip() == "❯ 2. B"
