@@ -218,6 +218,26 @@ class TestBuiltinDialogs:
         with pytest.raises(ValueError, match="at least one option"):
             _dropdown_dialog("Theme", "Select:", [])
 
+    @pytest.mark.parametrize("build", [
+        lambda p: _yes_no_dialog("T", "B", placement=p),
+        lambda p: _message_dialog("T", "B", placement=p),
+        lambda p: _choice_dialog("T", "B", ["a"], placement=p),
+        lambda p: _dropdown_dialog("T", "B", ["a"], placement=p),
+    ], ids=["yes_no", "message", "choice", "dropdown"])
+    def test_builders_pin_the_placement_they_built_for(self, build):
+        assert build("inline").placement == "inline"
+        assert build("box").placement == "box"
+
+    def test_inline_dropdown_is_one_action_per_option_starting_on_the_default(self):
+        d = _dropdown_dialog("Theme", "Select:", ["Light", "Dark", "System"], default="Dark",
+                             placement="inline")
+        assert isinstance(d.build_body(), Label)
+        buttons = d.get_buttons()
+        assert [b.text for b in buttons] == ["Light", "Dark", "System"]
+        assert [b.focused for b in buttons] == [False, True, False]
+        assert self._results(d) == ["Light", "Dark", "System"]
+        assert d.escape_result is None
+
 
 # =============================================================================
 # DialogManager Tests
@@ -742,3 +762,41 @@ class TestPlacement:
             )
         assert running_session._dialogs._current_dialog is None
         assert running_session._dialogs.inline_view is None
+
+
+class TestHelperPlacement:
+    """Every helper takes placement=; None means the session's dialog_placement."""
+
+    @pytest.fixture
+    def captured(self, monkeypatch):
+        from thinking_prompt import ThinkingPromptSession
+
+        def make(**kwargs):
+            session = ThinkingPromptSession(**kwargs)
+            shown: list = []
+
+            async def capture(dialog):
+                shown.append(dialog)
+
+            monkeypatch.setattr(session._dialogs, "show", capture)
+            return session, shown
+
+        return make
+
+    @pytest.mark.parametrize("call", [
+        lambda s, **kw: s.yes_no_dialog("T", "B", **kw),
+        lambda s, **kw: s.message_dialog("T", "B", **kw),
+        lambda s, **kw: s.choice_dialog("T", "B", ["a"], **kw),
+        lambda s, **kw: s.dropdown_dialog("T", "B", ["a"], **kw),
+    ], ids=["yes_no", "message", "choice", "dropdown"])
+    async def test_session_default_and_per_call_override(self, captured, call):
+        session, shown = captured(dialog_placement="inline")
+        await call(session)
+        await call(session, placement="box")
+        assert [d.placement for d in shown] == ["inline", "box"]
+
+    async def test_invalid_placement_raises(self, captured):
+        session, shown = captured()
+        with pytest.raises(ValueError, match="placement must be"):
+            await session.yes_no_dialog("T", "B", placement="side")
+        assert shown == []

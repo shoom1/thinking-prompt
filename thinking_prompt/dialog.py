@@ -327,7 +327,11 @@ class Dialog:
 
 
 def _yes_no_dialog(
-    title: str, text: str, yes_text: str = "Yes", no_text: str = "No"
+    title: str,
+    text: str,
+    yes_text: str = "Yes",
+    no_text: str = "No",
+    placement: Placement = "box",
 ) -> Dialog:
     """Yes/No confirmation: True or False; Escape returns False."""
     return Dialog(
@@ -335,30 +339,56 @@ def _yes_no_dialog(
         text,
         [ButtonConfig(yes_text, result=True), ButtonConfig(no_text, result=False)],
         escape_result=False,
+        placement=placement,
     )
 
 
-def _message_dialog(title: str, text: str, ok_text: str = "OK") -> Dialog:
+def _message_dialog(
+    title: str, text: str, ok_text: str = "OK", placement: Placement = "box"
+) -> Dialog:
     """A message with one button; returns None."""
-    return Dialog(title, text, [ButtonConfig(ok_text)])
+    return Dialog(title, text, [ButtonConfig(ok_text)], placement=placement)
 
 
-def _choice_dialog(title: str, text: str, choices: Sequence[str]) -> Dialog:
+def _choice_dialog(
+    title: str, text: str, choices: Sequence[str], placement: Placement = "box"
+) -> Dialog:
     """One button per choice, returning its text; Escape returns None."""
-    return Dialog(title, text, [ButtonConfig(choice, result=choice) for choice in choices])
+    return Dialog(
+        title,
+        text,
+        [ButtonConfig(choice, result=choice) for choice in choices],
+        placement=placement,
+    )
 
 
 def _dropdown_dialog(
-    title: str, text: str, options: Sequence[str], default: str | None = None
+    title: str,
+    text: str,
+    options: Sequence[str],
+    default: str | None = None,
+    placement: Placement = "box",
 ) -> Dialog:
-    """A radio list of options: OK returns the selection, Cancel None."""
+    """Pick one option; Cancel and Escape return None.
+
+    Box: a radio list with OK / Cancel. Inline: one numbered action per
+    option, with the cursor starting on ``default``.
+    """
     if not options:
         raise ValueError("dropdown_dialog() needs at least one option")
+    if placement == "inline":
+        return Dialog(
+            title,
+            text,
+            [ButtonConfig(opt, result=opt, focused=opt == default) for opt in options],
+            placement="inline",
+        )
+
     radio: RadioList[str] = RadioList(values=[(opt, opt) for opt in options])
     if default is not None and default in options:
         radio.current_value = default
 
-    dialog = Dialog(title, HSplit([Label(text=text), radio]))
+    dialog = Dialog(title, HSplit([Label(text=text), radio]), placement="box")
     # Buttons set after construction: OK's handler needs the dialog itself.
     dialog.buttons = [
         ButtonConfig("OK", handler=lambda: dialog.set_result(radio.current_value)),

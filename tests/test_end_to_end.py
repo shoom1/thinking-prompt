@@ -789,3 +789,54 @@ class TestInlineDialogs:
             with pytest.raises(asyncio.CancelledError):
                 await asyncio.wait_for(task, timeout=1)
             assert not inline_open(session)
+
+    async def test_inline_dropdown_starts_on_the_default(self):
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.dropdown_dialog(
+                "Theme", "Pick:", ["Light", "Dark", "System"], default="Dark", placement="inline"
+            ))
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                inp.send_text(DOWN + ENTER)
+                await wait_until(lambda: results == ["System"])
+
+            await run_with(session, handler, script)
+
+    async def test_long_inline_list_scrolls_with_the_cursor(self):
+        from thinking_prompt.dialog_inline import MAX_ROWS
+
+        options = [f"option {i}" for i in range(1, 31)]
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.dropdown_dialog("Pick", "", options, placement="inline"))
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                target = session._dialog_manager.inline_view.actions[20].window
+                inp.send_text(DOWN * 20)
+                await wait_until(lambda: session.app.layout.has_focus(target))
+                await wait_until(lambda: target in session.app.layout.visible_windows)
+                where = session.app.renderer.last_rendered_screen.visible_windows_to_write_positions
+                prompt = next(
+                    w for w in where
+                    if isinstance(w.content, BufferControl) and w.content.buffer is session.default_buffer
+                )
+                status = next(w for w in where if w.style == "class:status")
+                # The cursor row is on screen, and the dialog stays small:
+                # title, separator, at most MAX_ROWS rows, blank, hint.
+                assert where[prompt].ypos < where[target].ypos < where[status].ypos
+                assert where[status].ypos - where[prompt].ypos <= MAX_ROWS + 5
+                inp.send_text(ENTER)
+                await wait_until(lambda: results == ["option 21"])
+
+            await run_with(session, handler, script)

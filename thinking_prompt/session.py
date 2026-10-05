@@ -1330,12 +1330,19 @@ class ThinkingPromptSession:
             self._dialog_manager = DialogManager(self)
         return self._dialog_manager
 
+    def _resolve_placement(self, placement: Placement | None) -> Placement:
+        """``placement``, or the session's dialog_placement when None (validated)."""
+        check_placement(placement, optional=True)
+        return placement if placement is not None else self._dialog_placement
+
     async def yes_no_dialog(
         self,
         title: str,
         text: str,
         yes_text: str = "Yes",
         no_text: str = "No",
+        *,
+        placement: Placement | None = None,
     ) -> bool:
         """
         Show a Yes/No confirmation dialog.
@@ -1345,6 +1352,8 @@ class ThinkingPromptSession:
             text: Dialog body text.
             yes_text: Text for Yes button (default: "Yes").
             no_text: Text for No button (default: "No").
+            placement: "box" or "inline"; None (default) uses the session's
+                dialog_placement.
 
         Returns:
             True if Yes was clicked, False if No or Escape.
@@ -1354,7 +1363,7 @@ class ThinkingPromptSession:
                 delete_file()
         """
         from .dialog import _yes_no_dialog
-        dialog = _yes_no_dialog(title, text, yes_text, no_text)
+        dialog = _yes_no_dialog(title, text, yes_text, no_text, self._resolve_placement(placement))
         return cast(bool, await self._dialogs.show(dialog))
 
     async def message_dialog(
@@ -1362,6 +1371,8 @@ class ThinkingPromptSession:
         title: str,
         text: str,
         ok_text: str = "OK",
+        *,
+        placement: Placement | None = None,
     ) -> None:
         """
         Show an informational message dialog.
@@ -1370,12 +1381,14 @@ class ThinkingPromptSession:
             title: Dialog title.
             text: Dialog body text.
             ok_text: Text for OK button (default: "OK").
+            placement: "box" or "inline"; None (default) uses the session's
+                dialog_placement.
 
         Example:
             await session.message_dialog("Info", "Operation completed.")
         """
         from .dialog import _message_dialog
-        dialog = _message_dialog(title, text, ok_text)
+        dialog = _message_dialog(title, text, ok_text, self._resolve_placement(placement))
         await self._dialogs.show(dialog)
 
     async def choice_dialog(
@@ -1383,6 +1396,8 @@ class ThinkingPromptSession:
         title: str,
         text: str,
         choices: Sequence[str],
+        *,
+        placement: Placement | None = None,
     ) -> str | None:
         """
         Show a dialog with multiple choice buttons.
@@ -1391,6 +1406,8 @@ class ThinkingPromptSession:
             title: Dialog title.
             text: Dialog body text.
             choices: List of choice strings (each becomes a button).
+            placement: "box" or "inline"; None (default) uses the session's
+                dialog_placement.
 
         Returns:
             The selected choice string, or None if Escape was pressed.
@@ -1405,7 +1422,7 @@ class ThinkingPromptSession:
                 save_file()
         """
         from .dialog import _choice_dialog
-        dialog = _choice_dialog(title, text, choices)
+        dialog = _choice_dialog(title, text, choices, self._resolve_placement(placement))
         return cast(Optional[str], await self._dialogs.show(dialog))
 
     async def dropdown_dialog(
@@ -1414,6 +1431,8 @@ class ThinkingPromptSession:
         text: str,
         options: Sequence[str],
         default: str | None = None,
+        *,
+        placement: Placement | None = None,
     ) -> str | None:
         """
         Show a dialog with a dropdown/radio list selection.
@@ -1423,6 +1442,8 @@ class ThinkingPromptSession:
             text: Dialog body text.
             options: List of options to choose from.
             default: Default selected option (optional).
+            placement: "box" or "inline"; None (default) uses the session's
+                dialog_placement.
 
         Returns:
             The selected option string, or None if cancelled.
@@ -1436,7 +1457,7 @@ class ThinkingPromptSession:
             )
         """
         from .dialog import _dropdown_dialog
-        dialog = _dropdown_dialog(title, text, options, default)
+        dialog = _dropdown_dialog(title, text, options, default, self._resolve_placement(placement))
         return cast(Optional[str], await self._dialogs.show(dialog))
 
     async def show_dialog(self, dialog: Dialog) -> Any:
