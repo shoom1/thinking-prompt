@@ -1,9 +1,10 @@
 """
 Dialog system for ThinkingPromptSession.
 
-Provides floating dialogs that integrate with the existing Application layout,
-avoiding the issues with prompt_toolkit's built-in dialog shortcuts which
-create their own Application and cause rendering conflicts.
+Provides dialogs that integrate with the existing Application layout, shown
+two ways: as a box floating over the session, or inline, as rows under the
+prompt. This avoids the issues with prompt_toolkit's built-in dialog
+shortcuts, which create their own Application and cause rendering conflicts.
 
 Example usage:
 
@@ -117,15 +118,16 @@ class Dialog:
 
     Build one with arguments for simple dialogs, or subclass it and
     override build_body() / get_buttons() for custom ones. It's drawn as a
-    box (prompt_toolkit's ``Dialog`` widget); this class holds what the
-    dialog asks and returns: the result, Escape handling and the options
-    below.
+    box (prompt_toolkit's ``Dialog`` widget) or inline, as rows under the
+    prompt (see ``placement``); this class holds what the dialog asks and
+    returns: the result, Escape handling and the options below.
 
     The class attributes are the only defaults: constructor arguments
     override them per instance, subclasses override them as class attributes.
 
     Attributes:
-        title: Title shown in the frame (default: none).
+        title: Title, shown in the box's frame or as the first inline row
+            (default: none).
         body: Text (str, HTML, ANSI, FormattedText), shown in a Label, or
             any prompt_toolkit container.
         buttons: ButtonConfigs (default: none). A dialog needs something to

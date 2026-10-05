@@ -421,10 +421,12 @@ if result:
 **Control Types:**
 | Control | Description | Navigation |
 |---------|-------------|------------|
-| `DropdownItem` | Expandable dropdown list with `▼` indicator | Enter to open, Up/Down to select, Enter to confirm |
+| `DropdownItem` | Expandable dropdown list with `▼` indicator; in inline dialogs, a `◀`/`▶` selector instead | Enter to open, Up/Down to select, Enter to confirm (inline: Left/Right to cycle) |
 | `InlineSelectItem` | Inline cycling with `◀`/`▶` indicators | Left/Right to cycle through options |
 | `TextItem` | Text input (optional password masking) | Enter to edit, Enter/Escape to confirm/cancel |
 | `CheckboxItem` | Boolean toggle (`true`/`false`) | Space/Enter/Left/Right to toggle |
+| `ChecklistItem` | Check list, one `[x]` option per line; value: the checked options, in option order | Up/Down to move between options, Space/Enter to toggle |
+| `RadioItem` | Radio list, one `(•)` option per line; value: the picked option | Up/Down to move between options, Space/Enter to pick |
 
 **Navigation:** Up/Down moves between controls, Tab cycles through controls and buttons, Ctrl+S saves.
 
@@ -516,7 +518,8 @@ colorless rendering regardless of theme, while keeping bold/italic.
 |---|---|
 | `ThinkingPromptSession(styles=s)` | `ThinkingPromptSession(theme=s)` |
 | `show_settings_dialog(..., styles=...)`, `SettingsDialog(..., styles=...)` | Drop it (it was never applied). `width=`, `top=` and `height=` are now keyword-only. |
-| `assistant_prefix`, `select_value`, `checkbox_mark`, `user_separator` | Removed: no component drew with them. |
+| `assistant_prefix`, `select_value`, `user_separator` | Removed: no component drew with them. |
+| `checkbox_mark` (styled nothing) | Now styles the `[x]` / `(•)` marks of check and radio lists. |
 
 Bound history growth for long sessions:
 

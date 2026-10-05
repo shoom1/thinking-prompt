@@ -34,7 +34,8 @@ from .rows import ActionRow, RowControl, RowNavigator
 if TYPE_CHECKING:
     from .dialog import Dialog
 
-# The body and actions scroll within this many rows; the title and hint stay put.
+# Rows and actions scroll within this many rows; the title, a text body and
+# the hint stay put.
 MAX_ROWS = 12
 
 # Hint line entries, in display order.
