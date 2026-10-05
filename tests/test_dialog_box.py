@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -12,6 +13,7 @@ from prompt_toolkit.layout import FloatContainer, Window
 from prompt_toolkit.output import DummyOutput
 from prompt_toolkit.widgets import Button, Label
 
+from thinking_prompt import dialog_box
 from thinking_prompt.dialog import ButtonConfig, Dialog
 from thinking_prompt.dialog_box import (
     MIN_DIALOG_HEIGHT,
@@ -112,7 +114,7 @@ class TestBoxPresenter:
         assert presenter.view is None
 
     def test_effective_height_clamps_to_the_terminal(self, monkeypatch):
-        monkeypatch.setattr("shutil.get_terminal_size", lambda: os.terminal_size((80, 20)))
+        monkeypatch.setattr(dialog_box, "shutil", SimpleNamespace(get_terminal_size=lambda: os.terminal_size((80, 20))))
         presenter = self._presenter()
         assert presenter.effective_height(Dialog()) is None
         assert presenter.effective_height(Dialog(height=10)) == 10
@@ -120,7 +122,7 @@ class TestBoxPresenter:
 
     def test_effective_height_reports_a_terminal_that_is_too_small(self, monkeypatch):
         rows = MIN_DIALOG_HEIGHT + TERMINAL_BUFFER_ROWS - 1
-        monkeypatch.setattr("shutil.get_terminal_size", lambda: os.terminal_size((80, rows)))
+        monkeypatch.setattr(dialog_box, "shutil", SimpleNamespace(get_terminal_size=lambda: os.terminal_size((80, rows))))
         presenter = self._presenter()
         assert presenter.effective_height(Dialog(height=10)) is TERMINAL_TOO_SMALL
         presenter._session.add_error.assert_called_once()
