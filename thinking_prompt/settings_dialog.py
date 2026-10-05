@@ -9,6 +9,7 @@ Enter edits text in place. Ctrl+S saves, Escape cancels.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any, Generic, TypeVar
 
@@ -36,7 +37,7 @@ from prompt_toolkit.layout.processors import PasswordProcessor
 from prompt_toolkit.widgets import Frame
 
 from .dialog import ButtonConfig, Dialog
-from .rows import MARKER, NO_MARKER, RowControl, RowNavigator
+from .rows import MARKER, NO_MARKER, OptionGroup, RowControl, RowNavigator, has_focus
 from .types import Placement
 
 
@@ -78,6 +79,20 @@ class TextItem(SettingsItem):
     default: str = ""
     password: bool = False
     edit_width: int = 15  # Width of text input field in edit mode
+
+
+@dataclass
+class ChecklistItem(SettingsItem):
+    """Any number of options, one per line; the value is the checked ones, in option order."""
+    options: list[str] = field(default_factory=list)
+    default: Sequence[str] = ()
+
+
+@dataclass
+class RadioItem(SettingsItem):
+    """One of several options, one per line; with no default nothing is picked."""
+    options: list[str] = field(default_factory=list)
+    default: str | None = None
 
 
 T = TypeVar("T", bound=SettingsItem)
@@ -747,6 +762,60 @@ class TextControl(SettingControl[TextItem]):
         return kb
 
 
+class OptionsControl(SettingControl[Any]):
+    """A check list or radio list setting: its label row, then one OptionRow
+    per option. The options are the cursor stops; the label takes no focus."""
+
+    def __init__(self, item: ChecklistItem | RadioItem) -> None:
+        super().__init__(item)
+        if isinstance(item, ChecklistItem):
+            self._group = OptionGroup(item.options, multiple=True, selected=list(item.default), indent=2)
+        else:
+            picked = [item.default] if item.default is not None else []
+            self._group = OptionGroup(item.options, multiple=False, selected=picked, indent=2)
+        self._label_window = Window(self, height=2 if item.description else 1)
+        self._container = HSplit([self._label_window, *(row.window for row in self._group.rows)])
+
+    @property
+    def value(self) -> Any:
+        """The checked options (check list) or the picked one (radio list)."""
+        return self._group.checked if self._group.multiple else self._group.picked
+
+    @value.setter
+    def value(self, val: Any) -> None:
+        if self._group.multiple:
+            self._group.select(list(val))
+        else:
+            self._group.select([] if val is None else [val])
+
+    @property
+    def row_count(self) -> int:
+        return super().row_count + len(self._group.rows)
+
+    def is_focusable(self) -> bool:
+        return False  # the label row; the option rows take focus
+
+    def get_container(self) -> Container:
+        return self._container
+
+    def get_stops(self) -> list[Container]:
+        return [row.window for row in self._group.rows]
+
+    def create_content(self, width: int, height: int) -> UIContent:
+        """The label row (and description), highlighted while an option has focus."""
+        selected = any(has_focus(row.window) for row in self._group.rows)
+        label_style = "class:setting-label-selected" if selected else "class:setting-label"
+        lines = [FormattedText([("", NO_MARKER), (label_style, self._item.label)])]
+        if self._item.description:
+            desc_style = "class:setting-desc-selected" if selected else "class:setting-desc"
+            lines.append(FormattedText([("", "  "), (desc_style, self._item.description)]))
+
+        def get_line(i: int) -> FormattedText:
+            return lines[i] if i < len(lines) else FormattedText([])
+
+        return UIContent(get_line=get_line, line_count=len(lines))
+
+
 class SettingsDialog(Dialog):
     """
     A settings dialog using individual controls per setting type.
@@ -791,7 +860,9 @@ class SettingsDialog(Dialog):
 
     def _create_control(self, item: SettingsItem) -> SettingControl:
         """Create the appropriate control for a settings item."""
-        if isinstance(item, CheckboxItem):
+        if isinstance(item, (ChecklistItem, RadioItem)):
+            return OptionsControl(item)
+        elif isinstance(item, CheckboxItem):
             return CheckboxControl(item)
         elif isinstance(item, DropdownItem):
             return DropdownControl(item)

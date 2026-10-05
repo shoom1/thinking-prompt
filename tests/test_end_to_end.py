@@ -21,8 +21,10 @@ from prompt_toolkit.output import DummyOutput
 from thinking_prompt import (
     ButtonConfig,
     CheckboxItem,
+    ChecklistItem,
     Dialog,
     InlineSelectItem,
+    RadioItem,
     TextItem,
     ThinkingPromptSession,
 )
@@ -979,5 +981,30 @@ class TestInlineSettings:
                 inp.send_text(RIGHT + DOWN + " ")  # Model: b; Stream: on
                 inp.send_text(TAB + TAB + ENTER)   # Name, then the Save button
                 await wait_until(lambda: results == [{"model": "b", "stream": True}])
+
+            await run_with(session, handler, script)
+
+    async def test_check_and_radio_lists_one_option_per_line(self):
+        results: list[Any] = []
+        items = [
+            ChecklistItem(key="tools", label="Tools", options=["search", "code"], default=("search",)),
+            RadioItem(key="mode", label="Mode", options=["fast", "careful"], default="fast"),
+        ]
+
+        async def handler(text: str) -> None:
+            results.append(await session.show_settings_dialog("Settings", items, placement="inline"))
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                # Stops: search, code, fast, careful, Save, Cancel
+                inp.send_text(DOWN + " ")         # check "code"
+                inp.send_text(DOWN + DOWN + " ")  # pick "careful"
+                inp.send_text(DOWN + ENTER)       # 1. Save
+                await wait_until(
+                    lambda: results == [{"tools": ["search", "code"], "mode": "careful"}]
+                )
 
             await run_with(session, handler, script)

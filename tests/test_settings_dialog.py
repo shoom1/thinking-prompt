@@ -677,3 +677,54 @@ class TestSettingsRows:
         assert SettingsDialog("S", []).placement is None
         with pytest.raises(ValueError, match="placement must be"):
             SettingsDialog("S", [], placement="side")
+
+
+class TestOptionItems:
+    """Check lists and radio lists in the settings form, one option per line."""
+
+    def test_checklist_value_is_the_checked_options_in_option_order(self):
+        from thinking_prompt.settings_dialog import ChecklistItem, OptionsControl
+
+        control = OptionsControl(ChecklistItem(key="t", label="Tools", options=["a", "b", "c"], default=("c", "a")))
+        assert control.value == ["a", "c"]
+
+    def test_radio_value(self):
+        from thinking_prompt.settings_dialog import OptionsControl, RadioItem
+
+        assert OptionsControl(RadioItem(key="m", label="Mode", options=["x", "y"], default="y")).value == "y"
+        assert OptionsControl(RadioItem(key="m", label="Mode", options=["x", "y"])).value is None
+
+    def test_one_stop_per_option_and_the_label_takes_no_focus(self):
+        from thinking_prompt.settings_dialog import ChecklistItem, OptionsControl
+
+        control = OptionsControl(ChecklistItem(key="t", label="Tools", options=["a", "b"]))
+        assert len(control.get_stops()) == 2
+        assert not control.is_focusable()
+        assert control.row_count == 3
+
+    def test_change_detection(self):
+        from thinking_prompt.settings_dialog import ChecklistItem, RadioItem
+
+        dialog = SettingsDialog("S", [
+            ChecklistItem(key="t", label="T", options=["a", "b"], default=("b",)),
+            RadioItem(key="m", label="M", options=["x", "y"]),
+        ])
+        assert dialog._get_changed_values() == {}
+        tools, mode = dialog._controls
+        tools._group.choose("a")
+        mode._group.choose("x")
+        assert dialog._get_changed_values() == {"t": ["a", "b"], "m": "x"}
+
+    def test_box_cursor_stops_on_each_option(self):
+        from thinking_prompt.settings_dialog import ChecklistItem
+
+        dialog = SettingsDialog("S", [
+            CheckboxItem(key="c", label="C"),
+            ChecklistItem(key="t", label="T", options=["a", "b"]),
+        ])
+        assert len(dialog._stops()) == 3
+
+    def test_exported(self):
+        from thinking_prompt import ChecklistItem, RadioItem
+
+        assert ChecklistItem and RadioItem
