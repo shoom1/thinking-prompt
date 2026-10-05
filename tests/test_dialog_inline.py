@@ -93,6 +93,12 @@ class TestBuildInline:
     def test_nothing_focusable_means_no_focus(self):
         assert build_inline(Dialog("T", "just text")).focus is None
 
+    def test_action_labels_line_up_past_nine_actions(self):
+        view = build_inline(Dialog("T", "", [ButtonConfig(f"a{i}") for i in range(1, 12)]))
+        texts = ["".join(t for _, t in a.create_content(60, 1).get_line(0)) for a in view.actions]
+        assert (texts[0], texts[8], texts[9]) == ("   1. a1", "   9. a9", "  10. a10")
+        assert len({text.index(".") for text in texts}) == 1
+
     def test_actions_run_the_dialog_click_logic_with_the_button_style(self):
         loop = asyncio.new_event_loop()
         try:

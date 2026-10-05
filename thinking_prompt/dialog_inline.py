@@ -135,8 +135,9 @@ class InlineView:
 def build_inline(dialog: Dialog) -> InlineView:
     """Build ``dialog`` as rows: title, body, numbered actions, hint."""
     configs = dialog._button_configs()
+    number_width = len(str(len(configs)))
     actions = [
-        ActionRow(number, cfg.text, dialog._click_handler(cfg), cfg.style)
+        ActionRow(number, cfg.text, dialog._click_handler(cfg), cfg.style, number_width)
         for number, cfg in enumerate(configs, start=1)
     ]
     body = to_container(dialog.build_body()) if dialog._has_body() else None

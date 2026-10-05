@@ -58,6 +58,16 @@ class TestActionRow:
         _binding(row.get_key_bindings(), Keys.ControlM).handler(MagicMock())
         assert ran == ["Go"]
 
+    def test_numbers_are_padded_to_the_given_width(self):
+        nine = ActionRow(9, "nine", lambda: None, number_width=2)
+        ten = ActionRow(10, "ten", lambda: None, number_width=2)
+        assert (_text(nine), _text(ten)) == ("   9. nine", "  10. ten")
+
+    def test_hides_the_terminal_cursor(self):
+        """The ❯ marker shows the row: no terminal cursor drawn over it."""
+        (row,) = _actions("Go")
+        assert row.create_content(60, 1).show_cursor is False
+
 
 class TestOptionRows:
     def test_check_list_marks_and_toggles(self):
@@ -92,6 +102,10 @@ class TestOptionRows:
         assert _text(row) == "    [ ] a"
         assert "class:checkbox-mark" in _styles(row)
         assert row.hints == {"Space toggle"}
+
+    def test_hides_the_terminal_cursor(self):
+        (row,) = OptionGroup(["a"], multiple=False).rows
+        assert row.create_content(60, 1).show_cursor is False
 
 
 class TestRowNavigator:

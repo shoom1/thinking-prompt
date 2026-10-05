@@ -51,15 +51,23 @@ class ActionRow(RowControl):
     """One numbered action of an inline dialog, e.g. ``❯ 1. Delete``.
 
     Enter runs ``on_select``: the dialog's click logic for that button.
+    ``number_width`` right-aligns the number, so the labels of a dialog with
+    ten or more actions line up (``  9. Nine`` over ``10. Ten``).
     """
 
     def __init__(
-        self, number: int, text: str, on_select: Callable[[], None], style: str = ""
+        self,
+        number: int,
+        text: str,
+        on_select: Callable[[], None],
+        style: str = "",
+        number_width: int = 1,
     ) -> None:
         self.number = number
         self.text = text
         self.on_select = on_select
         self.style = style
+        self.number_width = number_width
         self.window = Window(self, height=1, dont_extend_height=True)
         self._key_bindings = KeyBindings()
 
@@ -73,8 +81,10 @@ class ActionRow(RowControl):
         if self.style:
             style = f"{style} {self.style}"
         marker = MARKER if selected else NO_MARKER
-        line: StyleAndTextTuples = [(style, f"{marker}{self.number}. {self.text}")]
-        return UIContent(get_line=lambda i: line, line_count=1)
+        number = f"{self.number:>{self.number_width}}"
+        line: StyleAndTextTuples = [(style, f"{marker}{number}. {self.text}")]
+        # The marker shows the cursor row: no terminal cursor drawn over it.
+        return UIContent(get_line=lambda i: line, line_count=1, show_cursor=False)
 
     def get_key_bindings(self) -> KeyBindings:
         return self._key_bindings
@@ -163,7 +173,7 @@ class OptionRow(RowControl):
             ("class:checkbox-mark", mark),
             (label_style, f" {self.option}"),
         ]
-        return UIContent(get_line=lambda i: line, line_count=1)
+        return UIContent(get_line=lambda i: line, line_count=1, show_cursor=False)
 
     def get_key_bindings(self) -> KeyBindings:
         return self._key_bindings
