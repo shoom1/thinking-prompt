@@ -56,10 +56,14 @@ class _AtMost(Container):
 
     def preferred_height(self, width: int, max_available_height: int) -> Dimension:
         wanted = self.content.preferred_height(width, max_available_height)
+        # max is capped at the capped preferred (not self.rows): otherwise
+        # HSplit would offer this container spare layout height, and it
+        # would pad with blank rows up to self.rows instead of its content.
+        capped_preferred = min(wanted.preferred, self.rows)
         return Dimension(
             min=min(wanted.min, self.rows),
-            max=self.rows,
-            preferred=min(wanted.preferred, self.rows),
+            max=capped_preferred,
+            preferred=capped_preferred,
         )
 
     def write_to_screen(

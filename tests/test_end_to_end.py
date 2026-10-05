@@ -558,6 +558,45 @@ class TestInlineDialogs:
             **kwargs,
         )
 
+    async def test_no_padding_when_the_layout_has_spare_height(self):
+        """Regression: _AtMost used to let HSplit distribute spare layout
+        height to the inline dialog, padding it with blank rows up to
+        MAX_ROWS instead of sizing to its actual content (fullscreen mode,
+        or any render with rows to spare)."""
+        from prompt_toolkit.layout import Window
+        from prompt_toolkit.layout.controls import FormattedTextControl
+        from prompt_toolkit.layout.layout import walk
+
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.show_dialog(self._dialog()))
+
+        with piped_session() as (session, inp):
+            # Fullscreen mode gives the layout spare height (history fills
+            # whatever the dialog doesn't use) on a 40-row DummyOutput.
+            session._is_fullscreen = True
+            session._invalidate()
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                where = session.app.renderer.last_rendered_screen.visible_windows_to_write_positions
+                view = session._dialog_manager.inline_view
+                text_windows = [
+                    c for c in walk(view.container)
+                    if isinstance(c, Window) and isinstance(c.content, FormattedTextControl)
+                ]
+                hint_window = text_windows[-1]  # title, body, ..., hint: hint is last
+                last_action = view.actions[-1].window
+                # One blank spacer row, then the hint, directly below the
+                # last action's one row — not padded out toward MAX_ROWS.
+                assert where[hint_window].ypos == where[last_action].ypos + 2
+                inp.send_text(ENTER)
+                await wait_until(lambda: results == ["delete"])
+
+            await run_with(session, handler, script)
+
     async def test_drawn_below_the_prompt_and_above_the_status_bar(self):
         results: list[Any] = []
 

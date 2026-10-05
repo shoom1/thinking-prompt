@@ -83,5 +83,16 @@ class TestAtMost:
     def test_caps_the_preferred_height(self):
         tall = HSplit([Window(height=1) for _ in range(30)])
         short = HSplit([Window(height=1) for _ in range(3)])
-        assert _AtMost(tall, MAX_ROWS).preferred_height(80, 100).preferred == MAX_ROWS
-        assert _AtMost(short, MAX_ROWS).preferred_height(80, 100).preferred == 3
+        tall_dim = _AtMost(tall, MAX_ROWS).preferred_height(80, 100)
+        short_dim = _AtMost(short, MAX_ROWS).preferred_height(80, 100)
+        assert tall_dim.preferred == MAX_ROWS
+        assert short_dim.preferred == 3
+
+    def test_max_is_also_capped_so_hsplit_cannot_pad_with_blank_rows(self):
+        """max must equal the capped preferred, not self.rows: otherwise a
+        parent HSplit with spare height distributes it to this container,
+        padding it with blank rows past its actual content."""
+        tall = HSplit([Window(height=1) for _ in range(30)])
+        short = HSplit([Window(height=1) for _ in range(3)])
+        assert _AtMost(tall, MAX_ROWS).preferred_height(80, 100).max == MAX_ROWS
+        assert _AtMost(short, MAX_ROWS).preferred_height(80, 100).max == 3
