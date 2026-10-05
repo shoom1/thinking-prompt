@@ -834,16 +834,35 @@ class TestInlineDialogs:
                 target = session._dialog_manager.inline_view.actions[20].window
                 inp.send_text(DOWN * 20)
                 await wait_until(lambda: session.app.layout.has_focus(target))
-                await wait_until(lambda: target in session.app.layout.visible_windows)
-                where = session.app.renderer.last_rendered_screen.visible_windows_to_write_positions
-                prompt = next(
-                    w for w in where
-                    if isinstance(w.content, BufferControl) and w.content.buffer is session.default_buffer
-                )
-                status = next(w for w in where if w.style == "class:status")
-                # The cursor row is on screen, and the dialog stays small:
-                # title, separator, at most MAX_ROWS rows, blank, hint.
-                assert where[prompt].ypos < where[target].ypos < where[status].ypos
+
+                # ScrollablePane copies every child window's write position into
+                # the real screen, scrolled-off ones included (at an adjusted
+                # ypos) — so target merely being in visible_windows doesn't mean
+                # the pane has scrolled to it yet in the last rendered frame.
+                # Wait for the rendered positions themselves to show the
+                # cursor row between the prompt and the status bar.
+                found: dict[str, Any] = {}
+
+                def scrolled() -> bool:
+                    where = session.app.renderer.last_rendered_screen.visible_windows_to_write_positions
+                    prompt = next(
+                        (w for w in where
+                         if isinstance(w.content, BufferControl)
+                         and w.content.buffer is session.default_buffer),
+                        None,
+                    )
+                    status = next((w for w in where if w.style == "class:status"), None)
+                    if prompt is None or status is None or target not in where:
+                        return False
+                    if not (where[prompt].ypos < where[target].ypos < where[status].ypos):
+                        return False
+                    found["where"], found["prompt"], found["status"] = where, prompt, status
+                    return True
+
+                await wait_until(scrolled, timeout=3.0)
+                where, prompt, status = found["where"], found["prompt"], found["status"]
+                # The dialog stays small: title, separator, at most MAX_ROWS
+                # rows, blank, hint.
                 assert where[status].ypos - where[prompt].ypos <= MAX_ROWS + 5
                 inp.send_text(ENTER)
                 await wait_until(lambda: results == ["option 21"])
