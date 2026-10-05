@@ -314,6 +314,54 @@ to take keyboard focus: at least one button, or a focusable body (e.g. a
 | `escape_result = _UNSET` | `escapable = False` |
 | `BaseDialog` subclass relying on its default OK button | `buttons = (ButtonConfig("OK"),)` |
 
+### Inline dialogs
+
+Any dialog can also be drawn inline: rows under the prompt, above the status
+bar, instead of a box over the transcript. Its buttons become a numbered list:
+
+```
+ Delete 3 files?
+ This can't be undone.
+
+ ❯ 1. Delete
+   2. Keep
+
+ ↑↓ navigate · Enter select · Esc cancel
+```
+
+Choose per session, per dialog, or per call:
+
+```python
+session = ThinkingPromptSession(dialog_placement="inline")   # default: "box"
+
+ok = await session.yes_no_dialog("Delete?", "3 files", placement="box")   # this call only
+await session.show_dialog(Dialog("Pick", "Which one?", buttons, placement="inline"))
+```
+
+One cursor walks every row: ↑↓ move (Tab / Shift+Tab too), Enter runs the
+highlighted action, 1–9 run an action directly, Esc closes an escapable
+dialog. Settings are edited in place: ←→ change a selector (dropdown settings
+become selectors inline), Space toggles a checkbox, Enter edits a text field.
+
+Check lists and radio lists show one option per line, in both styles:
+
+```python
+from thinking_prompt import ChecklistItem, RadioItem
+
+tools = await session.checklist_dialog(
+    "Tools", "Enable any:", ["search", "code", "files"], defaults=["search"],
+)   # the checked options, or None if cancelled
+
+await session.show_settings_dialog("Settings", [
+    ChecklistItem(key="tools", label="Tools", options=["search", "code"]),
+    RadioItem(key="mode", label="Mode", options=["fast", "careful"], default="fast"),
+])
+```
+
+`width`, `top` and `height` apply to box dialogs only. Dialogs need a running
+session; to ask something before `run_async()` starts or after it ends, use
+prompt_toolkit's own `choice()` (prompt_toolkit 3.0.52 or later).
+
 ### Settings Dialog
 
 A form-based dialog for configuring multiple settings at once:
@@ -494,6 +542,7 @@ See the `examples/` directory for complete demos:
 - `demo_showcase.py` - Feature showcase for demos and screenshots
 - `completer_demo.py` - Slash-command autocompletion (like Claude Code)
 - `demo_themes.py` - Built-in themes and runtime theme switching
+- `inline_dialogs.py` - Dialogs drawn inline under the prompt (and the same ones as boxes)
 
 ## License
 
