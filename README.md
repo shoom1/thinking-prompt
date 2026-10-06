@@ -72,7 +72,7 @@ if __name__ == "__main__":
 
 | Key | Action |
 |-----|--------|
-| Ctrl+T | Expand/collapse all thinking boxes (in prompt mode) |
+| Ctrl+T | Expand/collapse all thinking boxes (while one is open, in prompt mode) |
 | Ctrl+E | Toggle fullscreen mode (when enabled) |
 | Ctrl+C | Cancel current operation or exit |
 | Ctrl+D | Exit application (empty input line only) |
@@ -118,6 +118,30 @@ await asyncio.sleep(0.5)
 # Finish this specific box and optionally echo to console
 ctx.finish(add_to_history=True, echo_to_console=True)
 ```
+
+### When a Box Ends
+
+A box's content is kept however it ends, echoed to the console and history
+as on a normal finish:
+
+- **Cancelled** (Ctrl+C, or the task running a `thinking()` block is
+  cancelled): the content, then one `Operation cancelled...` line after all
+  the boxes that the cancel ended.
+- **The handler raises**: the content, then the `[ERROR] Handler error: ...` line.
+- **Left open** by a handler that returns: finished as `ctx.finish()` would.
+
+A box belongs to the task that opened it. When a handler ends, the session
+finishes the boxes it opened (and any whose task has already ended); a box
+opened by a background task stays until that task finishes it. Ctrl+C at
+an idle prompt clears every remaining box.
+
+`ctx.is_finished` tells whether a box is done. Calling `finish()` again
+returns the content without echoing it twice. Writes to a finished box show
+nowhere; the first one logs a warning to the `thinking_prompt` logger.
+
+Ctrl+T expands or collapses all open boxes together, and boxes start
+collapsed again once the last one finishes. In full screen every box is
+shown expanded.
 
 ### Long Content
 

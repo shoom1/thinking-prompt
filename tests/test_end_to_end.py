@@ -34,6 +34,7 @@ CTRL_A = "\x01"
 CTRL_C = "\x03"
 CTRL_D = "\x04"
 CTRL_S = "\x13"
+CTRL_T = "\x14"
 ENTER = "\r"
 ESCAPE = "\x1b"
 TAB = "\t"
@@ -168,6 +169,94 @@ class TestCtrlCWithIdleBox:
                 assert not run.done(), "Ctrl+C with an open box must not exit"
                 inp.send_text("hello" + ENTER)
                 await wait_until(lambda: delivered == ["hello"])
+
+            await run_with(session, handler, script)
+
+
+def history_texts(session: ThinkingPromptSession) -> list[str]:
+    return [entry.text for entry in session._display.history.iter_entries()]
+
+
+LONG = "\n".join(f"line {i}" for i in range(40))
+
+
+class TestBoxLifecycle:
+    async def test_ctrl_t_edits_the_prompt_once_the_boxes_are_gone(self):
+        """Expanding a box doesn't outlive it: with no box left, Ctrl+T is
+        the editor's transpose-chars again."""
+        release = asyncio.Event()
+
+        async def handler(text: str) -> None:
+            async with session.thinking() as ctx:
+                ctx.append(LONG)
+                await release.wait()
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: session.is_thinking)
+                inp.send_text(CTRL_T)
+                await wait_until(lambda: session._manager.is_expanded)
+
+                release.set()
+                await wait_until(lambda: waiting_for_input(session) and not session.is_thinking)
+                inp.send_text("ab")
+                await wait_until(lambda: session.default_buffer.text == "ab")
+                inp.send_text(CTRL_T)
+                await wait_until(lambda: session.default_buffer.text == "ba")
+
+            await run_with(session, handler, script)
+
+    async def test_a_background_box_survives_an_unrelated_handler(self):
+        """A box opened by a background task stays open when a handler
+        that didn't open it ends, and finishes into history normally."""
+        delivered: list[str] = []
+        opened, gate = asyncio.Event(), asyncio.Event()
+
+        def handler(text: str) -> None:
+            delivered.append(text)
+
+        async def background() -> None:
+            async with session.thinking(title="Indexing") as ctx:
+                ctx.append("indexed 1\n")
+                opened.set()
+                await gate.wait()
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                task = asyncio.create_task(background())
+                await asyncio.wait_for(opened.wait(), 2)
+                inp.send_text("hi" + ENTER)
+                await wait_until(lambda: delivered == ["hi"] and waiting_for_input(session))
+                assert session.is_thinking
+
+                gate.set()
+                await asyncio.wait_for(task, 2)
+                assert not session.is_thinking
+                assert any("indexed 1" in text for text in history_texts(session))
+
+            await run_with(session, handler, script)
+
+    async def test_ctrl_c_during_a_handler_echoes_its_box_then_says_so(self):
+        async def handler(text: str) -> None:
+            async with session.thinking() as ctx:
+                ctx.append("working\n")
+                await asyncio.sleep(3600)
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: session.is_thinking)
+                inp.send_text(CTRL_C)
+                await wait_until(lambda: waiting_for_input(session) and not session.is_thinking)
+
+                history = history_texts(session)
+                assert sum("working" in text for text in history) == 1
+                assert history[-1] == "Operation cancelled...\n"
+                assert not run.done()
 
             await run_with(session, handler, script)
 

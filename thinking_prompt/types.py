@@ -6,6 +6,7 @@ for better type safety throughout the package.
 """
 from __future__ import annotations
 
+import logging
 import re
 import threading
 from collections.abc import Awaitable
@@ -15,6 +16,8 @@ from typing import (
     Literal,
     Union,
 )
+
+logger = logging.getLogger(__name__)
 
 # =============================================================================
 # Type Aliases
@@ -261,6 +264,11 @@ class ThinkingContext:
     When used via the ``thinking()`` context manager, content is wired up
     automatically.  When used via ``start_thinking()`` (low-level API),
     content is None and content methods raise AttributeError.
+
+    Once the box is finished (by ``finish()``, or by the session on
+    Ctrl+C or when its handler ends), ``is_finished`` is True: writes no
+    longer show anywhere (the first one logs a warning), and ``finish()``
+    returns the content again without echoing it twice.
     """
 
     def __init__(
@@ -271,6 +279,7 @@ class ThinkingContext:
         set_format: Callable[[ContentFormat], None] | None = None,
         rich_theme: Any = None,
         finish: Callable[..., str] | None = None,
+        is_finished: Callable[[], bool] | None = None,
     ) -> None:
         self._content = content
         self._set_title = set_title
@@ -279,6 +288,22 @@ class ThinkingContext:
         self._format_set = False
         self._rich_theme = rich_theme
         self._finish = finish
+        self._is_finished = is_finished
+        self._warned_finished = False
+
+    @property
+    def is_finished(self) -> bool:
+        """True once the box is finished and no longer displayed."""
+        return self._is_finished() if self._is_finished is not None else False
+
+    def _note_write(self, what: str) -> None:
+        """Warn (once) that a write to a finished box shows nowhere."""
+        if self._warned_finished or not self.is_finished:
+            return
+        self._warned_finished = True
+        logger.warning(
+            "thinking box already finished: %s() and later writes have no effect", what
+        )
 
     # -- StreamingContent delegation ------------------------------------------
 
@@ -292,6 +317,7 @@ class ThinkingContext:
 
     def append(self, chunk: str) -> None:
         """Append a chunk of content (thread-safe)."""
+        self._note_write("append")
         self._require_content().append(chunk)
 
     def get_content(self) -> str:
@@ -300,10 +326,12 @@ class ThinkingContext:
 
     def clear(self) -> None:
         """Clear all accumulated content (thread-safe)."""
+        self._note_write("clear")
         self._require_content().clear()
 
     def set_line(self, index: int, text: str) -> None:
         """Set the content of a specific line (thread-safe)."""
+        self._note_write("set_line")
         self._require_content().set_line(index, text)
 
     def __len__(self) -> int:
@@ -339,6 +367,7 @@ class ThinkingContext:
             renderable: Rich markup string or Rich renderable object.
             theme: Optional Rich Theme override (defaults to session theme).
         """
+        self._note_write("append_rich")
         self._ensure_ansi_format()
         self._require_content().append_rich(
             renderable, theme=theme or self._rich_theme
@@ -352,6 +381,7 @@ class ThinkingContext:
             renderable: Rich markup string or Rich renderable object.
             theme: Optional Rich Theme override (defaults to session theme).
         """
+        self._note_write("set_line_rich")
         self._ensure_ansi_format()
         self._require_content().set_line_rich(
             index, renderable, theme=theme or self._rich_theme
@@ -361,6 +391,7 @@ class ThinkingContext:
 
     def set_title(self, text: str) -> None:
         """Set the thinking separator title."""
+        self._note_write("set_title")
         self._set_title(text)
 
     @property
@@ -382,7 +413,8 @@ class ThinkingContext:
             echo_to_console: If True, print content to console.
 
         Returns:
-            The full content that was displayed.
+            The full content that was displayed. Finishing again (or after
+            the session finished the box) returns it again, echoing nothing.
 
         Raises:
             RuntimeError: If no finish callback was provided.
@@ -394,4 +426,16 @@ class ThinkingContext:
             )
         return self._finish(
             add_to_history=add_to_history, echo_to_console=echo_to_console
+        )
+
+    def _cancel(
+        self,
+        add_to_history: bool = True,
+        echo_to_console: bool | None = None,
+    ) -> str:
+        """Finish as cancelled: echo the content, then "Operation cancelled..."."""
+        if self._finish is None:
+            return ""
+        return self._finish(
+            add_to_history=add_to_history, echo_to_console=echo_to_console, cancelled=True
         )
