@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import threading
 from dataclasses import dataclass
+from functools import partial
 from typing import Any, Callable
 
 from prompt_toolkit.application.current import get_app
@@ -17,6 +18,7 @@ from prompt_toolkit.layout.containers import Container
 from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.layout.dimension import Dimension as D
 
+from .frames import POLL_INTERVAL, FrameScheduler
 from .layout import ThinkingHeader
 from .thinking import ThinkingBoxControl
 from .types import ContentFormat, Overflow, StreamingContent
@@ -72,6 +74,10 @@ class ThinkingBoxManager:
     forced on while the session is in full screen. The user's choice
     resets to collapsed when the last box finishes, so each new thinking
     phase starts collapsed.
+
+    With ``frames``, boxes ask for their own redraws: a write redraws now,
+    a spinner asks for its next frame, and a box fed by a content callback
+    is polled every ``POLL_INTERVAL`` seconds while it's drawn.
     """
 
     def __init__(
@@ -79,10 +85,12 @@ class ThinkingBoxManager:
         default_max_lines: int = 15,
         default_style: str = "class:thinking-box",
         expand_key: str = "c-t",
+        frames: FrameScheduler | None = None,
     ) -> None:
         self._default_max_lines = default_max_lines
         self._default_style = default_style
         self._expand_key = expand_key
+        self._frames = frames
         self._boxes: dict[str, ManagedBox] = {}
         self._seq_counter = 0
         self._auto_id_counter = 0
@@ -131,6 +139,19 @@ class ThinkingBoxManager:
             # Determine max lines
             effective_max_lines = max_lines if max_lines is not None else self._default_max_lines
 
+            frames = self._frames
+            # Content written through the box's handle redraws on each
+            # write; a caller's content callback can only be polled.
+            streaming_content: StreamingContent | None = None
+            on_draw: Callable[[], None] | None = None
+            if content_callback is None:
+                streaming_content = StreamingContent(
+                    on_change=frames.redraw if frames is not None else None
+                )
+                content_callback = streaming_content.get_content
+            elif frames is not None:
+                on_draw = partial(frames.redraw_in, POLL_INTERVAL)
+
             # Create control. expand_key is forwarded so the truncation
             # hint names the key that actually toggles expansion.
             control = ThinkingBoxControl(
@@ -139,13 +160,8 @@ class ThinkingBoxManager:
                 expand_key=self._expand_key,
                 overflow=overflow,
                 expanded=self._box_expanded,
+                on_draw=on_draw,
             )
-
-            # Create StreamingContent if no callback provided
-            streaming_content: StreamingContent | None = None
-            if content_callback is None:
-                streaming_content = StreamingContent()
-                content_callback = streaming_content.get_content
 
             # Start the control
             control.start(content_callback, content_format=content_format)
@@ -153,7 +169,10 @@ class ThinkingBoxManager:
             # Create header if title provided
             header: ThinkingHeader | None = None
             if title is not None:
-                header = ThinkingHeader(text=title)
+                header = ThinkingHeader(
+                    text=title,
+                    request_frame=frames.redraw_in if frames is not None else None,
+                )
 
             # Assign sequence number
             seq = self._seq_counter

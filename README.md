@@ -143,6 +143,20 @@ Ctrl+T expands or collapses all open boxes together, and boxes start
 collapsed again once the last one finishes. In full screen every box is
 shown expanded.
 
+### Redraws
+
+The screen is redrawn only when something changes, never on a timer, so an
+idle prompt costs no CPU:
+
+- Writes through a box's handle (`append`, `set_line`, `set_title`, ...)
+  redraw right away, from any thread; fast streams are capped at 30
+  redraws a second.
+- A spinner redraws at each frame (10 a second) while its box is shown;
+  `AppInfo(thinking_animation=())` turns the spinner off.
+- Text that can't say when it changes is re-read every 0.1 s while it's
+  shown: a content callback passed to `start_thinking()`, and a prompt
+  `message` or `status_text` given as a callable.
+
 ### Long Content
 
 A collapsed box shows at most `max_lines` rows (session default:

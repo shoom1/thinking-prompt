@@ -44,6 +44,10 @@ if TYPE_CHECKING:
     from .history import FormattedTextHistory
     from .manager import ThinkingBoxManager
 
+# Seconds past a frame's tick that a header asks to be redrawn at, so timer
+# jitter can't redraw it a hair early, still on the old frame.
+_TICK_SLACK = 0.005
+
 __all__ = [
     "DEFAULT_SPINNER_FRAMES",  # re-export; canonical home is types.py
     "ThinkingHeader",
@@ -60,7 +64,8 @@ class ThinkingHeader:
     Animated separator line for the thinking box.
 
     Displays a horizontal line with optional animated text in the center.
-    The animation cycles through frames on each render.
+    The animation steps through ``frames``, one per ``animation_interval``;
+    while drawn, an animated header asks for a redraw at its next frame.
 
     Example outputs:
         ─────── ⠋ Thinking ───────   (default, spinner before text)
@@ -76,6 +81,7 @@ class ThinkingHeader:
         position: Literal["before", "after"] = "before",
         border_char: str = "─",
         animation_interval: float = 0.1,
+        request_frame: Callable[[float], None] | None = None,
     ) -> None:
         """
         Initialize the thinking separator.
@@ -86,26 +92,36 @@ class ThinkingHeader:
             position: Position of animation relative to text ('before' or 'after').
             border_char: Character used for the separator line.
             animation_interval: Time between frame changes in seconds.
+            request_frame: Called with the seconds until the next frame each
+                time an animated header is drawn, to have it redrawn then
+                (the session passes its FrameScheduler.redraw_in).
         """
         self.text = text
         self.frames = frames
         self.position = position
         self.border_char = border_char
         self.animation_interval = animation_interval
-        self._last_update = 0.0
-        self._frame_index = 0
+        self._request_frame = request_frame
+        self._first_tick: int | None = None
 
     def _get_current_frame(self) -> str:
-        """Get current animation frame, advancing if interval elapsed."""
+        """The animation frame for now; asks to be redrawn for the next one.
+
+        Frames step on a clock every header shares (one tick per interval),
+        so any number of spinners turn on the same redraws. Each starts on
+        its first frame.
+        """
         if not self.frames:
             return ""
 
-        now = time.time()
-        if now - self._last_update >= self.animation_interval:
-            self._frame_index = (self._frame_index + 1) % len(self.frames)
-            self._last_update = now
-
-        return self.frames[self._frame_index]
+        now = time.monotonic()
+        tick = int(now / self.animation_interval)
+        if self._first_tick is None:
+            self._first_tick = tick
+        if self._request_frame is not None:
+            # A little past the tick, so the redraw lands on the new frame.
+            self._request_frame((tick + 1) * self.animation_interval - now + _TICK_SLACK)
+        return self.frames[(tick - self._first_tick) % len(self.frames)]
 
     def get_formatted_text(self, width: int = 80) -> FormattedText:
         """
@@ -145,8 +161,7 @@ class ThinkingHeader:
 
     def reset(self) -> None:
         """Reset animation to first frame."""
-        self._frame_index = 0
-        self._last_update = 0.0
+        self._first_tick = None
 
 
 # Backward-compat alias

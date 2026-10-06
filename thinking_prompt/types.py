@@ -166,16 +166,25 @@ class StreamingContent:
             content.append(chunk)
 
         ctx.finish()
+
+    ``on_change`` is called after every change, from the writing thread
+    (the thinking box's own content uses it to redraw).
     """
 
-    def __init__(self) -> None:
+    def __init__(self, on_change: Callable[[], None] | None = None) -> None:
         self._chunks: list[str] = []
         self._lock = threading.Lock()
+        self._on_change = on_change
+
+    def _changed(self) -> None:
+        if self._on_change is not None:
+            self._on_change()
 
     def append(self, chunk: str) -> None:
         """Append a chunk of content (thread-safe)."""
         with self._lock:
             self._chunks.append(chunk)
+        self._changed()
 
     def get_content(self) -> str:
         """Get the accumulated content (thread-safe)."""
@@ -186,6 +195,7 @@ class StreamingContent:
         """Clear all accumulated content (thread-safe)."""
         with self._lock:
             self._chunks.clear()
+        self._changed()
 
     def __len__(self) -> int:
         """Return the number of chunks."""
@@ -228,6 +238,7 @@ class StreamingContent:
 
             self._chunks.clear()
             self._chunks.append("\n".join(lines) + ("\n" if has_trailing_newline else ""))
+        self._changed()
 
     def append_rich(self, renderable: Any, *, theme: Any = None) -> None:
         """Append a Rich renderable or markup string, converted to ANSI.
