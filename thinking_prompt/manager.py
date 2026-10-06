@@ -6,6 +6,7 @@ ThinkingBoxManager (collection manager with thread-safe operations).
 """
 from __future__ import annotations
 
+import asyncio
 import threading
 from dataclasses import dataclass
 from typing import Any, Callable
@@ -33,9 +34,22 @@ def _terminal_width(default: int = 80) -> int:
         return default
 
 
+def _current_task() -> asyncio.Task[Any] | None:
+    """The running asyncio task, or None outside one (e.g. in a thread)."""
+    try:
+        return asyncio.current_task()
+    except RuntimeError:  # no running event loop in this thread
+        return None
+
+
 @dataclass
 class ManagedBox:
-    """State for a single managed thinking box."""
+    """State for a single managed thinking box.
+
+    ``owner`` is the asyncio task that created the box (None when it was
+    created outside one): when a handler ends or is cancelled, the session
+    finishes only the boxes that handler answers for.
+    """
 
     box_id: str
     control: ThinkingBoxControl
@@ -44,6 +58,7 @@ class ManagedBox:
     order: int
     seq: int
     streaming_content: StreamingContent | None
+    owner: asyncio.Task[Any] | None = None
 
 
 class ThinkingBoxManager:
@@ -52,6 +67,11 @@ class ThinkingBoxManager:
 
     Thread-safe via RLock. Supports creating, removing, sorting,
     and bulk expand/collapse of boxes.
+
+    Expansion is one mode shared by every box: the user's choice (Ctrl+T),
+    forced on while the session is in full screen. The user's choice
+    resets to collapsed when the last box finishes, so each new thinking
+    phase starts collapsed.
     """
 
     def __init__(
@@ -66,8 +86,13 @@ class ThinkingBoxManager:
         self._boxes: dict[str, ManagedBox] = {}
         self._seq_counter = 0
         self._auto_id_counter = 0
-        self._expanded = False
+        self._expanded = False  # the user's choice (Ctrl+T)
+        self._forced = False  # full screen: every box expanded
         self._lock = threading.RLock()
+
+    def _box_expanded(self) -> bool:
+        """The mode every box reads (plain reads: no lock needed)."""
+        return self._forced or self._expanded
 
     def create_box(
         self,
@@ -113,6 +138,7 @@ class ThinkingBoxManager:
                 style=self._default_style,
                 expand_key=self._expand_key,
                 overflow=overflow,
+                expanded=self._box_expanded,
             )
 
             # Create StreamingContent if no callback provided
@@ -123,10 +149,6 @@ class ThinkingBoxManager:
 
             # Start the control
             control.start(content_callback, content_format=content_format)
-
-            # Apply current expand state
-            if self._expanded:
-                control.expand()
 
             # Create header if title provided
             header: ThinkingHeader | None = None
@@ -148,6 +170,7 @@ class ThinkingBoxManager:
                 order=order,
                 seq=seq,
                 streaming_content=streaming_content,
+                owner=_current_task(),
             )
 
             self._boxes[box_id] = box
@@ -211,7 +234,19 @@ class ThinkingBoxManager:
             box = self._boxes.pop(box_id, None)
             if box is None:
                 return ("", False, "plain")
-            return box.control.finish()
+            result = box.control.finish()
+            self._reset_mode_if_empty()
+            return result
+
+    def _reset_mode_if_empty(self) -> None:
+        """The next thinking phase starts collapsed (caller holds the lock)."""
+        if not self._boxes:
+            self._expanded = False
+
+    def has_box(self, box_id: str) -> bool:
+        """True while the box is active (not yet finished)."""
+        with self._lock:
+            return box_id in self._boxes
 
     def get_sorted_boxes(self) -> list[ManagedBox]:
         """
@@ -237,43 +272,45 @@ class ThinkingBoxManager:
             return HSplit([b.container for b in sorted_boxes])
 
     def toggle_all(self) -> None:
-        """Toggle expand/collapse for all boxes."""
+        """Toggle the user's expand/collapse choice for all boxes."""
         with self._lock:
             self._expanded = not self._expanded
-            for box in self._boxes.values():
-                if self._expanded:
-                    box.control.expand()
-                else:
-                    box.control.collapse()
 
     def expand_all(self) -> None:
-        """Expand all boxes."""
+        """Expand all boxes (the user's choice)."""
         with self._lock:
             self._expanded = True
-            for box in self._boxes.values():
-                box.control.expand()
 
     def collapse_all(self) -> None:
-        """Collapse all boxes."""
+        """Collapse all boxes (the user's choice)."""
         with self._lock:
             self._expanded = False
-            for box in self._boxes.values():
-                box.control.collapse()
+
+    def force_expanded(self, on: bool) -> None:
+        """While on (full screen), every box is expanded, new ones too.
+        Turning it off brings back the user's choice."""
+        with self._lock:
+            self._forced = on
 
     def can_toggle(self) -> bool:
         """
         Check if toggle is available.
 
-        Returns True if expanded or any box can toggle.
+        Returns True when there is a box, and the boxes are expanded or any
+        of them overflows (shows the expand hint).
         """
         with self._lock:
+            if not self._boxes:
+                return False
             if self._expanded:
                 return True
             return any(box.control.can_toggle_expanded for box in self._boxes.values())
 
-    def finish_all(self) -> list[tuple[str, str, bool, ContentFormat, int, Overflow]]:
+    def finish_all(
+        self, *, where: Callable[[ManagedBox], bool] | None = None
+    ) -> list[tuple[str, str, bool, ContentFormat, int, Overflow]]:
         """
-        Finish all boxes and return their final states.
+        Finish all boxes (or those ``where`` picks) and return their final states.
 
         Returns:
             List of (box_id, content, was_expanded, content_format,
@@ -281,19 +318,22 @@ class ThinkingBoxManager:
         """
         with self._lock:
             results: list[tuple[str, str, bool, ContentFormat, int, Overflow]] = []
-            for box_id in list(self._boxes.keys()):
-                box = self._boxes.pop(box_id)
+            for box_id, box in list(self._boxes.items()):
+                if where is not None and not where(box):
+                    continue
+                del self._boxes[box_id]
                 max_lines = box.control.max_collapsed_lines
                 overflow = box.control.overflow
                 content, was_expanded, fmt = box.control.finish()
                 results.append((box_id, content, was_expanded, fmt, max_lines, overflow))
+            self._reset_mode_if_empty()
             return results
 
     @property
     def is_expanded(self) -> bool:
-        """True if boxes are currently in the expanded state."""
+        """True if boxes are currently expanded (by the user, or full screen)."""
         with self._lock:
-            return self._expanded
+            return self._box_expanded()
 
     @property
     def has_active_boxes(self) -> bool:

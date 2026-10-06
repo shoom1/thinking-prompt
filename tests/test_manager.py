@@ -237,8 +237,8 @@ class TestRemoval:
     def test_remove_returns_was_expanded(self):
         """remove_box should return was_expanded state."""
         mgr = ThinkingBoxManager()
-        box = mgr.create_box(lambda: "x", box_id="x")
-        box.control.expand()
+        mgr.create_box(lambda: "x", box_id="x")
+        mgr.expand_all()
         _, was_expanded, _ = mgr.remove_box("x")
         assert was_expanded
 
@@ -423,10 +423,9 @@ class TestExpandCollapse:
     def test_collapse_all(self):
         """collapse_all should collapse all boxes."""
         mgr = ThinkingBoxManager()
-        b1 = mgr.create_box(lambda: "a", box_id="a")
-        b2 = mgr.create_box(lambda: "b", box_id="b")
-        b1.control.expand()
-        b2.control.expand()
+        mgr.create_box(lambda: "a", box_id="a")
+        mgr.create_box(lambda: "b", box_id="b")
+        mgr.expand_all()
         mgr.collapse_all()
         for box in mgr.get_sorted_boxes():
             assert not box.control.is_expanded

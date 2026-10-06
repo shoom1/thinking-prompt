@@ -49,7 +49,7 @@ from prompt_toolkit.styles import DynamicStyle
 from .app_info import AppInfo
 from .display import Display
 from .layout import create_layout
-from .manager import ThinkingBoxManager
+from .manager import ManagedBox, ThinkingBoxManager
 from .rich_utils import _is_rich_renderable
 from .styles import ThinkingPromptStyles, resolve_theme
 from .types import Placement, ThinkingContext, check_placement, format_exception_detail
@@ -170,7 +170,6 @@ class ThinkingPromptSession:
         # Fullscreen state (thread-safe)
         self._is_fullscreen: bool = False
         self._fullscreen_lock = threading.RLock()
-        self._pre_fullscreen_expanded: bool | None = None
         # Set by set_theme(repaint=True) while in fullscreen; consumed by
         # switch_to_prompt(), which repaints instead of flushing pending output.
         self._repaint_on_fullscreen_exit: bool = False
@@ -220,6 +219,9 @@ class ThinkingPromptSession:
         # (swallow CancelledError, continue the input loop) from an outer
         # cancellation (re-raise to let the input loop exit).
         self._user_cancelled_handler: bool = False
+        # Boxes were cancelled during a Ctrl+C of the handler: one
+        # "Operation cancelled..." follows them once the handler ends.
+        self._cancel_line_pending: bool = False
 
         # Dialog manager (lazy initialization)
         self._dialog_manager: DialogManager | None = None
@@ -360,7 +362,7 @@ class ThinkingPromptSession:
         """Create key bindings for the session."""
         kb = KeyBindings()
 
-        # Cancel/interrupt — cancel the running handler and finish boxes.
+        # Cancel/interrupt — cancel the running handler, or finish boxes.
         # Falls through to exit (cancelling pending input) when no handler
         # was running and no boxes were active. A live pending input
         # future does NOT count as in-flight work: it merely means the
@@ -385,13 +387,15 @@ class ThinkingPromptSession:
             if handler_running:
                 # Mark before cancel so _run_handler treats this as a user
                 # cancellation and does not re-raise CancelledError.
+                # Its boxes are finished as it unwinds (and by
+                # _run_handler's cleanup); a background task's live box
+                # keeps going.
                 self._user_cancelled_handler = True
                 assert self._current_handler_task is not None
                 self._current_handler_task.cancel()
-
-            if had_active_boxes:
-                self._manager.finish_all()
-                self._invalidate()
+            elif had_active_boxes:
+                # Idle prompt: Ctrl+C clears whatever boxes are left.
+                self._finish_boxes(None, cancelled=True)
 
             if not handler_running and not had_active_boxes:
                 # No handler and no boxes — the session is idle, so Ctrl+C
@@ -462,9 +466,6 @@ class ThinkingPromptSession:
                 if self._is_fullscreen:
                     self.switch_to_prompt()
                 else:
-                    if self._manager.has_active_boxes:
-                        self._pre_fullscreen_expanded = self._manager.is_expanded
-                        self._manager.expand_all()
                     self.switch_to_fullscreen()
 
         return kb
@@ -633,22 +634,19 @@ class ThinkingPromptSession:
         def _finish_box(
             add_to_history: bool = True,
             echo_to_console: bool | None = None,
+            cancelled: bool = False,
         ) -> str:
-            full_content, _, content_format_val = self._manager.remove_box(box.box_id)
-            should_echo = (
-                echo_to_console if echo_to_console is not None else self._echo_thinking
+            results = self._finish_boxes(
+                lambda candidate: candidate is box,
+                add_to_history=add_to_history,
+                echo_to_console=echo_to_console,
+                cancelled=cancelled,
             )
-            if full_content.strip():
-                self._display.thinking(
-                    full_content,
-                    truncate_lines=box.control.max_collapsed_lines,
-                    add_to_history=add_to_history,
-                    echo_to_console=should_echo,
-                    content_format=content_format_val,
-                    overflow=box.control.overflow,
-                )
-            self._invalidate()
-            return full_content
+            if not results:
+                # Already finished (by this handle, or by the session on
+                # Ctrl+C / when its handler ended): nothing to echo again.
+                return box.control.final_content
+            return results[0][1]
 
         return ThinkingContext(
             content=box.streaming_content,
@@ -657,7 +655,62 @@ class ThinkingPromptSession:
             set_format=box.control.set_content_format,
             rich_theme=self._display.rich_theme,
             finish=_finish_box,
+            is_finished=lambda: not self._manager.has_box(box.box_id),
         )
+
+    def _finish_boxes(
+        self,
+        where: Callable[[ManagedBox], bool] | None,
+        *,
+        add_to_history: bool = True,
+        echo_to_console: bool | None = None,
+        cancelled: bool = False,
+    ) -> list[tuple[str, str, bool, ContentFormat, int, Overflow]]:
+        """Finish the boxes ``where`` picks (all if None) and echo them.
+
+        Each box's content is echoed as on a normal finish (truncated to
+        its own limit on screen, in full in history). When ``cancelled``
+        and any box was finished, "Operation cancelled..." follows them --
+        or, while Ctrl+C is cancelling the handler, follows every box that
+        cancel ends, once the handler is done (see _run_handler).
+        """
+        results = self._manager.finish_all(where=where)
+        should_echo = (
+            echo_to_console if echo_to_console is not None else self._echo_thinking
+        )
+        for _box_id, content, _, content_format_val, max_lines, overflow in results:
+            if content.strip():
+                self._display.thinking(
+                    content,
+                    truncate_lines=max_lines,
+                    add_to_history=add_to_history,
+                    echo_to_console=should_echo,
+                    content_format=content_format_val,
+                    overflow=overflow,
+                )
+        if cancelled and results:
+            if self._user_cancelled_handler:
+                self._cancel_line_pending = True
+            else:
+                self._display.system("Operation cancelled...")
+        if results:
+            self._invalidate()
+        return results
+
+    @staticmethod
+    def _owned_by(owner: asyncio.Task[Any] | None) -> Callable[[ManagedBox], bool]:
+        """The boxes a handler answers for when it ends or is cancelled.
+
+        Its own (created by its task), those whose task has already ended
+        (nobody else will finish them), and those with no known owner
+        (created outside asyncio, e.g. from a thread). A live background
+        task's box is left alone.
+        """
+
+        def owned(box: ManagedBox) -> bool:
+            return box.owner is None or box.owner is owner or box.owner.done()
+
+        return owned
 
     def finish_thinking(
         self,
@@ -690,32 +743,10 @@ class ThinkingPromptSession:
             DeprecationWarning,
             stacklevel=2,
         )
-        if not self._manager.has_active_boxes:
-            return ""
-
-        should_echo = (
-            echo_to_console if echo_to_console is not None else self._echo_thinking
+        results = self._finish_boxes(
+            None, add_to_history=add_to_history, echo_to_console=echo_to_console
         )
-
-        results = self._manager.finish_all()
-        all_content = []
-
-        for _box_id, full_content, _, content_format_val, max_lines, overflow in results:
-            if full_content.strip():
-                self._display.thinking(
-                    full_content,
-                    # Truncate to each box's own limit and end, matching
-                    # the per-box finish path (_finish_box).
-                    truncate_lines=max_lines,
-                    add_to_history=add_to_history,
-                    echo_to_console=should_echo,
-                    content_format=content_format_val,
-                    overflow=overflow,
-                )
-                all_content.append(full_content)
-
-        self._invalidate()
-        return "\n".join(all_content)
+        return "\n".join(content for _, content, *_rest in results if content.strip())
 
     @property
     def is_thinking(self) -> bool:
@@ -779,8 +810,10 @@ class ThinkingPromptSession:
                 ctx.set_line_rich(1, "[green]✓ Step 2: Process[/green]")
 
         Note:
-            If an exception occurs within the context, thinking is still
-            finished properly but content is not added to history.
+            The box's content is kept however the block ends. If the block
+            is cancelled (e.g. Ctrl+C), "Operation cancelled..." follows the
+            content; if it raises, the exception propagates after the box
+            is finished.
         """
         ctx = self.start_thinking(
             title=title,
@@ -791,10 +824,14 @@ class ThinkingPromptSession:
         )
         try:
             yield ctx
-            ctx.finish(add_to_history=add_to_history, echo_to_console=echo_to_console)
-        except BaseException:
-            ctx.finish(add_to_history=False, echo_to_console=False)
+        except asyncio.CancelledError:
+            ctx._cancel(add_to_history=add_to_history, echo_to_console=echo_to_console)
             raise
+        except BaseException:
+            ctx.finish(add_to_history=add_to_history, echo_to_console=echo_to_console)
+            raise
+        else:
+            ctx.finish(add_to_history=add_to_history, echo_to_console=echo_to_console)
 
     # =========================================================================
     # Chat History API
@@ -961,6 +998,7 @@ class ThinkingPromptSession:
         # Exit fullscreen if active
         with self._fullscreen_lock:
             self._is_fullscreen = False
+            self._manager.force_expanded(False)
             # clear() supersedes any deferred repaint: nothing left to repaint.
             self._repaint_on_fullscreen_exit = False
 
@@ -1000,6 +1038,8 @@ class ThinkingPromptSession:
         with self._fullscreen_lock:
             if not self._is_fullscreen:
                 self._is_fullscreen = True
+                # Every box shows in full, ones started here too.
+                self._manager.force_expanded(True)
                 self._invalidate()
 
     def switch_to_prompt(self) -> None:
@@ -1007,11 +1047,8 @@ class ThinkingPromptSession:
         with self._fullscreen_lock:
             if self._is_fullscreen:
                 self._is_fullscreen = False
-                # Restore pre-fullscreen expansion state
-                if self._pre_fullscreen_expanded is not None:
-                    if not self._pre_fullscreen_expanded:
-                        self._manager.collapse_all()
-                    self._pre_fullscreen_expanded = None
+                # Back to the user's expand/collapse choice.
+                self._manager.force_expanded(False)
                 if self._repaint_on_fullscreen_exit:
                     self._repaint_on_fullscreen_exit = False
                     self._display.drop_pending()
@@ -1190,17 +1227,20 @@ class ThinkingPromptSession:
         CancelledError raised from outside the handler (e.g. the input loop
         being cancelled during shutdown) is re-raised so the loop can exit.
         """
+        # A sync handler (and the sync start of an async one) runs in this
+        # task: boxes it opens are owned by it.
+        caller = asyncio.current_task()
         try:
             result = handler(text)
         except Exception as e:
-            self._cleanup_after_handler()
+            self._cleanup_after_handler(caller)
             self._report_handler_error(e)
             return
 
         if not asyncio.iscoroutine(result):
-            # Sync handler — already complete. Drop any boxes it left
+            # Sync handler — already complete. Finish any boxes it left
             # open so the UI can't get stuck in a "thinking" state.
-            self._cleanup_after_handler()
+            self._cleanup_after_handler(caller)
             return
 
         task = asyncio.create_task(result)
@@ -1210,21 +1250,28 @@ class ThinkingPromptSession:
         except asyncio.CancelledError:
             if self._user_cancelled_handler:
                 # Ctrl+C path: swallow and continue the input loop.
-                self._cleanup_after_handler()
+                self._cleanup_after_handler(task, cancelled=True)
                 return
             # Outer cancellation (e.g. session shutdown) — propagate so
             # the input loop exits.
-            self._cleanup_after_handler()
+            self._cleanup_after_handler(task, cancelled=True)
             raise
         except Exception as e:
-            self._cleanup_after_handler()
+            # The boxes' content is echoed, then the error line.
+            self._cleanup_after_handler(task)
             self._report_handler_error(e)
         else:
-            # Handler completed normally — finish any boxes it left open
-            # (content is discarded, same as the cancel/error paths).
-            self._cleanup_after_handler()
+            # Handler completed normally — finish any boxes it left open,
+            # as ctx.finish() would.
+            self._cleanup_after_handler(task)
         finally:
             self._current_handler_task = None
+            if self._cancel_line_pending:
+                # One line after all the boxes the Ctrl+C ended, those of
+                # the handler's sub-tasks too.
+                self._cancel_line_pending = False
+                self._display.system("Operation cancelled...")
+                self._invalidate()
             # Always clear the cancel flag for the next invocation. We can't
             # only reset it inside the except CancelledError block: if user
             # code catches CancelledError and returns normally, or if cancel
@@ -1250,11 +1297,15 @@ class ThinkingPromptSession:
         if self.app.is_running and future is not None and not future.done():
             self.app.exit()
 
-    def _cleanup_after_handler(self) -> None:
-        """Drop any thinking boxes the handler left open and refresh UI."""
-        if self._manager.has_active_boxes:
-            self._manager.finish_all()
-            self._invalidate()
+    def _cleanup_after_handler(
+        self, owner: asyncio.Task[Any] | None, *, cancelled: bool = False
+    ) -> None:
+        """Finish the boxes the ended handler answers for (see _owned_by).
+
+        Their content is echoed; when the handler was cancelled,
+        "Operation cancelled..." follows.
+        """
+        self._finish_boxes(self._owned_by(owner), cancelled=cancelled)
 
     def run(self, handler: Callable[[str], Any] | None = None) -> None:
         """

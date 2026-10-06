@@ -10,8 +10,9 @@ from typing import List
 
 import pytest
 
-from thinking_prompt.thinking import ThinkingBoxControl
 from thinking_prompt.history import FormattedTextHistory
+from thinking_prompt.manager import ThinkingBoxManager
+from thinking_prompt.thinking import ThinkingBoxControl
 
 
 class TestFormattedTextHistoryThreadSafety:
@@ -137,13 +138,14 @@ class TestThinkingBoxControlThreadSafety:
         errors = [r for r in results if r.startswith("ERROR")]
         assert len(errors) == 0
 
-    def test_concurrent_expand_collapse(self, thinking_control: ThinkingBoxControl):
-        """Multiple threads toggling expand/collapse should be safe."""
-        thinking_control.start(lambda: "test content " * 100)
+    def test_concurrent_expand_collapse(self):
+        """Threads toggling the shared expand mode lose no toggles."""
+        manager = ThinkingBoxManager()
+        box = manager.create_box(lambda: "test content " * 100)
 
         def toggler():
             for _ in range(100):
-                thinking_control.toggle_expanded()
+                manager.toggle_all()
                 time.sleep(0.001)
 
         threads = [threading.Thread(target=toggler) for _ in range(5)]
@@ -153,9 +155,9 @@ class TestThinkingBoxControlThreadSafety:
         for t in threads:
             t.join()
 
-        # Should complete without error
-        # Final state is non-deterministic but valid
-        assert thinking_control.is_expanded in (True, False)
+        # 500 toggles: back where it started.
+        assert not manager.is_expanded
+        assert not box.control.is_expanded
 
     def test_concurrent_start_finish(self):
         """Starting and finishing should be thread-safe."""

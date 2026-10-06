@@ -9,6 +9,13 @@ from prompt_toolkit.formatted_text import FormattedText
 from thinking_prompt.thinking import ThinkingBoxControl
 
 
+def _expanded_control(max_collapsed_lines: int = 5) -> ThinkingBoxControl:
+    """A box whose expand mode (normally the manager's) is on."""
+    return ThinkingBoxControl(
+        max_collapsed_lines=max_collapsed_lines, expanded=lambda: True
+    )
+
+
 class TestThinkingBoxControlBasics:
     """Test basic functionality of ThinkingBoxControl."""
 
@@ -46,11 +53,11 @@ class TestThinkingBoxControlBasics:
         assert not thinking_control.is_expanded
         assert thinking_control.content == ""
 
-    def test_finish_returns_expanded_state(self, thinking_control: ThinkingBoxControl):
+    def test_finish_returns_expanded_state(self):
         """Finishing should return True for was_expanded if expanded."""
-        thinking_control.start(lambda: "test")
-        thinking_control.expand()
-        content, was_expanded, fmt = thinking_control.finish()
+        control = _expanded_control(15)
+        control.start(lambda: "test")
+        content, was_expanded, fmt = control.finish()
 
         assert was_expanded
 
@@ -67,34 +74,16 @@ class TestThinkingBoxControlBasics:
 class TestThinkingBoxControlExpansion:
     """Test expansion/collapse functionality."""
 
-    def test_expand_sets_expanded(self, thinking_control: ThinkingBoxControl):
-        """Expand should set is_expanded to True."""
+    def test_collapsed_without_an_expand_predicate(self, thinking_control: ThinkingBoxControl):
+        """A box on its own (no manager) stays collapsed."""
         thinking_control.start(lambda: "test")
-        thinking_control.expand()
-        assert thinking_control.is_expanded
-
-    def test_collapse_clears_expanded(self, thinking_control: ThinkingBoxControl):
-        """Collapse should set is_expanded to False."""
-        thinking_control.start(lambda: "test")
-        thinking_control.expand()
-        thinking_control.collapse()
         assert not thinking_control.is_expanded
 
-    def test_toggle_switches_state(self, thinking_control: ThinkingBoxControl):
-        """Toggle should switch expanded state."""
-        thinking_control.start(lambda: "test")
-
-        assert not thinking_control.is_expanded
-        thinking_control.toggle_expanded()
-        assert thinking_control.is_expanded
-        thinking_control.toggle_expanded()
-        assert not thinking_control.is_expanded
-
-    def test_can_toggle_when_expanded(self, thinking_control: ThinkingBoxControl):
+    def test_can_toggle_when_expanded(self):
         """Should be able to toggle when already expanded."""
-        thinking_control.start(lambda: "test")
-        thinking_control.expand()
-        assert thinking_control.can_toggle_expanded
+        control = _expanded_control(15)
+        control.start(lambda: "test")
+        assert control.can_toggle_expanded
 
     def test_cannot_toggle_when_inactive(self, thinking_control: ThinkingBoxControl):
         """Should not be able to toggle when inactive."""
@@ -147,13 +136,11 @@ class TestThinkingBoxControlFormatting:
         # Default key is c-t, displayed as ctrl-t
         assert "ctrl-t to expand" in text
 
-    def test_formatted_text_no_hint_when_expanded(
-        self, small_thinking_control: ThinkingBoxControl, multiline_content: str
-    ):
+    def test_formatted_text_no_hint_when_expanded(self, multiline_content: str):
         """Formatted text should not include hint when expanded."""
-        small_thinking_control.start(lambda: multiline_content)
-        small_thinking_control.expand()
-        formatted = small_thinking_control._get_formatted_text()
+        control = _expanded_control()
+        control.start(lambda: multiline_content)
+        formatted = control._get_formatted_text()
 
         text = "".join(frag[1] for frag in formatted)
         assert "to expand" not in text
@@ -256,13 +243,13 @@ class TestThinkingBoxControlAnsiFormat:
         text = "".join(frag[1] for frag in formatted)
         assert "ctrl-t to expand" in text
 
-    def test_ansi_no_truncation_when_expanded(self, small_thinking_control: ThinkingBoxControl):
+    def test_ansi_no_truncation_when_expanded(self):
         """ANSI content should show fully when expanded."""
         lines = [f"\033[32mLine {i}\033[0m" for i in range(20)]
         content = "\n".join(lines)
-        small_thinking_control.start(lambda: content, content_format="ansi")
-        small_thinking_control.expand()
-        formatted = small_thinking_control._get_formatted_text()
+        control = _expanded_control()
+        control.start(lambda: content, content_format="ansi")
+        formatted = control._get_formatted_text()
 
         text = "".join(frag[1] for frag in formatted)
         assert "Line 19" in text
@@ -363,19 +350,17 @@ class TestOverflowTail:
         ]
 
     def test_expanded_fits_given_height_and_offers_collapse(self):
-        control = ThinkingBoxControl(max_collapsed_lines=5)
+        control = _expanded_control()
         content = _numbered(60)
         control.start(lambda: content)
-        control.expand()
         rows = _rendered(control, 40, 8)
         assert rows[0] == "+53 earlier lines... ctrl-t to collapse"
         assert rows[1:] == [f"line {i}" for i in range(53, 60)]
 
     def test_expanded_with_room_shows_everything(self):
-        control = ThinkingBoxControl(max_collapsed_lines=5)
+        control = _expanded_control()
         content = _numbered(12)
         control.start(lambda: content)
-        control.expand()
         assert _rendered(control, 40, 30) == [f"line {i}" for i in range(12)]
 
     def test_ansi_style_carries_across_the_cut(self):
