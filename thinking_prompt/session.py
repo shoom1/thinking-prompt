@@ -48,6 +48,7 @@ from prompt_toolkit.styles import DynamicStyle
 
 from .app_info import AppInfo
 from .display import Display
+from .frames import POLL_INTERVAL, FrameScheduler
 from .layout import create_layout
 from .manager import ManagedBox, ThinkingBoxManager
 from .rich_utils import _is_rich_renderable
@@ -192,12 +193,17 @@ class ThinkingPromptSession:
         self._fullscreen_enabled = app_info.fullscreen_enabled if app_info else False
         self._echo_thinking = app_info.echo_thinking if app_info else True
 
+        # Redraws on demand: writes redraw now, animations ask for their
+        # next frame; nothing redraws on a timer (see _create_application).
+        self._frames = FrameScheduler(lambda: self.app.invalidate())
+
         # Thinking box manager (manages multiple thinking boxes).
         # expand_key flows through to each box so the truncation hint
         # matches the key bound below in _create_key_bindings.
         self._manager = ThinkingBoxManager(
             default_max_lines=max_thinking_height,
             expand_key=self._expand_key,
+            frames=self._frames,
         )
 
         # Input history (for up/down arrow)
@@ -330,16 +336,23 @@ class ThinkingPromptSession:
 
         return create_layout(
             default_buffer=self.default_buffer,
-            message=lambda: self._message,
+            message=lambda: self._polled(self._message),
             max_thinking_height=self._max_thinking_height,
             history=self._display.history,
             is_fullscreen=lambda: self._is_fullscreen,
-            get_status_text=lambda: self._status_text,
+            get_status_text=lambda: self._polled(self._status_text),
             is_status_bar_enabled=lambda: self._enable_status_bar,
             thinking_manager=self._manager,
             completions_menu_height=self._completions_menu_height,
             inline_dialog=DynamicContainer(self._inline_dialog_content),
         )
+
+    def _polled(self, text: AnyFormattedText) -> AnyFormattedText:
+        """Text about to be drawn. A callable is re-read every
+        POLL_INTERVAL while it's drawn: nothing says when its text changes."""
+        if callable(text):
+            self._frames.redraw_in(POLL_INTERVAL)
+        return text
 
     def _create_application(self) -> Application:
         """Create the Application object."""
@@ -354,7 +367,10 @@ class ThinkingPromptSession:
             editing_mode=self._editing_mode,
             full_screen=False,  # Fixed for the app's lifetime; see _invalidate()
             mouse_support=Condition(lambda: self._is_fullscreen),  # Only in fullscreen
-            refresh_interval=0.1,  # For real-time updates
+            # No refresh_interval: redrawn when something changes or an
+            # animation asks (FrameScheduler), so an idle prompt costs
+            # nothing. Bursts of writes are capped at 30 redraws a second.
+            min_redraw_interval=1 / 30,
             color_depth=self._effective_color_depth,
         )
 
@@ -648,9 +664,14 @@ class ThinkingPromptSession:
                 return box.control.final_content
             return results[0][1]
 
+        def _set_title(text: str) -> None:
+            if box.header is not None:
+                box.header.text = text
+                self._frames.redraw()
+
         return ThinkingContext(
             content=box.streaming_content,
-            set_title=lambda t: setattr(box.header, 'text', t) if box.header else None,
+            set_title=_set_title,
             get_title=lambda: box.header.text if box.header else self._default_thinking_text,
             set_format=box.control.set_content_format,
             rich_theme=self._display.rich_theme,
@@ -1211,6 +1232,7 @@ class ThinkingPromptSession:
             loop_task.cancel()
             with suppress(asyncio.CancelledError):
                 await loop_task
+            self._frames.cancel()
 
     async def _run_handler(
         self,

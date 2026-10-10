@@ -90,6 +90,7 @@ class ThinkingBoxControl(FormattedTextControl):
         expand_key: str = "c-t",
         overflow: Overflow = "tail",
         expanded: Callable[[], bool] | None = None,
+        on_draw: Callable[[], None] | None = None,
     ) -> None:
         """
         Initialize the thinking box control.
@@ -102,6 +103,9 @@ class ThinkingBoxControl(FormattedTextControl):
                 "tail" (newest lines, default) or "head" (first lines).
             expanded: Whether the box is expanded right now (default:
                 never). ThinkingBoxManager passes its shared mode.
+            on_draw: Called each time the active box is drawn. A box fed by
+                a content callback uses it to be redrawn again shortly:
+                nothing tells it when the callback's content changes.
         """
         self._content_callback: Callable[[], str] | None = None
         self._max_collapsed_lines = max_collapsed_lines
@@ -112,6 +116,7 @@ class ThinkingBoxControl(FormattedTextControl):
         # renders (e.g. whether the expand key applies).
         self._last_width = _DEFAULT_WIDTH
         self._expanded = expanded or (lambda: False)
+        self._on_draw = on_draw
         self._content_format: ContentFormat = "plain"
         # The content when the box was finished, for handles that ask again.
         self._final_content = ""
@@ -200,6 +205,8 @@ class ThinkingBoxControl(FormattedTextControl):
         depends on the size, which its text callable can't see.
         """
         self._last_width = width
+        if self._on_draw is not None and self.is_active:
+            self._on_draw()
         fragments = to_formatted_text(self._format(width, height), style=self.style)
         lines = [list(line) for line in split_lines(fragments)]
         return UIContent(

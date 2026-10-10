@@ -8,6 +8,7 @@ together (e.g. several keys arriving in one read). These tests run
 from __future__ import annotations
 
 import asyncio
+import threading
 from collections.abc import Awaitable, Iterator
 from contextlib import contextmanager
 from typing import Any, Callable
@@ -20,6 +21,7 @@ from prompt_toolkit.layout import BufferControl
 from prompt_toolkit.output import DummyOutput
 
 from thinking_prompt import (
+    AppInfo,
     ButtonConfig,
     CheckboxItem,
     ChecklistItem,
@@ -113,8 +115,11 @@ def screen_lines(session: ThinkingPromptSession) -> list[str]:
     screen = session.app.renderer.last_rendered_screen
     if screen is None:
         return []
+    # screen.width only counts columns some windows widened it to (it can
+    # stay 0): read the terminal's full width.
+    width = max(screen.width, session.app.output.get_size().columns)
     return [
-        "".join(screen.data_buffer[y][x].char for x in range(screen.width)).strip()
+        "".join(screen.data_buffer[y][x].char for x in range(width)).strip()
         for y in range(screen.height)
     ]
 
@@ -259,6 +264,145 @@ class TestBoxLifecycle:
                 assert not run.done()
 
             await run_with(session, handler, script)
+
+
+async def settled_renders(session: ThinkingPromptSession, quiet: float = 0.15) -> int:
+    """The app's render count once it hasn't redrawn for ``quiet`` seconds."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + 2.0
+    count, still_since = session.app.render_counter, loop.time()
+    while loop.time() - still_since < quiet:
+        if loop.time() > deadline:
+            raise AssertionError("the app kept redrawing")
+        await asyncio.sleep(0.01)
+        if session.app.render_counter != count:
+            count, still_since = session.app.render_counter, loop.time()
+    return count
+
+
+def on_screen(session: ThinkingPromptSession, text: str) -> bool:
+    return any(text in line for line in screen_lines(session))
+
+
+STILL = AppInfo(name="t", thinking_animation=())  # boxes without a spinner
+
+
+class TestRedraws:
+    """The screen is redrawn when something changes or animates, never on
+    a fixed timer."""
+
+    async def test_an_idle_prompt_is_not_redrawn(self):
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                before = await settled_renders(session)
+                await asyncio.sleep(0.3)
+                assert session.app.render_counter == before
+
+            await run_with(session, lambda text: None, script)
+
+    async def test_a_spinner_turns_while_its_box_is_open_then_redraws_stop(self):
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                ctx = session.start_thinking(title="Working")
+                headers = set()
+                for _ in range(35):
+                    await asyncio.sleep(0.01)
+                    headers.update(line for line in screen_lines(session) if "Working" in line)
+                assert len(headers) >= 2  # the spinner frame changed
+
+                ctx.finish()
+                before = await settled_renders(session)
+                await asyncio.sleep(0.3)
+                assert session.app.render_counter == before
+
+            await run_with(session, lambda text: None, script)
+
+    async def test_a_box_without_a_spinner_is_redrawn_only_when_written(self):
+        with piped_session(app_info=STILL) as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                ctx = session.start_thinking()
+                before = await settled_renders(session)
+                await asyncio.sleep(0.3)
+                assert session.app.render_counter == before
+
+                ctx.append("hello\n")
+                await wait_until(lambda: on_screen(session, "hello"))
+                ctx.set_title("Renamed")
+                await wait_until(lambda: on_screen(session, "Renamed"))
+
+            await run_with(session, lambda text: None, script)
+
+    async def test_a_write_from_a_thread_shows(self):
+        with piped_session(app_info=STILL) as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                ctx = session.start_thinking()
+                await settled_renders(session)
+                writer = threading.Thread(target=ctx.append, args=("from a thread\n",))
+                writer.start()
+                writer.join()
+                await wait_until(lambda: on_screen(session, "from a thread"))
+
+            await run_with(session, lambda text: None, script)
+
+    async def test_a_box_fed_by_a_callback_is_polled_while_open(self):
+        chunks: list[str] = []
+        with piped_session(app_info=STILL) as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                ctx = session.start_thinking(lambda: "".join(chunks))
+                await settled_renders(session, quiet=0.05)  # still polling: settles only between polls
+                chunks.append("polled\n")
+                await wait_until(lambda: on_screen(session, "polled"))
+
+                ctx.finish()
+                before = await settled_renders(session)
+                await asyncio.sleep(0.3)
+                assert session.app.render_counter == before
+
+            await run_with(session, lambda text: None, script)
+
+    async def test_a_status_given_as_a_callable_is_polled(self):
+        shown = ["one"]
+        with piped_session(status_text=lambda: shown[-1]) as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                await wait_until(lambda: on_screen(session, "one"))
+                shown.append("two")
+                await wait_until(lambda: on_screen(session, "two"))
+
+            await run_with(session, lambda text: None, script)
+
+    async def test_a_prompt_message_given_as_a_callable_is_polled(self):
+        shown = ["one> "]
+        with piped_session(message=lambda: shown[-1]) as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                await wait_until(lambda: on_screen(session, "one>"))
+                shown.append("two> ")
+                await wait_until(lambda: on_screen(session, "two>"))
+
+            await run_with(session, lambda text: None, script)
+
+    async def test_fast_writes_are_capped_at_30_redraws_a_second(self):
+        with piped_session(app_info=STILL) as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                ctx = session.start_thinking()
+                before = await settled_renders(session)
+                loop = asyncio.get_running_loop()
+                start = loop.time()
+                for i in range(60):
+                    ctx.append(f"{i}\n")
+                    await asyncio.sleep(0.005)
+                elapsed = loop.time() - start
+                renders = await settled_renders(session) - before
+                assert renders <= elapsed * 30 + 3
+
+            await run_with(session, lambda text: None, script)
 
 
 class TestInputLoopLifetime:
