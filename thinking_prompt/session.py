@@ -11,8 +11,7 @@ import asyncio
 import logging
 import os
 import threading
-import warnings
-from collections.abc import AsyncIterator, Coroutine, Sequence
+from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager, suppress
 from typing import (
     TYPE_CHECKING,
@@ -20,13 +19,14 @@ from typing import (
     Callable,
     Literal,
     Optional,
+    TypeVar,
     cast,
 )
 
 if TYPE_CHECKING:
     from .dialog import Dialog, DialogManager
     from .settings_dialog import SettingsItem
-    from .types import ContentFormat, Overflow
+    from .types import ContentCallback, ContentFormat, InputHandler, Overflow
 
 from prompt_toolkit.application import Application
 from prompt_toolkit.buffer import Buffer
@@ -46,6 +46,7 @@ from prompt_toolkit.layout import AnyContainer, DynamicContainer, Window
 from prompt_toolkit.output import ColorDepth
 from prompt_toolkit.styles import DynamicStyle
 
+from ._text import format_exception_detail
 from .app_info import AppInfo
 from .display import Display
 from .frames import POLL_INTERVAL, FrameScheduler
@@ -53,9 +54,12 @@ from .layout import create_layout
 from .manager import ManagedBox, ThinkingBoxManager
 from .rich_utils import _is_rich_renderable
 from .styles import ThinkingPromptStyles, resolve_theme
-from .types import Placement, ThinkingContext, check_placement, format_exception_detail
+from .types import Placement, ThinkingContext, check_placement
 
 logger = logging.getLogger(__name__)
+
+# on_input() returns the handler it registers with its own type.
+_HandlerT = TypeVar("_HandlerT", bound="InputHandler")
 
 
 class ThinkingPromptSession:
@@ -210,8 +214,7 @@ class ThinkingPromptSession:
         self._input_history = history or InMemoryHistory()
 
         # Input handler callback (can be set via @on_input decorator or run_async)
-        # Handler can be sync (returns None) or async (returns Coroutine)
-        self._input_handler: Callable[[str], None | Coroutine[Any, Any, None]] | None = None
+        self._input_handler: InputHandler | None = None
 
         # Pending input future for async handling
         self._pending_input: asyncio.Future[str] | None = None
@@ -579,7 +582,7 @@ class ThinkingPromptSession:
 
     def start_thinking(
         self,
-        content_callback: Callable[[], str] | None = None,
+        content_callback: ContentCallback | None = None,
         *,
         title: str | None = None,
         order: int = 0,
@@ -732,42 +735,6 @@ class ThinkingPromptSession:
             return box.owner is None or box.owner is owner or box.owner.done()
 
         return owned
-
-    def finish_thinking(
-        self,
-        add_to_history: bool = True,
-        echo_to_console: bool | None = None,
-    ) -> str:
-        """
-        Complete the thinking phase (finishes all active boxes).
-
-        .. deprecated::
-            Use ``ThinkingContext.finish()`` on the context returned by
-            ``start_thinking()``, or use the ``thinking()`` async context
-            manager for automatic per-box lifecycle management.
-
-        Console gets collapsed/truncated version (for prompt mode).
-        History gets full content (for fullscreen mode).
-
-        Args:
-            add_to_history: If True, add thinking content to chat history.
-            echo_to_console: If True, print thinking content to console.
-                            If None (default), uses AppInfo.echo_thinking setting.
-
-        Returns:
-            The full thinking content that was displayed.
-        """
-        warnings.warn(
-            "finish_thinking() is deprecated. Use ctx.finish() on the "
-            "ThinkingContext returned by start_thinking(), or use the "
-            "thinking() async context manager instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        results = self._finish_boxes(
-            None, add_to_history=add_to_history, echo_to_console=echo_to_console
-        )
-        return "\n".join(content for _, content, *_rest in results if content.strip())
 
     @property
     def is_thinking(self) -> bool:
@@ -1099,7 +1066,7 @@ class ThinkingPromptSession:
     # Handler Registration
     # =========================================================================
 
-    def on_input(self, func: Callable[[str], Any]) -> Callable[[str], Any]:
+    def on_input(self, func: _HandlerT) -> _HandlerT:
         """
         Decorator to register an input handler.
 
@@ -1166,7 +1133,7 @@ class ThinkingPromptSession:
 
     async def run_async(
         self,
-        handler: Callable[[str], Any] | None = None,
+        handler: InputHandler | None = None,
     ) -> None:
         """
         Run the session asynchronously.
@@ -1236,7 +1203,7 @@ class ThinkingPromptSession:
 
     async def _run_handler(
         self,
-        handler: Callable[[str], None | Coroutine[Any, Any, None]],
+        handler: InputHandler,
         text: str,
     ) -> None:
         """Invoke the input handler with cancellation and cleanup hooks.
@@ -1329,7 +1296,7 @@ class ThinkingPromptSession:
         """
         self._finish_boxes(self._owned_by(owner), cancelled=cancelled)
 
-    def run(self, handler: Callable[[str], Any] | None = None) -> None:
+    def run(self, handler: InputHandler | None = None) -> None:
         """
         Run the session synchronously.
 

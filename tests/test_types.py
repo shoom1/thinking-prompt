@@ -206,6 +206,15 @@ class TestStreamingContentSetLine:
         content.set_line(0, "ONLY")
         assert content.text == "ONLY"
 
+    def test_set_line_rejects_text_of_more_than_one_line(self):
+        """A newline in the text would add lines, shifting every index after it."""
+        content = StreamingContent()
+        content.append("a\nb\n")
+        for text in ("x\ny", "x\n"):
+            with pytest.raises(ValueError, match="one line"):
+                content.set_line(0, text)
+        assert content.text == "a\nb\n"
+
     def test_set_line_first_line_index_zero(self):
         """Index 0 should set the first line."""
         content = StreamingContent()
@@ -332,8 +341,25 @@ class TestStreamingContentRichMethods:
         assert "✓ line0" in text
         assert "\033[" in text  # ANSI escape codes
 
-    def test_set_line_rich_takes_first_line_only(self):
-        """set_line_rich should only use the first line of multi-line output."""
+    def test_set_line_rich_rejects_markup_of_more_than_one_line(self):
+        """Its lines after the first used to be dropped without a word."""
+        content = StreamingContent()
+        content.append("line0\nline1\n")
+        with pytest.raises(ValueError, match="one line"):
+            content.set_line_rich(0, "[green]first[/green]\nsecond")
+        assert content.text == "line0\nline1\n"
+
+    def test_set_line_rich_rejects_a_renderable_of_more_than_one_line(self):
+        pytest.importorskip("rich")
+        from rich.panel import Panel
+        content = StreamingContent()
+        content.append("line0\n")
+        with pytest.raises(ValueError, match="one line"):
+            content.set_line_rich(0, Panel("boxed"))
+        assert content.text == "line0\n"
+
+    def test_set_line_rich_keeps_the_other_lines(self):
+        """set_line_rich replaces one line and leaves the rest."""
         content = StreamingContent()
         content.append("line0\nline1\n")
         content.set_line_rich(0, "[green]first[/green]")
@@ -355,17 +381,17 @@ class TestTruncateToLines:
     """A trailing newline is not a line of its own when truncating."""
 
     def test_trailing_newline_does_not_trigger_truncation(self):
-        from thinking_prompt.types import truncate_to_lines
+        from thinking_prompt._text import truncate_to_lines
 
         assert truncate_to_lines("a\nb\nc\nd\n", 4) == "a\nb\nc\nd"
 
     def test_truncates_beyond_limit(self):
-        from thinking_prompt.types import truncate_to_lines
+        from thinking_prompt._text import truncate_to_lines
 
         assert truncate_to_lines("a\nb\nc\nd\ne\n", 4) == "a\nb\nc\nd\n..."
 
     def test_ansi_trailing_newline_does_not_trigger_truncation(self):
-        from thinking_prompt.types import truncate_ansi_to_lines
+        from thinking_prompt._text import truncate_ansi_to_lines
 
         assert truncate_ansi_to_lines("\033[1ma\033[0m\nb\n", 2) == "\033[1ma\033[0m\nb"
 
@@ -374,12 +400,12 @@ class TestTruncateTail:
     """overflow="tail" keeps the last lines, marker on top."""
 
     def test_plain_tail(self):
-        from thinking_prompt.types import truncate_to_lines
+        from thinking_prompt._text import truncate_to_lines
 
         assert truncate_to_lines("a\nb\nc\nd\n", 2, overflow="tail") == "...\nc\nd"
 
     def test_plain_tail_that_fits_is_untouched(self):
-        from thinking_prompt.types import truncate_to_lines
+        from thinking_prompt._text import truncate_to_lines
 
         assert truncate_to_lines("a\nb\n", 2, overflow="tail") == "a\nb"
 
@@ -392,7 +418,7 @@ class TestTruncateTail:
             to_formatted_text,
         )
 
-        from thinking_prompt.types import truncate_ansi_to_lines
+        from thinking_prompt._text import truncate_ansi_to_lines
 
         out = truncate_ansi_to_lines("\x1b[31ma\nb\nc\x1b[0m\n", 1, overflow="tail")
         frags = list(to_formatted_text(ANSI(out)))  # ~one fragment per char
@@ -405,11 +431,22 @@ class TestFormatExceptionDetail:
     """format_exception_detail(): one formatter for exception detail lines."""
 
     def test_exception_with_message_includes_type_and_message(self):
-        from thinking_prompt.types import format_exception_detail
+        from thinking_prompt._text import format_exception_detail
 
         assert format_exception_detail(KeyError("x")) == "KeyError: 'x'"
 
     def test_exception_without_message_is_just_the_type_name(self):
-        from thinking_prompt.types import format_exception_detail
+        from thinking_prompt._text import format_exception_detail
 
         assert format_exception_detail(RuntimeError()) == "RuntimeError"
+
+
+class TestRemovedTypes:
+    def test_message_role_is_gone(self):
+        """A chat-role literal nothing used: not this UI library's concern."""
+        import thinking_prompt
+        import thinking_prompt.types as types_module
+
+        assert not hasattr(thinking_prompt, "MessageRole")
+        assert "MessageRole" not in thinking_prompt.__all__
+        assert not hasattr(types_module, "MessageRole")

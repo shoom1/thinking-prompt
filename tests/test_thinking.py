@@ -349,6 +349,15 @@ class TestOverflowTail:
             "+58 earlier lines... ctrl-t to expand", "line 58", "line 59",
         ]
 
+    def test_collapsed_box_keeps_its_cap_in_a_taller_window(self):
+        control = ThinkingBoxControl(max_collapsed_lines=5)
+        content = _numbered(60)
+        control.start(lambda: content)
+        assert _rendered(control, 40, 30) == [
+            "+56 earlier lines... ctrl-t to expand",
+            "line 56", "line 57", "line 58", "line 59",
+        ]
+
     def test_expanded_fits_given_height_and_offers_collapse(self):
         control = _expanded_control()
         content = _numbered(60)

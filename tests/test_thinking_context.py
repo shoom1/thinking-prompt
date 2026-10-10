@@ -45,6 +45,14 @@ class TestThinkingContextDelegation:
         ctx.set_line(-1, "REPLACED")
         assert content.text == "line0\nREPLACED\n"
 
+    def test_set_line_rejects_text_of_more_than_one_line(self):
+        content = StreamingContent()
+        content.append("line0\n")
+        ctx = ThinkingContext(content, set_title=MagicMock(), get_title=lambda: "")
+        with pytest.raises(ValueError, match="one line"):
+            ctx.set_line(0, "a\nb")
+        assert content.text == "line0\n"
+
     def test_len_delegates(self):
         content = StreamingContent()
         content.append("a")
