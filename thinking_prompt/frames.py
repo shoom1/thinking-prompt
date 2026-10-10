@@ -17,11 +17,11 @@ POLL_INTERVAL = 0.1
 class FrameScheduler:
     """Asks the app for redraws: now, or in a while.
 
-    Writes call ``redraw()``, from any thread. Whatever changes with time
-    (a spinner, a box polling its content callback) calls ``redraw_in()``
-    each time it's drawn. One timer is kept, at the earliest time asked
-    for, so every animation shares each redraw, and nothing ticks once
-    nothing animated is drawn.
+    Writes call ``redraw()``. Whatever changes with time (a spinner, a box
+    polling its content callback) calls ``redraw_in()`` each time it's
+    drawn. One timer is kept, at the earliest time asked for, so every
+    animation shares each redraw, and nothing ticks once nothing animated
+    is drawn.
     """
 
     def __init__(self, invalidate: Callable[[], None]) -> None:
@@ -35,7 +35,11 @@ class FrameScheduler:
         self._loop: asyncio.AbstractEventLoop | None = None
 
     def redraw(self) -> None:
-        """Redraw as soon as possible (thread-safe)."""
+        """Redraw as soon as possible.
+
+        Thread-safe when ``invalidate`` is: ``Application.invalidate`` hands
+        the redraw to the event loop with ``call_soon_threadsafe``.
+        """
         self._invalidate()
 
     def redraw_in(self, delay: float) -> None:
@@ -49,7 +53,9 @@ class FrameScheduler:
             return
         when = loop.time() + max(0.0, delay)
         if self._handle is not None:
-            # A timer on another (finished) loop will never fire: replace it.
+            # A redraw already due by then covers this request: whoever asked
+            # is drawn in it and asks again from there. A timer on another
+            # (finished) loop will never fire, though: replace it.
             if self._loop is loop and self._handle.when() <= when:
                 return
             self._handle.cancel()

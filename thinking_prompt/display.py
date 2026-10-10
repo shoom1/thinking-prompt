@@ -17,6 +17,7 @@ from prompt_toolkit import print_formatted_text
 from prompt_toolkit.formatted_text import ANSI, AnyFormattedText, FormattedText
 from prompt_toolkit.styles import Style
 
+from ._text import truncate_ansi_to_lines, truncate_to_lines
 from .history import FormattedTextHistory
 from .rich_utils import (
     _highlight_code,
@@ -25,7 +26,7 @@ from .rich_utils import (
     _renderable_to_ansi,
     _rich_to_ansi,
 )
-from .types import ContentFormat, Overflow, truncate_ansi_to_lines, truncate_to_lines
+from .types import ContentFormat, Overflow
 
 if TYPE_CHECKING:
     from prompt_toolkit.output import ColorDepth

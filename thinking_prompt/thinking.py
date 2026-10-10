@@ -19,7 +19,7 @@ from prompt_toolkit.formatted_text import (
 from prompt_toolkit.formatted_text.utils import fragment_list_width, split_lines
 from prompt_toolkit.layout.controls import FormattedTextControl, UIContent
 
-from .types import ContentFormat, Overflow
+from .types import ContentCallback, ContentFormat, Overflow
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +76,8 @@ class ThinkingBoxControl(FormattedTextControl):
         control.start(lambda: ''.join(chunks))
 
         chunks.append("Processing...\\n")
-        # UI automatically updates via content_callback
+        # Shown at the next redraw: the control reads the callback when
+        # drawn. on_draw= can ask for that redraw (ThinkingBoxManager's does).
 
         expanded = True  # e.g. the user pressed Ctrl+T
 
@@ -107,7 +108,7 @@ class ThinkingBoxControl(FormattedTextControl):
                 a content callback uses it to be redrawn again shortly:
                 nothing tells it when the callback's content changes.
         """
-        self._content_callback: Callable[[], str] | None = None
+        self._content_callback: ContentCallback | None = None
         self._max_collapsed_lines = max_collapsed_lines
         self._box_style = style
         self._expand_key = expand_key
@@ -134,7 +135,7 @@ class ThinkingBoxControl(FormattedTextControl):
 
     def start(
         self,
-        content_callback: Callable[[], str],
+        content_callback: ContentCallback,
         content_format: ContentFormat = "plain",
     ) -> None:
         """
@@ -223,13 +224,12 @@ class ThinkingBoxControl(FormattedTextControl):
             return FormattedText([])
 
         with self._lock:
-            limit = height
-            if not self.is_expanded:
-                limit = (
-                    self._max_collapsed_lines
-                    if limit is None
-                    else min(limit, self._max_collapsed_lines)
-                )
+            if self.is_expanded:
+                limit = height
+            elif height is None:
+                limit = self._max_collapsed_lines
+            else:
+                limit = min(height, self._max_collapsed_lines)
             return self._fit(self._content_lines(content), width, limit)
 
     def _content_lines(self, content: str) -> list[StyleAndTextTuples]:

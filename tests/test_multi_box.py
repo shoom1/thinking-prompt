@@ -52,17 +52,9 @@ class TestMultiBoxLifecycle:
         ctx2.finish(add_to_history=False, echo_to_console=False)
         ctx3.finish(add_to_history=False, echo_to_console=False)
 
-    @pytest.mark.filterwarnings("ignore::DeprecationWarning")
-    def test_session_finish_thinking_finishes_all_boxes(self):
-        """session.finish_thinking() should finish all active boxes."""
-        session = _make_session()
-        session.start_thinking(lambda: "box 1")
-        session.start_thinking(lambda: "box 2")
-        session.start_thinking(lambda: "box 3")
-        assert session._manager.active_count == 3
-
-        session.finish_thinking(add_to_history=False, echo_to_console=False)
-        assert session._manager.active_count == 0
+    def test_finish_thinking_is_gone(self):
+        """Deprecated since 0.3.0: each box is finished through its handle."""
+        assert not hasattr(ThinkingPromptSession, "finish_thinking")
 
     def test_ctx_finish_returns_box_content(self):
         """ctx.finish() should return the content of the finished box."""
@@ -108,13 +100,6 @@ class TestMultiBoxLifecycle:
 
         ctx.finish(add_to_history=False, echo_to_console=False)
         assert not session.is_thinking
-
-    @pytest.mark.filterwarnings("ignore::DeprecationWarning")
-    def test_finish_thinking_on_empty_returns_empty_string(self):
-        """session.finish_thinking() with no active boxes should return ''."""
-        session = _make_session()
-        result = session.finish_thinking(add_to_history=False, echo_to_console=False)
-        assert result == ""
 
 
 # =============================================================================
@@ -253,19 +238,18 @@ class TestMultiBoxExpandCollapse:
 class TestMultiBoxBackwardCompat:
     """Test backward compatibility with single-box usage patterns."""
 
-    @pytest.mark.filterwarnings("ignore::DeprecationWarning")
     def test_single_box_start_finish(self):
-        """Single-box start_thinking(callback) / finish_thinking() works as before."""
+        """Single-box start_thinking(callback) / ctx.finish() works as before."""
         session = _make_session()
         chunks = []
-        session.start_thinking(lambda: "".join(chunks))
+        ctx = session.start_thinking(lambda: "".join(chunks))
         chunks.append("Processing...\n")
         chunks.append("Done!\n")
 
         assert session.is_thinking
         assert session._manager.active_count == 1
 
-        result = session.finish_thinking(add_to_history=False, echo_to_console=False)
+        result = ctx.finish(add_to_history=False, echo_to_console=False)
         assert "Processing" in result
         assert "Done!" in result
         assert not session.is_thinking
@@ -367,12 +351,11 @@ class TestSessionOverflow:
             assert s._manager.get_sorted_boxes()[0].control.overflow == "head"
         assert self._echoed(s) == ["line 0\nline 1\nline 2\n...\n"]
 
-    def test_deprecated_finish_thinking_keeps_each_boxs_end(self):
+    def test_finishing_every_box_at_once_keeps_each_boxs_end(self):
         s = self._session()
         s.start_thinking(max_lines=2).append(self._lines(5))
         s.start_thinking(max_lines=2, overflow="head").append(self._lines(5))
-        with pytest.warns(DeprecationWarning):
-            s.finish_thinking(echo_to_console=True)
+        s._finish_boxes(None, echo_to_console=True)
         assert self._echoed(s) == ["...\nline 3\nline 4\n", "line 0\nline 1\n...\n"]
 
     def test_overflow_type_is_exported(self):

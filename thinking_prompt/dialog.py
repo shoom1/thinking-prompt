@@ -53,10 +53,11 @@ from prompt_toolkit.layout import AnyContainer, HSplit
 from prompt_toolkit.layout.containers import is_container
 from prompt_toolkit.widgets import Label, RadioList
 
+from ._text import format_exception_detail
 from .dialog_box import TERMINAL_TOO_SMALL, BoxPresenter
 from .dialog_inline import InlinePresenter, InlineView
 from .rows import OptionGroup, RowNavigator
-from .types import Placement, check_placement, format_exception_detail
+from .types import Placement, check_placement
 
 if TYPE_CHECKING:
     from .session import ThinkingPromptSession

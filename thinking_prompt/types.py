@@ -7,9 +7,8 @@ for better type safety throughout the package.
 from __future__ import annotations
 
 import logging
-import re
 import threading
-from collections.abc import Awaitable
+from collections.abc import Coroutine
 from typing import (
     Any,
     Callable,
@@ -22,9 +21,6 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 # Type Aliases
 # =============================================================================
-
-# Message roles supported by add_message()
-MessageRole = Literal["user", "assistant", "thinking", "system"]
 
 # Content format for thinking box rendering
 ContentFormat = Literal["plain", "ansi"]
@@ -45,106 +41,19 @@ def check_placement(value: object, *, optional: bool = False) -> None:
     if value not in ("box", "inline"):
         raise ValueError(f"placement must be 'box' or 'inline', got {value!r}")
 
-# Content callback type for thinking box
+# Returns a thinking box's current content; the box re-reads it while drawn.
 ContentCallback = Callable[[], str]
 
-# Input handler types - can be sync or async
-SyncInputHandler = Callable[[str], None]
-AsyncInputHandler = Callable[[str], Awaitable[None]]
-InputHandler = Union[SyncInputHandler, AsyncInputHandler]
-
-# SGR (color/style) escape sequences — the only escapes thinking content is
-# expected to carry. Used to measure/replay styling without the text.
-ANSI_SGR_RE = re.compile(r"\x1b\[[0-9;]*m")
+# Handles one line of submitted input: a function, or an async function
+# (the session runs its coroutine as a task that Ctrl+C can cancel).
+InputHandler = Union[
+    Callable[[str], None], Callable[[str], Coroutine[Any, Any, None]]
+]
 
 # Default spinner animation frames for the thinking header.
 # Single source of truth — referenced by layout.ThinkingHeader and
 # app_info.AppInfo.
 DEFAULT_SPINNER_FRAMES = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
-
-
-# =============================================================================
-# Utility Functions
-# =============================================================================
-
-def split_content_lines(content: str) -> list[str]:
-    """
-    Split content into the lines it displays as.
-
-    Trailing whitespace is not content: a trailing newline ends the last
-    line rather than starting a new, empty one, and trailing blank lines
-    are dropped (echoed output is rstripped, so they must not count toward
-    truncation either). Every truncation path — the live thinking box, the
-    console echo, the repaint — splits through here so they agree.
-
-    Args:
-        content: The content to split.
-
-    Returns:
-        The content's lines; ``[""]`` for empty or whitespace-only content.
-    """
-    return content.rstrip().split('\n')
-
-
-def truncate_to_lines(
-    content: str,
-    max_lines: int,
-    suffix: str = "...",
-    overflow: Overflow = "head",
-) -> str:
-    """
-    Truncate content to max_lines, marking the cut with suffix.
-
-    Args:
-        content: The content to truncate.
-        max_lines: Maximum number of lines to keep.
-        suffix: Marker for the cut (default: "...").
-        overflow: Which end to keep: "head" (first lines, marker after
-            them) or "tail" (last lines, marker before them).
-
-    Returns:
-        Truncated content with the marker if over limit, otherwise
-        content.rstrip().
-    """
-    lines = split_content_lines(content)
-    if len(lines) <= max_lines:
-        return content.rstrip()
-    if overflow == "tail":
-        return suffix + '\n' + '\n'.join(lines[-max_lines:])
-    return '\n'.join(lines[:max_lines]) + '\n' + suffix
-
-
-def format_exception_detail(exc: BaseException) -> str:
-    """Format an exception as "Type: message", or just "Type" if message is empty."""
-    return f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
-
-
-def truncate_ansi_to_lines(
-    content: str, max_lines: int, overflow: Overflow = "head"
-) -> str:
-    """
-    Truncate ANSI-formatted content to max_lines, keeping styles intact.
-
-    Keeping the head, an ANSI reset (``\\033[0m``) precedes the ``...``
-    marker so styles don't leak into it. Keeping the tail, the SGR codes of
-    the cut-off lines are replayed after the marker, restoring the style
-    state the kept lines were written in (e.g. a color opened earlier).
-
-    Args:
-        content: The ANSI-formatted content to truncate.
-        max_lines: Maximum number of lines to keep.
-        overflow: Which end to keep: "head" or "tail".
-
-    Returns:
-        Truncated content if over limit, otherwise content.rstrip().
-    """
-    if overflow == "head":
-        return truncate_to_lines(content, max_lines, suffix="\033[0m...")
-    lines = split_content_lines(content)
-    if len(lines) <= max_lines:
-        return content.rstrip()
-    state = "".join(ANSI_SGR_RE.findall("\n".join(lines[:-max_lines])))
-    return "...\n" + state + "\n".join(lines[-max_lines:])
 
 
 # =============================================================================
@@ -207,7 +116,13 @@ class StreamingContent:
 
         Supports negative indices (-1 is last non-empty line).
         If index is beyond current line count, extends with empty lines.
+
+        Raises:
+            ValueError: If ``text`` holds a newline: it would add lines,
+                shifting every line after it.
         """
+        if "\n" in text:
+            raise ValueError(f"set_line() takes one line of text, got {text!r}")
         with self._lock:
             current = "".join(self._chunks)
             # Split preserving trailing newline awareness
@@ -231,8 +146,7 @@ class StreamingContent:
                     )
 
             # Extend if needed
-            while index >= len(lines):
-                lines.append("")
+            lines.extend([""] * (index + 1 - len(lines)))
 
             lines[index] = text
 
@@ -257,10 +171,19 @@ class StreamingContent:
             index: Line index (supports negative indices).
             renderable: Rich markup string or Rich renderable object.
             theme: Optional Rich Theme for styling.
+
+        Raises:
+            ValueError: If it renders to more than one line (e.g. markup
+                with a newline, or a Panel).
         """
         from .rich_utils import _renderable_to_ansi
         ansi = _renderable_to_ansi(renderable, theme=theme)
-        self.set_line(index, ansi.split('\n')[0])
+        rows = ansi.count("\n") + 1
+        if rows > 1:
+            raise ValueError(
+                f"set_line_rich() takes one line; {renderable!r} renders to {rows}"
+            )
+        self.set_line(index, ansi)
 
     @property
     def text(self) -> str:
@@ -272,9 +195,8 @@ class ThinkingContext:
     """Context for a thinking session — content accumulation + title control.
 
     Wraps an optional StreamingContent with title control callbacks.
-    When used via the ``thinking()`` context manager, content is wired up
-    automatically.  When used via ``start_thinking()`` (low-level API),
-    content is None and content methods raise AttributeError.
+    A box started with a content callback (``start_thinking(callback)``)
+    has no content of its own: content methods raise AttributeError.
 
     Once the box is finished (by ``finish()``, or by the session on
     Ctrl+C or when its handler ends), ``is_finished`` is True: writes no
@@ -341,7 +263,11 @@ class ThinkingContext:
         self._require_content().clear()
 
     def set_line(self, index: int, text: str) -> None:
-        """Set the content of a specific line (thread-safe)."""
+        """Set the content of a specific line (thread-safe).
+
+        Raises:
+            ValueError: If ``text`` holds a newline (it's one line).
+        """
         self._note_write("set_line")
         self._require_content().set_line(index, text)
 
@@ -391,6 +317,9 @@ class ThinkingContext:
             index: Line index (supports negative indices).
             renderable: Rich markup string or Rich renderable object.
             theme: Optional Rich Theme override (defaults to session theme).
+
+        Raises:
+            ValueError: If it renders to more than one line.
         """
         self._note_write("set_line_rich")
         self._ensure_ansi_format()

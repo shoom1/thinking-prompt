@@ -21,7 +21,7 @@ from prompt_toolkit.layout.dimension import Dimension as D
 from .frames import POLL_INTERVAL, FrameScheduler
 from .layout import ThinkingHeader
 from .thinking import ThinkingBoxControl
-from .types import ContentFormat, Overflow, StreamingContent
+from .types import ContentCallback, ContentFormat, Overflow, StreamingContent
 
 
 def _terminal_width(default: int = 80) -> int:
@@ -104,7 +104,7 @@ class ThinkingBoxManager:
 
     def create_box(
         self,
-        content_callback: Callable[[], str] | None = None,
+        content_callback: ContentCallback | None = None,
         *,
         title: str | None = None,
         order: int = 0,
