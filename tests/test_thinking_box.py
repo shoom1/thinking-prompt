@@ -19,7 +19,14 @@ NO_CONTENT = "shows a content callback's text"
 
 
 def _session() -> ThinkingPromptSession:
-    return ThinkingPromptSession(app_info=AppInfo(name="Test", thinking_text="Thinking"))
+    return ThinkingPromptSession(app_info=AppInfo(name="Test", thinking_text="Pondering"))
+
+
+def _fullscreen_session() -> ThinkingPromptSession:
+    """A session whose Display caches console output in _pending_output."""
+    session = _session()
+    session._is_fullscreen = True
+    return session
 
 
 def _history(session: ThinkingPromptSession) -> list[str]:
@@ -267,7 +274,10 @@ class TestSessionBoxes:
     def test_start_thinking_returns_a_box_with_the_default_title(self):
         box = _session().start_thinking(lambda: "")
         assert isinstance(box, ThinkingBox)
-        assert box.title == "Thinking"
+        assert box.title == "Pondering"
+
+    def test_start_thinking_without_app_info_titles_the_box_thinking(self):
+        assert ThinkingPromptSession().start_thinking().title == "Thinking"
 
     def test_start_thinking_with_a_title(self):
         assert _session().start_thinking(title="Processing").title == "Processing"
@@ -278,6 +288,7 @@ class TestSessionBoxes:
             title="Working", add_to_history=False, echo_to_console=False
         ) as box:
             assert isinstance(box, ThinkingBox)
+            assert box.title == "Working"
             box.append("hello\n")
             box.set_title("Almost Done")
             assert box.title == "Almost Done"
@@ -316,3 +327,50 @@ class TestSessionBoxes:
         session.start_thinking(lambda: "shown\n")
         _ctrl_c(session)(MagicMock())
         assert _history(session) == ["shown\n\n", "Operation cancelled...\n"]
+
+
+class TestFinishArguments:
+    """add_to_history and echo_to_console reach the echo, on every way out."""
+
+    def test_finish_keeps_the_text_out_of_history_and_console_when_told_to(self):
+        session = _fullscreen_session()
+        box = session.start_thinking()
+        box.append("x\n")
+        box.finish(add_to_history=False, echo_to_console=False)
+        assert _history(session) == []
+        assert session._display._pending_output == []
+
+    def test_finish_defaults_put_the_text_in_history_and_console(self):
+        """Positive control: the checks above can tell echoed from not."""
+        session = _fullscreen_session()
+        box = session.start_thinking()
+        box.append("x\n")
+        box.finish(echo_to_console=True)
+        assert _history(session) == ["x\n\n"]
+        assert session._display._pending_output != []
+
+    async def test_thinking_exit_passes_the_arguments_on(self):
+        session = _fullscreen_session()
+        async with session.thinking(add_to_history=False, echo_to_console=False) as box:
+            box.append("x\n")
+        assert _history(session) == []
+        assert session._display._pending_output == []
+
+    async def test_thinking_exit_with_an_error_passes_the_arguments_on(self):
+        session = _fullscreen_session()
+        with pytest.raises(RuntimeError):
+            async with session.thinking(
+                add_to_history=False, echo_to_console=False
+            ) as box:
+                box.append("x\n")
+                raise RuntimeError("boom")
+        assert _history(session) == []
+        assert session._display._pending_output == []
+
+    async def test_thinking_exit_echoes_when_asked_to(self):
+        """Positive control for the two tests above."""
+        session = _fullscreen_session()
+        async with session.thinking(add_to_history=True, echo_to_console=True) as box:
+            box.append("x\n")
+        assert _history(session) == ["x\n\n"]
+        assert session._display._pending_output != []
