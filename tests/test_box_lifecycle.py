@@ -74,8 +74,7 @@ class TestExpandMode:
 
     def test_a_standalone_box_reads_its_expand_predicate(self):
         expanded = [False]
-        control = ThinkingBoxControl(max_collapsed_lines=5, expanded=lambda: expanded[0])
-        control.start(lambda: LONG)
+        control = ThinkingBoxControl(lambda: LONG, max_collapsed_lines=5, expanded=lambda: expanded[0])
         assert control.is_expanded is False
         expanded[0] = True
         assert control.is_expanded is True
@@ -387,8 +386,7 @@ class TestCallbackErrors:
         def boom() -> str:
             raise ValueError("bad")
 
-        control = ThinkingBoxControl(max_collapsed_lines=5)
-        control.start(boom)
+        control = ThinkingBoxControl(boom, max_collapsed_lines=5)
         with caplog.at_level(logging.ERROR, logger="thinking_prompt"):
             for _ in range(5):
                 control.create_content(40, 5)

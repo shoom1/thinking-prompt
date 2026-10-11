@@ -34,7 +34,6 @@ class TestCreation:
         """create_box with callback should use it in the control."""
         mgr = make_manager()
         box = mgr.create_box(lambda: "test content")
-        assert box._control.is_active
         assert box._control.content == "test content"
 
     def test_create_box_without_callback_creates_streaming_content(self):
@@ -43,7 +42,6 @@ class TestCreation:
         box = mgr.create_box()
         assert box._content is not None
         assert isinstance(box._content, StreamingContent)
-        assert box._control.is_active
 
     def test_create_box_without_callback_content_wired(self):
         """The box's own content is what the control draws."""
@@ -174,7 +172,7 @@ class TestCreation:
         assert len(line) == 120
 
     def test_create_box_content_format(self):
-        """create_box with content_format should pass it to control.start()."""
+        """create_box passes content_format to the control."""
         mgr = make_manager()
         box = mgr.create_box(lambda: "x", content_format="ansi")
         assert box._control.content_format == "ansi"

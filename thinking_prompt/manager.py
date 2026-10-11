@@ -159,14 +159,15 @@ class ThinkingBoxManager:
             # expand_key is forwarded so the truncation hint names the key
             # that actually toggles expansion.
             control = ThinkingBoxControl(
+                content_callback,
                 max_collapsed_lines=effective_max_lines,
                 style=self._default_style,
                 expand_key=self._expand_key,
                 overflow=overflow,
+                content_format=content_format,
                 expanded=self._box_expanded,
                 on_draw=on_draw,
             )
-            control.start(content_callback, content_format=content_format)
 
             header: ThinkingHeader | None = None
             if title is not None:

@@ -282,25 +282,19 @@ class TestStreamingContentWithThinkingControl:
         from thinking_prompt.thinking_control import ThinkingBoxControl
 
         content = StreamingContent()
-        control = ThinkingBoxControl()
-
-        control.start(content.get_content)
+        control = ThinkingBoxControl(content.get_content)
         content.append("Processing...\n")
         content.append("Step 1 complete\n")
 
         assert "Processing" in control.content
         assert "Step 1" in control.content
 
-        control.finish()
-
     def test_streaming_simulation(self):
         """Should handle streaming-like updates."""
         from thinking_prompt.thinking_control import ThinkingBoxControl
 
         content = StreamingContent()
-        control = ThinkingBoxControl()
-
-        control.start(content.get_content)
+        control = ThinkingBoxControl(content.get_content)
 
         # Simulate streaming tokens
         tokens = ["Hello", " ", "world", "!", "\n", "How", " ", "are", " ", "you", "?"]
@@ -308,8 +302,6 @@ class TestStreamingContentWithThinkingControl:
             content.append(token)
 
         assert control.content == "Hello world!\nHow are you?"
-
-        control.finish()
 
 
 class TestStreamingContentRichMethods:

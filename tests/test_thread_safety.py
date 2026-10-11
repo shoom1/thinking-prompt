@@ -95,7 +95,7 @@ class TestFormattedTextHistoryThreadSafety:
 class TestThinkingBoxControlThreadSafety:
     """Test thread safety of ThinkingBoxControl."""
 
-    def test_concurrent_content_access(self, thinking_control: ThinkingBoxControl):
+    def test_concurrent_content_access(self):
         """Multiple threads should be able to read content safely."""
         content_parts: List[str] = []
         lock = threading.Lock()
@@ -104,7 +104,7 @@ class TestThinkingBoxControlThreadSafety:
             with lock:
                 return "".join(content_parts)
 
-        thinking_control.start(get_content)
+        control = ThinkingBoxControl(get_content, max_collapsed_lines=15)
 
         results: List[str] = []
         stop_event = threading.Event()
@@ -112,7 +112,7 @@ class TestThinkingBoxControlThreadSafety:
         def reader():
             while not stop_event.is_set():
                 try:
-                    content = thinking_control.content
+                    content = control.content
                     results.append(content)
                 except Exception as e:
                     results.append(f"ERROR: {e}")
@@ -158,32 +158,3 @@ class TestThinkingBoxControlThreadSafety:
         # 500 toggles: back where it started.
         assert not manager.is_expanded
         assert not box._control.is_expanded
-
-    def test_concurrent_start_finish(self):
-        """Starting and finishing should be thread-safe."""
-        control = ThinkingBoxControl()
-        results: List[str] = []
-
-        def cycle(thread_id: int):
-            for i in range(20):
-                try:
-                    control.start(lambda: f"thread-{thread_id}-{i}")
-                    time.sleep(0.001)
-                    content, _, _fmt = control.finish()
-                    results.append(f"ok-{thread_id}")
-                except Exception as e:
-                    results.append(f"error-{thread_id}: {e}")
-                time.sleep(0.001)
-
-        threads = [threading.Thread(target=cycle, args=(i,)) for i in range(3)]
-
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
-
-        # Should complete, errors are acceptable due to race conditions
-        # but no crashes or deadlocks
-        assert len(results) > 0
-
-
