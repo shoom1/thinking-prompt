@@ -122,12 +122,13 @@ class ThinkingBox:
     def set_line(self, index: int, text: str) -> None:
         """Replace one line (thread-safe).
 
-        Negative indices count from the end; indices past the end add
-        empty lines up to it.
+        Lines are numbered as ``len()`` counts them, so -1 is the last line;
+        indices past the end add empty lines up to it.
 
         Raises:
             ValueError: If ``text`` holds a newline (it's one line).
-            IndexError: If a negative index is out of range.
+            IndexError: If a negative index is out of range (any negative
+                index, on an empty box).
         """
         content = self._writable("set_line")
         if content is not None:
@@ -189,7 +190,10 @@ class ThinkingBox:
         return self.text
 
     def __len__(self) -> int:
-        """Number of chunks written (thread-safe).
+        """Number of lines (thread-safe).
+
+        A trailing newline ends the last line rather than starting another:
+        ``"a"`` and ``"a\\n"`` are one line, ``""`` is none.
 
         Raises:
             TypeError: The box shows a content callback's text.
