@@ -16,12 +16,12 @@ class StreamingContent:
 
     Example:
         content = StreamingContent()
-        ctx = session.start_thinking(content.get_content)
+        box = session.start_thinking(content.get_content)
 
         async for chunk in llm_stream():
             content.append(chunk)
 
-        ctx.finish()
+        box.finish()
 
     ``on_change`` is called after every change, from the writing thread
     (the thinking box's own content uses it to redraw).

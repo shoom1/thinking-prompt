@@ -73,9 +73,8 @@ class ThinkingPromptSession:
     - Optional fullscreen mode showing the chat history (Ctrl+E by default,
       when AppInfo.fullscreen_enabled is set)
 
-    The handler decides whether to use thinking mode by calling start_thinking()
-    with a content callback. This allows flexible control over when the thinking
-    box appears.
+    The handler decides whether to show a thinking box: start one with
+    start_thinking() or the thinking() context manager, and write to it.
 
     Example:
         app_info = AppInfo(name="MyApp", version="1.0.0")
@@ -86,10 +85,10 @@ class ThinkingPromptSession:
             if not user_input.strip():
                 return
 
-            async with session.thinking() as ctx:
-                ctx.append("Processing...\\n")
+            async with session.thinking() as box:
+                box.append("Processing...\\n")
                 await asyncio.sleep(1)
-                ctx.append("Done!\\n")
+                box.append("Done!\\n")
 
             session.add_response(f"Echo: {user_input}")
 
@@ -998,8 +997,8 @@ class ThinkingPromptSession:
                 if not text.strip():
                     return
 
-                async with session.thinking() as ctx:
-                    ctx.append("Processing...\\n")
+                async with session.thinking() as box:
+                    box.append("Processing...\\n")
                     await asyncio.sleep(1)
 
                 session.add_response(f"Echo: {text}")
@@ -1061,8 +1060,8 @@ class ThinkingPromptSession:
         Example:
             # Option 1: Pass handler directly
             async def handle(text):
-                async with session.thinking() as ctx:
-                    ctx.append("Working...\\n")
+                async with session.thinking() as box:
+                    box.append("Working...\\n")
                     await asyncio.sleep(1)
 
             await session.run_async(handle)
@@ -1160,7 +1159,7 @@ class ThinkingPromptSession:
             self._report_handler_error(e)
         else:
             # Handler completed normally — finish any boxes it left open,
-            # as ctx.finish() would.
+            # as box.finish() would.
             self._cleanup_after_handler(task)
         finally:
             self._current_handler_task = None
