@@ -252,6 +252,9 @@ async with session.thinking(title="Downloading") as box:
 `set_line()` and `set_line_rich()` replace one line, so their text must be one
 line: a newline in it, or markup that renders to several lines (a `Panel`, a
 `Table`), raises `ValueError`. Indices past the end add empty lines up to it.
+Lines are numbered as `len(box)` counts them, so `-1` is the last line, and a
+trailing newline ends a line rather than starting one. A negative index on an
+empty box raises `IndexError`.
 
 ### Output Methods
 

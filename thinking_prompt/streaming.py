@@ -23,6 +23,9 @@ class StreamingContent:
 
         box.finish()
 
+    The text is kept as lines, so ``set_line()`` replaces one line in place
+    and ``len()`` is the number of lines.
+
     ``on_change`` is called after every change, from the writing thread
     (the thinking box's own content uses it to redraw).
 
@@ -33,7 +36,9 @@ class StreamingContent:
     """
 
     def __init__(self, on_change: Callable[[], None] | None = None) -> None:
-        self._chunks: list[str] = []
+        # The text is "\n".join(self._lines). The last entry is the line
+        # still being written: "" after a trailing newline, and for no text.
+        self._lines: list[str] = [""]
         self._lock = threading.Lock()
         self._closed = False
         self._on_change = on_change
@@ -47,20 +52,22 @@ class StreamingContent:
         with self._lock:
             if self._closed:
                 return
-            self._chunks.append(chunk)
+            first, *rest = chunk.split("\n")
+            self._lines[-1] += first
+            self._lines.extend(rest)
         self._changed()
 
     def get_content(self) -> str:
         """Get the accumulated content (thread-safe)."""
         with self._lock:
-            return "".join(self._chunks)
+            return "\n".join(self._lines)
 
     def clear(self) -> None:
         """Clear all accumulated content (thread-safe)."""
         with self._lock:
             if self._closed:
                 return
-            self._chunks.clear()
+            self._lines = [""]
         self._changed()
 
     def _close(self) -> str:
@@ -71,56 +78,58 @@ class StreamingContent:
         """
         with self._lock:
             self._closed = True
-            return "".join(self._chunks)
+            return "\n".join(self._lines)
+
+    def _line_count(self) -> int:
+        # An empty last line is the one still being written (after a
+        # trailing newline, or when there is no text): not yet a line.
+        count = len(self._lines)
+        return count - 1 if self._lines[-1] == "" else count
 
     def __len__(self) -> int:
-        """Return the number of chunks."""
+        """Return the number of lines (thread-safe).
+
+        A trailing newline ends the last line rather than starting another:
+        ``"a"`` and ``"a\\n"`` are one line, ``""`` is none.
+        """
+        # Locked: the count reads the list twice, and a write between the
+        # reads could give a number the text never had.
         with self._lock:
-            return len(self._chunks)
+            return self._line_count()
 
     def set_line(self, index: int, text: str) -> None:
         """Set the content of a specific line (thread-safe).
 
-        Supports negative indices (-1 is last non-empty line).
-        If index is beyond current line count, extends with empty lines.
+        Lines are numbered as ``len()`` counts them, so -1 is the last line.
+        An index past the end adds empty lines up to it; a trailing newline
+        stays trailing.
 
         Raises:
             ValueError: If ``text`` holds a newline: it would add lines,
                 shifting every line after it.
+            IndexError: If a negative index is before the first line
+                (any negative index, when there is no text).
         """
         if "\n" in text:
             raise ValueError(f"set_line() takes one line of text, got {text!r}")
         with self._lock:
             if self._closed:
                 return
-            current = "".join(self._chunks)
-            # Split preserving trailing newline awareness
-            has_trailing_newline = current.endswith("\n")
-            lines = current.split("\n")
-            # Remove trailing empty string from split if content ended with \n
-            if has_trailing_newline and lines and lines[-1] == "":
-                lines.pop()
-
-            # Handle negative indices
+            count = self._line_count()
+            if index < -count:
+                raise IndexError(f"line index {index} out of range for {count} line(s)")
             if index < 0:
-                index = len(lines) + index
-                if index < 0:
-                    # Still negative after normalization: out of range.
-                    # Without this check the list assignment below would
-                    # raise an IndexError with the normalized (confusing)
-                    # index instead of the one the caller passed.
-                    raise IndexError(
-                        f"line index {index - len(lines)} out of range "
-                        f"for {len(lines)} line(s)"
-                    )
-
-            # Extend if needed
-            lines.extend([""] * (index + 1 - len(lines)))
-
-            lines[index] = text
-
-            self._chunks.clear()
-            self._chunks.append("\n".join(lines) + ("\n" if has_trailing_newline else ""))
+                index += count
+            if index < count:
+                self._lines[index] = text
+            else:
+                added = [""] * (index - count) + [text]
+                if self._lines == [""]:
+                    self._lines = added
+                else:
+                    # Before the line still being written, so a trailing
+                    # newline stays trailing.
+                    self._lines[count:count] = added
         self._changed()
 
     def append_rich(self, renderable: Any, *, theme: Any = None) -> None:

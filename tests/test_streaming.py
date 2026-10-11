@@ -4,6 +4,7 @@ Tests for StreamingContent.
 from __future__ import annotations
 
 import concurrent.futures
+import random
 import threading
 import time
 
@@ -45,7 +46,7 @@ class TestStreamingContentBasics:
         content.append(" ")
         content.append("World")
         assert content.get_content() == "Hello World"
-        assert len(content) == 3
+        assert len(content) == 1
 
     def test_text_property(self):
         """text property should be alias for get_content()."""
@@ -75,14 +76,17 @@ class TestStreamingContentThreadSafety:
 
         def writer(thread_id: int):
             for i in range(appends_per_thread):
-                content.append(f"t{thread_id}-{i} ")
+                content.append(f"t{thread_id}-{i}\n")
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=num_threads) as executor:
             futures = [executor.submit(writer, i) for i in range(num_threads)]
             concurrent.futures.wait(futures)
 
-        # All appends should have succeeded
+        # Every line arrived whole
         assert len(content) == num_threads * appends_per_thread
+        assert sorted(content.get_content().splitlines()) == sorted(
+            f"t{t}-{i}" for t in range(num_threads) for i in range(appends_per_thread)
+        )
 
     def test_concurrent_read_write(self):
         """Reading and writing concurrently should be safe."""
@@ -92,7 +96,7 @@ class TestStreamingContentThreadSafety:
 
         def writer():
             for i in range(100):
-                content.append(f"msg-{i} ")
+                content.append(f"msg-{i}\n")
                 time.sleep(0.001)
 
         def reader():
@@ -270,8 +274,143 @@ class TestStreamingContentSetLine:
         content.append("line2\n")
         content.set_line(1, "REPLACED")
         assert content.text == "line0\nREPLACED\nline2\n"
-        # After set_line, chunks are consolidated into one
-        assert len(content) == 1
+        assert len(content) == 3
+
+    def test_set_line_on_empty_content_starts_the_first_line(self):
+        content = StreamingContent()
+        content.set_line(0, "x")
+        assert content.text == "x"
+
+    def test_set_line_past_the_end_of_empty_content_pads(self):
+        content = StreamingContent()
+        content.set_line(2, "x")
+        assert content.text == "\n\nx"
+
+    def test_a_negative_index_on_empty_content_raises(self):
+        """Empty content has no lines, so there is no last line to replace."""
+        content = StreamingContent()
+        with pytest.raises(IndexError, match=r"line index -1 out of range for 0 line\(s\)"):
+            content.set_line(-1, "x")
+        assert content.text == ""
+
+    def test_a_negative_index_after_clear_raises(self):
+        content = StreamingContent()
+        content.append("a\n")
+        content.clear()
+        with pytest.raises(IndexError):
+            content.set_line(-1, "x")
+
+
+class TestLen:
+    """len() counts lines; a trailing newline ends a line, it doesn't start one."""
+
+    @pytest.mark.parametrize(
+        "text, lines",
+        [
+            ("", 0),
+            ("a", 1),
+            ("a\n", 1),
+            ("a\nb", 2),
+            ("a\nb\n", 2),
+            ("\n", 1),
+            ("\n\n", 2),
+            ("a\n\n", 2),
+        ],
+    )
+    def test_counts_lines(self, text, lines):
+        content = StreamingContent()
+        content.append(text)
+        assert len(content) == lines
+
+    def test_counts_lines_across_appends(self):
+        content = StreamingContent()
+        for chunk in ("Hel", "lo\nWo", "rld", "\n", "!"):
+            content.append(chunk)
+        assert content.text == "Hello\nWorld\n!"
+        assert len(content) == 3
+
+    @pytest.mark.parametrize("text", ["a", "a\n", "a\nb", "a\nb\n", "\n", "a\n\n"])
+    def test_the_last_counted_line_is_the_one_minus_one_replaces(self, text):
+        by_len, by_minus_one = StreamingContent(), StreamingContent()
+        by_len.append(text)
+        by_minus_one.append(text)
+        by_len.set_line(len(by_len) - 1, "LAST")
+        by_minus_one.set_line(-1, "LAST")
+        assert by_len.text == by_minus_one.text
+        assert len(by_len) == len(text.splitlines())
+
+
+class _ChunkReference:
+    """The chunk-based StreamingContent that line storage replaced, with the
+    one intended change: empty text has no lines (it used to have one empty
+    line), so a negative index on it raises."""
+
+    def __init__(self) -> None:
+        self.text = ""
+
+    def append(self, chunk: str) -> None:
+        self.text += chunk
+
+    def clear(self) -> None:
+        self.text = ""
+
+    def _lines(self) -> tuple[list[str], bool]:
+        if not self.text:
+            return [], False
+        trailing_newline = self.text.endswith("\n")
+        lines = self.text.split("\n")
+        if trailing_newline:
+            lines.pop()
+        return lines, trailing_newline
+
+    def __len__(self) -> int:
+        return len(self._lines()[0])
+
+    def set_line(self, index: int, text: str) -> None:
+        lines, trailing_newline = self._lines()
+        if index < 0:
+            index += len(lines)
+            if index < 0:
+                raise IndexError(index)
+        lines.extend([""] * (index + 1 - len(lines)))
+        lines[index] = text
+        self.text = "\n".join(lines) + ("\n" if trailing_newline else "")
+
+
+class TestMatchesChunkStorage:
+    """Storing lines changes no text: random writes give what chunks gave."""
+
+    CHUNKS = ["", "a", "bc", "\n", "\n\n", "d\n", "e\nf", "\ng"]
+    TEXTS = ["", "x", "yz"]
+
+    def test_random_writes(self):
+        for seed in range(200):
+            rng = random.Random(seed)
+            content, reference = StreamingContent(), _ChunkReference()
+            ops: list[tuple] = []
+            for _ in range(40):
+                roll = rng.random()
+                if roll < 0.5:
+                    chunk = rng.choice(self.CHUNKS)
+                    ops.append(("append", chunk))
+                    content.append(chunk)
+                    reference.append(chunk)
+                elif roll < 0.95:
+                    index, text = rng.randint(-4, 5), rng.choice(self.TEXTS)
+                    ops.append(("set_line", index, text))
+                    try:
+                        reference.set_line(index, text)
+                    except IndexError:
+                        with pytest.raises(IndexError):
+                            content.set_line(index, text)
+                    else:
+                        content.set_line(index, text)
+                else:
+                    ops.append(("clear",))
+                    content.clear()
+                    reference.clear()
+                assert content.text == reference.text, f"seed {seed}: {ops}"
+                assert len(content) == len(reference), f"seed {seed}: {ops}"
 
 
 class TestStreamingContentWithThinkingControl:

@@ -66,11 +66,11 @@ class TestWriting:
             box.set_line(0, "a\nb")
         assert box.text == "line0\n"
 
-    def test_len_counts_chunks(self):
+    def test_len_counts_lines(self):
         box = make_manager().create_box()
-        box.append("a")
-        box.append("b")
-        assert len(box) == 2
+        box.append("line0\nline1\n")
+        box.append("line2")
+        assert len(box) == 3
 
     def test_a_box_is_always_truthy(self):
         """A box is a handle, not a collection: `if box:` holds when it's empty."""
