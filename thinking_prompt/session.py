@@ -16,7 +16,6 @@ from contextlib import asynccontextmanager, suppress
 from typing import (
     TYPE_CHECKING,
     Any,
-    Callable,
     Literal,
     Optional,
     TypeVar,
@@ -26,6 +25,7 @@ from typing import (
 if TYPE_CHECKING:
     from .dialog import Dialog, DialogManager
     from .settings_dialog import SettingsItem
+    from .thinking_box import ThinkingBox
     from .types import ContentCallback, ContentFormat, InputHandler, Overflow
 
 from prompt_toolkit.application import Application
@@ -51,10 +51,10 @@ from .app_info import AppInfo
 from .display import Display
 from .frames import POLL_INTERVAL, FrameScheduler
 from .layout import create_layout
-from .manager import ManagedBox, ThinkingBoxManager
+from .manager import ThinkingBoxManager
 from .rich_utils import _is_rich_renderable
 from .styles import ThinkingPromptStyles, resolve_theme
-from .types import Placement, ThinkingContext, check_placement
+from .types import DEFAULT_SPINNER_FRAMES, Placement, check_placement
 
 logger = logging.getLogger(__name__)
 
@@ -73,9 +73,8 @@ class ThinkingPromptSession:
     - Optional fullscreen mode showing the chat history (Ctrl+E by default,
       when AppInfo.fullscreen_enabled is set)
 
-    The handler decides whether to use thinking mode by calling start_thinking()
-    with a content callback. This allows flexible control over when the thinking
-    box appears.
+    The handler decides whether to show a thinking box: start one with
+    start_thinking() or the thinking() context manager, and write to it.
 
     Example:
         app_info = AppInfo(name="MyApp", version="1.0.0")
@@ -86,10 +85,10 @@ class ThinkingPromptSession:
             if not user_input.strip():
                 return
 
-            async with session.thinking() as ctx:
-                ctx.append("Processing...\\n")
+            async with session.thinking() as box:
+                box.append("Processing...\\n")
                 await asyncio.sleep(1)
-                ctx.append("Done!\\n")
+                box.append("Done!\\n")
 
             session.add_response(f"Echo: {user_input}")
 
@@ -195,19 +194,26 @@ class ThinkingPromptSession:
         self._fullscreen_key = app_info.fullscreen_key if app_info else "c-e"
         self._expand_key = app_info.expand_key if app_info else "c-t"
         self._fullscreen_enabled = app_info.fullscreen_enabled if app_info else False
-        self._echo_thinking = app_info.echo_thinking if app_info else True
 
         # Redraws on demand: writes redraw now, animations ask for their
         # next frame; nothing redraws on a timer (see _create_application).
         self._frames = FrameScheduler(lambda: self.app.invalidate())
 
-        # Thinking box manager (manages multiple thinking boxes).
-        # expand_key flows through to each box so the truncation hint
-        # matches the key bound below in _create_key_bindings.
+        # Thinking box manager: the boxes on screen, and their echo when
+        # they end. expand_key flows through to each box so the truncation
+        # hint matches the key bound below in _create_key_bindings.
         self._manager = ThinkingBoxManager(
+            self._display,
             default_max_lines=max_thinking_height,
             expand_key=self._expand_key,
             frames=self._frames,
+            echo_thinking=app_info.echo_thinking if app_info else True,
+            spinner_frames=(
+                app_info.thinking_animation if app_info else DEFAULT_SPINNER_FRAMES
+            ),
+            spinner_position=(
+                app_info.thinking_animation_position if app_info else "before"
+            ),
         )
 
         # Input history (for up/down arrow)
@@ -329,14 +335,6 @@ class ThinkingPromptSession:
         self._default_thinking_text = (
             self._app_info.thinking_text if self._app_info else "Thinking"
         )
-        # Store header config from app_info for per-box headers
-        self._header_config: dict[str, Any] = {}
-        if self._app_info:
-            self._header_config = {
-                "frames": self._app_info.thinking_animation,
-                "position": self._app_info.thinking_animation_position,
-            }
-
         return create_layout(
             default_buffer=self.default_buffer,
             message=lambda: self._polled(self._message),
@@ -414,7 +412,7 @@ class ThinkingPromptSession:
                 self._current_handler_task.cancel()
             elif had_active_boxes:
                 # Idle prompt: Ctrl+C clears whatever boxes are left.
-                self._finish_boxes(None, cancelled=True)
+                self._announce_cancel(bool(self._manager.finish_all()))
 
             if not handler_running and not had_active_boxes:
                 # No handler and no boxes — the session is idle, so Ctrl+C
@@ -589,19 +587,20 @@ class ThinkingPromptSession:
         max_lines: int | None = None,
         content_format: ContentFormat = "plain",
         overflow: Overflow = "tail",
-    ) -> ThinkingContext:
+    ) -> ThinkingBox:
         """
-        Start the thinking state with a content callback.
+        Start a thinking box and return it.
 
-        The callback is called repeatedly to get the current content for the
-        thinking box. This allows dynamic content that updates in real-time.
-
-        The callback must be thread-safe if called from multiple threads.
+        Write to the box to show text in it. To show text you already hold,
+        pass ``content_callback`` instead: the box re-reads it while it's
+        drawn (every 0.1 s), and can be read but not written to. The
+        callback must be thread-safe if the text changes in another thread.
 
         Args:
-            content_callback: Callable that returns the current thinking content.
-                If None, a StreamingContent is created internally.
-            title: Optional title to set on the thinking separator.
+            content_callback: Returns the text to show. If None, the box
+                holds its own text, which you write.
+            title: Title on the box's header line (default:
+                ``AppInfo.thinking_text``).
             order: Sort key for multiple boxes (higher = closer to prompt).
             max_lines: Max collapsed lines (overrides session default).
             content_format: Format for rendering ("plain" or "ansi").
@@ -611,130 +610,39 @@ class ThinkingPromptSession:
                 e.g. for a task list).
 
         Returns:
-            ThinkingContext for title control and content management.
+            The ThinkingBox: write to it, retitle it, and finish it.
 
         Example:
-            content = ""
-
-            def get_content():
-                return content
-
-            ctx = session.start_thinking(get_content, title="Processing")
-
-            # Update content dynamically
-            content += "Processing...\\n"
+            box = session.start_thinking(title="Processing")
+            box.append("Processing...\\n")
             await asyncio.sleep(0.5)
-            ctx.set_title("Finishing")
-            content += "Done!\\n"
-
-            ctx.finish()
+            box.set_title("Finishing")
+            box.append("Done!\\n")
+            box.finish()
         """
-        # Always provide a title so a header is created for every box
-        effective_title = title if title is not None else self._default_thinking_text
-        box = self._manager.create_box(
-            content_callback=content_callback,
-            title=effective_title,
+        return self._manager.create_box(
+            content_callback,
+            title=title if title is not None else self._default_thinking_text,
             order=order,
             max_lines=max_lines,
             content_format=content_format,
             overflow=overflow,
         )
 
-        # Apply header config from app_info
-        if box.header and self._header_config:
-            if self._header_config.get("frames") is not None:
-                box.header.frames = self._header_config["frames"]
-            if self._header_config.get("position") is not None:
-                box.header.position = self._header_config["position"]
+    def _announce_cancel(self, ended: bool) -> None:
+        """Say "Operation cancelled..." after the boxes a cancel ended.
 
-        self._invalidate()
-
-        # Build finish callback for this specific box
-        def _finish_box(
-            add_to_history: bool = True,
-            echo_to_console: bool | None = None,
-            cancelled: bool = False,
-        ) -> str:
-            results = self._finish_boxes(
-                lambda candidate: candidate is box,
-                add_to_history=add_to_history,
-                echo_to_console=echo_to_console,
-                cancelled=cancelled,
-            )
-            if not results:
-                # Already finished (by this handle, or by the session on
-                # Ctrl+C / when its handler ended): nothing to echo again.
-                return box.control.final_content
-            return results[0][1]
-
-        def _set_title(text: str) -> None:
-            if box.header is not None:
-                box.header.text = text
-                self._frames.redraw()
-
-        return ThinkingContext(
-            content=box.streaming_content,
-            set_title=_set_title,
-            get_title=lambda: box.header.text if box.header else self._default_thinking_text,
-            set_format=box.control.set_content_format,
-            rich_theme=self._display.rich_theme,
-            finish=_finish_box,
-            is_finished=lambda: not self._manager.has_box(box.box_id),
-        )
-
-    def _finish_boxes(
-        self,
-        where: Callable[[ManagedBox], bool] | None,
-        *,
-        add_to_history: bool = True,
-        echo_to_console: bool | None = None,
-        cancelled: bool = False,
-    ) -> list[tuple[str, str, bool, ContentFormat, int, Overflow]]:
-        """Finish the boxes ``where`` picks (all if None) and echo them.
-
-        Each box's content is echoed as on a normal finish (truncated to
-        its own limit on screen, in full in history). When ``cancelled``
-        and any box was finished, "Operation cancelled..." follows them --
-        or, while Ctrl+C is cancelling the handler, follows every box that
-        cancel ends, once the handler is done (see _run_handler).
+        While Ctrl+C is cancelling the handler, the line waits until the
+        handler is done, so one line follows every box that cancel ends
+        (see _run_handler). When nothing ended, there's nothing to say.
         """
-        results = self._manager.finish_all(where=where)
-        should_echo = (
-            echo_to_console if echo_to_console is not None else self._echo_thinking
-        )
-        for _box_id, content, _, content_format_val, max_lines, overflow in results:
-            if content.strip():
-                self._display.thinking(
-                    content,
-                    truncate_lines=max_lines,
-                    add_to_history=add_to_history,
-                    echo_to_console=should_echo,
-                    content_format=content_format_val,
-                    overflow=overflow,
-                )
-        if cancelled and results:
-            if self._user_cancelled_handler:
-                self._cancel_line_pending = True
-            else:
-                self._display.system("Operation cancelled...")
-        if results:
+        if not ended:
+            return
+        if self._user_cancelled_handler:
+            self._cancel_line_pending = True
+        else:
+            self._display.system("Operation cancelled...")
             self._invalidate()
-        return results
-
-    @staticmethod
-    def _owned_by(owner: asyncio.Task[Any] | None) -> Callable[[ManagedBox], bool]:
-        """The boxes a handler answers for when it ends or is cancelled.
-
-        Its own (created by its task), those whose task has already ended
-        (nobody else will finish them), and those with no known owner
-        (created outside asyncio, e.g. from a thread). A live background
-        task's box is left alone.
-        """
-
-        def owned(box: ManagedBox) -> bool:
-            return box.owner is None or box.owner is owner or box.owner.done()
-
-        return owned
 
     @property
     def is_thinking(self) -> bool:
@@ -752,13 +660,10 @@ class ThinkingPromptSession:
         order: int = 0,
         max_lines: int | None = None,
         overflow: Overflow = "tail",
-    ) -> AsyncIterator[ThinkingContext]:
+    ) -> AsyncIterator[ThinkingBox]:
         """
-        Context manager for thinking operations.
-
-        Provides a more Pythonic way to manage thinking state with automatic
-        cleanup. Returns a ThinkingContext for content accumulation and
-        title control.
+        Context manager for thinking operations: yields a ThinkingBox and
+        finishes it when the block ends.
 
         Args:
             title: Optional title for the thinking separator.
@@ -774,28 +679,28 @@ class ThinkingPromptSession:
                 or "head" (first lines).
 
         Yields:
-            ThinkingContext: Content accumulator with title control.
+            ThinkingBox: the box, to write to and retitle.
 
         Example:
-            async with session.thinking(title="Processing") as ctx:
-                ctx.append("Working...\\n")
+            async with session.thinking(title="Processing") as box:
+                box.append("Working...\\n")
                 await asyncio.sleep(1)
-                ctx.set_title("Finishing")
-                ctx.append("Done!\\n")
+                box.set_title("Finishing")
+                box.append("Done!\\n")
 
             # Thinking is automatically finished when exiting the context
 
         Example with Rich-styled lines:
-            async with session.thinking() as ctx:
-                ctx.append_rich("[dim]  Step 1: Load data[/dim]\\n")
-                ctx.append_rich("[dim]  Step 2: Process[/dim]\\n")
+            async with session.thinking() as box:
+                box.append_rich("[dim]  Step 1: Load data[/dim]\\n")
+                box.append_rich("[dim]  Step 2: Process[/dim]\\n")
 
                 await do_step_1()
-                ctx.set_line_rich(0, "[green]✓ Step 1: Load data[/green]")
-                ctx.set_line_rich(1, "[bold]⟳ Step 2: Processing...[/bold]")
+                box.set_line_rich(0, "[green]✓ Step 1: Load data[/green]")
+                box.set_line_rich(1, "[bold]⟳ Step 2: Processing...[/bold]")
 
                 await do_step_2()
-                ctx.set_line_rich(1, "[green]✓ Step 2: Process[/green]")
+                box.set_line_rich(1, "[green]✓ Step 2: Process[/green]")
 
         Note:
             The box's content is kept however the block ends. If the block
@@ -803,7 +708,7 @@ class ThinkingPromptSession:
             content; if it raises, the exception propagates after the box
             is finished.
         """
-        ctx = self.start_thinking(
+        box = self.start_thinking(
             title=title,
             content_format=content_format,
             order=order,
@@ -811,15 +716,18 @@ class ThinkingPromptSession:
             overflow=overflow,
         )
         try:
-            yield ctx
+            yield box
         except asyncio.CancelledError:
-            ctx._cancel(add_to_history=add_to_history, echo_to_console=echo_to_console)
+            ended = self._manager.finish(
+                box, add_to_history=add_to_history, echo_to_console=echo_to_console
+            )
+            self._announce_cancel(ended)
             raise
         except BaseException:
-            ctx.finish(add_to_history=add_to_history, echo_to_console=echo_to_console)
+            box.finish(add_to_history=add_to_history, echo_to_console=echo_to_console)
             raise
         else:
-            ctx.finish(add_to_history=add_to_history, echo_to_console=echo_to_console)
+            box.finish(add_to_history=add_to_history, echo_to_console=echo_to_console)
 
     # =========================================================================
     # Chat History API
@@ -1089,8 +997,8 @@ class ThinkingPromptSession:
                 if not text.strip():
                     return
 
-                async with session.thinking() as ctx:
-                    ctx.append("Processing...\\n")
+                async with session.thinking() as box:
+                    box.append("Processing...\\n")
                     await asyncio.sleep(1)
 
                 session.add_response(f"Echo: {text}")
@@ -1152,8 +1060,8 @@ class ThinkingPromptSession:
         Example:
             # Option 1: Pass handler directly
             async def handle(text):
-                async with session.thinking() as ctx:
-                    ctx.append("Working...\\n")
+                async with session.thinking() as box:
+                    box.append("Working...\\n")
                     await asyncio.sleep(1)
 
             await session.run_async(handle)
@@ -1251,7 +1159,7 @@ class ThinkingPromptSession:
             self._report_handler_error(e)
         else:
             # Handler completed normally — finish any boxes it left open,
-            # as ctx.finish() would.
+            # as box.finish() would.
             self._cleanup_after_handler(task)
         finally:
             self._current_handler_task = None
@@ -1289,12 +1197,14 @@ class ThinkingPromptSession:
     def _cleanup_after_handler(
         self, owner: asyncio.Task[Any] | None, *, cancelled: bool = False
     ) -> None:
-        """Finish the boxes the ended handler answers for (see _owned_by).
+        """Finish the boxes the ended handler answers for.
 
-        Their content is echoed; when the handler was cancelled,
-        "Operation cancelled..." follows.
+        See ThinkingBoxManager.finish_owned_by. Their content is echoed;
+        when the handler was cancelled, "Operation cancelled..." follows.
         """
-        self._finish_boxes(self._owned_by(owner), cancelled=cancelled)
+        ended = self._manager.finish_owned_by(owner)
+        if cancelled:
+            self._announce_cancel(bool(ended))
 
     def run(self, handler: InputHandler | None = None) -> None:
         """

@@ -42,10 +42,10 @@ async def main():
             return
 
         # Use context manager for clean thinking management
-        async with session.thinking() as content:
-            content.append("Processing...\n")
+        async with session.thinking() as box:
+            box.append("Processing...\n")
             await asyncio.sleep(0.5)
-            content.append("Done!\n")
+            box.append("Done!\n")
 
         session.add_response(f"You said: {text}")
 
@@ -99,24 +99,32 @@ session = ThinkingPromptSession(
 
 **Context Manager (recommended):**
 ```python
-async with session.thinking(title="Processing") as ctx:
-    ctx.append("Step 1...\n")
+async with session.thinking(title="Processing") as box:
+    box.append("Step 1...\n")
     await asyncio.sleep(0.5)
-    ctx.append("Step 2...\n")
+    box.append("Step 2...\n")
 # Automatically finishes when exiting context
 ```
 
 **Manual control:**
 ```python
-# Start with a content callback
-chunks = []
-ctx = session.start_thinking(lambda: ''.join(chunks))
-
-chunks.append("Processing...\n")
+box = session.start_thinking(title="Processing")
+box.append("Processing...\n")
 await asyncio.sleep(0.5)
 
 # Finish this specific box and optionally echo to console
-ctx.finish(add_to_history=True, echo_to_console=True)
+box.finish(add_to_history=True, echo_to_console=True)
+```
+
+To show text you already hold, pass a content callback instead. The box
+re-reads it while it's drawn (every 0.1 s). You can read such a box
+(`box.text` is what it shows), but writing to it raises `TypeError`:
+
+```python
+status = {"line": "starting"}
+box = session.start_thinking(lambda: status["line"], title="Watching")
+status["line"] = "step 2"   # shown at the next poll
+box.finish()
 ```
 
 ### When a Box Ends
@@ -128,16 +136,17 @@ as on a normal finish:
   cancelled): the content, then one `Operation cancelled...` line after all
   the boxes that the cancel ended.
 - **The handler raises**: the content, then the `[ERROR] Handler error: ...` line.
-- **Left open** by a handler that returns: finished as `ctx.finish()` would.
+- **Left open** by a handler that returns: finished as `box.finish()` would.
 
 A box belongs to the task that opened it. When a handler ends, the session
 finishes the boxes it opened (and any whose task has already ended); a box
 opened by a background task stays until that task finishes it. Ctrl+C at
 an idle prompt clears every remaining box.
 
-`ctx.is_finished` tells whether a box is done. Calling `finish()` again
-returns the content without echoing it twice. Writes to a finished box show
-nowhere; the first one logs a warning to the `thinking_prompt` logger.
+`box.is_finished` tells whether a box is done. Calling `finish()` again
+returns the same text without echoing it twice. Writes to a finished box are
+dropped, so `box.text` stays what `finish()` returned; the first one logs a
+warning to the `thinking_prompt` logger.
 
 Ctrl+T expands or collapses all open boxes together, and boxes start
 collapsed again once the last one finishes. In full screen every box is
@@ -148,7 +157,7 @@ shown expanded.
 The screen is redrawn only when something changes, never on a timer, so an
 idle prompt costs no CPU:
 
-- Writes through a box's handle (`append`, `set_line`, `set_title`, ...)
+- Writes to a box (`append`, `set_line`, `set_title`, ...)
   redraw right away, from any thread; fast streams are capped at 30
   redraws a second.
 - A spinner redraws at each frame (10 a second) while its box is shown;
@@ -171,7 +180,7 @@ head instead:
 
 ```python
 tasks = session.start_thinking(title="Tasks", max_lines=10, overflow="head")
-# or: async with session.thinking(overflow="head") as ctx: ...
+# or: async with session.thinking(overflow="head") as box: ...
 ```
 
 ### Multiple Thinking Boxes
@@ -212,19 +221,19 @@ tasks.finish(echo_to_console=False, add_to_history=False)
 Use `append_rich()` and `set_line_rich()` for styled content with [Rich markup](https://rich.readthedocs.io/):
 
 ```python
-async with session.thinking(title="Processing") as ctx:
-    ctx.append_rich("[dim]  ○ Load data[/dim]\n")
-    ctx.append_rich("[dim]  ○ Transform[/dim]\n")
+async with session.thinking(title="Processing") as box:
+    box.append_rich("[dim]  ○ Load data[/dim]\n")
+    box.append_rich("[dim]  ○ Transform[/dim]\n")
 
-    ctx.set_line_rich(0, "[bold cyan]  ⟳ Load data…[/bold cyan]")
-    ctx.set_title("Loading")
+    box.set_line_rich(0, "[bold cyan]  ⟳ Load data…[/bold cyan]")
+    box.set_title("Loading")
     await asyncio.sleep(1)
-    ctx.set_line_rich(0, "[green]  ✓ Load data[/green]")
+    box.set_line_rich(0, "[green]  ✓ Load data[/green]")
 
-    ctx.set_line_rich(1, "[bold cyan]  ⟳ Transform…[/bold cyan]")
-    ctx.set_title("Transforming")
+    box.set_line_rich(1, "[bold cyan]  ⟳ Transform…[/bold cyan]")
+    box.set_title("Transforming")
     await asyncio.sleep(1)
-    ctx.set_line_rich(1, "[green]  ✓ Transform[/green]")
+    box.set_line_rich(1, "[green]  ✓ Transform[/green]")
 ```
 
 ### Dynamic Titles & In-Place Updates
@@ -232,11 +241,11 @@ async with session.thinking(title="Processing") as ctx:
 Use `set_title()` to change the thinking header and `set_line()` to update lines in place:
 
 ```python
-async with session.thinking(title="Downloading") as ctx:
-    ctx.append("Progress: 0%\n")
+async with session.thinking(title="Downloading") as box:
+    box.append("Progress: 0%\n")
     for i in range(1, 101):
-        ctx.set_line(-1, f"Progress: {i}%")
-        ctx.set_title(f"Downloading {i}%")
+        box.set_line(-1, f"Progress: {i}%")
+        box.set_title(f"Downloading {i}%")
         await asyncio.sleep(0.02)
 ```
 

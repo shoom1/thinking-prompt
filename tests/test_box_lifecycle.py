@@ -10,8 +10,8 @@ import pytest
 from prompt_toolkit.keys import Keys
 
 from thinking_prompt import AppInfo, ThinkingPromptSession
-from thinking_prompt.manager import ThinkingBoxManager
-from thinking_prompt.thinking import ThinkingBoxControl
+from thinking_prompt.thinking_control import ThinkingBoxControl
+from tests.helpers import make_manager
 
 LONG = "\n".join(f"line {i}" for i in range(40))
 CANCELLED = "Operation cancelled...\n"
@@ -32,7 +32,7 @@ class TestExpandMode:
     """One expand mode for all boxes, kept by the manager (#1, #5)."""
 
     def test_mode_resets_when_the_last_box_finishes(self):
-        manager = ThinkingBoxManager()
+        manager = make_manager()
         manager.create_box(lambda: LONG)
         manager.toggle_all()
         assert manager.is_expanded
@@ -41,41 +41,40 @@ class TestExpandMode:
 
         assert manager.is_expanded is False
         assert manager.can_toggle() is False
-        assert manager.create_box(lambda: LONG).control.is_expanded is False
+        assert manager.create_box(lambda: LONG)._control.is_expanded is False
 
     def test_mode_holds_while_other_boxes_remain(self):
-        manager = ThinkingBoxManager()
-        manager.create_box(lambda: LONG, box_id="a")
-        manager.create_box(lambda: LONG, box_id="b")
+        manager = make_manager()
+        a = manager.create_box(lambda: LONG)
+        manager.create_box(lambda: LONG)
         manager.toggle_all()
 
-        manager.remove_box("a")
+        manager.finish(a)
 
         assert manager.is_expanded
         (left,) = manager.get_sorted_boxes()
-        assert left.control.is_expanded
+        assert left._control.is_expanded
 
     def test_nothing_to_toggle_without_boxes_even_when_expanded(self):
-        manager = ThinkingBoxManager()
+        manager = make_manager()
         manager.expand_all()
         assert manager.can_toggle() is False
 
     def test_boxes_follow_the_one_shared_mode(self):
-        manager = ThinkingBoxManager()
+        manager = make_manager()
         a = manager.create_box(lambda: LONG)
         b = manager.create_box(lambda: LONG)
 
         manager.toggle_all()
-        assert a.control.is_expanded and b.control.is_expanded
+        assert a._control.is_expanded and b._control.is_expanded
         manager.toggle_all()
-        assert not a.control.is_expanded and not b.control.is_expanded
+        assert not a._control.is_expanded and not b._control.is_expanded
         # A box can't leave the shared mode on its own.
-        assert not hasattr(a.control, "toggle_expanded")
+        assert not hasattr(a._control, "toggle_expanded")
 
     def test_a_standalone_box_reads_its_expand_predicate(self):
         expanded = [False]
-        control = ThinkingBoxControl(max_collapsed_lines=5, expanded=lambda: expanded[0])
-        control.start(lambda: LONG)
+        control = ThinkingBoxControl(lambda: LONG, max_collapsed_lines=5, expanded=lambda: expanded[0])
         assert control.is_expanded is False
         expanded[0] = True
         assert control.is_expanded is True
@@ -85,57 +84,47 @@ class TestFullScreen:
     """Full screen expands every box, including ones started there (#4)."""
 
     def test_forced_mode_expands_every_box_including_new_ones(self):
-        manager = ThinkingBoxManager()
+        manager = make_manager()
         a = manager.create_box(lambda: LONG)
 
         manager.force_expanded(True)
         b = manager.create_box(lambda: LONG)
         assert manager.is_expanded
-        assert a.control.is_expanded and b.control.is_expanded
+        assert a._control.is_expanded and b._control.is_expanded
 
         manager.force_expanded(False)
-        assert not a.control.is_expanded and not b.control.is_expanded
+        assert not a._control.is_expanded and not b._control.is_expanded
 
     def test_leaving_full_screen_restores_the_users_mode(self):
-        manager = ThinkingBoxManager()
+        manager = make_manager()
         a = manager.create_box(lambda: LONG)
         manager.toggle_all()
 
         manager.force_expanded(True)
         manager.force_expanded(False)
 
-        assert a.control.is_expanded
+        assert a._control.is_expanded
 
     def test_session_boxes_started_in_full_screen_are_expanded(self):
         session = ThinkingPromptSession(app_info=AppInfo(name="t", fullscreen_enabled=True))
         session.switch_to_fullscreen()
         session.start_thinking(lambda: LONG)
         (box,) = session._manager.get_sorted_boxes()
-        assert box.control.is_expanded
+        assert box._control.is_expanded
 
         session.switch_to_prompt()
-        assert not box.control.is_expanded
+        assert not box._control.is_expanded
 
 
 class TestOwnership:
     """A box belongs to the task that created it (#2)."""
 
     async def test_box_remembers_the_task_that_created_it(self):
-        manager = ThinkingBoxManager()
-        assert manager.create_box(lambda: "x").owner is asyncio.current_task()
+        manager = make_manager()
+        assert manager.create_box(lambda: "x")._owner is asyncio.current_task()
 
     def test_box_created_outside_asyncio_has_no_owner(self):
-        assert ThinkingBoxManager().create_box(lambda: "x").owner is None
-
-    def test_finish_all_can_pick_boxes(self):
-        manager = ThinkingBoxManager()
-        manager.create_box(lambda: "a", box_id="a")
-        manager.create_box(lambda: "b", box_id="b")
-
-        results = manager.finish_all(where=lambda box: box.box_id == "a")
-
-        assert [r[0] for r in results] == ["a"]
-        assert [box.box_id for box in manager.get_sorted_boxes()] == ["b"]
+        assert make_manager().create_box(lambda: "x")._owner is None
 
     async def test_a_handler_ending_leaves_a_live_background_box(self):
         session = ThinkingPromptSession()
@@ -397,8 +386,7 @@ class TestCallbackErrors:
         def boom() -> str:
             raise ValueError("bad")
 
-        control = ThinkingBoxControl(max_collapsed_lines=5)
-        control.start(boom)
+        control = ThinkingBoxControl(boom, max_collapsed_lines=5)
         with caplog.at_level(logging.ERROR, logger="thinking_prompt"):
             for _ in range(5):
                 control.create_content(40, 5)

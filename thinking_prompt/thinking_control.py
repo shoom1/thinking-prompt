@@ -1,7 +1,5 @@
 """
-Thinking box control for ThinkingPromptSession.
-
-A FormattedTextControl that manages thinking box state and content formatting.
+Thinking box control: draws one box's text (a FormattedTextControl).
 """
 from __future__ import annotations
 
@@ -47,49 +45,43 @@ def _format_key_for_display(key: str) -> str:
 
 class ThinkingBoxControl(FormattedTextControl):
     """
-    A FormattedTextControl that displays thinking box content.
+    Draws one thinking box's text.
 
-    Manages:
-    - Active/inactive state (thinking or not)
-    - Content retrieval via callback
-    - Fitting content to the rows it gets: when it overflows, one end is
-      kept (``overflow``: "tail" = newest lines, "head" = first lines) and a
-      hint names the hidden lines. Collapsed, the rows are capped at
-      ``max_collapsed_lines``; expanded, only by the window's height.
+    It reads the text from ``get_text`` each time it's drawn and fits it
+    to the rows it gets: when it overflows, one end is kept (``overflow``:
+    "tail" = newest lines, "head" = first lines) and a hint names the
+    hidden lines. Collapsed, the rows are capped at ``max_collapsed_lines``;
+    expanded, only by the window's height.
 
     Whether the box is expanded isn't its own state: it reads the
     ``expanded`` predicate it's given (ThinkingBoxManager passes the one
-    mode all its boxes share).
-
-    Created once and passed directly to Window(content=...).
-    Use start() to begin thinking and finish() to end.
+    mode all its boxes share). The box's life (its content, finishing it)
+    is ThinkingBox's; the control only draws.
 
     Example:
         expanded = False
-        control = ThinkingBoxControl(max_collapsed_lines=10, expanded=lambda: expanded)
-
-        # Use directly in layout
+        chunks: list[str] = []
+        control = ThinkingBoxControl(
+            lambda: "".join(chunks), max_collapsed_lines=10, expanded=lambda: expanded
+        )
         Window(content=control, ...)
 
-        # Start thinking with content callback
-        chunks = []
-        control.start(lambda: ''.join(chunks))
-
         chunks.append("Processing...\\n")
-        # Shown at the next redraw: the control reads the callback when
-        # drawn. on_draw= can ask for that redraw (ThinkingBoxManager's does).
+        # Shown at the next redraw: the control reads its text when drawn.
+        # on_draw= can ask for that redraw (ThinkingBoxManager's does).
 
         expanded = True  # e.g. the user pressed Ctrl+T
-
-        content, was_expanded, fmt = control.finish()
     """
 
     def __init__(
         self,
+        get_text: ContentCallback,
+        *,
         max_collapsed_lines: int = 15,
         style: str = "class:thinking-box",
         expand_key: str = "c-t",
         overflow: Overflow = "tail",
+        content_format: ContentFormat = "plain",
         expanded: Callable[[], bool] | None = None,
         on_draw: Callable[[], None] | None = None,
     ) -> None:
@@ -97,18 +89,21 @@ class ThinkingBoxControl(FormattedTextControl):
         Initialize the thinking box control.
 
         Args:
+            get_text: Returns the text to draw; read on every draw. If it
+                raises, the box draws nothing (logged once).
             max_collapsed_lines: Max lines when collapsed (must be >= 2).
             style: Style class for the content.
             expand_key: Key binding for expand/collapse (prompt_toolkit format).
             overflow: Which end of overflowing content stays visible:
                 "tail" (newest lines, default) or "head" (first lines).
+            content_format: "plain" or "ansi" (set_content_format() changes it).
             expanded: Whether the box is expanded right now (default:
                 never). ThinkingBoxManager passes its shared mode.
-            on_draw: Called each time the active box is drawn. A box fed by
-                a content callback uses it to be redrawn again shortly:
+            on_draw: Called each time the box is drawn. A box fed by a
+                content callback uses it to be redrawn again shortly:
                 nothing tells it when the callback's content changes.
         """
-        self._content_callback: ContentCallback | None = None
+        self._get_text = get_text
         self._max_collapsed_lines = max_collapsed_lines
         self._box_style = style
         self._expand_key = expand_key
@@ -118,10 +113,8 @@ class ThinkingBoxControl(FormattedTextControl):
         self._last_width = _DEFAULT_WIDTH
         self._expanded = expanded or (lambda: False)
         self._on_draw = on_draw
-        self._content_format: ContentFormat = "plain"
-        # The content when the box was finished, for handles that ask again.
-        self._final_content = ""
-        # A raising content callback is logged once, not on every redraw.
+        self._content_format: ContentFormat = content_format
+        # A raising get_text is logged once, not on every redraw.
         self._callback_failed = False
         self._lock = threading.RLock()
 
@@ -132,51 +125,6 @@ class ThinkingBoxControl(FormattedTextControl):
             focusable=False,
             show_cursor=False,
         )
-
-    def start(
-        self,
-        content_callback: ContentCallback,
-        content_format: ContentFormat = "plain",
-    ) -> None:
-        """
-        Start thinking with the given content callback.
-
-        Args:
-            content_callback: Callable that returns the current content.
-            content_format: Format for rendering content ("plain" or "ansi").
-        """
-        with self._lock:
-            self._content_callback = content_callback
-            self._content_format = content_format
-
-    def finish(self) -> tuple[str, bool, ContentFormat]:
-        """
-        Finish thinking and reset state.
-
-        Returns:
-            Tuple of (full_content, was_expanded, content_format).
-        """
-        with self._lock:
-            content = self.content
-            was_expanded = self.is_expanded
-            fmt = self._content_format
-            self._final_content = content
-            # Reset state
-            self._content_callback = None
-            self._content_format = "plain"
-            return content, was_expanded, fmt
-
-    @property
-    def final_content(self) -> str:
-        """The content the box had when it was finished ("" before that)."""
-        with self._lock:
-            return self._final_content
-
-    @property
-    def is_active(self) -> bool:
-        """Check if thinking is active (has a content callback)."""
-        with self._lock:
-            return self._content_callback is not None
 
     @property
     def content_format(self) -> ContentFormat:
@@ -206,7 +154,7 @@ class ThinkingBoxControl(FormattedTextControl):
         depends on the size, which its text callable can't see.
         """
         self._last_width = width
-        if self._on_draw is not None and self.is_active:
+        if self._on_draw is not None:
             self._on_draw()
         fragments = to_formatted_text(self._format(width, height), style=self.style)
         lines = [list(line) for line in split_lines(fragments)]
@@ -216,9 +164,6 @@ class ThinkingBoxControl(FormattedTextControl):
 
     def _format(self, width: int, height: int | None) -> FormattedText:
         """Fit the current content into ``height`` rows of ``width`` columns."""
-        if self._content_callback is None:
-            return FormattedText([])
-
         content = self.content
         if not content:
             return FormattedText([])
@@ -307,12 +252,9 @@ class ThinkingBoxControl(FormattedTextControl):
 
     @property
     def content(self) -> str:
-        """Get raw content from callback ("" if it raises; logged once per box)."""
-        callback = self._content_callback
-        if callback is None:
-            return ""
+        """The text to draw ("" if get_text raises; logged once per box)."""
         try:
-            return callback()
+            return self._get_text()
         except Exception:
             if not self._callback_failed:
                 self._callback_failed = True
@@ -341,14 +283,11 @@ class ThinkingBoxControl(FormattedTextControl):
 
         Returns True when:
         - Already expanded (can collapse), OR
-        - Active and content overflows the collapsed rows (hint is visible)
+        - Content overflows the collapsed rows (hint is visible)
         """
         with self._lock:
             if self.is_expanded:
                 return True
-
-            if not self.is_active:
-                return False
 
             return self.get_line_count(self._last_width) > self._max_collapsed_lines
 
