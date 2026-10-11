@@ -52,6 +52,7 @@ from .settings_dialog import (
     SettingsItem,
     TextItem,
 )
+from .spinner import Spinner
 from .streaming import StreamingContent
 from .styles import (
     DEFAULT_STYLES,
@@ -103,6 +104,7 @@ __all__ = [
     "SettingsDialog",
     # Layout
     "ThinkingHeader",
+    "Spinner",
     # Utilities
     "rich_to_ansi",
 ]

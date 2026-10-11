@@ -20,10 +20,11 @@ from prompt_toolkit.layout.dimension import Dimension as D
 
 from .frames import POLL_INTERVAL, FrameScheduler
 from .layout import ThinkingHeader
+from .spinner import Spinner
 from .streaming import StreamingContent
 from .thinking_box import ThinkingBox
 from .thinking_control import ThinkingBoxControl
-from .types import DEFAULT_SPINNER_FRAMES, ContentCallback, ContentFormat, Overflow
+from .types import ContentCallback, ContentFormat, Overflow
 
 if TYPE_CHECKING:
     from .display import Display
@@ -77,7 +78,7 @@ class ThinkingBoxManager:
         expand_key: str = "c-t",
         frames: FrameScheduler | None = None,
         echo_thinking: bool = True,
-        spinner_frames: tuple[str, ...] = DEFAULT_SPINNER_FRAMES,
+        spinner: Spinner | None = Spinner.DOTS,
         spinner_position: Literal["before", "after"] = "before",
     ) -> None:
         """
@@ -89,7 +90,7 @@ class ThinkingBoxManager:
             frames: Asks for redraws (None: nothing asks).
             echo_thinking: Whether a finished box is printed to the console
                 when the finish call doesn't say (AppInfo.echo_thinking).
-            spinner_frames: The header spinner's frames (() for none).
+            spinner: The header spinner (None for none).
             spinner_position: The spinner "before" or "after" the title.
         """
         self._display = display
@@ -98,7 +99,7 @@ class ThinkingBoxManager:
         self._expand_key = expand_key
         self._frames = frames
         self._echo_thinking = echo_thinking
-        self._spinner_frames = spinner_frames
+        self._spinner = spinner
         self._spinner_position: Literal["before", "after"] = spinner_position
         self._boxes: list[ThinkingBox] = []  # in creation order
         self._seq_counter = 0
@@ -173,7 +174,7 @@ class ThinkingBoxManager:
             if title is not None:
                 header = ThinkingHeader(
                     text=title,
-                    frames=self._spinner_frames,
+                    spinner=self._spinner,
                     position=self._spinner_position,
                     request_frame=frames.redraw_in if frames is not None else None,
                 )

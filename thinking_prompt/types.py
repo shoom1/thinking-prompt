@@ -43,9 +43,3 @@ ContentCallback = Callable[[], str]
 InputHandler = Union[
     Callable[[str], None], Callable[[str], Coroutine[Any, Any, None]]
 ]
-
-# Default spinner animation frames for the thinking header.
-# Single source of truth — referenced by layout.ThinkingHeader and
-# app_info.AppInfo.
-DEFAULT_SPINNER_FRAMES = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
-

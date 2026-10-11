@@ -3,10 +3,11 @@ frame while they're drawn, and nothing redraws on a fixed timer."""
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 
 import pytest
 
-from thinking_prompt import layout
+from thinking_prompt import Spinner, layout
 from thinking_prompt.frames import POLL_INTERVAL, FrameScheduler
 from thinking_prompt.layout import ThinkingHeader
 from tests.helpers import make_manager
@@ -85,7 +86,7 @@ class TestFrameScheduler:
 
 class TestSpinnerFrames:
     def test_frames_step_once_per_interval_from_the_first(self, clock: _Clock):
-        header = ThinkingHeader(text="T", frames=("a", "b", "c"), animation_interval=0.5)
+        header = ThinkingHeader(text="T", spinner=Spinner(("a", "b", "c"), 0.5))
         shown = []
         for now in (10.0, 10.5, 11.25, 11.5):
             clock.now = now
@@ -93,7 +94,7 @@ class TestSpinnerFrames:
         assert shown == ["a", "b", "c", "a"]
 
     def test_reset_starts_over_at_the_first_frame(self, clock: _Clock):
-        header = ThinkingHeader(text="T", frames=("a", "b", "c"), animation_interval=0.5)
+        header = ThinkingHeader(text="T", spinner=Spinner(("a", "b", "c"), 0.5))
         header._get_current_frame()
         clock.now = 10.5
         assert header._get_current_frame() == "b"
@@ -104,7 +105,7 @@ class TestSpinnerFrames:
     def test_drawing_asks_for_the_next_frame(self, clock: _Clock):
         asked: list[float] = []
         header = ThinkingHeader(
-            text="T", frames=("a", "b"), animation_interval=0.5, request_frame=asked.append
+            text="T", spinner=Spinner(("a", "b"), 0.5), request_frame=asked.append
         )
         clock.now = 10.2
         header.get_formatted_text(40)
@@ -114,21 +115,36 @@ class TestSpinnerFrames:
     def test_spinners_started_apart_ask_for_the_same_redraw(self, clock: _Clock):
         """They step on one shared clock, so N spinners cost one redraw per frame."""
         asked: list[float] = []
-        first = ThinkingHeader(text="A", animation_interval=0.5, request_frame=asked.append)
+        half = dataclasses.replace(Spinner.DOTS, interval=0.5)
+        first = ThinkingHeader(text="A", spinner=half, request_frame=asked.append)
         clock.now = 10.0
         first.get_formatted_text(40)
-        second = ThinkingHeader(text="B", animation_interval=0.5, request_frame=asked.append)
+        second = ThinkingHeader(text="B", spinner=half, request_frame=asked.append)
         clock.now = 10.3
         asked.clear()
         first.get_formatted_text(40)
         second.get_formatted_text(40)
         assert len(asked) == 2 and asked[0] == asked[1]
 
-    def test_a_header_without_frames_asks_for_nothing(self):
+    def test_a_header_without_a_spinner_asks_for_nothing(self):
         asked: list[float] = []
-        header = ThinkingHeader(text="T", frames=(), request_frame=asked.append)
-        header.get_formatted_text(40)
+        header = ThinkingHeader(text="T", spinner=None, request_frame=asked.append)
+        assert "─ T ─" in _line(header)
         assert asked == []
+
+    def test_a_one_frame_spinner_is_shown_and_asks_for_nothing(self):
+        """One frame never changes, so there is no next frame to draw."""
+        asked: list[float] = []
+        header = ThinkingHeader(text="T", spinner=Spinner(("●",)), request_frame=asked.append)
+        assert "● T" in _line(header)
+        assert asked == []
+
+    def test_the_default_spinner_is_dots(self):
+        assert ThinkingHeader().spinner == Spinner.DOTS
+
+
+def _line(header: ThinkingHeader) -> str:
+    return "".join(text for _style, text in header.get_formatted_text(40))
 
 
 class TestBoxRedraws:
