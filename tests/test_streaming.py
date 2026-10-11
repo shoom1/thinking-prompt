@@ -385,3 +385,28 @@ class TestStreamingContentRichMethods:
         content.set_line_rich(-1, "[bold]LAST[/bold]")
         text = content.get_content()
         assert "LAST" in text
+
+
+class TestClose:
+    """_close(): a thinking box closes its content when it finishes."""
+
+    def test_close_returns_the_final_text(self):
+        content = StreamingContent()
+        content.append("a\n")
+        assert content._close() == "a\n"
+
+    def test_writes_after_close_change_nothing(self):
+        changes: list[int] = []
+        content = StreamingContent(on_change=lambda: changes.append(1))
+        content.append("a\nb\n")
+        changes.clear()
+
+        content._close()
+        content.append("late\n")
+        content.set_line(0, "late")
+        content.clear()
+        content.append_rich("late")
+        content.set_line_rich(0, "late")
+
+        assert content.get_content() == "a\nb\n"
+        assert changes == []

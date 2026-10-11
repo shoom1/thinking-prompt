@@ -25,11 +25,15 @@ class StreamingContent:
 
     ``on_change`` is called after every change, from the writing thread
     (the thinking box's own content uses it to redraw).
+
+    A thinking box closes its content when it finishes (``_close()``):
+    later writes change nothing, so the box's text stays what it was.
     """
 
     def __init__(self, on_change: Callable[[], None] | None = None) -> None:
         self._chunks: list[str] = []
         self._lock = threading.Lock()
+        self._closed = False
         self._on_change = on_change
 
     def _changed(self) -> None:
@@ -39,6 +43,8 @@ class StreamingContent:
     def append(self, chunk: str) -> None:
         """Append a chunk of content (thread-safe)."""
         with self._lock:
+            if self._closed:
+                return
             self._chunks.append(chunk)
         self._changed()
 
@@ -50,8 +56,20 @@ class StreamingContent:
     def clear(self) -> None:
         """Clear all accumulated content (thread-safe)."""
         with self._lock:
+            if self._closed:
+                return
             self._chunks.clear()
         self._changed()
+
+    def _close(self) -> str:
+        """Stop taking writes and return the final text.
+
+        Under the lock, so a write racing this either lands before it (and
+        is in the returned text) or changes nothing.
+        """
+        with self._lock:
+            self._closed = True
+            return "".join(self._chunks)
 
     def __len__(self) -> int:
         """Return the number of chunks."""
@@ -71,6 +89,8 @@ class StreamingContent:
         if "\n" in text:
             raise ValueError(f"set_line() takes one line of text, got {text!r}")
         with self._lock:
+            if self._closed:
+                return
             current = "".join(self._chunks)
             # Split preserving trailing newline awareness
             has_trailing_newline = current.endswith("\n")
