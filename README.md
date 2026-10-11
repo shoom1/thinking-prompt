@@ -160,8 +160,8 @@ idle prompt costs no CPU:
 - Writes to a box (`append`, `set_line`, `set_title`, ...)
   redraw right away, from any thread; fast streams are capped at 30
   redraws a second.
-- A spinner redraws at each frame (10 a second) while its box is shown;
-  `AppInfo(thinking_animation=())` turns the spinner off.
+- A spinner redraws at each frame (10 a second for the default) while its
+  box is shown; `AppInfo(spinner=None)` turns the spinner off.
 - Text that can't say when it changes is re-read every 0.1 s while it's
   shown: a content callback passed to `start_thinking()`, and a prompt
   `message` or `status_text` given as a callable.
@@ -498,6 +498,8 @@ result = await session.show_settings_dialog(
 ### AppInfo Configuration
 
 ```python
+from thinking_prompt import AppInfo, Spinner
+
 app_info = AppInfo(
     name="MyApp",
     version="1.0.0",
@@ -511,12 +513,15 @@ app_info = AppInfo(
     fullscreen_enabled=False,    # Enable fullscreen mode
     echo_thinking=True,          # Echo thinking to console after completion
 
-    # Thinking animation
+    # Thinking header
     thinking_text="Thinking",    # Text in header
-    thinking_animation=("⠋", "⠙", "⠹", ...),  # Animation frames
-    thinking_animation_position="before",      # "before" or "after" text
+    spinner=Spinner.DOTS,        # Spinner.LINE, Spinner.ELLIPSIS, your own, or None
+    spinner_position="before",   # "before" or "after" text
 )
 ```
+
+A `Spinner` is its frames and the seconds each is shown:
+`Spinner(("◐", "◓", "◑", "◒"), interval=0.15)`. One frame makes a static mark.
 
 ## Theming
 

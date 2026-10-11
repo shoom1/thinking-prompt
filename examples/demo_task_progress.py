@@ -13,7 +13,7 @@ Run:
 """
 import asyncio
 
-from thinking_prompt import ThinkingPromptSession, AppInfo
+from thinking_prompt import ThinkingPromptSession, AppInfo, Spinner
 
 
 async def main():
@@ -21,8 +21,8 @@ async def main():
         name="TaskProgress",
         version="1.0.0",
         thinking_text="Working",
-        thinking_animation=("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"),
-        thinking_animation_position="before",
+        spinner=Spinner.DOTS,
+        spinner_position="before",
         echo_thinking=False,
     )
     session = ThinkingPromptSession(

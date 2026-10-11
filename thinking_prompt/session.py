@@ -53,8 +53,9 @@ from .frames import POLL_INTERVAL, FrameScheduler
 from .layout import create_layout
 from .manager import ThinkingBoxManager
 from .rich_utils import _is_rich_renderable
+from .spinner import Spinner
 from .styles import ThinkingPromptStyles, resolve_theme
-from .types import DEFAULT_SPINNER_FRAMES, Placement, check_placement
+from .types import Placement, check_placement
 
 logger = logging.getLogger(__name__)
 
@@ -208,12 +209,8 @@ class ThinkingPromptSession:
             expand_key=self._expand_key,
             frames=self._frames,
             echo_thinking=app_info.echo_thinking if app_info else True,
-            spinner_frames=(
-                app_info.thinking_animation if app_info else DEFAULT_SPINNER_FRAMES
-            ),
-            spinner_position=(
-                app_info.thinking_animation_position if app_info else "before"
-            ),
+            spinner=app_info.spinner if app_info else Spinner.DOTS,
+            spinner_position=app_info.spinner_position if app_info else "before",
         )
 
         # Input history (for up/down arrow)

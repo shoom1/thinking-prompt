@@ -14,6 +14,7 @@ from thinking_prompt.manager import ThinkingBoxManager
 from thinking_prompt.thinking_box import ThinkingBox
 from thinking_prompt.thinking_control import ThinkingBoxControl
 from thinking_prompt.layout import ThinkingHeader
+from thinking_prompt.spinner import Spinner
 from thinking_prompt.streaming import StreamingContent
 from tests.helpers import echoed, history_texts, make_display, make_manager
 
@@ -73,27 +74,40 @@ class TestCreation:
         assert box._header is None
 
     def test_headers_use_the_managers_spinner_settings(self):
-        mgr = make_manager(spinner_frames=("a", "b"), spinner_position="after")
+        spinner = Spinner(("a", "b"), 0.25)
+        mgr = make_manager(spinner=spinner, spinner_position="after")
         header = mgr.create_box(lambda: "x", title="T")._header
-        assert header.frames == ("a", "b")
+        assert header.spinner is spinner
         assert header.position == "after"
+
+    def test_headers_spin_dots_by_default(self):
+        header = make_manager().create_box(lambda: "x", title="T")._header
+        assert header.spinner == Spinner.DOTS
 
     def test_display_is_required(self):
         with pytest.raises(TypeError):
             ThinkingBoxManager()  # type: ignore[call-arg]
 
-    def test_session_spinner_settings_reach_every_header(self):
+    @pytest.mark.parametrize("spinner", [None, Spinner(("a", "b"), 0.25)])
+    def test_session_spinner_settings_reach_every_header(self, spinner):
         from thinking_prompt import AppInfo, ThinkingPromptSession
 
         session = ThinkingPromptSession(
-            app_info=AppInfo(
-                name="t", thinking_animation=(), thinking_animation_position="after"
-            )
+            app_info=AppInfo(name="t", spinner=spinner, spinner_position="after")
         )
         session.start_thinking(lambda: "x")
         (box,) = session._manager.get_sorted_boxes()
-        assert box._header.frames == ()
+        assert box._header.spinner is spinner
         assert box._header.position == "after"
+
+    def test_a_session_without_app_info_spins_dots_before_the_title(self):
+        from thinking_prompt import ThinkingPromptSession
+
+        session = ThinkingPromptSession()
+        session.start_thinking(lambda: "x")
+        (box,) = session._manager.get_sorted_boxes()
+        assert box._header.spinner == Spinner.DOTS
+        assert box._header.position == "before"
 
     def test_session_echo_thinking_off_keeps_boxes_off_the_console(self):
         from thinking_prompt import AppInfo, ThinkingPromptSession

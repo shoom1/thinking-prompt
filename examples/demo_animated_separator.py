@@ -10,7 +10,7 @@ Run:
 """
 import asyncio
 
-from thinking_prompt import ThinkingPromptSession, AppInfo
+from thinking_prompt import ThinkingPromptSession, AppInfo, Spinner
 
 
 async def main():
@@ -22,8 +22,8 @@ async def main():
                 name="AnimatedDemo",
                 version="1.0.0",
                 # Default: thinking_text="Thinking"
-                # Default: thinking_animation=("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
-                # Default: thinking_animation_position="before"
+                # Default: spinner=Spinner.DOTS
+                # Default: spinner_position="before"
             ),
         },
         {
@@ -32,18 +32,27 @@ async def main():
                 name="AnimatedDemo",
                 version="1.0.0",
                 thinking_text="Processing",
-                thinking_animation=(".  ", ".. ", "..."),
-                thinking_animation_position="after",
+                spinner=Spinner.ELLIPSIS,
+                spinner_position="after",
             ),
         },
         {
-            "name": "Arrow animation",
+            "name": "ASCII line",
+            "app_info": AppInfo(
+                name="AnimatedDemo",
+                version="1.0.0",
+                thinking_text="Working",
+                spinner=Spinner.LINE,
+            ),
+        },
+        {
+            "name": "Arrow animation (custom frames and speed)",
             "app_info": AppInfo(
                 name="AnimatedDemo",
                 version="1.0.0",
                 thinking_text="Loading",
-                thinking_animation=("→  ", " → ", "  →", " → "),
-                thinking_animation_position="after",
+                spinner=Spinner(("→  ", " → ", "  →", " → "), interval=0.15),
+                spinner_position="after",
             ),
         },
         {
@@ -61,7 +70,7 @@ async def main():
                 name="AnimatedDemo",
                 version="1.0.0",
                 thinking_text="Working",
-                thinking_animation=(),  # Empty tuple = no animation
+                spinner=None,  # No spinner
             ),
         },
     ]

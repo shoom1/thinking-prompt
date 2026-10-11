@@ -38,7 +38,7 @@ from prompt_toolkit.layout.processors import (
     HighlightSelectionProcessor,
 )
 
-from .types import DEFAULT_SPINNER_FRAMES
+from .spinner import Spinner
 
 if TYPE_CHECKING:
     from .history import FormattedTextHistory
@@ -49,9 +49,7 @@ if TYPE_CHECKING:
 _TICK_SLACK = 0.005
 
 __all__ = [
-    "DEFAULT_SPINNER_FRAMES",  # re-export; canonical home is types.py
     "ThinkingHeader",
-    "ThinkingSeparator",
     "create_history_window",
     "create_layout",
     "create_status_bar",
@@ -64,7 +62,7 @@ class ThinkingHeader:
     Animated separator line for the thinking box.
 
     Displays a horizontal line with optional animated text in the center.
-    The animation steps through ``frames``, one per ``animation_interval``;
+    The spinner steps through its frames, one per ``spinner.interval``;
     while drawn, an animated header asks for a redraw at its next frame.
 
     Example outputs:
@@ -77,10 +75,9 @@ class ThinkingHeader:
     def __init__(
         self,
         text: str = "Thinking",
-        frames: tuple[str, ...] = DEFAULT_SPINNER_FRAMES,
+        spinner: Spinner | None = Spinner.DOTS,
         position: Literal["before", "after"] = "before",
         border_char: str = "─",
-        animation_interval: float = 0.1,
         request_frame: Callable[[float], None] | None = None,
     ) -> None:
         """
@@ -88,19 +85,17 @@ class ThinkingHeader:
 
         Args:
             text: Text to display in the separator. Empty string for no text.
-            frames: Animation frames to cycle through. Empty tuple for no animation.
-            position: Position of animation relative to text ('before' or 'after').
+            spinner: The animation (None for none).
+            position: Position of the spinner relative to text ('before' or 'after').
             border_char: Character used for the separator line.
-            animation_interval: Time between frame changes in seconds.
             request_frame: Called with the seconds until the next frame each
                 time an animated header is drawn, to have it redrawn then
                 (the session passes its FrameScheduler.redraw_in).
         """
         self.text = text
-        self.frames = frames
+        self.spinner = spinner
         self.position = position
         self.border_char = border_char
-        self.animation_interval = animation_interval
         self._request_frame = request_frame
         self._first_tick: int | None = None
 
@@ -109,19 +104,24 @@ class ThinkingHeader:
 
         Frames step on a clock every header shares (one tick per interval),
         so any number of spinners turn on the same redraws. Each starts on
-        its first frame.
+        its first frame. A one-frame spinner never changes, so it asks for
+        nothing.
         """
-        if not self.frames:
+        spinner = self.spinner
+        if spinner is None:
             return ""
+        frames = spinner.frames
+        if len(frames) == 1:
+            return frames[0]
 
         now = time.monotonic()
-        tick = int(now / self.animation_interval)
+        tick = int(now / spinner.interval)
         if self._first_tick is None:
             self._first_tick = tick
         if self._request_frame is not None:
             # A little past the tick, so the redraw lands on the new frame.
-            self._request_frame((tick + 1) * self.animation_interval - now + _TICK_SLACK)
-        return self.frames[(tick - self._first_tick) % len(self.frames)]
+            self._request_frame((tick + 1) * spinner.interval - now + _TICK_SLACK)
+        return frames[(tick - self._first_tick) % len(frames)]
 
     def get_formatted_text(self, width: int = 80) -> FormattedText:
         """
@@ -162,10 +162,6 @@ class ThinkingHeader:
     def reset(self) -> None:
         """Reset animation to first frame."""
         self._first_tick = None
-
-
-# Backward-compat alias
-ThinkingSeparator = ThinkingHeader
 
 
 def create_thinking_area(manager: ThinkingBoxManager) -> DynamicContainer:

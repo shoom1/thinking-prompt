@@ -21,7 +21,7 @@ import asyncio
 from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.document import Document
 
-from thinking_prompt import ThinkingPromptSession, AppInfo, __version__
+from thinking_prompt import ThinkingPromptSession, AppInfo, Spinner, __version__
 from thinking_prompt.settings_dialog import (
     SettingsDialog,
     DropdownItem,
@@ -117,8 +117,8 @@ async def main():
         version=__version__,
         welcome_message=create_welcome_message,
         thinking_text="Processing",
-        thinking_animation=("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"),
-        thinking_animation_position="before",
+        spinner=Spinner.DOTS,
+        spinner_position="before",
     )
 
     # How the dialog commands draw their dialogs: "inline" (rows under the

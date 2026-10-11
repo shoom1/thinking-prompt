@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, Literal
 
-from .types import DEFAULT_SPINNER_FRAMES
+from .spinner import Spinner
 
 
 @dataclass
@@ -69,13 +69,13 @@ class AppInfo:
             fullscreen_enabled=True,
         )
 
-        # Custom thinking animation
+        # Custom thinking spinner
         app_info = AppInfo(
             name="MyApp",
             version="1.0.0",
             thinking_text="Processing",
-            thinking_animation=(".  ", ".. ", "..."),
-            thinking_animation_position="after",
+            spinner=Spinner.ELLIPSIS,
+            spinner_position="after",
         )
 
         session = ThinkingPromptSession(app_info=app_info)
@@ -97,15 +97,16 @@ class AppInfo:
     """Enable fullscreen mode toggle. When False (default), only thinking box
     expand/collapse in prompt mode is available. Ctrl+E has no effect."""
 
-    # Thinking animation settings
+    # Thinking header settings
     thinking_text: str = "Thinking"
     """Text shown in the thinking separator. Set to empty string for no text."""
 
-    thinking_animation: tuple[str, ...] = DEFAULT_SPINNER_FRAMES
-    """Animation frames for the thinking indicator. Set to empty tuple for no animation."""
+    spinner: Spinner | None = Spinner.DOTS
+    """The thinking header's spinner: a preset such as ``Spinner.LINE``, your
+    own ``Spinner(frames, interval)``, or None for no spinner."""
 
-    thinking_animation_position: Literal["before", "after"] = "before"
-    """Position of animation relative to text: 'before' (default) or 'after'."""
+    spinner_position: Literal["before", "after"] = "before"
+    """Position of the spinner relative to text: 'before' (default) or 'after'."""
 
     echo_thinking: bool = True
     """Whether to print thinking content to console after completion. Default: True."""

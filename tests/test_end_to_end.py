@@ -284,7 +284,7 @@ def on_screen(session: ThinkingPromptSession, text: str) -> bool:
     return any(text in line for line in screen_lines(session))
 
 
-STILL = AppInfo(name="t", thinking_animation=())  # boxes without a spinner
+STILL = AppInfo(name="t", spinner=None)  # boxes without a spinner
 
 
 class TestRedraws:
