@@ -9,7 +9,7 @@ import pytest
 from thinking_prompt import layout
 from thinking_prompt.frames import POLL_INTERVAL, FrameScheduler
 from thinking_prompt.layout import ThinkingHeader
-from thinking_prompt.manager import ThinkingBoxManager
+from tests.helpers import make_manager
 
 
 class _Counter:
@@ -132,10 +132,19 @@ class TestSpinnerFrames:
 
 
 class TestBoxRedraws:
+    def test_starting_and_ending_a_box_redraw(self):
+        redraws = _Counter()
+        manager = make_manager(frames=FrameScheduler(redraws))
+        box = manager.create_box(lambda: "x\n")
+        assert redraws.calls == 1
+        manager.finish(box)
+        assert redraws.calls == 2
+
     def test_writes_ask_for_a_redraw(self):
         redraws = _Counter()
-        manager = ThinkingBoxManager(frames=FrameScheduler(redraws))
+        manager = make_manager(frames=FrameScheduler(redraws))
         box = manager.create_box()
+        redraws.calls = 0
         assert box.streaming_content is not None
 
         box.streaming_content.append("a\n")
@@ -148,7 +157,7 @@ class TestBoxRedraws:
         asked: list[float] = []
         frames = FrameScheduler(_Counter())
         frames.redraw_in = asked.append  # type: ignore[method-assign]
-        manager = ThinkingBoxManager(frames=frames)
+        manager = make_manager(frames=frames)
         box = manager.create_box(lambda: "x\n")
 
         box.control.create_content(40, 5)
@@ -159,7 +168,7 @@ class TestBoxRedraws:
         asked: list[float] = []
         frames = FrameScheduler(_Counter())
         frames.redraw_in = asked.append  # type: ignore[method-assign]
-        manager = ThinkingBoxManager(frames=frames)
+        manager = make_manager(frames=frames)
         box = manager.create_box()
         assert box.streaming_content is not None
         box.streaming_content.append("x\n")

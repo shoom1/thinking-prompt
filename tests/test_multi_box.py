@@ -355,7 +355,7 @@ class TestSessionOverflow:
         s = self._session()
         s.start_thinking(max_lines=2).append(self._lines(5))
         s.start_thinking(max_lines=2, overflow="head").append(self._lines(5))
-        s._finish_boxes(None, echo_to_console=True)
+        s._manager.finish_all(echo_to_console=True)
         assert self._echoed(s) == ["...\nline 3\nline 4\n", "line 0\nline 1\n...\n"]
 
     def test_overflow_type_is_exported(self):

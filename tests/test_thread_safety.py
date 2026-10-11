@@ -11,8 +11,8 @@ from typing import List
 import pytest
 
 from thinking_prompt.history import FormattedTextHistory
-from thinking_prompt.manager import ThinkingBoxManager
 from thinking_prompt.thinking_control import ThinkingBoxControl
+from tests.helpers import make_manager
 
 
 class TestFormattedTextHistoryThreadSafety:
@@ -140,7 +140,7 @@ class TestThinkingBoxControlThreadSafety:
 
     def test_concurrent_expand_collapse(self):
         """Threads toggling the shared expand mode lose no toggles."""
-        manager = ThinkingBoxManager()
+        manager = make_manager()
         box = manager.create_box(lambda: "test content " * 100)
 
         def toggler():
