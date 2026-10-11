@@ -26,8 +26,10 @@ class StreamingContent:
     ``on_change`` is called after every change, from the writing thread
     (the thinking box's own content uses it to redraw).
 
-    A thinking box closes its content when it finishes (``_close()``):
-    later writes change nothing, so the box's text stays what it was.
+    A box's own content (the one ``start_thinking()`` makes when given no
+    content callback) is closed when the box finishes (``_close()``): later
+    writes change nothing, so the box's text stays what it was. A buffer
+    passed in as a callback is never closed by the box.
     """
 
     def __init__(self, on_change: Callable[[], None] | None = None) -> None:

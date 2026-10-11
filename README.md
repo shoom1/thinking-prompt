@@ -42,10 +42,10 @@ async def main():
             return
 
         # Use context manager for clean thinking management
-        async with session.thinking() as content:
-            content.append("Processing...\n")
+        async with session.thinking() as box:
+            box.append("Processing...\n")
             await asyncio.sleep(0.5)
-            content.append("Done!\n")
+            box.append("Done!\n")
 
         session.add_response(f"You said: {text}")
 
