@@ -41,7 +41,7 @@ class TestExpandMode:
 
         assert manager.is_expanded is False
         assert manager.can_toggle() is False
-        assert manager.create_box(lambda: LONG).control.is_expanded is False
+        assert manager.create_box(lambda: LONG)._control.is_expanded is False
 
     def test_mode_holds_while_other_boxes_remain(self):
         manager = make_manager()
@@ -53,7 +53,7 @@ class TestExpandMode:
 
         assert manager.is_expanded
         (left,) = manager.get_sorted_boxes()
-        assert left.control.is_expanded
+        assert left._control.is_expanded
 
     def test_nothing_to_toggle_without_boxes_even_when_expanded(self):
         manager = make_manager()
@@ -66,11 +66,11 @@ class TestExpandMode:
         b = manager.create_box(lambda: LONG)
 
         manager.toggle_all()
-        assert a.control.is_expanded and b.control.is_expanded
+        assert a._control.is_expanded and b._control.is_expanded
         manager.toggle_all()
-        assert not a.control.is_expanded and not b.control.is_expanded
+        assert not a._control.is_expanded and not b._control.is_expanded
         # A box can't leave the shared mode on its own.
-        assert not hasattr(a.control, "toggle_expanded")
+        assert not hasattr(a._control, "toggle_expanded")
 
     def test_a_standalone_box_reads_its_expand_predicate(self):
         expanded = [False]
@@ -91,10 +91,10 @@ class TestFullScreen:
         manager.force_expanded(True)
         b = manager.create_box(lambda: LONG)
         assert manager.is_expanded
-        assert a.control.is_expanded and b.control.is_expanded
+        assert a._control.is_expanded and b._control.is_expanded
 
         manager.force_expanded(False)
-        assert not a.control.is_expanded and not b.control.is_expanded
+        assert not a._control.is_expanded and not b._control.is_expanded
 
     def test_leaving_full_screen_restores_the_users_mode(self):
         manager = make_manager()
@@ -104,17 +104,17 @@ class TestFullScreen:
         manager.force_expanded(True)
         manager.force_expanded(False)
 
-        assert a.control.is_expanded
+        assert a._control.is_expanded
 
     def test_session_boxes_started_in_full_screen_are_expanded(self):
         session = ThinkingPromptSession(app_info=AppInfo(name="t", fullscreen_enabled=True))
         session.switch_to_fullscreen()
         session.start_thinking(lambda: LONG)
         (box,) = session._manager.get_sorted_boxes()
-        assert box.control.is_expanded
+        assert box._control.is_expanded
 
         session.switch_to_prompt()
-        assert not box.control.is_expanded
+        assert not box._control.is_expanded
 
 
 class TestOwnership:
@@ -122,10 +122,10 @@ class TestOwnership:
 
     async def test_box_remembers_the_task_that_created_it(self):
         manager = make_manager()
-        assert manager.create_box(lambda: "x").owner is asyncio.current_task()
+        assert manager.create_box(lambda: "x")._owner is asyncio.current_task()
 
     def test_box_created_outside_asyncio_has_no_owner(self):
-        assert make_manager().create_box(lambda: "x").owner is None
+        assert make_manager().create_box(lambda: "x")._owner is None
 
     async def test_a_handler_ending_leaves_a_live_background_box(self):
         session = ThinkingPromptSession()

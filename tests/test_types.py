@@ -77,3 +77,12 @@ class TestRemovedTypes:
         assert not hasattr(thinking_prompt, "MessageRole")
         assert "MessageRole" not in thinking_prompt.__all__
         assert not hasattr(types_module, "MessageRole")
+
+    def test_thinking_context_is_now_thinking_box(self):
+        import thinking_prompt
+        import thinking_prompt.types as types_module
+
+        assert not hasattr(thinking_prompt, "ThinkingContext")
+        assert "ThinkingContext" not in thinking_prompt.__all__
+        assert not hasattr(types_module, "ThinkingContext")
+        assert "ThinkingBox" in thinking_prompt.__all__

@@ -17,8 +17,8 @@ Example:
         if not text.strip():
             return
 
-        async with session.thinking() as content:
-            content.append("Processing...\\n")
+        async with session.thinking() as box:
+            box.append("Processing...\\n")
             await asyncio.sleep(1)
 
         session.add_response(f"Echo: {text}")
@@ -57,13 +57,13 @@ from .styles import (
     DEFAULT_STYLES,
     ThinkingPromptStyles,
 )
+from .thinking_box import ThinkingBox
 from .types import (
     ContentCallback,
     ContentFormat,
     InputHandler,
     Overflow,
     Placement,
-    ThinkingContext,
 )
 
 __version__ = "0.3.4"
@@ -83,7 +83,7 @@ __all__ = [
     "DEFAULT_STYLES",
     # Type helpers
     "StreamingContent",
-    "ThinkingContext",
+    "ThinkingBox",
     "ContentCallback",
     "ContentFormat",
     "Overflow",

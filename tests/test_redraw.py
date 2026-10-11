@@ -145,11 +145,10 @@ class TestBoxRedraws:
         manager = make_manager(frames=FrameScheduler(redraws))
         box = manager.create_box()
         redraws.calls = 0
-        assert box.streaming_content is not None
 
-        box.streaming_content.append("a\n")
-        box.streaming_content.set_line(0, "b")
-        box.streaming_content.clear()
+        box.append("a\n")
+        box.set_line(0, "b")
+        box.clear()
 
         assert redraws.calls == 3
 
@@ -160,7 +159,7 @@ class TestBoxRedraws:
         manager = make_manager(frames=frames)
         box = manager.create_box(lambda: "x\n")
 
-        box.control.create_content(40, 5)
+        box._control.create_content(40, 5)
 
         assert asked == [POLL_INTERVAL]
 
@@ -170,9 +169,8 @@ class TestBoxRedraws:
         frames.redraw_in = asked.append  # type: ignore[method-assign]
         manager = make_manager(frames=frames)
         box = manager.create_box()
-        assert box.streaming_content is not None
-        box.streaming_content.append("x\n")
+        box.append("x\n")
 
-        box.control.create_content(40, 5)
+        box._control.create_content(40, 5)
 
         assert asked == []

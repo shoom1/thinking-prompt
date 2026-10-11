@@ -1,15 +1,14 @@
 """
 ThinkingBoxManager — the thinking boxes on screen.
 
-Provides ManagedBox (one box's parts and state) and ThinkingBoxManager,
-which creates boxes, lays them out, keeps the expand mode they share, and
-ends them: off the screen, with their text echoed through the Display.
+Creates ThinkingBox objects, lays them out, keeps the expand mode they
+share, and ends them: off the screen, with their text echoed through the
+Display.
 """
 from __future__ import annotations
 
 import asyncio
 import threading
-from dataclasses import dataclass
 from functools import partial
 from typing import TYPE_CHECKING, Any, Callable, Literal
 
@@ -22,6 +21,7 @@ from prompt_toolkit.layout.dimension import Dimension as D
 from .frames import POLL_INTERVAL, FrameScheduler
 from .layout import ThinkingHeader
 from .streaming import StreamingContent
+from .thinking_box import ThinkingBox
 from .thinking_control import ThinkingBoxControl
 from .types import DEFAULT_SPINNER_FRAMES, ContentCallback, ContentFormat, Overflow
 
@@ -47,27 +47,6 @@ def _current_task() -> asyncio.Task[Any] | None:
         return asyncio.current_task()
     except RuntimeError:  # no running event loop in this thread
         return None
-
-
-@dataclass(eq=False)
-class ManagedBox:
-    """State for a single managed thinking box.
-
-    ``owner`` is the asyncio task that created the box (None when it was
-    created outside one): when a handler ends or is cancelled, the session
-    finishes only the boxes that handler answers for (see
-    ThinkingBoxManager.finish_owned_by). ``finished`` turns True when the
-    manager ends the box. Boxes compare by identity.
-    """
-
-    control: ThinkingBoxControl
-    header: ThinkingHeader | None
-    container: Container
-    order: int
-    seq: int
-    streaming_content: StreamingContent | None
-    owner: asyncio.Task[Any] | None = None
-    finished: bool = False
 
 
 class ThinkingBoxManager:
@@ -121,7 +100,7 @@ class ThinkingBoxManager:
         self._echo_thinking = echo_thinking
         self._spinner_frames = spinner_frames
         self._spinner_position: Literal["before", "after"] = spinner_position
-        self._boxes: list[ManagedBox] = []  # in creation order
+        self._boxes: list[ThinkingBox] = []  # in creation order
         self._seq_counter = 0
         self._expanded = False  # the user's choice (Ctrl+T)
         self._forced = False  # full screen: every box expanded
@@ -140,7 +119,7 @@ class ThinkingBoxManager:
         max_lines: int | None = None,
         content_format: ContentFormat = "plain",
         overflow: Overflow = "tail",
-    ) -> ManagedBox:
+    ) -> ThinkingBox:
         """
         Create a box and show it.
 
@@ -201,13 +180,14 @@ class ThinkingBoxManager:
             seq = self._seq_counter
             self._seq_counter += 1
 
-            box = ManagedBox(
+            box = ThinkingBox(
+                self,
+                content=streaming_content,
                 control=control,
                 header=header,
                 container=self._build_container(control, header, effective_max_lines),
                 order=order,
                 seq=seq,
-                streaming_content=streaming_content,
                 owner=_current_task(),
             )
             self._boxes.append(box)
@@ -262,15 +242,15 @@ class ThinkingBoxManager:
         if not self._boxes:
             self._expanded = False
 
-    def get_sorted_boxes(self) -> list[ManagedBox]:
+    def get_sorted_boxes(self) -> list[ThinkingBox]:
         """
         Get all boxes sorted by (order, seq).
 
         Returns:
-            List of ManagedBox sorted by order then creation sequence.
+            List of ThinkingBox sorted by order then creation sequence.
         """
         with self._lock:
-            return sorted(self._boxes, key=lambda b: (b.order, b.seq))
+            return sorted(self._boxes, key=lambda b: (b._order, b._seq))
 
     def get_container(self) -> Container:
         """
@@ -283,7 +263,7 @@ class ThinkingBoxManager:
             sorted_boxes = self.get_sorted_boxes()
             if not sorted_boxes:
                 return Window(height=0)
-            return HSplit([b.container for b in sorted_boxes])
+            return HSplit([b._container for b in sorted_boxes])
 
     def toggle_all(self) -> None:
         """Toggle the user's expand/collapse choice for all boxes."""
@@ -318,13 +298,13 @@ class ThinkingBoxManager:
                 return False
             if self._expanded:
                 return True
-            return any(box.control.can_toggle_expanded for box in self._boxes)
+            return any(box._control.can_toggle_expanded for box in self._boxes)
 
     # -- ending boxes ----------------------------------------------------------
 
     def finish(
         self,
-        box: ManagedBox,
+        box: ThinkingBox,
         *,
         add_to_history: bool = True,
         echo_to_console: bool | None = None,
@@ -343,7 +323,7 @@ class ThinkingBoxManager:
 
     def finish_all(
         self, *, add_to_history: bool = True, echo_to_console: bool | None = None
-    ) -> list[ManagedBox]:
+    ) -> list[ThinkingBox]:
         """End every box (e.g. Ctrl+C at an idle prompt); return them."""
         return self._finish(
             lambda b: True, add_to_history=add_to_history, echo_to_console=echo_to_console
@@ -355,7 +335,7 @@ class ThinkingBoxManager:
         *,
         add_to_history: bool = True,
         echo_to_console: bool | None = None,
-    ) -> list[ManagedBox]:
+    ) -> list[ThinkingBox]:
         """End the boxes a handler answers for when it ends; return them.
 
         Those ``task`` created, those whose task has already ended (nobody
@@ -364,8 +344,8 @@ class ThinkingBoxManager:
         is left alone.
         """
 
-        def owned(box: ManagedBox) -> bool:
-            return box.owner is None or box.owner is task or box.owner.done()
+        def owned(box: ThinkingBox) -> bool:
+            return box._owner is None or box._owner is task or box._owner.done()
 
         return self._finish(
             owned, add_to_history=add_to_history, echo_to_console=echo_to_console
@@ -373,11 +353,11 @@ class ThinkingBoxManager:
 
     def _finish(
         self,
-        pick: Callable[[ManagedBox], bool],
+        pick: Callable[[ThinkingBox], bool],
         *,
         add_to_history: bool,
         echo_to_console: bool | None,
-    ) -> list[ManagedBox]:
+    ) -> list[ThinkingBox]:
         """End the boxes ``pick`` selects, in creation order, and echo them.
 
         The echo runs after the lock is released: each box's text cut to
@@ -386,22 +366,20 @@ class ThinkingBoxManager:
         """
         with self._lock:
             ended = [box for box in self._boxes if pick(box)]
-            finals: list[tuple[ManagedBox, str, ContentFormat]] = []
             for box in ended:
                 self._boxes.remove(box)
-                text, _, content_format = box.control.finish()
-                box.finished = True
-                finals.append((box, text, content_format))
+                box._close()
             self._reset_mode_if_empty()
         echo = self._echo_thinking if echo_to_console is None else echo_to_console
-        for box, text, content_format in finals:
+        for box in ended:
+            control = box._control
             self._display.thinking(
-                text,
-                truncate_lines=box.control.max_collapsed_lines,
+                box.text,
+                truncate_lines=control.max_collapsed_lines,
                 add_to_history=add_to_history,
                 echo_to_console=echo,
-                content_format=content_format,
-                overflow=box.control.overflow,
+                content_format=control.content_format,
+                overflow=control.overflow,
             )
         if ended:
             self.redraw()
@@ -411,6 +389,11 @@ class ThinkingBoxManager:
         """Ask for a redraw (nothing asks without frames)."""
         if self._frames is not None:
             self._frames.redraw()
+
+    @property
+    def rich_theme(self) -> Any:
+        """The Display's current Rich theme: the default for boxes' rich writes."""
+        return self._display.rich_theme
 
     @property
     def is_expanded(self) -> bool:

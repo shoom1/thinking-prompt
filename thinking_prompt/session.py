@@ -25,6 +25,7 @@ from typing import (
 if TYPE_CHECKING:
     from .dialog import Dialog, DialogManager
     from .settings_dialog import SettingsItem
+    from .thinking_box import ThinkingBox
     from .types import ContentCallback, ContentFormat, InputHandler, Overflow
 
 from prompt_toolkit.application import Application
@@ -53,7 +54,7 @@ from .layout import create_layout
 from .manager import ThinkingBoxManager
 from .rich_utils import _is_rich_renderable
 from .styles import ThinkingPromptStyles, resolve_theme
-from .types import DEFAULT_SPINNER_FRAMES, Placement, ThinkingContext, check_placement
+from .types import DEFAULT_SPINNER_FRAMES, Placement, check_placement
 
 logger = logging.getLogger(__name__)
 
@@ -587,19 +588,20 @@ class ThinkingPromptSession:
         max_lines: int | None = None,
         content_format: ContentFormat = "plain",
         overflow: Overflow = "tail",
-    ) -> ThinkingContext:
+    ) -> ThinkingBox:
         """
-        Start the thinking state with a content callback.
+        Start a thinking box and return it.
 
-        The callback is called repeatedly to get the current content for the
-        thinking box. This allows dynamic content that updates in real-time.
-
-        The callback must be thread-safe if called from multiple threads.
+        Write to the box to show text in it. To show text you already hold,
+        pass ``content_callback`` instead: the box re-reads it while it's
+        drawn (every 0.1 s), and can be read but not written to. The
+        callback must be thread-safe if the text changes in another thread.
 
         Args:
-            content_callback: Callable that returns the current thinking content.
-                If None, a StreamingContent is created internally.
-            title: Optional title to set on the thinking separator.
+            content_callback: Returns the text to show. If None, the box
+                holds its own text, which you write.
+            title: Title on the box's header line (default:
+                ``AppInfo.thinking_text``).
             order: Sort key for multiple boxes (higher = closer to prompt).
             max_lines: Max collapsed lines (overrides session default).
             content_format: Format for rendering ("plain" or "ansi").
@@ -609,60 +611,23 @@ class ThinkingPromptSession:
                 e.g. for a task list).
 
         Returns:
-            ThinkingContext for title control and content management.
+            The ThinkingBox: write to it, retitle it, and finish it.
 
         Example:
-            content = ""
-
-            def get_content():
-                return content
-
-            ctx = session.start_thinking(get_content, title="Processing")
-
-            # Update content dynamically
-            content += "Processing...\\n"
+            box = session.start_thinking(title="Processing")
+            box.append("Processing...\\n")
             await asyncio.sleep(0.5)
-            ctx.set_title("Finishing")
-            content += "Done!\\n"
-
-            ctx.finish()
+            box.set_title("Finishing")
+            box.append("Done!\\n")
+            box.finish()
         """
-        box = self._manager.create_box(
+        return self._manager.create_box(
             content_callback,
             title=title if title is not None else self._default_thinking_text,
             order=order,
             max_lines=max_lines,
             content_format=content_format,
             overflow=overflow,
-        )
-
-        def _finish_box(
-            add_to_history: bool = True,
-            echo_to_console: bool | None = None,
-            cancelled: bool = False,
-        ) -> str:
-            ended = self._manager.finish(
-                box, add_to_history=add_to_history, echo_to_console=echo_to_console
-            )
-            if cancelled:
-                self._announce_cancel(ended)
-            # Finishing again (or after the session finished the box)
-            # returns the same text; nothing is echoed twice.
-            return box.control.final_content
-
-        def _set_title(text: str) -> None:
-            if box.header is not None:
-                box.header.text = text
-                self._frames.redraw()
-
-        return ThinkingContext(
-            content=box.streaming_content,
-            set_title=_set_title,
-            get_title=lambda: box.header.text if box.header else self._default_thinking_text,
-            set_format=box.control.set_content_format,
-            rich_theme=self._display.rich_theme,
-            finish=_finish_box,
-            is_finished=lambda: box.finished,
         )
 
     def _announce_cancel(self, ended: bool) -> None:
@@ -696,13 +661,10 @@ class ThinkingPromptSession:
         order: int = 0,
         max_lines: int | None = None,
         overflow: Overflow = "tail",
-    ) -> AsyncIterator[ThinkingContext]:
+    ) -> AsyncIterator[ThinkingBox]:
         """
-        Context manager for thinking operations.
-
-        Provides a more Pythonic way to manage thinking state with automatic
-        cleanup. Returns a ThinkingContext for content accumulation and
-        title control.
+        Context manager for thinking operations: yields a ThinkingBox and
+        finishes it when the block ends.
 
         Args:
             title: Optional title for the thinking separator.
@@ -718,28 +680,28 @@ class ThinkingPromptSession:
                 or "head" (first lines).
 
         Yields:
-            ThinkingContext: Content accumulator with title control.
+            ThinkingBox: the box, to write to and retitle.
 
         Example:
-            async with session.thinking(title="Processing") as ctx:
-                ctx.append("Working...\\n")
+            async with session.thinking(title="Processing") as box:
+                box.append("Working...\\n")
                 await asyncio.sleep(1)
-                ctx.set_title("Finishing")
-                ctx.append("Done!\\n")
+                box.set_title("Finishing")
+                box.append("Done!\\n")
 
             # Thinking is automatically finished when exiting the context
 
         Example with Rich-styled lines:
-            async with session.thinking() as ctx:
-                ctx.append_rich("[dim]  Step 1: Load data[/dim]\\n")
-                ctx.append_rich("[dim]  Step 2: Process[/dim]\\n")
+            async with session.thinking() as box:
+                box.append_rich("[dim]  Step 1: Load data[/dim]\\n")
+                box.append_rich("[dim]  Step 2: Process[/dim]\\n")
 
                 await do_step_1()
-                ctx.set_line_rich(0, "[green]✓ Step 1: Load data[/green]")
-                ctx.set_line_rich(1, "[bold]⟳ Step 2: Processing...[/bold]")
+                box.set_line_rich(0, "[green]✓ Step 1: Load data[/green]")
+                box.set_line_rich(1, "[bold]⟳ Step 2: Processing...[/bold]")
 
                 await do_step_2()
-                ctx.set_line_rich(1, "[green]✓ Step 2: Process[/green]")
+                box.set_line_rich(1, "[green]✓ Step 2: Process[/green]")
 
         Note:
             The box's content is kept however the block ends. If the block
@@ -747,7 +709,7 @@ class ThinkingPromptSession:
             content; if it raises, the exception propagates after the box
             is finished.
         """
-        ctx = self.start_thinking(
+        box = self.start_thinking(
             title=title,
             content_format=content_format,
             order=order,
@@ -755,15 +717,18 @@ class ThinkingPromptSession:
             overflow=overflow,
         )
         try:
-            yield ctx
+            yield box
         except asyncio.CancelledError:
-            ctx._cancel(add_to_history=add_to_history, echo_to_console=echo_to_console)
+            ended = self._manager.finish(
+                box, add_to_history=add_to_history, echo_to_console=echo_to_console
+            )
+            self._announce_cancel(ended)
             raise
         except BaseException:
-            ctx.finish(add_to_history=add_to_history, echo_to_console=echo_to_console)
+            box.finish(add_to_history=add_to_history, echo_to_console=echo_to_console)
             raise
         else:
-            ctx.finish(add_to_history=add_to_history, echo_to_console=echo_to_console)
+            box.finish(add_to_history=add_to_history, echo_to_console=echo_to_console)
 
     # =========================================================================
     # Chat History API

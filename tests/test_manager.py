@@ -1,5 +1,5 @@
 """
-Tests for ThinkingBoxManager and ManagedBox.
+Tests for ThinkingBoxManager and ThinkingBox.
 """
 from __future__ import annotations
 
@@ -8,7 +8,8 @@ import threading
 
 import pytest
 
-from thinking_prompt.manager import ManagedBox, ThinkingBoxManager
+from thinking_prompt.manager import ThinkingBoxManager
+from thinking_prompt.thinking_box import ThinkingBox
 from thinking_prompt.thinking_control import ThinkingBoxControl
 from thinking_prompt.layout import ThinkingHeader
 from thinking_prompt.streaming import StreamingContent
@@ -21,59 +22,59 @@ from tests.helpers import echoed, history_texts, make_display, make_manager
 
 
 class TestCreation:
-    """Test create_box returns ManagedBox with correct configuration."""
+    """Test create_box returns ThinkingBox with correct configuration."""
 
-    def test_create_box_returns_managed_box(self):
-        """create_box should return a ManagedBox instance."""
+    def test_create_box_returns_a_thinking_box(self):
+        """create_box should return a ThinkingBox instance."""
         mgr = make_manager()
         box = mgr.create_box(lambda: "hello")
-        assert isinstance(box, ManagedBox)
+        assert isinstance(box, ThinkingBox)
 
     def test_create_box_with_callback(self):
         """create_box with callback should use it in the control."""
         mgr = make_manager()
         box = mgr.create_box(lambda: "test content")
-        assert box.control.is_active
-        assert box.control.content == "test content"
+        assert box._control.is_active
+        assert box._control.content == "test content"
 
     def test_create_box_without_callback_creates_streaming_content(self):
         """create_box without callback should create StreamingContent internally."""
         mgr = make_manager()
         box = mgr.create_box()
-        assert box.streaming_content is not None
-        assert isinstance(box.streaming_content, StreamingContent)
-        assert box.control.is_active
+        assert box._content is not None
+        assert isinstance(box._content, StreamingContent)
+        assert box._control.is_active
 
     def test_create_box_without_callback_content_wired(self):
-        """StreamingContent created internally should be wired to the control."""
+        """The box's own content is what the control draws."""
         mgr = make_manager()
         box = mgr.create_box()
-        box.streaming_content.append("hello world")
-        assert box.control.content == "hello world"
+        box.append("hello world")
+        assert box._control.content == "hello world"
 
     def test_create_box_with_callback_no_streaming_content(self):
         """create_box with callback should not create StreamingContent."""
         mgr = make_manager()
         box = mgr.create_box(lambda: "x")
-        assert box.streaming_content is None
+        assert box._content is None
 
     def test_create_box_with_title_creates_header(self):
         """create_box with title should create a ThinkingHeader."""
         mgr = make_manager()
         box = mgr.create_box(lambda: "x", title="Processing")
-        assert box.header is not None
-        assert isinstance(box.header, ThinkingHeader)
-        assert box.header.text == "Processing"
+        assert box._header is not None
+        assert isinstance(box._header, ThinkingHeader)
+        assert box._header.text == "Processing"
 
     def test_create_box_without_title_no_header(self):
         """create_box without title should not create a header."""
         mgr = make_manager()
         box = mgr.create_box(lambda: "x")
-        assert box.header is None
+        assert box._header is None
 
     def test_headers_use_the_managers_spinner_settings(self):
         mgr = make_manager(spinner_frames=("a", "b"), spinner_position="after")
-        header = mgr.create_box(lambda: "x", title="T").header
+        header = mgr.create_box(lambda: "x", title="T")._header
         assert header.frames == ("a", "b")
         assert header.position == "after"
 
@@ -91,8 +92,8 @@ class TestCreation:
         )
         session.start_thinking(lambda: "x")
         (box,) = session._manager.get_sorted_boxes()
-        assert box.header.frames == ()
-        assert box.header.position == "after"
+        assert box._header.frames == ()
+        assert box._header.position == "after"
 
     def test_session_echo_thinking_off_keeps_boxes_off_the_console(self):
         from thinking_prompt import AppInfo, ThinkingPromptSession
@@ -106,28 +107,28 @@ class TestCreation:
         assert history_texts(session._display) == ["x\n\n"]
 
     def test_create_box_custom_order(self):
-        """create_box with order should set it on the ManagedBox."""
+        """create_box with order should set it on the ThinkingBox."""
         mgr = make_manager()
         box = mgr.create_box(lambda: "x", order=5)
-        assert box.order == 5
+        assert box._order == 5
 
     def test_create_box_default_order(self):
         """create_box without order should default to 0."""
         mgr = make_manager()
         box = mgr.create_box(lambda: "x")
-        assert box.order == 0
+        assert box._order == 0
 
     def test_create_box_custom_max_lines(self):
         """create_box with max_lines should override the default."""
         mgr = make_manager(default_max_lines=15)
         box = mgr.create_box(lambda: "x", max_lines=5)
-        assert box.control.max_collapsed_lines == 5
+        assert box._control.max_collapsed_lines == 5
 
     def test_create_box_default_max_lines(self):
         """create_box without max_lines should use the manager default."""
         mgr = make_manager(default_max_lines=20)
         box = mgr.create_box(lambda: "x")
-        assert box.control.max_collapsed_lines == 20
+        assert box._control.max_collapsed_lines == 20
 
     def test_create_box_forwards_expand_key_to_hint(self):
         """The truncation hint must name the manager's expand key.
@@ -138,7 +139,7 @@ class TestCreation:
         hint."""
         mgr = make_manager(default_max_lines=3, expand_key="c-x")
         box = mgr.create_box(lambda: "1\n2\n3\n4\n5", title="T")
-        hint = "".join(frag[1] for frag in box.control._get_formatted_text())
+        hint = "".join(frag[1] for frag in box._control._get_formatted_text())
         assert "ctrl-x" in hint
         assert "ctrl-t" not in hint
 
@@ -162,8 +163,8 @@ class TestCreation:
         mgr = make_manager()
         box = mgr.create_box(lambda: "x", title="T")
 
-        # box.container is HSplit([header_window, content_window]).
-        header_window = box.container.get_children()[0]
+        # box._container is HSplit([header_window, content_window]).
+        header_window = box._container.get_children()[0]
         get_text = header_window.content.text
 
         fake_app = MagicMock()
@@ -176,13 +177,13 @@ class TestCreation:
         """create_box with content_format should pass it to control.start()."""
         mgr = make_manager()
         box = mgr.create_box(lambda: "x", content_format="ansi")
-        assert box.control.content_format == "ansi"
+        assert box._control.content_format == "ansi"
 
     def test_create_box_has_container(self):
         """create_box should build a container."""
         mgr = make_manager()
         box = mgr.create_box(lambda: "x")
-        assert box.container is not None
+        assert box._container is not None
 
     def test_create_box_seq_increments(self):
         """Each created box should have an incrementing seq."""
@@ -190,7 +191,7 @@ class TestCreation:
         box1 = mgr.create_box(lambda: "a")
         box2 = mgr.create_box(lambda: "b")
         box3 = mgr.create_box(lambda: "c")
-        assert box1.seq < box2.seq < box3.seq
+        assert box1._seq < box2._seq < box3._seq
 
 
 # =============================================================================
@@ -251,7 +252,7 @@ class TestFinish:
         a = mgr.create_box(lambda: "a")
         b = mgr.create_box(lambda: "b")
         assert mgr.finish(a) is True
-        assert a.finished and not b.finished
+        assert a.is_finished and not b.is_finished
         assert mgr.get_sorted_boxes() == [b]
 
     def test_finishing_an_ended_box_does_nothing(self):
@@ -269,7 +270,7 @@ class TestFinishAll:
         a = mgr.create_box(lambda: "a", order=5)
         b = mgr.create_box(lambda: "b", order=1)
         assert mgr.finish_all() == [a, b]
-        assert a.finished and b.finished
+        assert a.is_finished and b.is_finished
 
     def test_finish_all_clears_boxes(self):
         mgr = make_manager()
@@ -292,13 +293,13 @@ class TestFinishOwnedBy:
         mine = mgr.create_box(lambda: "mine")
         threaded = await asyncio.to_thread(mgr.create_box, lambda: "thread")
 
-        async def open_and_return() -> ManagedBox:
+        async def open_and_return() -> ThinkingBox:
             return mgr.create_box(lambda: "ended")
 
         orphan = await asyncio.create_task(open_and_return())
 
         gate = asyncio.Event()
-        live: list[ManagedBox] = []
+        live: list[ThinkingBox] = []
 
         async def open_and_wait() -> None:
             live.append(mgr.create_box(lambda: "live"))
@@ -307,7 +308,7 @@ class TestFinishOwnedBy:
         task = asyncio.create_task(open_and_wait())
         await asyncio.sleep(0)
 
-        assert threaded.owner is None and orphan.owner.done()
+        assert threaded._owner is None and orphan._owner.done()
         assert mgr.finish_owned_by(asyncio.current_task()) == [mine, threaded, orphan]
         assert mgr.get_sorted_boxes() == live
         gate.set()
@@ -419,7 +420,7 @@ class TestExpandCollapse:
         mgr.create_box(lambda: "b")
         mgr.toggle_all()
         for box in mgr.get_sorted_boxes():
-            assert box.control.is_expanded
+            assert box._control.is_expanded
 
     def test_toggle_all_collapses_when_expanded(self):
         """toggle_all should collapse all boxes when currently expanded."""
@@ -429,7 +430,7 @@ class TestExpandCollapse:
         mgr.expand_all()
         mgr.toggle_all()
         for box in mgr.get_sorted_boxes():
-            assert not box.control.is_expanded
+            assert not box._control.is_expanded
 
     def test_expand_all(self):
         """expand_all should expand all boxes."""
@@ -438,7 +439,7 @@ class TestExpandCollapse:
         mgr.create_box(lambda: "b")
         mgr.expand_all()
         for box in mgr.get_sorted_boxes():
-            assert box.control.is_expanded
+            assert box._control.is_expanded
 
     def test_collapse_all(self):
         """collapse_all should collapse all boxes."""
@@ -448,7 +449,7 @@ class TestExpandCollapse:
         mgr.expand_all()
         mgr.collapse_all()
         for box in mgr.get_sorted_boxes():
-            assert not box.control.is_expanded
+            assert not box._control.is_expanded
 
     def test_new_box_inherits_expanded_state(self):
         """A new box should inherit the current expanded state."""
@@ -456,7 +457,7 @@ class TestExpandCollapse:
         mgr.create_box(lambda: "a")
         mgr.expand_all()
         box2 = mgr.create_box(lambda: "b")
-        assert box2.control.is_expanded
+        assert box2._control.is_expanded
 
     def test_new_box_inherits_collapsed_state(self):
         """A new box created when collapsed should remain collapsed."""
@@ -464,7 +465,7 @@ class TestExpandCollapse:
         mgr.create_box(lambda: "a")
         mgr.collapse_all()
         box2 = mgr.create_box(lambda: "b")
-        assert not box2.control.is_expanded
+        assert not box2._control.is_expanded
 
     def test_can_toggle_true_when_expanded(self):
         """can_toggle should return True when boxes are expanded."""
@@ -551,7 +552,7 @@ class TestCollapsedHeightUsesTerminalWidth:
         # whose .height is the get_height closure.
         box = manager.create_box(lambda: "x" * 80, title=None)
 
-        dim = box.container.height()
+        dim = box._container.height()
         # 80 chars at width 20 wrap to 4 display lines.
         assert dim.preferred == 4
 
@@ -559,7 +560,7 @@ class TestCollapsedHeightUsesTerminalWidth:
         manager = make_manager(default_max_lines=15)
         box = manager.create_box(lambda: "x" * 80, title=None)
 
-        dim = box.container.height()
+        dim = box._container.height()
         # Outside a running app the dummy app reports 80 columns:
         # a single 80-char line occupies exactly 1 display line.
         assert dim.preferred == 1
@@ -606,8 +607,8 @@ class TestBoxSizing:
 
     def test_overflow_defaults_to_tail(self):
         m = make_manager()
-        assert self._box(m, 1).control.overflow == "tail"
+        assert self._box(m, 1)._control.overflow == "tail"
 
     def test_overflow_head_reaches_the_control(self):
         m = make_manager()
-        assert self._box(m, 1, overflow="head").control.overflow == "head"
+        assert self._box(m, 1, overflow="head")._control.overflow == "head"

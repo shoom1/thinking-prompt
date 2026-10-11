@@ -157,7 +157,7 @@ class TestThinkingBoxControlThreadSafety:
 
         # 500 toggles: back where it started.
         assert not manager.is_expanded
-        assert not box.control.is_expanded
+        assert not box._control.is_expanded
 
     def test_concurrent_start_finish(self):
         """Starting and finishing should be thread-safe."""

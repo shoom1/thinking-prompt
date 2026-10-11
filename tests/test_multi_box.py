@@ -11,7 +11,7 @@ import warnings
 import pytest
 
 from thinking_prompt import ThinkingPromptSession, AppInfo
-from thinking_prompt.types import ThinkingContext
+from thinking_prompt import ThinkingBox
 
 
 def _make_session(**kwargs):
@@ -118,7 +118,7 @@ class TestMultiBoxOrdering:
         ctx3 = session.start_thinking(lambda: "mid", order=5)
 
         sorted_boxes = session._manager.get_sorted_boxes()
-        orders = [b.order for b in sorted_boxes]
+        orders = [b._order for b in sorted_boxes]
         assert orders == [1, 5, 10]
 
         ctx1.finish(add_to_history=False, echo_to_console=False)
@@ -135,7 +135,7 @@ class TestMultiBoxOrdering:
         sorted_boxes = session._manager.get_sorted_boxes()
         assert len(sorted_boxes) == 3
         # seq should be monotonically increasing
-        seqs = [b.seq for b in sorted_boxes]
+        seqs = [b._seq for b in sorted_boxes]
         assert seqs == sorted(seqs)
         assert seqs[0] < seqs[1] < seqs[2]
 
@@ -152,7 +152,7 @@ class TestMultiBoxOrdering:
         ctx_d = session.start_thinking(lambda: "d", order=1, title="D")
 
         sorted_boxes = session._manager.get_sorted_boxes()
-        titles = [b.header.text for b in sorted_boxes]
+        titles = [b._header.text for b in sorted_boxes]
         assert titles == ["B", "D", "A", "C"]
 
         ctx_a.finish(add_to_history=False, echo_to_console=False)
@@ -178,7 +178,7 @@ class TestMultiBoxExpandCollapse:
         session._manager.toggle_all()
 
         for box in session._manager.get_sorted_boxes():
-            assert box.control.is_expanded
+            assert box._control.is_expanded
 
         ctx1.finish(add_to_history=False, echo_to_console=False)
         ctx2.finish(add_to_history=False, echo_to_console=False)
@@ -193,7 +193,7 @@ class TestMultiBoxExpandCollapse:
         session._manager.toggle_all()
 
         for box in session._manager.get_sorted_boxes():
-            assert not box.control.is_expanded
+            assert not box._control.is_expanded
 
         ctx1.finish(add_to_history=False, echo_to_console=False)
         ctx2.finish(add_to_history=False, echo_to_console=False)
@@ -208,8 +208,8 @@ class TestMultiBoxExpandCollapse:
         ctx2 = session.start_thinking(lambda: "b")
         boxes = session._manager.get_sorted_boxes()
         # The new box should also be expanded
-        new_box = [b for b in boxes if b.control.content == "b"][0]
-        assert new_box.control.is_expanded
+        new_box = [b for b in boxes if b._control.content == "b"][0]
+        assert new_box._control.is_expanded
 
         ctx1.finish(add_to_history=False, echo_to_console=False)
         ctx2.finish(add_to_history=False, echo_to_console=False)
@@ -223,8 +223,8 @@ class TestMultiBoxExpandCollapse:
 
         ctx2 = session.start_thinking(lambda: "b")
         boxes = session._manager.get_sorted_boxes()
-        new_box = [b for b in boxes if b.control.content == "b"][0]
-        assert not new_box.control.is_expanded
+        new_box = [b for b in boxes if b._control.content == "b"][0]
+        assert not new_box._control.is_expanded
 
         ctx1.finish(add_to_history=False, echo_to_console=False)
         ctx2.finish(add_to_history=False, echo_to_console=False)
@@ -265,7 +265,7 @@ class TestMultiBoxBackwardCompat:
             add_to_history=False,
             echo_to_console=False,
         ) as ctx:
-            assert isinstance(ctx, ThinkingContext)
+            assert isinstance(ctx, ThinkingBox)
             assert session.is_thinking
             assert session._manager.active_count == 1
             ctx.append("step 1\n")
@@ -348,7 +348,7 @@ class TestSessionOverflow:
         s = self._session()
         async with s.thinking(max_lines=3, overflow="head", echo_to_console=True) as ctx:
             ctx.append(self._lines(10))
-            assert s._manager.get_sorted_boxes()[0].control.overflow == "head"
+            assert s._manager.get_sorted_boxes()[0]._control.overflow == "head"
         assert self._echoed(s) == ["line 0\nline 1\nline 2\n...\n"]
 
     def test_finishing_every_box_at_once_keeps_each_boxs_end(self):
