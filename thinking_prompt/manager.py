@@ -20,8 +20,9 @@ from prompt_toolkit.layout.dimension import Dimension as D
 
 from .frames import POLL_INTERVAL, FrameScheduler
 from .layout import ThinkingHeader
-from .thinking import ThinkingBoxControl
-from .types import ContentCallback, ContentFormat, Overflow, StreamingContent
+from .streaming import StreamingContent
+from .thinking_control import ThinkingBoxControl
+from .types import ContentCallback, ContentFormat, Overflow
 
 
 def _terminal_width(default: int = 80) -> int:

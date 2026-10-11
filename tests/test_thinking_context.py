@@ -8,7 +8,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from thinking_prompt.types import StreamingContent, ThinkingContext
+from thinking_prompt.streaming import StreamingContent
+from thinking_prompt.types import ThinkingContext
 
 
 # =============================================================================

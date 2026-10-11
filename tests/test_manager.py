@@ -8,9 +8,9 @@ import threading
 import pytest
 
 from thinking_prompt.manager import ManagedBox, ThinkingBoxManager
-from thinking_prompt.thinking import ThinkingBoxControl
+from thinking_prompt.thinking_control import ThinkingBoxControl
 from thinking_prompt.layout import ThinkingHeader
-from thinking_prompt.types import StreamingContent
+from thinking_prompt.streaming import StreamingContent
 
 
 # =============================================================================

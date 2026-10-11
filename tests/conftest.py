@@ -13,7 +13,7 @@ from prompt_toolkit.input import create_pipe_input
 from prompt_toolkit.output import DummyOutput
 
 from thinking_prompt import ThinkingPromptSession, ThinkingPromptStyles
-from thinking_prompt.thinking import ThinkingBoxControl
+from thinking_prompt.thinking_control import ThinkingBoxControl
 from thinking_prompt.history import FormattedTextHistory
 
 

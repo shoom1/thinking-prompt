@@ -52,6 +52,7 @@ from .settings_dialog import (
     SettingsItem,
     TextItem,
 )
+from .streaming import StreamingContent
 from .styles import (
     DEFAULT_STYLES,
     ThinkingPromptStyles,
@@ -62,7 +63,6 @@ from .types import (
     InputHandler,
     Overflow,
     Placement,
-    StreamingContent,
     ThinkingContext,
 )
 

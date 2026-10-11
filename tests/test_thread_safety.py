@@ -12,7 +12,7 @@ import pytest
 
 from thinking_prompt.history import FormattedTextHistory
 from thinking_prompt.manager import ThinkingBoxManager
-from thinking_prompt.thinking import ThinkingBoxControl
+from thinking_prompt.thinking_control import ThinkingBoxControl
 
 
 class TestFormattedTextHistoryThreadSafety:

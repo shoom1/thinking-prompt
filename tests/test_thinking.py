@@ -6,7 +6,7 @@ from __future__ import annotations
 import pytest
 from prompt_toolkit.formatted_text import FormattedText
 
-from thinking_prompt.thinking import ThinkingBoxControl
+from thinking_prompt.thinking_control import ThinkingBoxControl
 
 
 def _expanded_control(max_collapsed_lines: int = 5) -> ThinkingBoxControl:
@@ -404,3 +404,10 @@ class TestOverflowHead:
         content = "a\nb\nc\nd\n" + "x" * 15 + "\n"
         control.start(lambda: content)
         assert _rendered(control, 10, 5) == ["a", "b", "c", "d", "+1 line... ctrl-t to expand"]
+
+
+def test_the_control_lives_in_thinking_control():
+    import importlib.util
+
+    assert importlib.util.find_spec("thinking_prompt.thinking") is None
+    assert importlib.util.find_spec("thinking_prompt.thinking_control") is not None

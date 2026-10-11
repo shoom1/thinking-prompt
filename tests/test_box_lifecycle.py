@@ -11,7 +11,7 @@ from prompt_toolkit.keys import Keys
 
 from thinking_prompt import AppInfo, ThinkingPromptSession
 from thinking_prompt.manager import ThinkingBoxManager
-from thinking_prompt.thinking import ThinkingBoxControl
+from thinking_prompt.thinking_control import ThinkingBoxControl
 
 LONG = "\n".join(f"line {i}" for i in range(40))
 CANCELLED = "Operation cancelled...\n"
