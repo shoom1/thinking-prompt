@@ -16,7 +16,7 @@ from thinking_prompt import ThinkingBox
 
 def _make_session(**kwargs):
     """Create a minimal ThinkingPromptSession with test defaults."""
-    app_info = AppInfo(name="Test", version="0.0.1", thinking_text="Thinking")
+    app_info = AppInfo(name="Test", version="0.0.1")
     return ThinkingPromptSession(app_info=app_info, **kwargs)
 
 

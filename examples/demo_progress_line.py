@@ -75,16 +75,13 @@ class ProgressContent:
 
 
 async def main():
-    app_info = AppInfo(
-        name="ProgressDemo",
-        version="1.0.0",
-        echo_thinking=False,  # Don't echo thinking to console after completion
-    )
+    app_info = AppInfo(name="ProgressDemo", version="1.0.0")
 
     session = ThinkingPromptSession(
         app_info=app_info,
         message=">>> ",
         max_thinking_height=10,
+        echo_thinking=False,  # Don't echo thinking to console after completion
     )
 
     @session.on_input

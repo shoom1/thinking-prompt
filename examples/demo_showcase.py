@@ -116,9 +116,6 @@ async def main():
         name="ThinkingBox",
         version=__version__,
         welcome_message=create_welcome_message,
-        thinking_text="Processing",
-        spinner=Spinner.DOTS,
-        spinner_position="before",
     )
 
     # How the dialog commands draw their dialogs: "inline" (rows under the
@@ -132,6 +129,9 @@ async def main():
         app_info=app_info,
         message=">>> ",
         max_thinking_height=12,
+        thinking_title="Processing",
+        spinner=Spinner.DOTS,
+        spinner_position="before",
         completer=SlashCommandCompleter(),
         complete_while_typing=True,
         completions_menu_height=5,

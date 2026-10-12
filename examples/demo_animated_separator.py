@@ -5,108 +5,99 @@ Demo: Animated thinking separator.
 This demo showcases the configurable animated separator above the thinking box.
 Different animations can be configured: spinner (default), dots, arrows, etc.
 
+A session's header settings are fixed when it is created, so switching
+animation ends the session and starts a new one with the chosen settings.
+
 Run:
     python examples/demo_animated_separator.py
 """
+from __future__ import annotations
+
 import asyncio
 
 from thinking_prompt import ThinkingPromptSession, AppInfo, Spinner
 
+# Different animation configurations to demonstrate (session options)
+CONFIGS = [
+    {
+        "name": "Default (spinner)",
+        "options": {
+            # Default: thinking_title="Thinking"
+            # Default: spinner=Spinner.DOTS
+            # Default: spinner_position="before"
+        },
+    },
+    {
+        "name": "Dots after text",
+        "options": {
+            "thinking_title": "Processing",
+            "spinner": Spinner.ELLIPSIS,
+            "spinner_position": "after",
+        },
+    },
+    {
+        "name": "ASCII line",
+        "options": {
+            "thinking_title": "Working",
+            "spinner": Spinner.LINE,
+        },
+    },
+    {
+        "name": "Arrow animation (custom frames and speed)",
+        "options": {
+            "thinking_title": "Loading",
+            "spinner": Spinner(("→  ", " → ", "  →", " → "), interval=0.15),
+            "spinner_position": "after",
+        },
+    },
+    {
+        "name": "Just spinner (no text)",
+        "options": {
+            "thinking_title": "",  # No text
+            # Uses default spinner animation
+        },
+    },
+    {
+        "name": "Static text (no animation)",
+        "options": {
+            "thinking_title": "Working",
+            "spinner": None,  # No spinner
+        },
+    },
+]
 
-async def main():
-    # Different animation configurations to demonstrate
-    configs = [
-        {
-            "name": "Default (spinner)",
-            "app_info": AppInfo(
-                name="AnimatedDemo",
-                version="1.0.0",
-                # Default: thinking_text="Thinking"
-                # Default: spinner=Spinner.DOTS
-                # Default: spinner_position="before"
-            ),
-        },
-        {
-            "name": "Dots after text",
-            "app_info": AppInfo(
-                name="AnimatedDemo",
-                version="1.0.0",
-                thinking_text="Processing",
-                spinner=Spinner.ELLIPSIS,
-                spinner_position="after",
-            ),
-        },
-        {
-            "name": "ASCII line",
-            "app_info": AppInfo(
-                name="AnimatedDemo",
-                version="1.0.0",
-                thinking_text="Working",
-                spinner=Spinner.LINE,
-            ),
-        },
-        {
-            "name": "Arrow animation (custom frames and speed)",
-            "app_info": AppInfo(
-                name="AnimatedDemo",
-                version="1.0.0",
-                thinking_text="Loading",
-                spinner=Spinner(("→  ", " → ", "  →", " → "), interval=0.15),
-                spinner_position="after",
-            ),
-        },
-        {
-            "name": "Just spinner (no text)",
-            "app_info": AppInfo(
-                name="AnimatedDemo",
-                version="1.0.0",
-                thinking_text="",  # No text
-                # Uses default spinner animation
-            ),
-        },
-        {
-            "name": "Static text (no animation)",
-            "app_info": AppInfo(
-                name="AnimatedDemo",
-                version="1.0.0",
-                thinking_text="Working",
-                spinner=None,  # No spinner
-            ),
-        },
-    ]
 
-    current_config_idx = [0]  # Use list for mutable closure
-
-    def get_current_config():
-        return configs[current_config_idx[0]]
-
-    # Start with first config
-    config = get_current_config()
+async def run_config(index: int) -> int | None:
+    """Run a session with CONFIGS[index]; return the config to switch to,
+    or None when the user exits."""
+    config = CONFIGS[index]
     session = ThinkingPromptSession(
-        app_info=config["app_info"],
+        app_info=AppInfo(
+            name="AnimatedDemo",
+            version="1.0.0",
+            welcome_message=f"Animation {index + 1}/{len(CONFIGS)}: {config['name']}",
+        ),
         message=">>> ",
         max_thinking_height=5,
+        **config["options"],
     )
+    switch_to: list[int | None] = [None]  # Use list for mutable closure
 
     @session.on_input
     async def handle(user_input: str):
         """Process user input and show thinking animation."""
         cmd = user_input.strip().lower()
 
-        if cmd == "next":
-            # Cycle to next animation configuration
-            current_config_idx[0] = (current_config_idx[0] + 1) % len(configs)
-            session.add_message(
-                "system",
-                f"Switch to: {configs[current_config_idx[0]]['name']} "
-                "(restart to see change)"
-            )
+        if cmd == "next" or (cmd.isdigit() and 1 <= int(cmd) <= len(CONFIGS)):
+            # Restart with the chosen configuration
+            switch_to[0] = (index + 1) % len(CONFIGS) if cmd == "next" else int(cmd) - 1
+            session.exit()
             return
 
         if cmd == "list":
             session.add_message("system", "Available animation configs:")
-            for i, cfg in enumerate(configs):
-                marker = "→ " if i == current_config_idx[0] else "  "
+            for i, cfg in enumerate(CONFIGS):
+                marker = "→ " if i == index else "  "
                 session.add_message("system", f"  {marker}{i+1}. {cfg['name']}")
             return
 
@@ -116,19 +107,25 @@ async def main():
         # Demo the thinking animation
         async with session.thinking() as content:
             content.append("Starting process...\n")
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(1.0)
 
             for i in range(1, 6):
                 content.append(f"Step {i}/5: Processing data chunk\n")
-                await asyncio.sleep(0.3)
+                await asyncio.sleep(0.8)
 
             content.append("\nCompleted successfully!\n")
-            await asyncio.sleep(0.3)
+            await asyncio.sleep(1.0)
 
         session.add_success(f"Processed: {user_input}")
 
-    # Run the session
     await session.run_async()
+    return switch_to[0]
+
+
+async def main():
+    index: int | None = 0
+    while index is not None:
+        index = await run_config(index)
 
 
 if __name__ == "__main__":
@@ -137,6 +134,7 @@ if __name__ == "__main__":
     print("Type anything to see the animated thinking separator.")
     print("Commands:")
     print("  list - Show available animation configurations")
-    print("  next - Select next configuration (restart to apply)")
+    print("  next - Switch to the next configuration")
+    print(f"  1-{len(CONFIGS)}  - Switch to that configuration")
     print("Press Ctrl+C or Ctrl+D to exit.\n")
     asyncio.run(main())

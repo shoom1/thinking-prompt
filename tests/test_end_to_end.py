@@ -21,7 +21,6 @@ from prompt_toolkit.layout import BufferControl
 from prompt_toolkit.output import DummyOutput
 
 from thinking_prompt import (
-    AppInfo,
     ButtonConfig,
     CheckboxItem,
     ChecklistItem,
@@ -284,7 +283,6 @@ def on_screen(session: ThinkingPromptSession, text: str) -> bool:
     return any(text in line for line in screen_lines(session))
 
 
-STILL = AppInfo(name="t", spinner=None)  # boxes without a spinner
 
 
 class TestRedraws:
@@ -320,7 +318,7 @@ class TestRedraws:
             await run_with(session, lambda text: None, script)
 
     async def test_a_box_without_a_spinner_is_redrawn_only_when_written(self):
-        with piped_session(app_info=STILL) as (session, inp):
+        with piped_session(spinner=None) as (session, inp):
 
             async def script(run: asyncio.Task[None]) -> None:
                 ctx = session.start_thinking()
@@ -336,7 +334,7 @@ class TestRedraws:
             await run_with(session, lambda text: None, script)
 
     async def test_a_write_from_a_thread_shows(self):
-        with piped_session(app_info=STILL) as (session, inp):
+        with piped_session(spinner=None) as (session, inp):
 
             async def script(run: asyncio.Task[None]) -> None:
                 ctx = session.start_thinking()
@@ -350,7 +348,7 @@ class TestRedraws:
 
     async def test_a_box_fed_by_a_callback_is_polled_while_open(self):
         chunks: list[str] = []
-        with piped_session(app_info=STILL) as (session, inp):
+        with piped_session(spinner=None) as (session, inp):
 
             async def script(run: asyncio.Task[None]) -> None:
                 ctx = session.start_thinking(lambda: "".join(chunks))
@@ -388,7 +386,7 @@ class TestRedraws:
             await run_with(session, lambda text: None, script)
 
     async def test_fast_writes_are_capped_at_30_redraws_a_second(self):
-        with piped_session(app_info=STILL) as (session, inp):
+        with piped_session(spinner=None) as (session, inp):
 
             async def script(run: asyncio.Task[None]) -> None:
                 ctx = session.start_thinking()

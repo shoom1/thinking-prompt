@@ -89,7 +89,7 @@ class ThinkingBoxManager:
             expand_key: The key named in the overflow hint.
             frames: Asks for redraws (None: nothing asks).
             echo_thinking: Whether a finished box is printed to the console
-                when the finish call doesn't say (AppInfo.echo_thinking).
+                when the finish call doesn't say (the session's echo_thinking).
             spinner: The header spinner (None for none).
             spinner_position: The spinner "before" or "after" the title.
         """

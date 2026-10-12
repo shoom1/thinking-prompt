@@ -175,8 +175,7 @@ class TestRepaint:
         from prompt_toolkit.application.current import create_app_session
         from prompt_toolkit.output.defaults import create_output
 
-        s = ThinkingPromptSession(theme="dark", app_info=None)
-        s._fullscreen_enabled = True
+        s = ThinkingPromptSession(theme="dark", enable_fullscreen=True)
         s.app = MagicMock()
         s.app.is_running = True
         s.switch_to_fullscreen()
@@ -249,8 +248,7 @@ class TestRepaint:
         """session.clear() must reset _repaint_on_fullscreen_exit; otherwise
         a later fullscreen exit fires an unrequested repaint (renderer.clear
         + CSI 3J + reprint) instead of the normal flush_pending path."""
-        s = ThinkingPromptSession(theme="dark", app_info=None)
-        s._fullscreen_enabled = True
+        s = ThinkingPromptSession(theme="dark", enable_fullscreen=True)
         s.app = MagicMock()
         s.app.is_running = True
 

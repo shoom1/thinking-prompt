@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 import pytest
 from prompt_toolkit.keys import Keys
 
-from thinking_prompt import AppInfo, ThinkingPromptSession
+from thinking_prompt import ThinkingPromptSession
 from thinking_prompt.thinking_control import ThinkingBoxControl
 from tests.helpers import make_manager
 
@@ -106,7 +106,7 @@ class TestFullScreen:
         assert a._control.is_expanded
 
     def test_session_boxes_started_in_full_screen_are_expanded(self):
-        session = ThinkingPromptSession(app_info=AppInfo(name="t", fullscreen_enabled=True))
+        session = ThinkingPromptSession(enable_fullscreen=True)
         session.switch_to_fullscreen()
         session.start_thinking(lambda: LONG)
         (box,) = session._manager.get_sorted_boxes()

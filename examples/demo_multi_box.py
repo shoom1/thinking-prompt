@@ -11,11 +11,7 @@ from thinking_prompt import ThinkingPromptSession, AppInfo
 
 
 async def main():
-    app_info = AppInfo(
-        name="MultiBoxDemo",
-        version="1.0.0",
-        thinking_text="Thinking",
-    )
+    app_info = AppInfo(name="MultiBoxDemo", version="1.0.0")
     session = ThinkingPromptSession(app_info=app_info, message=">>> ")
 
     @session.on_input

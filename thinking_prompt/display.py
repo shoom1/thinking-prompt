@@ -359,11 +359,13 @@ class Display:
         Output welcome message content.
 
         Handles Rich renderables (Panel, Text, etc.) by converting to ANSI,
-        or plain text directly.
+        or plain text directly. Empty content ("" or None) prints nothing.
 
         Args:
             content: The welcome content (Rich renderable or string).
         """
+        if content is None or content == "":
+            return
         if _is_rich_renderable(content):
             self.rich(content)
         else:

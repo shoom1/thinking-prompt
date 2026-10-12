@@ -25,9 +25,9 @@ Example:
 
     asyncio.run(session.run_async())
 
-Key bindings (defaults, configurable via AppInfo):
+Key bindings (defaults; set expand_key/fullscreen_key on the session):
     Ctrl+T: Expand/collapse thinking box (in prompt mode)
-    Ctrl+E: Toggle fullscreen mode (when fullscreen_enabled=True)
+    Ctrl+E: Toggle fullscreen mode (with enable_fullscreen=True)
     Ctrl+C: Cancel current thinking or exit
     Ctrl+D: Exit application (empty input line only)
 """

@@ -5,7 +5,7 @@ import dataclasses
 
 import pytest
 
-from thinking_prompt import AppInfo, Spinner
+from thinking_prompt import Spinner
 
 BRAILLE = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
 
@@ -54,17 +54,3 @@ class TestPresets:
     def test_ellipsis(self):
         assert Spinner((".  ", ".. ", "..."), 0.3) == Spinner.ELLIPSIS
 
-
-class TestAppInfo:
-    def test_the_default_is_dots_before_the_title(self):
-        info = AppInfo(name="t")
-        assert info.spinner == Spinner.DOTS
-        assert info.spinner_position == "before"
-
-    def test_none_turns_the_spinner_off(self):
-        assert AppInfo(name="t", spinner=None).spinner is None
-
-    def test_the_animation_fields_are_gone(self):
-        names = {field.name for field in dataclasses.fields(AppInfo)}
-        assert "thinking_animation" not in names
-        assert "thinking_animation_position" not in names
