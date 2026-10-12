@@ -107,14 +107,14 @@ async def run_config(index: int) -> int | None:
         # Demo the thinking animation
         async with session.thinking() as content:
             content.append("Starting process...\n")
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(1.0)
 
             for i in range(1, 6):
                 content.append(f"Step {i}/5: Processing data chunk\n")
-                await asyncio.sleep(0.3)
+                await asyncio.sleep(0.8)
 
             content.append("\nCompleted successfully!\n")
-            await asyncio.sleep(0.3)
+            await asyncio.sleep(1.0)
 
         session.add_success(f"Processed: {user_input}")
 
