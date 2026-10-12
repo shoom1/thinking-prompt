@@ -11,7 +11,7 @@ from unittest.mock import MagicMock
 import pytest
 from prompt_toolkit.keys import Keys
 
-from thinking_prompt import AppInfo, ThinkingBox, ThinkingPromptSession, ThinkingPromptStyles
+from thinking_prompt import ThinkingBox, ThinkingPromptSession, ThinkingPromptStyles
 from thinking_prompt.frames import FrameScheduler
 from tests.helpers import history_texts, make_display, make_manager
 
@@ -19,7 +19,7 @@ NO_CONTENT = "shows a content callback's text"
 
 
 def _session() -> ThinkingPromptSession:
-    return ThinkingPromptSession(app_info=AppInfo(name="Test", thinking_text="Pondering"))
+    return ThinkingPromptSession(thinking_title="Pondering")
 
 
 def _fullscreen_session() -> ThinkingPromptSession:

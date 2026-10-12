@@ -239,7 +239,7 @@ class ThinkingBox:
         Args:
             add_to_history: If True, add the text to the chat history.
             echo_to_console: If True, print it to the console; None follows
-                ``AppInfo.echo_thinking``.
+                the session's ``echo_thinking``.
 
         Returns:
             The box's final text. Finishing again (or after the session

@@ -18,8 +18,8 @@ class Spinner:
     for a header without one.
 
     Example:
-        AppInfo(name="MyApp", spinner=Spinner.LINE)
-        AppInfo(name="MyApp", spinner=Spinner(("◐", "◓", "◑", "◒"), interval=0.15))
+        ThinkingPromptSession(spinner=Spinner.LINE)
+        ThinkingPromptSession(spinner=Spinner(("◐", "◓", "◑", "◒"), interval=0.15))
 
     Args:
         frames: The frames, in order (any sequence of strings; kept as a

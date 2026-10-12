@@ -17,18 +17,15 @@ from thinking_prompt import ThinkingPromptSession, AppInfo, Spinner
 
 
 async def main():
-    app_info = AppInfo(
-        name="TaskProgress",
-        version="1.0.0",
-        thinking_text="Working",
-        spinner=Spinner.DOTS,
-        spinner_position="before",
-        echo_thinking=False,
-    )
+    app_info = AppInfo(name="TaskProgress", version="1.0.0")
     session = ThinkingPromptSession(
         app_info=app_info,
         message=">>> ",
         max_thinking_height=12,
+        thinking_title="Working",
+        spinner=Spinner.DOTS,
+        spinner_position="before",
+        echo_thinking=False,
     )
 
     @session.on_input

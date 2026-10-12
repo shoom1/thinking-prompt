@@ -11,6 +11,7 @@ from thinking_prompt.display import (
     _markdown_to_ansi as markdown_to_ansi,
     _highlight_code as highlight_code,
 )
+from tests.helpers import echoed, make_display
 
 
 class TestIsRichRenderable:
@@ -425,6 +426,13 @@ class TestDisplayWelcome:
         display.welcome(FakeRenderable())
         # Should not raise and should add to history
         assert not display.history.is_empty
+
+    @pytest.mark.parametrize("content", ["", None])
+    def test_empty_content_prints_nothing(self, content):
+        display = make_display()
+        display.welcome(content)
+        assert display.history.is_empty
+        assert echoed(display) == []
 
 
 class TestDisplayFormatted:

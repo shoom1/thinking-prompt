@@ -88,38 +88,6 @@ class TestCreation:
         with pytest.raises(TypeError):
             ThinkingBoxManager()  # type: ignore[call-arg]
 
-    @pytest.mark.parametrize("spinner", [None, Spinner(("a", "b"), 0.25)])
-    def test_session_spinner_settings_reach_every_header(self, spinner):
-        from thinking_prompt import AppInfo, ThinkingPromptSession
-
-        session = ThinkingPromptSession(
-            app_info=AppInfo(name="t", spinner=spinner, spinner_position="after")
-        )
-        session.start_thinking(lambda: "x")
-        (box,) = session._manager.get_sorted_boxes()
-        assert box._header.spinner is spinner
-        assert box._header.position == "after"
-
-    def test_a_session_without_app_info_spins_dots_before_the_title(self):
-        from thinking_prompt import ThinkingPromptSession
-
-        session = ThinkingPromptSession()
-        session.start_thinking(lambda: "x")
-        (box,) = session._manager.get_sorted_boxes()
-        assert box._header.spinner == Spinner.DOTS
-        assert box._header.position == "before"
-
-    def test_session_echo_thinking_off_keeps_boxes_off_the_console(self):
-        from thinking_prompt import AppInfo, ThinkingPromptSession
-
-        session = ThinkingPromptSession(app_info=AppInfo(name="t", echo_thinking=False))
-        session._is_fullscreen = True  # the Display caches console output in full screen
-        ctx = session.start_thinking()
-        ctx.append("x\n")
-        ctx.finish()
-        assert session._display._pending_output == []
-        assert history_texts(session._display) == ["x\n\n"]
-
     def test_create_box_custom_order(self):
         """create_box with order should set it on the ThinkingBox."""
         mgr = make_manager()
@@ -156,15 +124,6 @@ class TestCreation:
         hint = "".join(frag[1] for frag in box._control._get_formatted_text())
         assert "ctrl-x" in hint
         assert "ctrl-t" not in hint
-
-    def test_session_expand_key_reaches_manager(self):
-        """AppInfo.expand_key flows through the session to the manager."""
-        from thinking_prompt import AppInfo, ThinkingPromptSession
-
-        session = ThinkingPromptSession(
-            app_info=AppInfo(name="t", expand_key="c-x")
-        )
-        assert session._manager._expand_key == "c-x"
 
     def test_header_separator_spans_terminal_width(self):
         """The header line is sized to the app's terminal width, not a

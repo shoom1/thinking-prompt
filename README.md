@@ -73,9 +73,12 @@ if __name__ == "__main__":
 | Key | Action |
 |-----|--------|
 | Ctrl+T | Expand/collapse all thinking boxes (while one is open, in prompt mode) |
-| Ctrl+E | Toggle fullscreen mode (when enabled) |
+| Ctrl+E | Toggle fullscreen mode (with `enable_fullscreen=True`) |
 | Ctrl+C | Cancel current operation or exit |
 | Ctrl+D | Exit application (empty input line only) |
+
+Rebind the first two with `expand_key=` and `fullscreen_key=` (see
+[Session Options](#session-options)).
 
 ## API Reference
 
@@ -86,7 +89,7 @@ The main class for creating a thinking-enabled prompt session.
 ```python
 session = ThinkingPromptSession(
     message=">>> ",              # Prompt message
-    app_info=AppInfo(...),       # App metadata and configuration
+    app_info=AppInfo(...),       # Startup banner (none without it)
     max_thinking_height=15,      # Max lines when collapsed
     enable_status_bar=True,      # Show status bar
     echo_input=True,             # Echo user input to console
@@ -94,6 +97,9 @@ session = ThinkingPromptSession(
     completions_menu_height=6,   # Max rows in completions popup
 )
 ```
+
+Every argument after `message` is keyword-only. Full screen, keys and the
+thinking header are under [Session Options](#session-options).
 
 ### Thinking API
 
@@ -161,7 +167,7 @@ idle prompt costs no CPU:
   redraw right away, from any thread; fast streams are capped at 30
   redraws a second.
 - A spinner redraws at each frame (10 a second for the default) while its
-  box is shown; `AppInfo(spinner=None)` turns the spinner off.
+  box is shown; `ThinkingPromptSession(spinner=None)` turns the spinner off.
 - Text that can't say when it changes is re-read every 0.1 s while it's
   shown: a content callback passed to `start_thinking()`, and a prompt
   `message` or `status_text` given as a callable.
@@ -495,33 +501,46 @@ result = await session.show_settings_dialog(
 )
 ```
 
-### AppInfo Configuration
+### Session Options
 
 ```python
-from thinking_prompt import AppInfo, Spinner
+from thinking_prompt import Spinner, ThinkingPromptSession
 
-app_info = AppInfo(
-    name="MyApp",
-    version="1.0.0",
-    welcome_message="Welcome to MyApp!",  # Optional custom welcome
+session = ThinkingPromptSession(
+    # Full screen and keys
+    enable_fullscreen=False,     # Let fullscreen_key show the transcript full screen
+    fullscreen_key="c-e",        # Ctrl+E toggles full screen
+    expand_key="c-t",            # Ctrl+T expands/collapses thinking boxes
 
-    # Key bindings
-    fullscreen_key="c-e",        # Ctrl+E for fullscreen
-    expand_key="c-t",            # Ctrl+T for expand/collapse
-
-    # Feature flags
-    fullscreen_enabled=False,    # Enable fullscreen mode
-    echo_thinking=True,          # Echo thinking to console after completion
-
-    # Thinking header
-    thinking_text="Thinking",    # Text in header
+    # Thinking boxes
+    thinking_title="Thinking",   # Header title of boxes started without one
     spinner=Spinner.DOTS,        # Spinner.LINE, Spinner.ELLIPSIS, your own, or None
-    spinner_position="before",   # "before" or "after" text
+    spinner_position="before",   # "before" or "after" the title
+    echo_thinking=True,          # Echo a finished box to the console
 )
 ```
 
 A `Spinner` is its frames and the seconds each is shown:
 `Spinner(("◐", "◓", "◑", "◒"), interval=0.15)`. One frame makes a static mark.
+
+### AppInfo
+
+The banner printed when the session starts:
+
+```python
+from thinking_prompt import AppInfo
+
+app_info = AppInfo(
+    name="MyApp",
+    version="1.0.0",
+    welcome_message="Welcome to MyApp!",  # Optional; replaces the name/version box
+)
+session = ThinkingPromptSession(app_info=app_info)
+```
+
+`welcome_message` can also be a callable returning a string or a Rich
+renderable. Leave `app_info` out for no banner. An empty message (`""`, or a
+callable returning `""` or `None`) prints nothing.
 
 ## Theming
 

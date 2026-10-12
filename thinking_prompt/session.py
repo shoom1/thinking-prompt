@@ -72,7 +72,7 @@ class ThinkingPromptSession:
     - A thinking box that appears above the input during processing
     - Expand/collapse of thinking boxes (Ctrl+T by default)
     - Optional fullscreen mode showing the chat history (Ctrl+E by default,
-      when AppInfo.fullscreen_enabled is set)
+      with enable_fullscreen=True)
 
     The handler decides whether to show a thinking box: start one with
     start_thinking() or the thinking() context manager, and write to it.
@@ -102,6 +102,7 @@ class ThinkingPromptSession:
     def __init__(
         self,
         message: AnyFormattedText = ">>> ",
+        *,
         app_info: AppInfo | None = None,
         theme: str | ThinkingPromptStyles | None = None,
         history: History | None = None,
@@ -109,10 +110,17 @@ class ThinkingPromptSession:
         complete_while_typing: bool = False,
         completions_menu_height: int = 5,
         editing_mode: EditingMode = EditingMode.EMACS,
-        max_thinking_height: int = 15,
         enable_status_bar: bool = True,
         status_text: AnyFormattedText = "Ctrl+C: cancel | Ctrl+D: exit",
+        enable_fullscreen: bool = False,
+        fullscreen_key: str = "c-e",
+        expand_key: str = "c-t",
+        max_thinking_height: int = 15,
+        thinking_title: str = "Thinking",
+        spinner: Spinner | None = Spinner.DOTS,
+        spinner_position: Literal["before", "after"] = "before",
         echo_input: bool = True,
+        echo_thinking: bool = True,
         history_limit: int | None = None,
         dialog_placement: Placement = "box",
     ) -> None:
@@ -120,8 +128,10 @@ class ThinkingPromptSession:
         Initialize the ThinkingPromptSession.
 
         Args:
-            message: The prompt message to display.
-            app_info: Application info (name, version, welcome message).
+            message: The prompt message to display. Every other argument
+                is keyword-only.
+            app_info: The banner printed at startup (name, version, welcome
+                message). None (default): no banner.
             theme: Theme name ('dark', 'light', 'mono', 'terminal', 'auto') or
                    ThinkingPromptStyles instance. Default: 'dark'.
             history: History object for input history.
@@ -129,10 +139,25 @@ class ThinkingPromptSession:
             complete_while_typing: Show completions automatically while typing.
             completions_menu_height: Maximum height of completions dropdown menu.
             editing_mode: Editing mode (EMACS or VI).
-            max_thinking_height: Max lines for collapsed thinking box (must be >= 2).
             enable_status_bar: Whether to show status bar.
             status_text: Text to display in status bar.
+            enable_fullscreen: Let fullscreen_key switch to a full-screen
+                view of the transcript. Default: off.
+            fullscreen_key: Toggles full screen (prompt_toolkit key name).
+                Default: "c-e" (Ctrl+E).
+            expand_key: Expands/collapses thinking boxes in prompt mode.
+                Default: "c-t" (Ctrl+T).
+            max_thinking_height: Max lines for collapsed thinking box (must be >= 2).
+            thinking_title: Header title of boxes started without one.
+                "" for none.
+            spinner: The thinking header's spinner: a preset such as
+                ``Spinner.LINE``, your own ``Spinner(frames, interval)``,
+                or None for none. Default: ``Spinner.DOTS``.
+            spinner_position: The spinner "before" (default) or "after" the
+                title.
             echo_input: Whether to echo user input to console before thinking.
+            echo_thinking: Whether a finished box's text is printed to the
+                console when its finish call doesn't say. Default: True.
             history_limit: Max transcript entries kept for fullscreen history
                           and repaint; oldest trimmed. None = unbounded.
             dialog_placement: How dialogs are drawn unless they say otherwise:
@@ -149,6 +174,7 @@ class ThinkingPromptSession:
 
         self._message = message
         self._app_info = app_info
+        self._thinking_title = thinking_title
         check_placement(dialog_placement)
         self._dialog_placement: Placement = dialog_placement
 
@@ -191,10 +217,9 @@ class ThinkingPromptSession:
             history_limit=history_limit,
         )
 
-        # Get key bindings and feature flags from app_info or use defaults
-        self._fullscreen_key = app_info.fullscreen_key if app_info else "c-e"
-        self._expand_key = app_info.expand_key if app_info else "c-t"
-        self._fullscreen_enabled = app_info.fullscreen_enabled if app_info else False
+        self._fullscreen_key = fullscreen_key
+        self._expand_key = expand_key
+        self._fullscreen_enabled = enable_fullscreen
 
         # Redraws on demand: writes redraw now, animations ask for their
         # next frame; nothing redraws on a timer (see _create_application).
@@ -208,9 +233,9 @@ class ThinkingPromptSession:
             default_max_lines=max_thinking_height,
             expand_key=self._expand_key,
             frames=self._frames,
-            echo_thinking=app_info.echo_thinking if app_info else True,
-            spinner=app_info.spinner if app_info else Spinner.DOTS,
-            spinner_position=app_info.spinner_position if app_info else "before",
+            echo_thinking=echo_thinking,
+            spinner=spinner,
+            spinner_position=spinner_position,
         )
 
         # Input history (for up/down arrow)
@@ -329,9 +354,6 @@ class ThinkingPromptSession:
 
     def _create_session_layout(self) -> Any:
         """Create the layout using the layout module."""
-        self._default_thinking_text = (
-            self._app_info.thinking_text if self._app_info else "Thinking"
-        )
         return create_layout(
             default_buffer=self.default_buffer,
             message=lambda: self._polled(self._message),
@@ -596,8 +618,8 @@ class ThinkingPromptSession:
         Args:
             content_callback: Returns the text to show. If None, the box
                 holds its own text, which you write.
-            title: Title on the box's header line (default:
-                ``AppInfo.thinking_text``).
+            title: Title on the box's header line (default: the session's
+                ``thinking_title``).
             order: Sort key for multiple boxes (higher = closer to prompt).
             max_lines: Max collapsed lines (overrides session default).
             content_format: Format for rendering ("plain" or "ansi").
@@ -619,7 +641,7 @@ class ThinkingPromptSession:
         """
         return self._manager.create_box(
             content_callback,
-            title=title if title is not None else self._default_thinking_text,
+            title=title if title is not None else self._thinking_title,
             order=order,
             max_lines=max_lines,
             content_format=content_format,
@@ -668,7 +690,7 @@ class ThinkingPromptSession:
             add_to_history: If True, add thinking content to chat history
                 when exiting the context.
             echo_to_console: If True, print thinking content to console.
-                            If None (default), uses AppInfo.echo_thinking setting.
+                            If None (default), uses the session's echo_thinking.
             order: Sort key for multiple boxes (higher = closer to prompt).
             max_lines: Max collapsed lines (overrides session default).
             overflow: Which end of overflowing content stays visible, in

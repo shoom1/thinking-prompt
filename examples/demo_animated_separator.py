@@ -14,64 +14,52 @@ from thinking_prompt import ThinkingPromptSession, AppInfo, Spinner
 
 
 async def main():
-    # Different animation configurations to demonstrate
+    # Different animation configurations to demonstrate (session options)
     configs = [
         {
             "name": "Default (spinner)",
-            "app_info": AppInfo(
-                name="AnimatedDemo",
-                version="1.0.0",
-                # Default: thinking_text="Thinking"
+            "options": {
+                # Default: thinking_title="Thinking"
                 # Default: spinner=Spinner.DOTS
                 # Default: spinner_position="before"
-            ),
+            },
         },
         {
             "name": "Dots after text",
-            "app_info": AppInfo(
-                name="AnimatedDemo",
-                version="1.0.0",
-                thinking_text="Processing",
-                spinner=Spinner.ELLIPSIS,
-                spinner_position="after",
-            ),
+            "options": {
+                "thinking_title": "Processing",
+                "spinner": Spinner.ELLIPSIS,
+                "spinner_position": "after",
+            },
         },
         {
             "name": "ASCII line",
-            "app_info": AppInfo(
-                name="AnimatedDemo",
-                version="1.0.0",
-                thinking_text="Working",
-                spinner=Spinner.LINE,
-            ),
+            "options": {
+                "thinking_title": "Working",
+                "spinner": Spinner.LINE,
+            },
         },
         {
             "name": "Arrow animation (custom frames and speed)",
-            "app_info": AppInfo(
-                name="AnimatedDemo",
-                version="1.0.0",
-                thinking_text="Loading",
-                spinner=Spinner(("→  ", " → ", "  →", " → "), interval=0.15),
-                spinner_position="after",
-            ),
+            "options": {
+                "thinking_title": "Loading",
+                "spinner": Spinner(("→  ", " → ", "  →", " → "), interval=0.15),
+                "spinner_position": "after",
+            },
         },
         {
             "name": "Just spinner (no text)",
-            "app_info": AppInfo(
-                name="AnimatedDemo",
-                version="1.0.0",
-                thinking_text="",  # No text
+            "options": {
+                "thinking_title": "",  # No text
                 # Uses default spinner animation
-            ),
+            },
         },
         {
             "name": "Static text (no animation)",
-            "app_info": AppInfo(
-                name="AnimatedDemo",
-                version="1.0.0",
-                thinking_text="Working",
-                spinner=None,  # No spinner
-            ),
+            "options": {
+                "thinking_title": "Working",
+                "spinner": None,  # No spinner
+            },
         },
     ]
 
@@ -83,9 +71,10 @@ async def main():
     # Start with first config
     config = get_current_config()
     session = ThinkingPromptSession(
-        app_info=config["app_info"],
+        app_info=AppInfo(name="AnimatedDemo", version="1.0.0"),
         message=">>> ",
         max_thinking_height=5,
+        **config["options"],
     )
 
     @session.on_input

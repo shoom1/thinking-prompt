@@ -6,18 +6,17 @@ Provides AppInfo dataclass for app metadata and welcome message.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, Literal
-
-from .spinner import Spinner
+from typing import Any, Callable
 
 
 @dataclass
 class AppInfo:
     """
-    Application information displayed at startup.
+    The banner printed when the session starts: the app's name and version,
+    or your own welcome message. Without an AppInfo there is no banner.
 
-    Provides app metadata and optional welcome message that is printed
-    when the session starts.
+    Behavior (full screen, keys, the thinking header) is set on
+    ThinkingPromptSession itself.
 
     Example:
         # Simple usage - auto-generates welcome box
@@ -54,62 +53,12 @@ class AppInfo:
             welcome_message=lambda: Markdown("# MyApp\\n\\n**Welcome!**"),
         )
 
-        # Custom key bindings
-        app_info = AppInfo(
-            name="MyApp",
-            version="1.0.0",
-            fullscreen_key="c-f",  # Ctrl+F for fullscreen
-            expand_key="c-x",      # Ctrl+X for expand/collapse
-        )
-
-        # Enable fullscreen mode (disabled by default)
-        app_info = AppInfo(
-            name="MyApp",
-            version="1.0.0",
-            fullscreen_enabled=True,
-        )
-
-        # Custom thinking spinner
-        app_info = AppInfo(
-            name="MyApp",
-            version="1.0.0",
-            thinking_text="Processing",
-            spinner=Spinner.ELLIPSIS,
-            spinner_position="after",
-        )
-
         session = ThinkingPromptSession(app_info=app_info)
     """
 
     name: str
     version: str | None = None
     welcome_message: str | Callable[[], Any] | None = None
-
-    # Key bindings (prompt_toolkit format, e.g., "c-e" for Ctrl+E)
-    fullscreen_key: str = "c-e"
-    """Key binding to toggle fullscreen mode. Default: Ctrl+E"""
-
-    expand_key: str = "c-t"
-    """Key binding to expand/collapse thinking box (prompt mode only). Default: Ctrl+T"""
-
-    # Feature flags
-    fullscreen_enabled: bool = False
-    """Enable fullscreen mode toggle. When False (default), only thinking box
-    expand/collapse in prompt mode is available. Ctrl+E has no effect."""
-
-    # Thinking header settings
-    thinking_text: str = "Thinking"
-    """Text shown in the thinking separator. Set to empty string for no text."""
-
-    spinner: Spinner | None = Spinner.DOTS
-    """The thinking header's spinner: a preset such as ``Spinner.LINE``, your
-    own ``Spinner(frames, interval)``, or None for no spinner."""
-
-    spinner_position: Literal["before", "after"] = "before"
-    """Position of the spinner relative to text: 'before' (default) or 'after'."""
-
-    echo_thinking: bool = True
-    """Whether to print thinking content to console after completion. Default: True."""
 
     def get_welcome_content(self) -> Any:
         """
@@ -120,6 +69,7 @@ class AppInfo:
 
         Returns:
             The welcome content - can be a string or a Rich renderable.
+            Nothing is printed for "" (or a callable returning "" or None).
         """
         if self.welcome_message is not None:
             if callable(self.welcome_message):
