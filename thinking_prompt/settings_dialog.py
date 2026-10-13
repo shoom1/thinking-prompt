@@ -149,16 +149,26 @@ def _columns(fragments: Sequence[tuple[str, str]]) -> int:
 class _RowValue:
     """A row's value as ``_layout_row`` takes it: its text, the field it
     normally takes (``left``- or right-justified), and the decoration
-    fragments around the field."""
+    fragments around the field. ``lead`` and ``trail`` are blank padding
+    columns (in the value's style) beside it: unlike decoration, they give
+    way, down to nothing, before the text is cut."""
     text: str
     style: str
     field: int
     left: bool = True
     before: tuple[tuple[str, str], ...] = ()
     after: tuple[tuple[str, str], ...] = ()
+    lead: int = 0
+    trail: int = 0
 
     def fragments(self, layout: _RowLayout) -> list[tuple[str, str]]:
-        return [*self.before, (self.style, layout.text), *self.after]
+        return [
+            *self.before,
+            (self.style, " " * layout.lead),
+            (self.style, layout.text),
+            (self.style, " " * layout.trail),
+            *self.after,
+        ]
 
 
 @dataclass(frozen=True)
@@ -167,6 +177,8 @@ class _RowLayout:
     column: int  # where the value starts, its decoration included
     field: int   # the field width used
     text: str    # the value text as drawn, padded to the field
+    lead: int = 0   # the value's leading padding as drawn
+    trail: int = 0  # the trailing padding as drawn
 
 
 def _layout_row(
@@ -185,10 +197,12 @@ def _layout_row(
     2. the value in full at the right edge (the row's last column but
        one), the label cut to fit before it, down to 3 columns;
     3. the label at 3 columns, the field shrunk to what is left, down to
-       ``min_field`` (default: the text's width);
+       ``min_field`` (default: the text's width), then the padding;
     4. the value text cut with "…" to what is left, at least 1 column.
 
-    The decoration stays throughout. Past that the row is clipped. A
+    The decoration stays throughout; the value's blank padding (``lead``,
+    ``trail``) is kept while the row has room and shrinks, down to nothing,
+    before the text is cut. Past that the row is clipped. A
     ``min_field`` beyond the text (an edited field) is kept by cutting the
     label below 3 columns first.
     """
@@ -196,25 +210,31 @@ def _layout_row(
     text_width = get_cwidth(value.text)
     minimum = text_width if min_field is None else min_field
     decoration = _columns(value.before) + _columns(value.after)
+    padding = value.lead + value.trail
     edge = width - 1
     keep = min(3, get_cwidth(label))
     full = max(value.field, text_width)
 
-    def laid_out(label: str, start: int, field: int) -> _RowLayout:
+    def laid_out(label: str, start: int, field: int, lead: int = 0, trail: int = 0) -> _RowLayout:
         text = _justify(_cut(value.text, field), field, value.left)
-        return _RowLayout(label, start, field, text)
+        return _RowLayout(label, start, field, text, lead, trail)
 
-    if column is not None and column + decoration + full <= edge:
-        return laid_out(_cut(label, column - marker - 1), column, full)
-    start = edge - decoration - full
+    if column is not None and column + decoration + padding + full <= edge:
+        return laid_out(_cut(label, column - marker - 1), column, full, value.lead, value.trail)
+    start = edge - decoration - padding - full
     if start - marker - 1 >= keep:
-        return laid_out(_cut(label, start - marker - 1), start, full)
+        return laid_out(_cut(label, start - marker - 1), start, full, value.lead, value.trail)
     label = _cut(label, keep)
     start = marker + get_cwidth(label) + 1
     if edge - start - decoration < minimum and minimum > text_width:
         label = _cut(label, max(1, edge - decoration - minimum - marker - 1))
         start = marker + get_cwidth(label) + 1
-    return laid_out(label, start, max(1, edge - start - decoration))
+    left = edge - start - decoration
+    # The padding gives way once the field is down to its minimum.
+    kept = max(0, min(padding, left - minimum))
+    trail = min(value.trail, kept)
+    lead = kept - trail
+    return laid_out(label, start, max(1, left - kept), lead, trail)
 
 
 def _cycled(options: list[str], value: Any, delta: int) -> Any:
@@ -235,16 +255,24 @@ def _cycled(options: list[str], value: Any, delta: int) -> Any:
 
 def _selector_value(options: list[str], value: Any, value_style: str) -> _RowValue:
     """``◀ value ▶``: the arrows layer class:select-arrow over the value
-    style; at either end the missing arrow's place is kept blank."""
+    style; at either end the missing arrow's place is kept blank, as
+    padding that gives way before the option is cut."""
     try:
         idx = options.index(value)
     except ValueError:
         idx = 0
     arrow_style = f"{value_style} class:select-arrow"
-    left = (value_style, "  ") if idx == 0 else (arrow_style, "◀ ")
-    right = (value_style, "  ") if idx == len(options) - 1 else (arrow_style, " ▶")
+    first, last = idx == 0, idx == len(options) - 1
     text = str(value) if value else ""
-    return _RowValue(text, value_style, get_cwidth(text), before=(left,), after=(right,))
+    return _RowValue(
+        text,
+        value_style,
+        get_cwidth(text),
+        before=() if first else ((arrow_style, "◀ "),),
+        after=() if last else ((arrow_style, " ▶"),),
+        lead=2 if first else 0,
+        trail=2 if last else 0,
+    )
 
 
 class SettingControl(RowControl, ABC, Generic[T]):
@@ -345,7 +373,6 @@ class SettingControl(RowControl, ABC, Generic[T]):
         width: int,
         value: _RowValue,
         is_selected: bool,
-        min_field: int | None = None,
     ) -> list[FormattedText]:
         """Build the standard setting row with optional description.
 
@@ -357,7 +384,7 @@ class SettingControl(RowControl, ABC, Generic[T]):
         indicator_style = "class:setting-indicator" if is_selected else ""
         label_style = "class:setting-label-selected" if is_selected else "class:setting-label"
 
-        layout = _layout_row(width, self._item.label, self._value_column, value, min_field)
+        layout = _layout_row(width, self._item.label, self._value_column, value)
         padding = max(1, layout.column - get_cwidth(indicator) - get_cwidth(layout.label))
 
         row: list[tuple[str, str]] = [
@@ -618,7 +645,7 @@ class DropdownControl(SettingControl[DropdownItem]):
             # The menu floats under the value, where this row draws it
             # (get_float). prompt_toolkit's menu position counts characters
             # into the line, not terminal columns: those drawn ahead of it.
-            drawn = len(value.before) + 1 + len(value.after)
+            drawn = 2 + len(value.after)
             ahead = lines[0][: len(lines[0]) - drawn]
             menu_position = Point(x=sum(len(text) for _, text, *_ in ahead), y=0)
 

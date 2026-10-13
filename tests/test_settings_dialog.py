@@ -973,7 +973,20 @@ class TestRowsShortOfWidth:
         control = _dropdown(label="Model name", default="o1")
         control.set_inline(True)
         assert _row(control, 14, width=24) == "  Model name  ◀ o1  "
-        assert _row(control, None, width=12) == "  Mo… ◀ …  "
+        assert _row(control, None, width=12) == "  Mo… ◀ o1 "
+
+    def test_a_missing_arrows_blank_place_gives_way_before_the_option_is_cut(self):
+        # Last option: no ▶, so the blank after it shrinks first.
+        last = _selector(options=("a", "gpt-4o", "z"), default="z")
+        assert _row(last, 14, width=40) == "  Model name  ◀ z  "
+        assert _row(last, None, width=12) == "  Mo… ◀ z  "
+        # First option: no ◀, so the blank before it shrinks first.
+        first = _selector(options=("a", "gpt-4o", "z"), default="a")
+        assert _row(first, 14, width=40) == "  Model name    a ▶"
+        assert _row(first, None, width=10) == "  Mo… a ▶"
+        # The visible arrow stays; only then is the option cut.
+        control = _selector(options=("gpt-4o-mini", "z"), default="gpt-4o-mini")
+        assert _row(control, None, width=12) == "  Mo… gp… ▶"
 
     # Box dropdown: padded to its width, ▼ after.
     def test_dropdown_in_full_at_the_column(self):
