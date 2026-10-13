@@ -1410,7 +1410,8 @@ class ThinkingPromptSession:
             title: Dialog title.
             text: Dialog body text.
             options: List of options to choose from.
-            default: Default selected option (optional).
+            default: The option selected, with the cursor on it, when the
+                dialog opens (optional; the first option otherwise).
             placement: "box" or "inline"; None (default) uses the session's
                 dialog_placement.
 

@@ -216,6 +216,10 @@ class TestBuiltinDialogs:
     def test_dropdown_without_default_selects_first(self):
         assert _click(_dropdown_dialog("Theme", "Select:", ["Light", "Dark"]), 0) == "Light"
 
+    def test_dropdown_with_a_default_that_is_not_an_option_selects_first(self):
+        d = _dropdown_dialog("Theme", "Select:", ["Light", "Dark"], default="Blue")
+        assert _click(d, 0) == "Light"
+
     def test_dropdown_needs_at_least_one_option(self):
         with pytest.raises(ValueError, match="at least one option"):
             _dropdown_dialog("Theme", "Select:", [])

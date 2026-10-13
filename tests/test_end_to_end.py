@@ -744,6 +744,24 @@ class TestDialogsEndToEnd:
 
             await run_with(session, handler, script)
 
+    async def test_box_dropdown_starts_on_the_default(self):
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.dropdown_dialog(
+                "Theme", "Pick:", ["Light", "Dark", "System"], default="Dark"
+            ))
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                inp.send_text(DOWN + ENTER + TAB + ENTER)  # the one after "Dark", then OK
+                await wait_until(lambda: results == ["System"])
+
+            await run_with(session, handler, script)
+
     async def test_keys_pressed_before_first_render_dont_break_navigation(self):
         """Keys pressed in the instant between a dialog opening and its first
         render (typed ahead) reach the focused control, and don't break the

@@ -376,7 +376,7 @@ def _dropdown_dialog(
     """Pick one option; Cancel and Escape return None.
 
     Box: a radio list with OK / Cancel. Inline: one numbered action per
-    option, with the cursor starting on ``default``.
+    option. Either way the cursor starts on ``default``.
     """
     if not options:
         raise ValueError("dropdown_dialog() needs at least one option")
@@ -388,9 +388,9 @@ def _dropdown_dialog(
             placement="inline",
         )
 
-    radio: RadioList[str] = RadioList(values=[(opt, opt) for opt in options])
-    if default is not None and default in options:
-        radio.current_value = default
+    # default= also puts the cursor there (setting current_value afterwards
+    # left it on the first option); one that isn't an option picks the first.
+    radio: RadioList[str] = RadioList(values=[(opt, opt) for opt in options], default=default)
 
     dialog = Dialog(title, HSplit([Label(text=text), radio]), placement="box")
     # Buttons set after construction: OK's handler needs the dialog itself.
