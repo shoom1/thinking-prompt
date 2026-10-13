@@ -1608,7 +1608,9 @@ class ThinkingPromptSession:
                    - positive int: minimum width (default 60)
                    - -1: maximum width (stretch to fill)
             top: Vertical position:
-                   - None: center (default)
+                   - None: outside full screen, under the prompt over
+                     the rows reserved for it (centered if those are
+                     squeezed); centered in full screen (default)
                    - 0 or positive: offset from top
                    - negative: offset from bottom (e.g., -1 = 1 row from bottom)
             max_height: The most rows the dialog takes; settings beyond it

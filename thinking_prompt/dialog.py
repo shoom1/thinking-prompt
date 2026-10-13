@@ -138,7 +138,10 @@ class Dialog:
         escape_result: What Escape and cancel() return (default None).
         escapable: If False, Escape does nothing (default True).
         width: None/0 = auto, >0 = preferred width, -1 = full width (box only).
-        top: None = centered, >=0 = rows from top, <0 = rows from bottom (box only).
+        top: Box only. None: outside full screen, under the prompt over the
+            rows reserved for it above the status bar (centered when those
+            are squeezed); centered in full screen. >=0: rows from the top.
+            <0: rows from the bottom.
         max_height: The most rows the dialog takes, all of it counted (a
             box's border, title and buttons; an inline dialog's title,
             body, actions and hint); content that doesn't fit scrolls.

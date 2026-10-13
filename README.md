@@ -390,7 +390,7 @@ terminal is big enough.
 ### Inline dialogs
 
 Any dialog can also be drawn inline: rows under the prompt, above the status
-bar, instead of a box over the transcript. Its buttons become a numbered list:
+bar, in the rows a box dialog would take, but laid out as plain rows instead of a bordered box. Its buttons become a numbered list:
 
 ```
  Delete 3 files?

@@ -191,8 +191,8 @@ class _BoxFloat(Float):
     ``room`` gives that window when it is in the layout now and was drawn
     with every row it asked for (None in full screen, where it isn't, and
     its cursor position would fall back to (0, 0); None too when squeezed
-    short, where the box would flip or shrink: it centers then). Asked on each draw, since full screen can switch with a
-    dialog open. The anchor is the window's top-left, so with ``ycursor``
+    short, where the box would flip or shrink: it centers then). Asked on
+    each draw, since full screen can switch with a dialog open. The anchor is the window's top-left, so with ``ycursor``
     and ``allow_cover_cursor`` the box's top border lands on its first row.
     An explicit top or bottom keeps its offset in both modes.
     """
@@ -263,7 +263,7 @@ class BoxPresenter:
         view = build_box(dialog)
 
         if dialog.top is None:
-            # Center: no top or bottom constraint
+            # No top or bottom: over the room, or centered (see _BoxFloat)
             self._float.top = None
             self._float.bottom = None
         elif dialog.top >= 0:
