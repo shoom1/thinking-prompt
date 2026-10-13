@@ -959,6 +959,124 @@ class TestDialogsAtTheBottomOfTheTerminal:
             await run_with(session, handler, script)
 
 
+class TestBoxOverItsRoom:
+    """Outside full screen the box sits over the rows the session reserved
+    for it, between the prompt and the status bar, not centered over the
+    whole drawn area (which covered the status bar); full screen centers it."""
+
+    @staticmethod
+    def _rows(session: ThinkingPromptSession) -> tuple[list[str], int, int]:
+        frame = screen_lines(session)
+        prompt, status = prompt_and_status_rows(session)
+        return frame, prompt, status
+
+    async def _open_at_top(self, make_dialog: Callable[[ThinkingPromptSession], Any], **terminal: Any) -> tuple[list[str], int, int]:
+        """The frame with the dialog open, the prompt row and the status row."""
+        closed: list[bool] = []
+        seen: list[tuple[list[str], int, int]] = []
+
+        async def handler(text: str) -> None:
+            await make_dialog(session)
+            closed.append(True)
+
+        with piped_session(**terminal) as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                # dialog_rendered needs a focused window; a notice has none.
+                await wait_until(lambda: dialog_open(session) and any("┌" in line for line in screen_lines(session)))
+                seen.append(self._rows(session))
+                inp.send_text(ESCAPE)
+                await wait_until(lambda: closed == [True])
+
+            await run_with(session, handler, script)
+        return seen[0]
+
+    async def test_the_box_starts_on_the_rooms_first_row(self):
+        frame, prompt, status = await self._open_at_top(
+            lambda s: s.message_dialog("Hello", "Some text", placement="box"), rows=30
+        )
+        top = next(i for i, line in enumerate(frame) if "┌" in line)
+        assert top == prompt + 2, frame  # the row after the prompt's separator
+        assert max(i for i, line in enumerate(frame) if "┘" in line) < status
+        assert "Ctrl+C: cancel" in frame[status], frame
+
+    async def test_a_settings_form_leaves_the_status_bar_whole(self):
+        items = [CheckboxItem(key=f"s{i}", label=f"Setting {i}") for i in range(4)]
+        frame, prompt, status = await self._open_at_top(
+            lambda s: s.show_settings_dialog("Settings", items, placement="box"), rows=30
+        )
+        assert next(i for i, line in enumerate(frame) if "┌" in line) == prompt + 2, frame
+        assert frame[status].startswith("Ctrl+C: cancel") and "│" not in frame[status], frame
+
+    async def test_the_notice_takes_the_rooms_place_too(self):
+        frame, prompt, status = await self._open_at_top(
+            lambda s: s.yes_no_dialog("Delete files?", "This removes 3 files.", placement="box"),
+            rows=30, columns=16,
+        )
+        top = next(i for i, line in enumerate(frame) if "┌" in line)
+        assert top == prompt + 2, frame
+        assert any("Terminal too" in line for line in frame[top:status]), frame
+        assert "Ctrl+C" in frame[status] and "│" not in frame[status], frame
+
+    async def _fullscreen_box_top(self, session: ThinkingPromptSession) -> tuple[int, int, int]:
+        frame = screen_lines(session)
+        top = next(i for i, line in enumerate(frame) if "┌" in line)
+        height = session.app.renderer.last_rendered_screen.height
+        return top, box_height(frame), height
+
+    async def test_full_screen_centers_the_box(self):
+        closed: list[bool] = []
+
+        async def handler(text: str) -> None:
+            await session.message_dialog("Hello", "Some text", placement="box")
+            closed.append(True)
+
+        with piped_session(rows=24, enable_fullscreen=True) as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                session.switch_to_fullscreen()
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                top, box, height = await self._fullscreen_box_top(session)
+                assert top == (height - box) // 2, screen_lines(session)
+                inp.send_text(ESCAPE)
+                await wait_until(lambda: closed == [True])
+
+            await run_with(session, handler, script)
+
+    async def test_toggling_full_screen_moves_an_open_box(self):
+        closed: list[bool] = []
+
+        async def handler(text: str) -> None:
+            await session.message_dialog("Hello", "Some text", placement="box")
+            closed.append(True)
+
+        async def after_render(session: ThinkingPromptSession, change: Callable[[], None]) -> None:
+            before = session.app.render_counter
+            change()
+            await wait_until(lambda: session.app.render_counter > before)
+            await asyncio.sleep(0.05)
+
+        with piped_session(rows=30, enable_fullscreen=True) as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                prompt, _ = prompt_and_status_rows(session)
+                assert next(i for i, line in enumerate(screen_lines(session)) if "┌" in line) == prompt + 2
+                await after_render(session, session.switch_to_fullscreen)
+                top, box, height = await self._fullscreen_box_top(session)
+                assert top == (height - box) // 2, screen_lines(session)
+                await after_render(session, session.switch_to_prompt)
+                prompt, _ = prompt_and_status_rows(session)
+                assert next(i for i, line in enumerate(screen_lines(session)) if "┌" in line) == prompt + 2
+                inp.send_text(ESCAPE)
+                await wait_until(lambda: closed == [True])
+
+            await run_with(session, handler, script)
+
+
 class TestBoxMaxHeight:
     """A box dialog is no taller than its max_height and the terminal (less
     the prompt's rows); its body scrolls within that."""

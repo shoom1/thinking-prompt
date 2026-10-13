@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import textwrap
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 from prompt_toolkit.application.current import get_app
 from prompt_toolkit.filters import Condition
@@ -184,6 +184,43 @@ class _BoxOrNotice(Container):
         return [self.box]
 
 
+class _BoxFloat(Float):
+    """The box's float: centered over the drawn area, or, outside full
+    screen, anchored to the window that holds its reserved rows.
+
+    ``room`` gives that window when it is in the layout now (None in full
+    screen, where it isn't, and its cursor position would fall back to
+    (0, 0)). Asked on each draw, since full screen can switch with a
+    dialog open. The anchor is the window's top-left, so with ``ycursor``
+    and ``allow_cover_cursor`` the box's top border lands on its first row.
+    An explicit top or bottom keeps its offset in both modes.
+    """
+
+    def __init__(self, room: Callable[[], Window | None], **kwargs: Any) -> None:
+        self._room = room
+        super().__init__(**kwargs)
+
+    # Float assigns these in __init__; here they are worked out when read.
+    @property
+    def attach_to_window(self) -> Window | None:
+        return self._room() if self._anchored() else None
+
+    @attach_to_window.setter
+    def attach_to_window(self, value: Any) -> None:
+        pass
+
+    @property
+    def ycursor(self) -> bool:
+        return self._anchored() and self._room() is not None
+
+    @ycursor.setter
+    def ycursor(self, value: bool) -> None:
+        pass
+
+    def _anchored(self) -> bool:
+        return self.top is None and self.bottom is None
+
+
 class BoxPresenter:
     """Floats box dialogs over the session's layout."""
 
@@ -197,7 +234,8 @@ class BoxPresenter:
         self._capped: Container = Window()
         self._title = ""
         self._escapable = True
-        self._float = Float(
+        self._float = _BoxFloat(
+            self._session.box_dialog_room,
             content=ConditionalContainer(
                 content=DynamicContainer(lambda: self._capped),
                 filter=Condition(lambda: self.view is not None),

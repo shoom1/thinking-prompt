@@ -31,6 +31,7 @@ if TYPE_CHECKING:
 from prompt_toolkit.application import Application
 from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.completion import Completer
+from prompt_toolkit.data_structures import Point
 from prompt_toolkit.enums import DEFAULT_BUFFER, EditingMode
 from prompt_toolkit.filters import Condition, has_focus
 from prompt_toolkit.formatted_text import (
@@ -43,6 +44,7 @@ from prompt_toolkit.history import History, InMemoryHistory
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.key_binding.key_processor import KeyPressEvent
 from prompt_toolkit.layout import AnyContainer, DynamicContainer, Window
+from prompt_toolkit.layout.controls import UIContent, UIControl
 from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.output import ColorDepth
 from prompt_toolkit.styles import DynamicStyle
@@ -62,6 +64,19 @@ logger = logging.getLogger(__name__)
 
 # on_input() returns the handler it registers with its own type.
 _HandlerT = TypeVar("_HandlerT", bound="InputHandler")
+
+
+class _RoomControl(UIControl):
+    """Blank content whose menu position is its top-left corner, which a
+    float attached to the window can use as its anchor."""
+
+    def create_content(self, width: int, height: int) -> UIContent:
+        # The first line holds a space: an empty one maps no position to the screen.
+        return UIContent(
+            get_line=lambda i: [("", " ")] if i == 0 else [],
+            line_count=height,
+            menu_position=Point(x=0, y=0),
+        )
 
 
 class ThinkingPromptSession:
@@ -266,7 +281,9 @@ class ThinkingPromptSession:
         # Shown in the layout's inline-dialog slot while no inline dialog is open.
         self._no_inline_dialog = Window(height=0)
         # Blank rows as tall as an open box dialog: see _inline_dialog_content.
-        self._box_dialog_room = Window(height=self._box_dialog_rows)
+        # Its control reports a menu position at its top-left: the box floats
+        # from there (a window not in focus records no cursor position).
+        self._box_dialog_room = Window(_RoomControl(), height=self._box_dialog_rows)
 
         # Create components
         self.default_buffer = self._create_default_buffer()
@@ -1305,6 +1322,12 @@ class ThinkingPromptSession:
         if self._is_fullscreen:
             return self._no_inline_dialog  # full screen has every row already
         return self._box_dialog_room
+
+    def box_dialog_room(self) -> Window | None:
+        """The window holding a box dialog's reserved rows if it is in the
+        layout now (the box floats over it), else None."""
+        room = self._box_dialog_room
+        return room if self._inline_dialog_content() is room else None
 
     def _box_dialog_rows(self) -> Dimension:
         """The box dialog's rows, to reserve. Flexible down to none, so a
