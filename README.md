@@ -372,8 +372,8 @@ scrolls with PgUp/PgDn (and ↑↓ in a box). Every helper takes `max_height=`.
 
 **Small terminals.** A box dialog that can't fit the terminal at all
 (narrower than its buttons, or shorter than its frame, buttons and one body
-row) shows a short notice in its place, with the size it needs. Esc still
-cancels it and Enter presses its focused button. It comes back as soon as the
+row) shows a short notice in its place, with the size it needs. Keys still
+reach the hidden dialog: Esc cancels it and Enter presses its focused button. It comes back as soon as the
 terminal is big enough.
 
 **Upgrading from 0.3:** `DialogConfig` and `BaseDialog` were removed.
