@@ -408,7 +408,7 @@ async def main():
             dialog = SettingsDialog(
                 title="Settings",
                 items=settings_items,
-                height=16,  # box only; inline dialogs size to their content
+                max_height=16,
                 width=60,
                 placement=placement,
             )
