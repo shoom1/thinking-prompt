@@ -2066,6 +2066,28 @@ class TestBoxTooSmall:
 
         assert await self._ask(self._yes_no, keys, rows=24, columns=16) is True
 
+    async def test_the_dialog_stays_in_the_layout_under_the_notice(self):
+        """Tab and Left/Right between buttons only act on windows drawn, so
+        under the notice they do nothing. But the Dialog's own bindings and
+        its modality (a modal container above the button) are found through the layout's parent relations, which
+        must still reach the dialog from the focused button."""
+        found: list[bool] = []
+
+        async def keys(session, inp, frames):
+            assert "too small" in self._text(frames[0])
+            layout = session.app.layout
+            button = session._dialog_manager._box.view.buttons[0].window
+            parents = []
+            node = layout.get_parent(button)
+            while node is not None:
+                parents.append(node)
+                node = layout.get_parent(node)
+            found.append(any(p.is_modal() for p in parents))
+            inp.send_text(ESCAPE)
+
+        await self._ask(self._yes_no, keys, rows=24, columns=16)
+        assert found == [True]
+
     async def test_a_dialog_that_ignores_escape_does_not_say_escape_cancels(self):
         shown: list[list[str]] = []
 
