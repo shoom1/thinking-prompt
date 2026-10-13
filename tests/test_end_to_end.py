@@ -1924,6 +1924,46 @@ class TestInlineSettings:
             await run_with(session, handler, script)
 
 
+class TestSettingsInANarrowBox:
+    """At a value column too wide for a box's rows, values end at the rows'
+    right edge, and a text field being edited sits where its value was."""
+
+    async def test_editing_text_keeps_the_form_and_the_field_where_the_value_was(self):
+        items = [
+            TextItem(key="name", label="Name", default="bob"),
+            CheckboxItem(key="stream", label="Stream"),
+        ]
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.show_settings_dialog(
+                "Settings", items, width=40, align_values=30, placement="box"
+            ))
+
+        def from_the_right(text: str) -> int:
+            """How far from the end of its row ``text`` starts."""
+            line = next(line for line in screen_lines(session) if text in line)
+            return len(line) - line.index(text)
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                shown = from_the_right("bob")
+                inp.send_text(ENTER)
+                await wait_until(lambda: TestInlineSettings._editing(session))
+                await settled_renders(session)
+                assert on_screen(session, "Stream") and on_screen(session, "Save"), screen_lines(session)
+                assert from_the_right("bob") == shown
+                inp.send_text("by" + ENTER)
+                await wait_until(lambda: not TestInlineSettings._editing(session))
+                inp.send_text(CTRL_S)
+                await wait_until(lambda: results == [{"name": "bobby"}])
+
+            await run_with(session, handler, script)
+
+
 class TestChecklistDialog:
     async def test_inline(self):
         results: list[Any] = []

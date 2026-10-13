@@ -6,7 +6,9 @@ from unittest.mock import MagicMock
 import pytest
 from prompt_toolkit.keys import Keys
 from prompt_toolkit.layout import BufferControl, HSplit, Window
+from prompt_toolkit.layout.mouse_handlers import MouseHandlers
 from prompt_toolkit.layout.processors import PasswordProcessor
+from prompt_toolkit.layout.screen import Screen, WritePosition
 
 from thinking_prompt.settings_dialog import (
     CheckboxControl,
@@ -750,6 +752,28 @@ def _row(control, column, width: int = 60) -> str:
     return "".join(text for _, text in control.create_content(width, 1).get_line(0))
 
 
+def _drawn(container, width: int, height: int = 1) -> list[list[tuple[str, str]]]:
+    """``container`` drawn ``width`` columns wide, floats included: each
+    row's cells as (character, style)."""
+    screen = Screen()
+    container.write_to_screen(screen, MouseHandlers(), WritePosition(0, 0, width, height), "", True, None)
+    screen.draw_all_floats()
+    return [
+        [(screen.data_buffer[y][x].char, screen.data_buffer[y][x].style) for x in range(width)]
+        for y in range(height)
+    ]
+
+
+def _text(cells: list[tuple[str, str]]) -> str:
+    return "".join(char for char, _ in cells)
+
+
+def _field(cells: list[tuple[str, str]]) -> list[int]:
+    """The columns of a text setting's input field (its text-area style).
+    (Tests drawing one are async: its buffer loads its history in a task.)"""
+    return [x for x, (_, style) in enumerate(cells) if "class:text-area" in style]
+
+
 # (make the control, its label, its value at a column, how the row ends at the right edge)
 ROWS = [
     (lambda: CheckboxControl(CheckboxItem(key="c", label="Stream", default=True)),
@@ -787,21 +811,56 @@ class TestValueColumn:
         assert row.endswith("false") and len(row) == 19
         assert "…" in row
 
+    @staticmethod
+    def _menu_open(width: int, **kwargs) -> list[str]:
+        """A box form's dropdown, its menu open, drawn ``width`` columns wide."""
+        items = [
+            DropdownItem(key="d", label="Model", options=["alpha", "beta"], default="beta"),
+            *(CheckboxItem(key=k, label=k) for k in ("a", "b", "c")),
+        ]
+        dialog = SettingsDialog("S", items, **kwargs)
+        body = dialog.build_body()
+        dialog._controls[0].enter_edit_mode()
+        return [_text(row) for row in _drawn(body, width, 4)]
+
     def test_the_dropdown_menu_floats_under_its_value(self):
-        control = DropdownControl(DropdownItem(key="d", label="Model", options=["a", "b"]))
-        control.set_value_column(20)
-        menu = control.get_float()
-        assert (menu.left, menu.right) == (20, None)
+        rows = self._menu_open(60, align_values=20)
+        assert rows[0].index("beta") == rows[1].index("┌") == 20
+
+    def test_a_narrow_row_floats_the_menu_under_the_value_at_the_right_edge(self):
+        rows = self._menu_open(36, align_values=30)
+        value = 36 - 1 - len("beta".ljust(15) + " ▼")
+        assert rows[0].index("beta") == rows[1].index("┌") == value
+        assert "beta" in rows[2]  # the menu has room for its options
 
     def test_without_a_column_the_menu_floats_at_the_right_edge(self):
         menu = DropdownControl(DropdownItem(key="d", label="Model", options=["a", "b"])).get_float()
         assert (menu.left, menu.right) == (None, 0)
 
-    def test_the_text_field_starts_at_the_column_while_editing(self):
-        control = TextControl(TextItem(key="t", label="Name"))
+    async def test_the_text_field_starts_at_the_column_while_editing(self):
+        control = TextControl(TextItem(key="t", label="Name", default="bob"))
         control.set_value_column(20)
-        label, field, rest = control._build_edit_container().children
-        assert label.width == 20 and field is control._buffer_window
+        control.enter_edit_mode()
+        (row,) = _drawn(control.get_container(), 60)
+        assert _field(row) == list(range(20, 35))
+        assert _text(row)[20:23] == "bob"
+
+    async def test_while_editing_a_long_label_is_cut_before_the_field(self):
+        control = TextControl(TextItem(key="t", label="A rather long label", default="bob"))
+        control.set_value_column(12)
+        control.enter_edit_mode()
+        (row,) = _drawn(control.get_container(), 60)
+        assert _text(row)[:15] == "❯ A rather… bob"
+
+    async def test_a_narrow_row_keeps_the_text_field_where_the_value_was(self):
+        """Too narrow for the column, the field ends at the row's right edge,
+        as the value did, and the label is cut before it as it was."""
+        control = TextControl(TextItem(key="t", label="A rather long label", default="bob"))
+        shown = _row(control, 30, width=36)
+        control.enter_edit_mode()
+        (row,) = _drawn(control.get_container(), 36)
+        assert _field(row) == list(range(36 - 1 - 15, 36 - 1))
+        assert _text(row)[2:23] == shown[2:23] == "A rather long la… bob"
 
     def test_without_a_column_the_text_field_is_at_the_right_edge(self):
         control = TextControl(TextItem(key="t", label="Name"))
