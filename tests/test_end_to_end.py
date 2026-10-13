@@ -1019,7 +1019,7 @@ class TestBoxOverItsRoom:
         assert any("Terminal too" in line for line in frame[top:status]), frame
         assert "Ctrl+C" in frame[status] and "│" not in frame[status], frame
 
-    async def _fullscreen_box_top(self, session: ThinkingPromptSession) -> tuple[int, int, int]:
+    def _fullscreen_box_top(self, session: ThinkingPromptSession) -> tuple[int, int, int]:
         frame = screen_lines(session)
         top = next(i for i, line in enumerate(frame) if "┌" in line)
         height = session.app.renderer.last_rendered_screen.height
@@ -1038,7 +1038,7 @@ class TestBoxOverItsRoom:
                 session.switch_to_fullscreen()
                 inp.send_text("go" + ENTER)
                 await wait_until(lambda: dialog_rendered(session))
-                top, box, height = await self._fullscreen_box_top(session)
+                top, box, height = self._fullscreen_box_top(session)
                 assert top == (height - box) // 2, screen_lines(session)
                 inp.send_text(ESCAPE)
                 await wait_until(lambda: closed == [True])
@@ -1066,7 +1066,7 @@ class TestBoxOverItsRoom:
                 prompt, _ = prompt_and_status_rows(session)
                 assert next(i for i, line in enumerate(screen_lines(session)) if "┌" in line) == prompt + 2
                 await after_render(session, session.switch_to_fullscreen)
-                top, box, height = await self._fullscreen_box_top(session)
+                top, box, height = self._fullscreen_box_top(session)
                 assert top == (height - box) // 2, screen_lines(session)
                 await after_render(session, session.switch_to_prompt)
                 prompt, _ = prompt_and_status_rows(session)
@@ -2451,5 +2451,31 @@ class TestBoxDropdownMenu:
                 await wait_until(lambda: not on_screen(session, "│opt"))  # the menu closed
                 inp.send_text(CTRL_S)
                 await wait_until(lambda: results == [{"d": "opt6"}])
+
+            await run_with(session, handler, script)
+
+
+class TestBoxMenuFloatsOnClose:
+    async def test_closing_a_dialog_with_its_menu_open_leaves_no_stale_float(self):
+        items = [DropdownItem(key="d", label="Model", options=["alpha", "beta"], default="beta")]
+        closed: list[bool] = []
+
+        async def handler(text: str) -> None:
+            await session.show_settings_dialog("Settings", items, placement="box")
+            closed.append(True)
+
+        with piped_session(rows=30) as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                inp.send_text(ENTER)
+                await wait_until(lambda: on_screen(session, "alpha"))
+                assert len(session.app.layout.container.floats) > 1
+                # Escape would only shut the menu: close the form under it.
+                session._dialogs._current_dialog.cancel()
+                await wait_until(lambda: closed == [True])
+                assert len(session.app.layout.container.floats) == 1
+                await wait_until(lambda: not on_screen(session, "alpha"))
 
             await run_with(session, handler, script)
