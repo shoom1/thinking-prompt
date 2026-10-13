@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from prompt_toolkit.keys import Keys
-from prompt_toolkit.layout import BufferControl, HSplit, Window
+from prompt_toolkit.layout import BufferControl, FloatContainer, HSplit, Window
 from prompt_toolkit.layout.mouse_handlers import MouseHandlers
 from prompt_toolkit.layout.processors import PasswordProcessor
 from prompt_toolkit.layout.screen import Screen, WritePosition
@@ -844,7 +844,9 @@ class TestValueColumn:
         dialog = SettingsDialog("S", items, **kwargs)
         body = dialog.build_body()
         dialog._controls[0].enter_edit_mode()
-        return [_text(row) for row in _drawn(body, width, 4)]
+        # As a box has them: the menu floats over the whole screen.
+        screen = FloatContainer(content=body, floats=dialog._screen_floats())
+        return [_text(row) for row in _drawn(screen, width, 4)]
 
     def test_the_dropdown_menu_floats_under_its_value(self):
         rows = self._menu_open(60, align_values=20)
@@ -865,7 +867,9 @@ class TestValueColumn:
         dialog = SettingsDialog("S", items, **kwargs)
         body = dialog.build_body()
         dialog._controls[0].enter_edit_mode()
-        return [_text(row) for row in _drawn(body, width, 4)]
+        # As a box has them: the menu floats over the whole screen.
+        screen = FloatContainer(content=body, floats=dialog._screen_floats())
+        return [_text(row) for row in _drawn(screen, width, 4)]
 
     def test_a_wide_label_does_not_shift_the_menu_off_its_value(self):
         rows = self._wide_menu_open(60, "モデル名", align_values=20)
@@ -879,9 +883,10 @@ class TestValueColumn:
         )
         assert "┌" in rows[1] and not rows[1].startswith("┌")
 
-    def test_without_a_column_the_menu_floats_at_the_right_edge(self):
-        menu = DropdownControl(DropdownItem(key="d", label="Model", options=["a", "b"])).get_float()
-        assert (menu.left, menu.right) == (None, 0)
+    def test_without_a_column_the_menu_floats_under_the_value_at_the_right_edge(self):
+        rows = self._menu_open(60, align_values="right")
+        field = 15  # the dropdown's width, the value right-justified in it
+        assert rows[1].index("┌") == rows[0].index("▼") - 1 - field
 
     async def test_the_text_field_starts_at_the_column_while_editing(self):
         control = TextControl(TextItem(key="t", label="Name", default="bob"))

@@ -26,13 +26,11 @@ from prompt_toolkit.layout import (
     Container,
     DynamicContainer,
     Float,
-    FloatContainer,
     HSplit,
     Window,
 )
 from prompt_toolkit.layout.controls import FormattedTextControl, UIContent, UIControl
 from prompt_toolkit.layout.dimension import Dimension
-from prompt_toolkit.layout.margins import ScrollbarMargin
 from prompt_toolkit.layout.mouse_handlers import MouseHandlers
 from prompt_toolkit.layout.processors import PasswordProcessor
 from prompt_toolkit.layout.screen import Screen, WritePosition
@@ -515,7 +513,7 @@ class DropdownControl(SettingControl[DropdownItem]):
         super().__init__(item)
         self._original_value: Any = item.default
         self._selected_index = 0  # Index in dropdown list during edit
-        self._scroll_offset = 0  # For scrolling long lists
+        self._scroll_offset = 0  # The menu's first option shown, kept by the menu as it draws
         self._app_ref: Any = None
         # Cache view-mode window for stable focus target
         height = 2 if item.description else 1
@@ -523,7 +521,6 @@ class DropdownControl(SettingControl[DropdownItem]):
         # Floating menu components (built lazily)
         self._menu_control = _DropdownMenuControl(self)
         self._menu_window: Window | None = None
-        self._max_visible_height: int | None = None  # Set by parent dialog
         # Inline dialogs show a dropdown as a ←/→ selector, with no popup menu.
         self._inline = False
 
@@ -539,17 +536,9 @@ class DropdownControl(SettingControl[DropdownItem]):
         """Move through options by delta (+1 or -1), clamped to the ends."""
         self._value = _cycled(self._item.options, self._value, delta)
 
-    def set_max_visible_height(self, max_height: int) -> None:
-        """Limit dropdown height to fit within dialog bounds."""
-        self._max_visible_height = max_height
-
-    def _get_visible_height(self) -> int:
-        """Get the actual visible height (capped by max_visible_height)."""
-        num_options = len(self._item.options)
-        height = min(num_options, self._item.height)
-        if self._max_visible_height is not None:
-            height = min(height, self._max_visible_height)
-        return max(1, height)
+    def _preferred_menu_rows(self) -> int:
+        """Option rows the menu asks for; it gets fewer when there is no room."""
+        return max(1, min(len(self._item.options), self._item.height))
 
     def _check_focus(self) -> bool:
         """Check if this control has focus (for rendering)."""
@@ -583,7 +572,6 @@ class DropdownControl(SettingControl[DropdownItem]):
         except (ValueError, IndexError):
             self._selected_index = 0
         self._scroll_offset = 0
-        self._ensure_visible()
         self._editing = True
         self._app_ref = app
         if app:
@@ -606,20 +594,11 @@ class DropdownControl(SettingControl[DropdownItem]):
             self._app_ref.layout.focus(self._view_window)
             self._app_ref.invalidate()
 
-    def _ensure_visible(self) -> None:
-        """Ensure selected index is visible in the scroll window."""
-        height = self._get_visible_height()
-        if self._selected_index < self._scroll_offset:
-            self._scroll_offset = self._selected_index
-        elif self._selected_index >= self._scroll_offset + height:
-            self._scroll_offset = self._selected_index - height + 1
-
     def _move_selection(self, delta: int) -> None:
         """Move selection by delta, clamping to bounds."""
         new_index = self._selected_index + delta
         new_index = max(0, min(new_index, len(self._item.options) - 1))
         self._selected_index = new_index
-        self._ensure_visible()
 
     def create_content(self, width: int, height: int) -> UIContent:
         """Render the dropdown row with down arrow indicator."""
@@ -640,14 +619,12 @@ class DropdownControl(SettingControl[DropdownItem]):
             )
 
         lines = self._build_setting_row(width, value, is_selected)
-        menu_position = None
-        if self._value_column is not None:
-            # The menu floats under the value, where this row draws it
-            # (get_float). prompt_toolkit's menu position counts characters
-            # into the line, not terminal columns: those drawn ahead of it.
-            drawn = 2 + len(value.after)
-            ahead = lines[0][: len(lines[0]) - drawn]
-            menu_position = Point(x=sum(len(text) for _, text, *_ in ahead), y=0)
+        # The menu opens under the value, where this row draws it (get_float).
+        # prompt_toolkit's menu position counts characters into the line, not
+        # terminal columns: those drawn ahead of it.
+        drawn = 2 + len(value.after)
+        ahead = lines[0][: len(lines[0]) - drawn]
+        menu_position = Point(x=sum(len(text) for _, text, *_ in ahead), y=0)
 
         def get_line(i: int) -> FormattedText:
             return lines[i] if i < len(lines) else FormattedText([])
@@ -659,19 +636,13 @@ class DropdownControl(SettingControl[DropdownItem]):
         if self._menu_window is not None:
             return
 
-        dropdown_width = self._get_dropdown_width()
-        num_options = len(self._item.options)
-        visible_height = self._get_visible_height()
-        needs_scrollbar = num_options > visible_height
-
-        right_margins = [ScrollbarMargin(display_arrows=False)] if needs_scrollbar else []
-
+        # Its height is the terminal's to give: the options asked for, fewer
+        # where there's no room (the menu then scrolls and shows a scrollbar).
         self._menu_window = Window(
             self._menu_control,
-            width=dropdown_width,
-            height=visible_height,
+            width=self._get_dropdown_width(),
+            height=Dimension(min=1, preferred=self._preferred_menu_rows()),
             style="class:setting-dropdown",
-            right_margins=right_margins,
         )
 
     def get_container(self) -> Container:
@@ -688,18 +659,17 @@ class DropdownControl(SettingControl[DropdownItem]):
             style="class:setting-dropdown-border",
         )
 
-        # Under the value: at the menu position its row gives (create_content),
-        # worked out from the row's width, else at the row's right edge.
-        at_column = self._value_column is not None
+        # Directly under its row, at the value: the menu position the row gives
+        # (create_content). prompt_toolkit shrinks the float where there is
+        # no room below, or flips it above the row when there is more there.
         return Float(
             content=ConditionalContainer(
                 content=framed_menu,
                 filter=Condition(lambda: self._editing),
             ),
             attach_to_window=self._view_window,
-            xcursor=at_column,
-            right=None if at_column else 0,
-            top=1,
+            xcursor=True,
+            ycursor=True,
         )
 
     def get_key_bindings(self) -> KeyBindings:
@@ -750,32 +720,39 @@ class _DropdownMenuControl(UIControl):
         self._dropdown = dropdown
 
     def create_content(self, width: int, height: int) -> UIContent:
-        """Render all dropdown options (Window handles scrolling)."""
+        """Render the options that fit ``height`` rows, scrolled to keep the
+        selected one in view, with a scrollbar when not all of them show."""
         dropdown = self._dropdown
         options = dropdown._item.options
         selected = dropdown._selected_index
+        count = len(options)
+        height = max(1, height)
+
+        scrolls = count > height
+        text_width = max(1, width - 1) if scrolls else width
+        offset = min(dropdown._scroll_offset, max(0, count - height))
+        if selected < offset:
+            offset = selected
+        elif selected >= offset + height:
+            offset = selected - height + 1
+        dropdown._scroll_offset = offset
+
+        # The scrollbar's thumb: its size and place along the track.
+        thumb = max(1, height * height // count) if scrolls else 0
+        thumb_top = offset * (height - thumb) // (count - height) if scrolls else 0
 
         lines = []
-        for i, opt in enumerate(options):
-            is_selected = (i == selected)
-            if is_selected:
-                style = "class:setting-dropdown-selected"
-            else:
-                style = "class:setting-dropdown-item"
-            # Truncate if needed
-            max_text = width
-            text = opt[:max_text] if len(opt) > max_text else opt.ljust(max_text)
-            lines.append(FormattedText([(style, text)]))
+        for row, i in enumerate(range(offset, min(count, offset + height))):
+            opt = options[i]
+            style = "class:setting-dropdown-selected" if i == selected else "class:setting-dropdown-item"
+            text = opt[:text_width] if len(opt) > text_width else opt.ljust(text_width)
+            fragments = [(style, text)]
+            if scrolls:
+                on_thumb = thumb_top <= row < thumb_top + thumb
+                fragments.append(("class:scrollbar.button" if on_thumb else "class:scrollbar.background", " "))
+            lines.append(FormattedText(fragments))
 
-        def get_line(i: int) -> FormattedText:
-            return lines[i] if i < len(lines) else FormattedText([])
-
-        # Return all lines with cursor at selected position for scrolling
-        return UIContent(
-            get_line=get_line,
-            line_count=len(lines),
-            cursor_position=Point(x=0, y=selected),
-        )
+        return UIContent(get_line=lambda i: lines[i], line_count=len(lines))
 
     def is_focusable(self) -> bool:
         return False  # Menu is not focusable, control handles keys
@@ -1225,24 +1202,14 @@ class SettingsDialog(Dialog):
         if inline:
             return controls_container
 
-        # Box: dropdown menus float over the settings below them, sized to
-        # the rows available under each dropdown.
-        total_height = sum(control.row_count for control in self._controls)
-        cumulative_height = 0
-        floats = []
-        for control in self._controls:
-            if isinstance(control, DropdownControl):
-                # Dropdown appears at top=1 relative to control's top;
-                # subtract 2 for the Frame borders (top + bottom).
-                available_below = total_height - (cumulative_height + 1)
-                control.set_max_visible_height(max(1, available_below - 2))
-                floats.append(control.get_float())
-            cumulative_height += control.row_count
-
-        if floats:
-            # Wrap in FloatContainer so dropdowns can overlay other controls
-            return FloatContainer(content=controls_container, floats=floats)
         return controls_container
+
+    def _screen_floats(self) -> list[Float]:
+        """A box's dropdown menus float over the whole screen, not the form,
+        so each is sized by the room the terminal has around its row."""
+        if self._placement == "inline":
+            return []
+        return [c.get_float() for c in self._controls if isinstance(c, DropdownControl)]
 
     def get_buttons(self) -> list[ButtonConfig]:
         """Return dialog buttons."""

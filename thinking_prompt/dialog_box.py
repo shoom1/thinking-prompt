@@ -8,7 +8,7 @@ a box dialog looks, where it floats and how tall it is.
 from __future__ import annotations
 
 import textwrap
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Callable
 
 from prompt_toolkit.application.current import get_app
@@ -47,6 +47,7 @@ class BoxView:
         focused_button: The first ``ButtonConfig(focused=True)`` button, if any.
         max_height: The dialog's max_height (None: the terminal's).
         text_region: The body's region when nothing in the body takes focus (a text body): it scrolls by keys.
+        floats: Floats the body needs over the whole screen (Dialog._screen_floats), drawn over the box.
     """
 
     widget: _DialogWidget
@@ -54,6 +55,7 @@ class BoxView:
     focused_button: Button | None = None
     max_height: int | None = None
     text_region: ScrollRegion | None = None
+    floats: list[Float] = field(default_factory=list)
 
     @property
     def initial_focus(self) -> Window | None:
@@ -105,7 +107,9 @@ def build_box(dialog: Dialog) -> BoxView:
         width=_width_dimension(dialog.width),
         with_background=False,  # Use styled dialog, no light overlay
     )
-    return BoxView(widget, buttons, focused, dialog.max_height, text_region)
+    return BoxView(
+        widget, buttons, focused, dialog.max_height, text_region, dialog._screen_floats()
+    )
 
 
 def _width_dimension(width: int | None) -> Dimension | None:
@@ -201,6 +205,7 @@ class BoxPresenter:
             allow_cover_cursor=True,
         )
         self._installed = False
+        self._root: FloatContainer | None = None
         # _smallest's last answer and the question it answered: asked several
         # times per draw, and measuring the whole body each time is slow.
         self._smallest_memo: tuple[tuple[int, int, int], tuple[int, int]] | None = None
@@ -210,7 +215,8 @@ class BoxPresenter:
         if self._installed:
             return
         layout = self._session.app.layout
-        layout.container = FloatContainer(content=layout.container, floats=[self._float])
+        self._root = FloatContainer(content=layout.container, floats=[self._float])
+        layout.container = self._root
         self._installed = True
 
     def open(self, dialog: Dialog) -> BoxView:
@@ -237,9 +243,22 @@ class BoxPresenter:
         self._capped = _BoxOrNotice(
             AtMost(to_container(view.widget), self._cap), self._notice_in_app
         )
+        # The body's own floats go on the root, over the whole screen, after
+        # the box's so they draw over it. Hidden with the box: a notice
+        # leaves them no row to attach to.
+        if view.floats:
+            assert self._root is not None  # install() ran
+            boxed = Condition(lambda: self._notice_in_app() is None)
+            for fl in view.floats:
+                fl.content = ConditionalContainer(fl.content, filter=boxed)
+            self._root.floats.extend(view.floats)
         return view
 
     def close(self) -> None:
+        if self.view is not None and self.view.floats:
+            assert self._root is not None
+            for fl in self.view.floats:
+                self._root.floats.remove(fl)
         self.view = None
         self._smallest_memo = None
         self._capped = Window()

@@ -2184,3 +2184,86 @@ class TestChecklistDialog:
                 await wait_until(lambda: results == [["code"]])
 
             await run_with(session, handler, script)
+
+
+class TestBoxDropdownMenu:
+    """A box dropdown's menu opens under its own row and uses the terminal's room."""
+
+    @staticmethod
+    def _items() -> list[Any]:
+        return [
+            CheckboxItem(key="a", label="Stream"),
+            CheckboxItem(key="b", label="Verbose"),
+            DropdownItem(key="d", label="Model", options=["alpha", "beta", "gamma"], default="beta"),
+            CheckboxItem(key="c", label="Cache"),
+            CheckboxItem(key="e", label="Echo"),
+            CheckboxItem(key="f", label="Fast"),
+            CheckboxItem(key="g", label="Debug"),
+        ]
+
+    @pytest.mark.parametrize("align", ["labels", "right"])
+    async def test_the_menu_opens_under_its_own_row_showing_every_option(self, align):
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.show_settings_dialog(
+                "Settings", self._items(), placement="box", align_values=align
+            ))
+
+        with piped_session(rows=30) as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                inp.send_text(DOWN * 2 + ENTER)
+                await wait_until(lambda: on_screen(session, "alpha"))
+                lines = screen_lines(session)
+                (row,) = [i for i, line in enumerate(lines) if "❯ Model" in line]
+                assert "beta" in lines[row]  # its row isn't covered
+                assert "┌" in lines[row + 1]
+                value = lines[row].index("beta")
+                top = lines[row + 1]
+                assert top.index("┌") <= value < top.index("┐")  # under the value
+                menu = "\n".join(lines[row + 2:row + 5])
+                assert [name in menu for name in ("alpha", "beta", "gamma")] == [True] * 3
+                assert "└" in lines[row + 5]
+                inp.send_text(DOWN + ENTER)  # gamma
+                await wait_until(lambda: not on_screen(session, "alpha"))
+                inp.send_text(CTRL_S)
+                await wait_until(lambda: results == [{"d": "gamma"}])
+
+            await run_with(session, handler, script)
+
+    async def test_a_menu_with_more_options_than_fit_scrolls_and_picks_the_right_one(self):
+        options = [f"opt{i}" for i in range(10)]
+        items = [
+            CheckboxItem(key="a", label="Stream"),
+            CheckboxItem(key="b", label="Verbose"),
+            DropdownItem(key="d", label="Model", options=options, default="opt0", height=10),
+            CheckboxItem(key="c", label="Cache"),
+        ]
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.show_settings_dialog("Settings", items, placement="box"))
+
+        with piped_session(rows=14) as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                inp.send_text(DOWN * 2 + ENTER)
+                await wait_until(lambda: on_screen(session, "│opt0"))
+                frame = "\n".join(screen_lines(session))
+                assert "Window too small" not in frame
+                inp.send_text(DOWN * 6)
+                await wait_until(lambda: on_screen(session, "│opt6"))
+                frame = "\n".join(screen_lines(session))
+                assert "Window too small" not in frame
+                assert "│opt0" not in frame  # scrolled: the menu's first option is out of view
+                inp.send_text(ENTER)
+                await wait_until(lambda: not on_screen(session, "│opt"))  # the menu closed
+                inp.send_text(CTRL_S)
+                await wait_until(lambda: results == [{"d": "opt6"}])
+
+            await run_with(session, handler, script)

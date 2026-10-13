@@ -49,7 +49,7 @@ from typing import (
 from prompt_toolkit.filters import Condition
 from prompt_toolkit.formatted_text import AnyFormattedText
 from prompt_toolkit.key_binding import KeyBindings, merge_key_bindings
-from prompt_toolkit.layout import AnyContainer, HSplit
+from prompt_toolkit.layout import AnyContainer, Float, HSplit
 from prompt_toolkit.layout.containers import is_container
 from prompt_toolkit.widgets import Label, RadioList
 
@@ -242,6 +242,15 @@ class Dialog:
         if is_container(body):
             return body
         return Label(text=cast("AnyFormattedText", body))
+
+    def _screen_floats(self) -> list[Float]:
+        """
+        Floats the body needs over the whole screen while the dialog is
+        open as a box (a dropdown's menu, say), not just over the body.
+
+        Default: none. Called once, after ``build_body``.
+        """
+        return []
 
     def get_buttons(self) -> list[ButtonConfig]:
         """
