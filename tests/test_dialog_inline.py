@@ -226,6 +226,37 @@ class TestTextRegion:
         assert view.hint == "↑↓ navigate · PgUp/PgDn scroll · Enter select · Esc cancel"
 
 
+class TestHintWrapping:
+    """The hint breaks between its entries, never inside one."""
+
+    @staticmethod
+    def _hint_window(view) -> Window:
+        (window,) = [w for w, text in _text_windows(view.container) if text == view.hint]
+        return window
+
+    @staticmethod
+    def _lines(window: Window, width: int) -> list[str]:
+        content = window.content.create_content(width, None)
+        return [fragment_list_to_text(content.get_line(i)) for i in range(content.line_count)]
+
+    def _view(self):
+        group = OptionGroup(["a", "b"], multiple=True)
+        return build_inline(Dialog("T", HSplit([r.window for r in group.rows]), [ButtonConfig("OK")]))
+
+    def test_the_hint_breaks_between_entries(self):
+        window = self._hint_window(self._view())
+        assert self._lines(window, 30) == ["↑↓ navigate · Space toggle", "Enter select · Esc cancel"]
+        assert window.preferred_height(30, 100).preferred == 2
+
+    def test_the_hint_is_one_line_when_it_fits(self):
+        view = self._view()
+        assert self._lines(self._hint_window(view), 80) == [view.hint]
+
+    def test_an_entry_wider_than_the_row_gets_a_line_of_its_own(self):
+        window = self._hint_window(self._view())
+        assert self._lines(window, 11) == ["↑↓ navigate", "Space toggle", "Enter select", "Esc cancel"]
+
+
 class TestInlineSizes:
     """The rows share the cap: fixed rows, then the actions, then a text body."""
 

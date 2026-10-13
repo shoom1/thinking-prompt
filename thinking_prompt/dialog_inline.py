@@ -16,8 +16,9 @@ from typing import TYPE_CHECKING, Callable
 from prompt_toolkit.application.current import get_app
 from prompt_toolkit.formatted_text import FormattedText
 from prompt_toolkit.layout import Container, HSplit, VSplit, Window, to_container
-from prompt_toolkit.layout.controls import FormattedTextControl
+from prompt_toolkit.layout.controls import FormattedTextControl, UIContent
 from prompt_toolkit.layout.dimension import Dimension
+from prompt_toolkit.utils import get_cwidth
 
 from .dialog_scroll import AtMost, ScrollRegion, dialog_cap, focusable_windows, terminal_rows
 from .rows import ActionRow, RowControl, RowNavigator
@@ -38,6 +39,8 @@ HINT_ORDER = (
     "Enter select",
     "Esc cancel",
 )
+# Between hint entries: the hint line breaks only here.
+HINT_SEPARATOR = " · "
 
 
 @dataclass
@@ -174,7 +177,7 @@ def build_inline(dialog: Dialog) -> InlineView:
 
     if hint() or text is not None:
         blank()
-        fixed(_text_row("class:dialog-hint", hint))
+        fixed(Window(_HintControl(hint), dont_extend_height=True))
 
     navigator = RowNavigator(stops, is_editing=dialog._is_editing, tab=True, actions=actions)
     content = HSplit(rows, key_bindings=navigator.key_bindings())
@@ -193,13 +196,32 @@ def _blank_row() -> Window:
     return Window(height=Dimension(min=0, preferred=1, max=1))
 
 
-def _text_row(style: str, text: str | Callable[[], str]) -> Window:
-    """A row of ``text`` (or what ``text()`` returns at each redraw), wrapped."""
+def _text_row(style: str, text: str) -> Window:
+    """A row of ``text``, wrapped."""
+    return Window(
+        FormattedTextControl(FormattedText([(style, text)])), dont_extend_height=True, wrap_lines=True
+    )
 
-    def fragments() -> FormattedText:
-        return FormattedText([(style, text() if callable(text) else text)])
 
-    return Window(FormattedTextControl(fragments), dont_extend_height=True, wrap_lines=True)
+class _HintControl(FormattedTextControl):
+    """The hint line, broken between its entries to fit the row: an entry
+    is never split, and one wider than the row on its own is cut at its
+    edge."""
+
+    def __init__(self, hint: Callable[[], str]) -> None:
+        super().__init__(lambda: FormattedText([("class:dialog-hint", hint())]))
+        self._hint = hint
+
+    def create_content(self, width: int, height: int | None) -> UIContent:
+        lines: list[str] = []
+        for entry in self._hint().split(HINT_SEPARATOR):
+            if lines and get_cwidth(lines[-1] + HINT_SEPARATOR + entry) <= width:
+                lines[-1] += HINT_SEPARATOR + entry
+            else:
+                lines.append(entry)
+        return UIContent(
+            get_line=lambda i: [("class:dialog-hint", lines[i])], line_count=len(lines)
+        )
 
 
 def _hint(dialog: Dialog, stops: list[Container], text: ScrollRegion | None) -> str:
@@ -216,7 +238,7 @@ def _hint(dialog: Dialog, stops: list[Container], text: ScrollRegion | None) -> 
         keys.add("Enter select")
     if dialog.escapable:
         keys.add("Esc cancel")
-    return " · ".join(key for key in HINT_ORDER if key in keys)
+    return HINT_SEPARATOR.join(key for key in HINT_ORDER if key in keys)
 
 
 class InlinePresenter:
