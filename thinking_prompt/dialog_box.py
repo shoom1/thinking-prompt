@@ -7,8 +7,9 @@ a box dialog looks, where it floats and how tall it is.
 """
 from __future__ import annotations
 
+import textwrap
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 from prompt_toolkit.application.current import get_app
 from prompt_toolkit.filters import Condition
@@ -18,16 +19,20 @@ from prompt_toolkit.layout import (
     DynamicContainer,
     Float,
     FloatContainer,
+    FormattedTextControl,
     Window,
     to_container,
 )
 from prompt_toolkit.layout.dimension import Dimension
-from prompt_toolkit.widgets import Button
+from prompt_toolkit.widgets import Button, Frame
 from prompt_toolkit.widgets import Dialog as _DialogWidget
 
 from .dialog_scroll import AtMost, ScrollRegion, dialog_cap, focusable_windows
 
 if TYPE_CHECKING:
+    from prompt_toolkit.layout.mouse_handlers import MouseHandlers
+    from prompt_toolkit.layout.screen import Screen, WritePosition
+
     from .dialog import Dialog
     from .session import ThinkingPromptSession
 
@@ -132,6 +137,49 @@ def _apply_button_style(button: Button, extra_style: str) -> None:
         button.window.style = f"{original} {extra_style}".strip()
 
 
+class _BoxOrNotice(Container):
+    """``box`` (the capped dialog widget), or a notice in its place while the
+    terminal is too small for it.
+
+    The box stays among the children, so its windows keep their focus and
+    key bindings; only its drawing is replaced. ``notice`` gives the
+    notice's container, or None when the box fits: asked on each size
+    question and draw, so the terminal growing brings the box back.
+    """
+
+    def __init__(self, box: Container, notice: Callable[[], Container | None]) -> None:
+        self.box = box
+        self.notice = notice
+
+    def _shown(self) -> Container:
+        return self.notice() or self.box
+
+    def reset(self) -> None:
+        self.box.reset()
+
+    def preferred_width(self, max_available_width: int) -> Dimension:
+        return self._shown().preferred_width(max_available_width)
+
+    def preferred_height(self, width: int, max_available_height: int) -> Dimension:
+        return self._shown().preferred_height(width, max_available_height)
+
+    def write_to_screen(
+        self,
+        screen: Screen,
+        mouse_handlers: MouseHandlers,
+        write_position: WritePosition,
+        parent_style: str,
+        erase_bg: bool,
+        z_index: int | None,
+    ) -> None:
+        self._shown().write_to_screen(
+            screen, mouse_handlers, write_position, parent_style, erase_bg, z_index
+        )
+
+    def get_children(self) -> list[Container]:
+        return [self.box]
+
+
 class BoxPresenter:
     """Floats box dialogs over the session's layout."""
 
@@ -143,6 +191,8 @@ class BoxPresenter:
         # would no longer trim it to the rows left under top= (or above
         # a negative one), cutting off the title or the buttons.
         self._capped: Container = Window()
+        self._title = ""
+        self._escapable = True
         self._float = Float(
             content=ConditionalContainer(
                 content=DynamicContainer(lambda: self._capped),
@@ -178,7 +228,11 @@ class BoxPresenter:
             self._float.bottom = abs(dialog.top)
 
         self.view = view
-        self._capped = AtMost(to_container(view.widget), self._cap)
+        self._title = dialog.title
+        self._escapable = dialog.escapable
+        self._capped = _BoxOrNotice(
+            AtMost(to_container(view.widget), self._cap), self._notice_in_app
+        )
         return view
 
     def close(self) -> None:
@@ -192,11 +246,59 @@ class BoxPresenter:
         row need. 0 when none is open."""
         if self.view is None:
             return 0
+        notice = self._notice(width, max_rows)
+        if notice is not None:
+            return min(self._notice_rows(notice, width), max_rows)
         widget = to_container(self.view.widget)
         dialog_width = min(widget.preferred_width(width).preferred, width)
         wanted = widget.preferred_height(dialog_width, max_rows)
         cap = dialog_cap(self.view.max_height, max_rows)
         return max(wanted.min, min(wanted.preferred, cap))
+
+    def _smallest(self, width: int, max_rows: int) -> tuple[int, int]:
+        """The open dialog's smallest size (columns, rows): its frame, buttons
+        row and one body row."""
+        assert self.view is not None
+        widget = to_container(self.view.widget)
+        # A box given a width reports no minimum for it, so the width comes
+        # from the buttons row, the one thing that can't be squeezed: the
+        # buttons side by side (VSplit's padding=1 between), inside the frame.
+        buttons = [b.window.preferred_width(max(width, 1)).min for b in self.view.buttons]
+        row = sum(buttons) + max(len(buttons) - 1, 0)
+        needs_width = max(widget.preferred_width(width).min, row + 2)
+        # Height at the width the box would get: below its minimum width the
+        # box collapses, and reports a frame's two rows and no more.
+        box_width = min(widget.preferred_width(width).preferred, max(width, needs_width))
+        return needs_width, widget.preferred_height(box_width, max_rows).min
+
+    def _notice(self, width: int, max_rows: int) -> Container | None:
+        """The notice to draw in a ``width``-column, ``max_rows``-row terminal
+        if the open dialog's smallest size doesn't fit it, else None."""
+        if self.view is None:
+            return None
+        needs_width, needs_rows = self._smallest(width, max_rows)
+        if needs_width <= width and needs_rows <= max_rows:
+            return None
+        text = f"Terminal too small: needs {needs_width}\u00d7{needs_rows}"
+        if self._escapable:
+            text += " \u00b7 Esc cancels"
+        # Wrapped at spaces to the frame's inside; a longer word is cut.
+        lines = textwrap.wrap(text, max(width - 2, 1))
+        return to_container(Frame(
+            Window(FormattedTextControl("\n".join(lines)), dont_extend_height=True),
+            title=self._title,
+            style="class:dialog.body",
+        ))
+
+    def _notice_in_app(self) -> Container | None:
+        size = get_app().output.get_size()
+        return self._notice(size.columns, size.rows)
+
+    @staticmethod
+    def _notice_rows(notice: Container, width: int) -> int:
+        """The notice's rows in a ``width``-column terminal."""
+        notice_width = min(notice.preferred_width(width).preferred, width)
+        return notice.preferred_height(notice_width, 1000).preferred
 
     def _cap(self, width: int) -> int:
         """The open dialog's rows in the app's terminal: rows(), as the

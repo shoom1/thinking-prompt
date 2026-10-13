@@ -165,3 +165,27 @@ class TestBoxPresenter:
         view = presenter.open(self._long(max_height=2))
         smallest = to_container(view.widget).preferred_height(80, 24).min
         assert presenter.rows(80, 24) == smallest > 2
+
+
+class TestBoxTooSmall:
+    @staticmethod
+    def _open() -> tuple[BoxPresenter, Dialog]:
+        session = MagicMock()
+        session.app.layout.container = Window()
+        presenter = BoxPresenter(session)
+        dialog = Dialog("Delete files?", "Gone.", [ButtonConfig("Yes"), ButtonConfig("No")])
+        presenter.open(dialog)
+        return presenter, dialog
+
+    def test_rows_are_the_notices_while_the_box_is_too_narrow(self):
+        presenter, _ = self._open()
+        box = presenter.rows(80, 24)
+        assert box > 3
+        # The notice, wrapped to 14 columns inside its frame: 4 lines and 2 borders.
+        assert presenter.rows(16, 24) == 6
+        assert presenter.rows(80, 24) == box
+
+    def test_rows_are_the_notices_while_the_box_is_too_short(self):
+        presenter, _ = self._open()
+        assert presenter.rows(80, 3) == 3
+        assert presenter.rows(80, 24) > 3

@@ -59,6 +59,11 @@ class _ShortOutput(DummyOutput):
         self._below_cursor = below_cursor
         self._columns = columns
 
+    def resize(self, *, rows: int | None = None, columns: int | None = None) -> None:
+        """Change the terminal's size; the next draw sees it."""
+        self._rows = self._rows if rows is None else rows
+        self._columns = self._columns if columns is None else columns
+
     def get_size(self) -> Size:
         return Size(rows=self._rows, columns=self._columns)
 
@@ -1996,6 +2001,125 @@ class TestSettingsInANarrowBox:
                 await wait_until(lambda: results == [{"name": "bobby"}])
 
             await run_with(session, handler, script)
+
+
+class TestBoxTooSmall:
+    """A box dialog whose smallest size doesn't fit the terminal draws a
+    notice in its place; the dialog stays open, with its keys."""
+
+    ITEMS = [
+        CheckboxItem(key="s", label="Stream responses", default=True),
+        DropdownItem(key="m", label="Model for summaries", options=["gpt-4o", "o1"], default="o1"),
+        TextItem(key="n", label="Display name", default="bob"),
+    ]
+
+    @staticmethod
+    def _text(frame: list[str]) -> str:
+        """The frame's words, rows joined, so a wrapped notice reads as one line."""
+        return " ".join(line.strip("│┌└┐┘─| ").strip() for line in frame)
+
+    async def _ask(self, make_dialog: Callable[[ThinkingPromptSession], Any], script_keys: Callable[..., Awaitable[None]], **terminal: Any) -> Any:
+        """Open the dialog ``make_dialog`` makes, in a terminal as ``terminal``
+        says; ``script_keys(session, inp, frames)`` runs once it's drawn."""
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await make_dialog(session))
+
+        with piped_session(**terminal) as (session, inp):
+            frames = record_dialog_frames(session)
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: len(frames) > 0)
+                await script_keys(session, inp, frames)
+                await wait_until(lambda: len(results) == 1)
+
+            await run_with(session, handler, script)
+        return results[0]
+
+    @staticmethod
+    def _yes_no(session: ThinkingPromptSession) -> Any:
+        return session.yes_no_dialog("Delete files?", "This removes 3 files.", placement="box")
+
+    async def test_a_narrow_terminal_shows_the_notice_not_the_collapsed_box(self):
+        shown: list[list[str]] = []
+
+        async def keys(session, inp, frames):
+            shown.append(frames[0])
+            inp.send_text(ESCAPE)
+
+        await self._ask(self._yes_no, keys, rows=24, columns=16)
+        text = self._text(shown[0])
+        assert "too small" in text and "27" in text and "Esc cancels" in text, shown[0]
+        assert "Delete" in text  # the title, clipped to the frame
+
+    async def test_escape_cancels_under_the_notice(self):
+        async def keys(session, inp, frames):
+            inp.send_text(ESCAPE)
+
+        assert await self._ask(self._yes_no, keys, rows=24, columns=16) is False
+
+    async def test_enter_presses_the_focused_button_under_the_notice(self):
+        async def keys(session, inp, frames):
+            inp.send_text(ENTER)
+
+        assert await self._ask(self._yes_no, keys, rows=24, columns=16) is True
+
+    async def test_a_dialog_that_ignores_escape_does_not_say_escape_cancels(self):
+        shown: list[list[str]] = []
+
+        def make(session):
+            return session.show_dialog(Dialog("Sure?", "Really?", [ButtonConfig("Yes", result=1)], escapable=False))
+
+        async def keys(session, inp, frames):
+            shown.append(frames[0])
+            inp.send_text(ENTER)
+
+        await self._ask(make, keys, rows=24, columns=10)
+        assert "too small" in self._text(shown[0]) and "Esc" not in self._text(shown[0])
+
+    async def test_a_short_terminal_shows_the_notice(self):
+        shown: list[list[str]] = []
+
+        def make(session):
+            return session.message_dialog("Note", "Saved.\nAll done.", placement="box")
+
+        async def keys(session, inp, frames):
+            shown.append(frames[0])
+            inp.send_text(ESCAPE)
+
+        await self._ask(make, keys, rows=3, columns=80)
+        text = self._text(shown[0])
+        assert "too small" in text and "×4" in text, shown[0]
+        assert "Saved." not in text and "OK" not in text
+
+    async def test_growing_the_terminal_brings_the_box_back(self):
+        grown: list[list[str]] = []
+
+        async def keys(session, inp, frames):
+            assert "too small" in self._text(frames[0])
+            session.app.output.resize(columns=80)
+            session.app.invalidate()
+            await wait_until(lambda: on_screen(session, "Yes"))
+            grown.append(screen_lines(session))
+            inp.send_text(ENTER)
+
+        assert await self._ask(self._yes_no, keys, rows=24, columns=16) is True
+        text = self._text(grown[0])
+        assert "This removes 3 files." in text and "Yes" in text and "No" in text
+        assert "too small" not in text
+
+    async def test_a_settings_form_in_a_narrow_box_shows_the_notice_then_fits_at_40(self):
+        for cols, small in [(24, True), (40, False)]:
+            frame = await first_dialog_frame(
+                lambda s: s.show_settings_dialog("Settings", self.ITEMS, placement="box"),
+                rows=14, columns=cols,
+            )
+            text = self._text(frame)
+            assert ("too small" in text) is small, frame
+            if not small:
+                assert "Stream responses" in text and "Save" in text and "Cancel" in text
 
 
 class TestChecklistDialog:
