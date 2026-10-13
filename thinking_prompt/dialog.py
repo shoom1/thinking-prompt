@@ -56,6 +56,7 @@ from prompt_toolkit.widgets import Label, RadioList
 from ._text import format_exception_detail
 from .dialog_box import BoxPresenter
 from .dialog_inline import InlinePresenter, InlineView
+from .dialog_scroll import ScrollRegion
 from .rows import OptionGroup, RowNavigator
 from .types import Placement, check_placement
 
@@ -493,7 +494,8 @@ class DialogManager:
         return self._box.rows(width, max_rows)
 
     def _create_key_bindings(self) -> KeyBindings:
-        """Create key bindings for dialog (Escape handler)."""
+        """Escape, and the keys that scroll a text body that doesn't fit:
+        PgUp/PgDn, and in a box also ↑↓ (its buttons use ←→ and Tab)."""
         kb = KeyBindings()
 
         @kb.add("escape", filter=Condition(lambda: self._visible))
@@ -502,7 +504,43 @@ class DialogManager:
             if dialog and dialog.escapable:
                 dialog.set_result(dialog.escape_result)
 
+        text_overflows = Condition(self._text_overflows)
+        in_box = Condition(lambda: self._box.view is not None)
+
+        @kb.add("pageup", filter=text_overflows)
+        def page_up(event: Any) -> None:
+            self._scroll_text(pages=-1)
+
+        @kb.add("pagedown", filter=text_overflows)
+        def page_down(event: Any) -> None:
+            self._scroll_text(pages=1)
+
+        @kb.add("up", filter=text_overflows & in_box)
+        def line_up(event: Any) -> None:
+            self._scroll_text(lines=-1)
+
+        @kb.add("down", filter=text_overflows & in_box)
+        def line_down(event: Any) -> None:
+            self._scroll_text(lines=1)
+
         return kb
+
+    def _text_region(self) -> ScrollRegion | None:
+        """The open dialog's text body, which scrolls by keys; None when
+        no dialog is open or its body has cursor stops."""
+        if self._box.view is not None:
+            return self._box.view.text_region
+        return None
+
+    def _text_overflows(self) -> bool:
+        region = self._text_region()
+        return self._visible and region is not None and region.overflows
+
+    def _scroll_text(self, *, lines: int = 0, pages: int = 0) -> None:
+        region = self._text_region()
+        if region is not None:
+            region.scroll(lines)
+            region.page(pages)
 
     def _inject_float_container(self) -> None:
         """Install the box dialogs' float and the Escape binding (one-time)."""

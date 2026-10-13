@@ -41,6 +41,8 @@ ESCAPE = "\x1b"
 TAB = "\t"
 SHIFT_TAB = "\x1b[Z"
 DOWN = "\x1b[B"
+PGUP = "\x1b[5~"
+PGDN = "\x1b[6~"
 UP = "\x1b[A"
 RIGHT = "\x1b[C"
 
@@ -338,6 +340,12 @@ def box_height(lines: list[str]) -> int:
     top = next(i for i, line in enumerate(lines) if "┌" in line)
     bottom = max(i for i, line in enumerate(lines) if "┘" in line)
     return bottom - top + 1
+
+
+def first_line_shown(session: ThinkingPromptSession) -> int | None:
+    """The first of "line 00", "line 01", ... on screen, or None."""
+    shown = [i for i in range(100) if on_screen(session, f"line {i:02}")]
+    return shown[0] if shown else None
 
 
 
@@ -983,6 +991,89 @@ class TestBoxMaxHeight:
                 assert box_height(screen_lines(session)) == 12
                 inp.send_text(ESCAPE)
                 await wait_until(lambda: results == [None])
+
+            await run_with(session, handler, script)
+
+
+class TestBoxTextScrolling:
+    """A box dialog's text body scrolls with PgUp/PgDn and ↑↓ when it
+    doesn't fit; the focused button keeps the focus."""
+
+    TEXT = "\n".join(f"line {i:02}" for i in range(40))
+
+    async def _run(self, text: str, keys_script: Callable[[ThinkingPromptSession, PipeInput], Awaitable[None]]) -> None:
+        closed: list[bool] = []
+
+        async def handler(_: str) -> None:
+            await session.message_dialog("Long", text, max_height=12, placement="box")
+            closed.append(True)
+
+        with piped_session(rows=40) as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                assert first_line_shown(session) == 0
+                await keys_script(session, inp)
+                inp.send_text(ENTER)  # OK still has the focus
+                await wait_until(lambda: closed == [True])
+
+            await run_with(session, handler, script)
+
+    async def test_pagedown_and_pageup_page_through_the_text(self):
+        async def keys(session: ThinkingPromptSession, inp: PipeInput) -> None:
+            inp.send_text(PGDN)
+            await wait_until(lambda: (first_line_shown(session) or 0) > 1)
+            inp.send_text(PGUP)
+            await wait_until(lambda: first_line_shown(session) == 0)
+
+        await self._run(self.TEXT, keys)
+
+    async def test_arrows_scroll_a_line(self):
+        async def keys(session: ThinkingPromptSession, inp: PipeInput) -> None:
+            inp.send_text(DOWN)
+            await wait_until(lambda: first_line_shown(session) == 1)
+            inp.send_text(UP)
+            await wait_until(lambda: first_line_shown(session) == 0)
+
+        await self._run(self.TEXT, keys)
+
+    async def test_scrolling_stops_at_the_end(self):
+        async def keys(session: ThinkingPromptSession, inp: PipeInput) -> None:
+            inp.send_text(PGDN * 20)
+            await wait_until(lambda: on_screen(session, "line 39"))
+            first = first_line_shown(session)
+            inp.send_text(DOWN)
+            await asyncio.sleep(0.2)
+            assert on_screen(session, "line 39") and first_line_shown(session) == first
+
+        await self._run(self.TEXT, keys)
+
+    async def test_keys_do_nothing_when_the_text_fits(self):
+        async def keys(session: ThinkingPromptSession, inp: PipeInput) -> None:
+            inp.send_text(DOWN + PGDN)
+            await asyncio.sleep(0.3)
+            assert first_line_shown(session) == 0
+
+        await self._run("\n".join(f"line {i:02}" for i in range(3)), keys)
+
+    async def test_arrows_still_move_through_a_long_list(self):
+        """A body with cursor stops keeps its own ↑↓: here a radio list taller than the cap."""
+        options = [f"option {i:02}" for i in range(40)]
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.dropdown_dialog(
+                "Pick", "Pick one:", options, max_height=12, placement="box"
+            ))
+
+        with piped_session(rows=40) as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                inp.send_text(DOWN * 3 + ENTER + TAB + ENTER)  # option 03, then OK
+                await wait_until(lambda: results == ["option 03"])
 
             await run_with(session, handler, script)
 

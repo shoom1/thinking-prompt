@@ -25,7 +25,7 @@ from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.widgets import Button
 from prompt_toolkit.widgets import Dialog as _DialogWidget
 
-from .dialog_scroll import ScrollRegion, dialog_cap
+from .dialog_scroll import ScrollRegion, dialog_cap, focusable_windows
 
 if TYPE_CHECKING:
     from .dialog import Dialog
@@ -41,12 +41,14 @@ class BoxView:
         buttons: Its Button widgets, one per ButtonConfig, in order.
         focused_button: The first ``ButtonConfig(focused=True)`` button, if any.
         max_height: The dialog's max_height (None: the terminal's).
+        text_region: The body's region when nothing in the body takes focus (a text body): it scrolls by keys.
     """
 
     widget: _DialogWidget
     buttons: list[Button]
     focused_button: Button | None = None
     max_height: int | None = None
+    text_region: ScrollRegion | None = None
 
     @property
     def initial_focus(self) -> Window | None:
@@ -60,7 +62,10 @@ def build_box(dialog: Dialog) -> BoxView:
     The body sits in a ScrollRegion: when the dialog is capped
     (BoxPresenter.rows), it scrolls with the cursor, or by keys for a text body.
     """
-    body = ScrollRegion(to_container(dialog.build_body()), scrollbar=True)
+    content = to_container(dialog.build_body())
+    body = ScrollRegion(content, scrollbar=True)
+    # Nothing in it takes focus (a text body): it scrolls by keys.
+    text_region = body if not focusable_windows(content) else None
 
     # Each ButtonConfig's style and focused flag apply however the dialog was made.
     buttons: list[Button] = []
@@ -79,7 +84,7 @@ def build_box(dialog: Dialog) -> BoxView:
         width=_width_dimension(dialog.width),
         with_background=False,  # Use styled dialog, no light overlay
     )
-    return BoxView(widget, buttons, focused, dialog.max_height)
+    return BoxView(widget, buttons, focused, dialog.max_height, text_region)
 
 
 def _width_dimension(width: int | None) -> Dimension | None:
