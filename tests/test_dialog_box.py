@@ -7,10 +7,10 @@ from unittest.mock import MagicMock
 import pytest
 from prompt_toolkit.application import create_app_session
 from prompt_toolkit.input import create_pipe_input
-from prompt_toolkit.layout import FloatContainer, Window, to_container
+from prompt_toolkit.layout import FloatContainer, FormattedTextControl, Window, to_container
 from prompt_toolkit.layout.layout import walk
 from prompt_toolkit.output import DummyOutput
-from prompt_toolkit.widgets import Button, Label
+from prompt_toolkit.widgets import Button, Label, RadioList
 
 from thinking_prompt.dialog import ButtonConfig, Dialog
 from thinking_prompt.dialog_box import BoxPresenter, build_box
@@ -44,6 +44,21 @@ class TestBuildBox:
         view = build_box(Dialog("T", "B", [ButtonConfig("One"), ButtonConfig("Two")]))
         assert view.focused_button is None
         assert view.initial_focus is None
+
+    def test_a_text_body_is_the_text_region(self):
+        view = build_box(Dialog("T", "Just text", [ButtonConfig("OK")]))
+        regions = [c for c in walk(to_container(view.widget)) if isinstance(c, ScrollRegion)]
+        assert len(regions) == 1
+        assert view.text_region is regions[0]
+
+    def test_a_body_with_a_cursor_stop_has_no_text_region(self):
+        body = Window(FormattedTextControl("pick", focusable=True))
+        view = build_box(Dialog("T", body, [ButtonConfig("OK")]))
+        assert view.text_region is None
+
+    def test_a_radio_list_body_has_no_text_region(self):
+        view = build_box(Dialog("T", RadioList([("a", "A"), ("b", "B")]), [ButtonConfig("OK")]))
+        assert view.text_region is None
 
     def test_button_style_is_added_to_the_button_window(self):
         view = build_box(Dialog("T", "B", [ButtonConfig("Danger", result=1, style="class:danger")]))
