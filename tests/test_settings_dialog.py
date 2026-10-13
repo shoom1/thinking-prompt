@@ -811,6 +811,14 @@ class TestValueColumn:
         assert row.endswith("false") and len(row) == 19
         assert "…" in row
 
+    def test_a_value_reaching_the_rows_last_column_falls_back_too(self):
+        """Values end where "right" ends them, a column short of the row's
+        right edge: a value fits at its column if it ends there."""
+        control = CheckboxControl(CheckboxItem(key="c", label="Stream"))
+        assert _row(control, 14, width=20)[14:] == "false"
+        row = _row(control, 15, width=20)
+        assert row.endswith("false") and len(row) == 19
+
     @staticmethod
     def _menu_open(width: int, **kwargs) -> list[str]:
         """A box form's dropdown, its menu open, drawn ``width`` columns wide."""

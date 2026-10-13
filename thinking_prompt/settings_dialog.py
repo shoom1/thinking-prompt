@@ -229,12 +229,13 @@ class SettingControl(RowControl, ABC, Generic[T]):
         ``width``-column row: the value column, or the one that ends the
         value at the row's right edge when it wouldn't fit after it. None
         with no value column: the row puts the value at its right edge.
+        The right edge is the row's last column but one, as "right" has it.
 
         The one rule for where a value is drawn, and so for the menu under
         it and the field that edits it.
         """
         column = self._value_column
-        if column is not None and column + value_width > width:
+        if column is not None and column + value_width > width - 1:
             return width - 1 - value_width  # too narrow: at the right edge
         return column
 
