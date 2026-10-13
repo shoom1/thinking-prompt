@@ -48,16 +48,18 @@ RIGHT = "\x1b[C"
 
 
 class _ShortOutput(DummyOutput):
-    """A DummyOutput whose terminal is ``rows`` rows tall (DummyOutput: 40),
-    with ``below_cursor`` rows free under the prompt if given."""
+    """A DummyOutput whose terminal is ``rows`` rows tall (DummyOutput: 40)
+    and ``columns`` wide, with ``below_cursor`` rows free under the prompt
+    if given."""
 
-    def __init__(self, rows: int, below_cursor: int | None = None) -> None:
+    def __init__(self, rows: int, below_cursor: int | None = None, columns: int = 80) -> None:
         super().__init__()
         self._rows = rows
         self._below_cursor = below_cursor
+        self._columns = columns
 
     def get_size(self) -> Size:
-        return Size(rows=self._rows, columns=80)
+        return Size(rows=self._rows, columns=self._columns)
 
     def get_rows_below_cursor_position(self) -> int:
         if self._below_cursor is None:
@@ -67,12 +69,12 @@ class _ShortOutput(DummyOutput):
 
 @contextmanager
 def piped_session(
-    *, rows: int | None = None, below_cursor: int | None = None, **kwargs: Any
+    *, rows: int | None = None, below_cursor: int | None = None, columns: int = 80, **kwargs: Any
 ) -> Iterator[tuple[ThinkingPromptSession, PipeInput]]:
     """A session whose Application reads from a pipe and renders nowhere
-    (in a ``rows``-row terminal if given, with ``below_cursor`` rows free
+    (in a ``rows``-row, ``columns`` wide terminal if given, with ``below_cursor`` rows free
     under the prompt if given)."""
-    output = DummyOutput() if rows is None else _ShortOutput(rows, below_cursor)
+    output = DummyOutput() if rows is None else _ShortOutput(rows, below_cursor, columns)
     with create_pipe_input() as inp, create_app_session(input=inp, output=output):
         yield ThinkingPromptSession(**kwargs), inp
 
@@ -1659,6 +1661,20 @@ class TestInlineDialogs:
 
 
 class TestInlineSettings:
+    async def test_values_sit_after_their_labels_in_a_wide_terminal(self):
+        items = [
+            CheckboxItem(key="stream", label="Stream", default=True),
+            TextItem(key="name", label="Name", default="bob"),
+        ]
+        frame = await first_dialog_frame(
+            lambda s: s.show_settings_dialog("Settings", items, placement="inline"),
+            rows=24, columns=120,
+        )
+        stream = next(line for line in frame if "Stream" in line)
+        name = next(line for line in frame if "Name" in line)
+        assert stream.index("true") - stream.index("Stream") == len("Stream") + 2
+        assert name.index("bob") - name.index("Name") == len("Stream") + 2
+
     """The settings dialog inline: settings rows, then Save / Cancel, one cursor."""
 
     @staticmethod

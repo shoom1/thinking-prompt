@@ -9,8 +9,12 @@ from prompt_toolkit.layout import BufferControl, HSplit, Window
 from prompt_toolkit.layout.processors import PasswordProcessor
 
 from thinking_prompt.settings_dialog import (
+    CheckboxControl,
     CheckboxItem,
+    ChecklistItem,
+    DropdownControl,
     DropdownItem,
+    InlineSelectControl,
     InlineSelectItem,
     SettingsDialog,
     TextControl,
@@ -588,9 +592,10 @@ class TestSettingsDialogOptions:
 
     async def test_session_helper_passes_options_through(self, capturing_session):
         session, shown = capturing_session
-        await session.show_settings_dialog("S", [], False, width=40, top=1, max_height=15)
+        await session.show_settings_dialog("S", [], False, width=40, top=1, max_height=15, align_values=24)
 
         (dialog,) = shown
+        assert dialog._align_values == 24
         assert (dialog.title, dialog.width, dialog.top, dialog.max_height) == ("S", 40, 1, 15)
         assert dialog.escapable is False
 
@@ -738,3 +743,104 @@ class TestOptionItems:
         from thinking_prompt import ChecklistItem, RadioItem
 
         assert ChecklistItem and RadioItem
+
+
+def _row(control, column, width: int = 60) -> str:
+    control.set_value_column(column)
+    return "".join(text for _, text in control.create_content(width, 1).get_line(0))
+
+
+# (make the control, its label, its value at a column, how the row ends at the right edge)
+ROWS = [
+    (lambda: CheckboxControl(CheckboxItem(key="c", label="Stream", default=True)),
+     "Stream", "true", "true"),
+    (lambda: InlineSelectControl(InlineSelectItem(key="s", label="Size", options=["a", "b", "c"], default="b")),
+     "Size", "◀ b ▶", "◀ b ▶"),
+    (lambda: DropdownControl(DropdownItem(key="d", label="Model", options=["gpt", "o1"], default="o1")),
+     "Model", "o1".ljust(15) + " ▼", "o1 ▼"),
+    (lambda: TextControl(TextItem(key="t", label="Name", default="bob")),
+     "Name", "bob".ljust(15), "bob"),
+]
+ROW_IDS = ["checkbox", "select", "dropdown", "text"]
+
+
+class TestValueColumn:
+    @pytest.mark.parametrize("make,label,at_column,at_right", ROWS, ids=ROW_IDS)
+    def test_a_value_starts_at_its_column(self, make, label, at_column, at_right):
+        row = _row(make(), 20)
+        assert row[:20].strip() == label
+        assert row[20:].startswith(at_column)
+
+    @pytest.mark.parametrize("make,label,at_column,at_right", ROWS, ids=ROW_IDS)
+    def test_no_column_keeps_values_at_the_right_edge(self, make, label, at_column, at_right):
+        row = _row(make(), None)
+        assert len(row) == 59
+        assert row.endswith(at_right)
+
+    def test_a_long_label_is_cut_before_the_column(self):
+        row = _row(CheckboxControl(CheckboxItem(key="c", label="A very long label indeed")), 10)
+        assert row[:10] == "  A very… "
+        assert row[10:] == "false"
+
+    def test_a_narrow_row_puts_the_value_at_the_right_edge(self):
+        row = _row(CheckboxControl(CheckboxItem(key="c", label="Streaming output")), 30, width=20)
+        assert row.endswith("false") and len(row) == 19
+        assert "…" in row
+
+    def test_the_dropdown_menu_floats_under_its_value(self):
+        control = DropdownControl(DropdownItem(key="d", label="Model", options=["a", "b"]))
+        control.set_value_column(20)
+        menu = control.get_float()
+        assert (menu.left, menu.right) == (20, None)
+
+    def test_without_a_column_the_menu_floats_at_the_right_edge(self):
+        menu = DropdownControl(DropdownItem(key="d", label="Model", options=["a", "b"])).get_float()
+        assert (menu.left, menu.right) == (None, 0)
+
+    def test_the_text_field_starts_at_the_column_while_editing(self):
+        control = TextControl(TextItem(key="t", label="Name"))
+        control.set_value_column(20)
+        label, field, rest = control._build_edit_container().children
+        assert label.width == 20 and field is control._buffer_window
+
+    def test_without_a_column_the_text_field_is_at_the_right_edge(self):
+        control = TextControl(TextItem(key="t", label="Name"))
+        label, padding, field = control._build_edit_container().children
+        assert field is control._buffer_window
+
+
+class TestAlignValues:
+    @staticmethod
+    def _column(items, **kwargs):
+        dialog = SettingsDialog("S", items, **kwargs)
+        dialog.build_body()
+        return dialog._controls[0]._value_column
+
+    def test_labels_start_values_after_the_longest_label(self):
+        items = [
+            CheckboxItem(key="a", label="Stream"),
+            TextItem(key="b", label="API key"),
+            ChecklistItem(key="c", label="A much longer check list label", options=["x"]),
+        ]
+        assert self._column(items) == 2 + len("API key") + 2
+
+    def test_labels_are_measured_in_terminal_columns(self):
+        items = [CheckboxItem(key="a", label="設定"), CheckboxItem(key="b", label="abc")]
+        assert self._column(items) == 2 + 4 + 2
+
+    def test_right_and_a_column(self):
+        items = [CheckboxItem(key="a", label="Stream")]
+        assert self._column(items, align_values="right") is None
+        assert self._column(items, align_values=24) == 24
+
+    def test_a_form_of_lists_only_needs_no_column(self):
+        dialog = SettingsDialog("S", [ChecklistItem(key="c", label="Tools", options=["x", "y"])])
+        dialog.build_body()
+
+    @pytest.mark.parametrize("bad", [3, 0, -1, "left", True, 4.5])
+    def test_align_values_is_checked(self, bad):
+        with pytest.raises(ValueError, match="align_values"):
+            SettingsDialog("S", [], align_values=bad)
+
+    def test_the_smallest_column(self):
+        assert SettingsDialog("S", [], align_values=4)._align_values == 4

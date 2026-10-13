@@ -1555,6 +1555,7 @@ class ThinkingPromptSession:
         width: int | None = 60,
         top: int | None = None,
         max_height: int | None = None,
+        align_values: Literal["labels", "right"] | int = "labels",
         placement: Placement | None = None,
     ) -> dict[str, Any] | None:
         """
@@ -1576,6 +1577,9 @@ class ThinkingPromptSession:
             max_height: The most rows the dialog takes; settings beyond it
                     scroll with the cursor. None (default): the terminal's
                     rows less the prompt's.
+            align_values: Where values start: "labels" (default, two
+                    columns after the longest label), "right" (the row's
+                    right edge), or a column number (labels cut with "…").
             placement: "box" or "inline"; None (default) uses the session's
                     dialog_placement.
 
@@ -1600,7 +1604,8 @@ class ThinkingPromptSession:
         """
         from .settings_dialog import SettingsDialog
         dialog = SettingsDialog(
-            title, items, can_cancel, width=width, top=top, max_height=max_height, placement=placement
+            title, items, can_cancel, width=width, top=top, max_height=max_height,
+            align_values=align_values, placement=placement,
         )
         return cast(
             "dict[str, Any] | None", await self._dialogs.show(dialog)

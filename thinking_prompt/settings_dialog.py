@@ -11,7 +11,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any, Generic, TypeVar
+from typing import Any, Generic, Literal, TypeVar, Union
 
 from prompt_toolkit.application.current import get_app
 from prompt_toolkit.buffer import Buffer
@@ -34,6 +34,7 @@ from prompt_toolkit.layout import (
 from prompt_toolkit.layout.controls import FormattedTextControl, UIContent, UIControl
 from prompt_toolkit.layout.margins import ScrollbarMargin
 from prompt_toolkit.layout.processors import PasswordProcessor
+from prompt_toolkit.utils import get_cwidth
 from prompt_toolkit.widgets import Frame
 
 from .dialog import ButtonConfig, Dialog
@@ -97,6 +98,38 @@ class RadioItem(SettingsItem):
 
 T = TypeVar("T", bound=SettingsItem)
 
+# Where settings values start: "labels" (two columns after the longest
+# label), "right" (the row's right edge) or a column, the marker included.
+AlignValues = Union[Literal["labels", "right"], int]
+
+# The smallest value column: the marker, one label character and a space.
+MIN_VALUE_COLUMN = len(MARKER) + 2
+
+
+def _check_align_values(align: object) -> None:
+    if align in ("labels", "right"):
+        return
+    if isinstance(align, int) and not isinstance(align, bool) and align >= MIN_VALUE_COLUMN:
+        return
+    raise ValueError(
+        f'align_values must be "labels", "right" or a column of at least '
+        f"{MIN_VALUE_COLUMN}, got {align!r}"
+    )
+
+
+def _cut(text: str, columns: int) -> str:
+    """``text`` in at most ``columns`` terminal columns, ending in "…" if cut."""
+    if get_cwidth(text) <= columns:
+        return text
+    if columns < 1:
+        return ""
+    kept = ""
+    for char in text:
+        if get_cwidth(kept + char) > columns - 1:
+            break
+        kept += char
+    return kept.rstrip() + "…"
+
 
 def _cycled(options: list[str], value: Any, delta: int) -> Any:
     """The option ``delta`` steps from ``value``, clamped to the ends.
@@ -139,6 +172,8 @@ class SettingControl(RowControl, ABC, Generic[T]):
         self._value: Any = item.default
         self._editing = False
         self._has_focus = False
+        # Where the value starts (set_value_column); None: the right edge.
+        self._value_column: int | None = None
 
     @property
     def item(self) -> T:
@@ -175,6 +210,11 @@ class SettingControl(RowControl, ABC, Generic[T]):
     def set_has_focus(self, has_focus: bool) -> None:
         """Update focus state (called by parent container)."""
         self._has_focus = has_focus
+
+    def set_value_column(self, column: int | None) -> None:
+        """Start the value at column ``column`` of the row, the marker
+        included; None puts it at the row's right edge."""
+        self._value_column = column
 
     @abstractmethod
     def create_content(self, width: int, height: int) -> UIContent:
@@ -221,21 +261,30 @@ class SettingControl(RowControl, ABC, Generic[T]):
     ) -> list[FormattedText]:
         """Build the standard setting row with optional description.
 
-        `value` is the right-aligned value as (style, text) fragments.
-        Returns a list of FormattedText lines (1 or 2 depending on description).
+        ``value`` is the value as (style, text) fragments. It starts at the
+        value column (set_value_column), the label cut with "…" to keep a
+        space before it; with no column, or when the value wouldn't fit
+        after it, the value ends at the row's right edge. Returns a list of
+        FormattedText lines (1 or 2 depending on description).
         """
         indicator = MARKER if is_selected else NO_MARKER
         indicator_style = "class:setting-indicator" if is_selected else ""
         label_style = "class:setting-label-selected" if is_selected else "class:setting-label"
 
-        label_text = self._item.label
-        value_len = sum(len(text) for _, text in value)
-        available = width - len(indicator) - len(label_text) - value_len - 1
-        padding = max(1, available)
+        label = self._item.label
+        value_width = sum(get_cwidth(text) for _, text in value)
+        column = self._value_column
+        if column is not None and column + value_width > width:
+            column = width - 1 - value_width  # too narrow: at the right edge
+        if column is None:
+            padding = max(1, width - get_cwidth(indicator) - get_cwidth(label) - value_width - 1)
+        else:
+            label = _cut(label, column - get_cwidth(indicator) - 1)
+            padding = max(1, column - get_cwidth(indicator) - get_cwidth(label))
 
         row: list[tuple[str, str]] = [
             (indicator_style, indicator),
-            (label_style, label_text),
+            (label_style, label),
             ("", " " * padding),
             *value,
         ]
@@ -475,9 +524,12 @@ class DropdownControl(SettingControl[DropdownItem]):
         if self._inline:
             value = _selector_value(self._item.options, self._value, value_style)
         else:
-            # Right-align value within dropdown width, add dropdown indicator
+            # The value within the dropdown's width (left-justified when it
+            # starts at a column, so the ▼ marks line up), then the indicator.
+            width_ = self._get_dropdown_width()
+            text = value_text.ljust(width_) if self._value_column is not None else value_text.rjust(width_)
             value = [
-                (value_style, f"{value_text.rjust(self._get_dropdown_width())} "),
+                (value_style, f"{text} "),
                 (f"{value_style} class:select-arrow", "▼"),
             ]
 
@@ -522,13 +574,16 @@ class DropdownControl(SettingControl[DropdownItem]):
             style="class:setting-dropdown-border",
         )
 
+        # Under the value: at its column, else at the row's right edge.
+        column = self._value_column
         return Float(
             content=ConditionalContainer(
                 content=framed_menu,
                 filter=Condition(lambda: self._editing),
             ),
             attach_to_window=self._view_window,
-            right=0,
+            left=column,
+            right=0 if column is None else None,
             top=1,
         )
 
@@ -664,14 +719,15 @@ class TextControl(SettingControl[TextItem]):
 
         is_selected = self._check_focus()
 
-        # Format value (right-aligned within edit_width)
+        # Format value (within edit_width: left-justified at a column, else right-justified)
         if self._item.password and self._value:
             value_text = "••••••"
         elif self._value:
             value_text = str(self._value)
         else:
             value_text = "(empty)"
-        value_text = value_text.rjust(self._item.edit_width)
+        width_ = self._item.edit_width
+        value_text = value_text.ljust(width_) if self._value_column is not None else value_text.rjust(width_)
 
         if not self._value:
             value_style = "class:setting-desc-selected" if is_selected else "class:setting-desc"
@@ -701,9 +757,14 @@ class TextControl(SettingControl[TextItem]):
         if self._edit_container is not None:
             return self._edit_container
 
-        # Label on left, input field on right
-        label_text = f"{MARKER}{self._item.label}"
-        label_width = len(label_text) + 2
+        if self._value_column is None:
+            # Label on the left, the field at the right edge.
+            label = self._item.label
+            label_width = get_cwidth(MARKER) + get_cwidth(label) + 2
+        else:
+            # The field starts at the value column, as the value does.
+            label = _cut(self._item.label, self._value_column - get_cwidth(MARKER) - 1)
+            label_width = self._value_column
 
         edit_kb = KeyBindings()
 
@@ -725,17 +786,18 @@ class TextControl(SettingControl[TextItem]):
         edit_width = self._item.edit_width
         self._buffer_window = Window(buffer_control, width=edit_width, style="class:text-area")
 
-        row = VSplit([
-            Window(
-                FormattedTextControl(lambda: FormattedText([
-                    ("class:setting-indicator", MARKER),
-                    ("class:setting-label-selected", self._item.label),
-                ])),
-                width=label_width,
-            ),
-            Window(),  # Flexible padding - expands to fill available space
-            self._buffer_window,
-        ])
+        label_window = Window(
+            FormattedTextControl(lambda: FormattedText([
+                ("class:setting-indicator", MARKER),
+                ("class:setting-label-selected", label),
+            ])),
+            width=label_width,
+        )
+        if self._value_column is None:
+            # Flexible padding expands to push the field to the right edge.
+            row = VSplit([label_window, Window(), self._buffer_window])
+        else:
+            row = VSplit([label_window, self._buffer_window, Window()])
 
         if self._item.description:
             desc_row = Window(
@@ -828,6 +890,10 @@ class SettingsDialog(Dialog):
     - Ctrl+S: save and close
     - Escape: cancel edit or close dialog
 
+    Values start two columns after the longest label by default
+    (align_values="labels"); "right" puts them at the row's right edge,
+    and a number at that column, cutting longer labels with "…".
+
     Returns a dictionary of changed values when closed, or None if cancelled.
     """
 
@@ -840,8 +906,10 @@ class SettingsDialog(Dialog):
         width: int | None = 60,
         top: int | None = None,
         max_height: int | None = None,
+        align_values: AlignValues = "labels",
         placement: Placement | None = None,
     ) -> None:
+        _check_align_values(align_values)
         # escapable: with can_cancel=False there is no cancel concept, so
         # Escape is disabled (the Done button is the only way out).
         # escape_result stays the default None, so nothing but a dict or None
@@ -851,12 +919,26 @@ class SettingsDialog(Dialog):
         )
         self._items = items
         self._can_cancel = can_cancel
+        self._align_values = align_values
 
         # Create controls
         self._controls: list[SettingControl] = [self._create_control(item) for item in items]
 
         # Original values for change detection, as each control reports them.
         self._original_values: dict[str, Any] = {c.item.key: c.value for c in self._controls}
+
+    def _value_column(self) -> int | None:
+        """Where values start (see align_values); None: the row's right edge."""
+        if self._align_values == "right":
+            return None
+        if self._align_values == "labels":
+            # Check and radio lists have their label on a row of its own.
+            labels = [
+                get_cwidth(c.item.label) for c in self._controls
+                if not isinstance(c, OptionsControl)
+            ]
+            return get_cwidth(MARKER) + max(labels, default=0) + 2
+        return int(self._align_values)
 
     def _create_control(self, item: SettingsItem) -> SettingControl:
         """Create the appropriate control for a settings item."""
@@ -945,7 +1027,9 @@ class SettingsDialog(Dialog):
 
         # Set initial focus indicator on first control
         self._controls[0].set_has_focus(True)
+        column = self._value_column()
         for control in self._controls:
+            control.set_value_column(column)
             if isinstance(control, DropdownControl):
                 control.set_inline(inline)
 
