@@ -1,6 +1,8 @@
 """Tests for theme selection and color-depth enforcement on the session."""
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import pytest
 from prompt_toolkit.output import ColorDepth
 
@@ -154,23 +156,6 @@ class TestRepaint:
         assert "\x1b[3J" in out          # scrollback erase
         assert "earlier message" in out  # transcript reprinted
 
-    def test_repaint_running_goes_through_renderer(self, capsys):
-        from prompt_toolkit.application.current import create_app_session
-        from prompt_toolkit.output.defaults import create_output
-
-        s = ThinkingPromptSession(theme="dark")
-        with create_app_session(output=create_output()):
-            s.add_response("hello")
-            s.app = MagicMock()
-            s.app.is_running = True
-            capsys.readouterr()
-
-            s.set_theme("light", repaint=True)
-
-            s.app.renderer.clear.assert_called_once()
-            s.app.output.write_raw.assert_called_once_with("\x1b[3J")
-            assert "hello" in capsys.readouterr().out
-
     def test_repaint_in_fullscreen_defers_to_exit_and_replaces_flush(self, capsys):
         from prompt_toolkit.application.current import create_app_session
         from prompt_toolkit.output.defaults import create_output
@@ -186,12 +171,16 @@ class TestRepaint:
         s.set_theme("light", repaint=True)
         assert capsys.readouterr().out == ""  # deferred: nothing printed yet
 
+        # With no app running the repaint prints at once (a running app
+        # gets it as a run_in_terminal job: TestRepaintWhileRunning in
+        # test_end_to_end).
+        s.app.is_running = False
         with create_app_session(output=create_output()):
             s.switch_to_prompt()
         out = capsys.readouterr().out
         # transcript reprint includes the message exactly once (pending dropped)
         assert out.count("during fullscreen") == 1
-        assert "\x1b[3J" in out or s.app.output.write_raw.called
+        assert "\x1b[3J" in out
 
     def test_thinking_truncation_reproduced_on_repaint(self, capsys):
         from prompt_toolkit.application.current import create_app_session
@@ -260,13 +249,11 @@ class TestRepaint:
         assert s._repaint_on_fullscreen_exit is False
 
         s.switch_to_fullscreen()
-        s.app.output.write_raw.reset_mock()
-        s.app.renderer.clear.reset_mock()
-        s.switch_to_prompt()
+        with patch.object(s, "_repaint_console") as repaint:
+            s.switch_to_prompt()
 
         # flush_pending path taken, not the repaint path.
-        s.app.output.write_raw.assert_not_called()
-        s.app.renderer.clear.assert_not_called()
+        repaint.assert_not_called()
 
 
 class TestLayoutAppliesThemeClasses:

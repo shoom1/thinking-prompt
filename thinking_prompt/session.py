@@ -28,7 +28,8 @@ if TYPE_CHECKING:
     from .thinking_box import ThinkingBox
     from .types import ContentCallback, ContentFormat, InputHandler, Overflow
 
-from prompt_toolkit.application import Application, get_app
+from prompt_toolkit.application import Application, get_app, run_in_terminal
+from prompt_toolkit.application.current import get_app_session
 from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.completion import Completer
 from prompt_toolkit.data_structures import Point
@@ -46,7 +47,7 @@ from prompt_toolkit.key_binding.key_processor import KeyPressEvent
 from prompt_toolkit.layout import AnyContainer, DynamicContainer, Window
 from prompt_toolkit.layout.controls import UIContent, UIControl
 from prompt_toolkit.layout.dimension import Dimension
-from prompt_toolkit.output import ColorDepth
+from prompt_toolkit.output import ColorDepth, Output
 from prompt_toolkit.styles import DynamicStyle
 
 from ._text import format_exception_detail
@@ -583,35 +584,46 @@ class ThinkingPromptSession:
         self._style = resolved.to_style()
         self._display.set_theme(resolved)
         if repaint:
-            if self.is_fullscreen:
+            self._repaint_unless_fullscreen()
+        self._invalidate()
+
+    def _repaint_unless_fullscreen(self) -> None:
+        """Repaint now, or in fullscreen (where the UI covers the screen) at
+        fullscreen exit."""
+        with self._fullscreen_lock:
+            if self._is_fullscreen:
                 self._repaint_on_fullscreen_exit = True
             else:
                 self._repaint_console()
-        self._invalidate()
 
     def _repaint_console(self) -> None:
-        """Clear screen + scrollback and re-print the transcript."""
-        if self.app and self.app.is_running:
-            self.app.renderer.clear()
-            # Renderer.clear() resets the screen model; scrollback erase is
-            # not part of its contract, so emit CSI 3J directly.
-            self.app.output.write_raw("\x1b[3J")
-            self.app.output.flush()
+        """Clear screen + scrollback and print the transcript, as it is now,
+        again. While the app runs that's one run_in_terminal job (the UI
+        erased and redrawn once), queued in order with the prints
+        print_formatted_text queues: one already queued prints before the
+        clear, a later one after the transcript, and two repaints in a row
+        print it once."""
+        contents = self._display.transcript()
+
+        def repaint(output: Output) -> None:
+            output.erase_screen()
+            output.cursor_goto(0, 0)
+            # Scrollback erase isn't part of Output's interface: CSI 3J.
+            output.write_raw("\x1b[3J")
+            self._display.print_now(output, contents)
+            output.flush()
+
+        app = self.app
+        if app and app.is_running and app.loop is not None:
+            app.loop.call_soon_threadsafe(lambda: run_in_terminal(lambda: repaint(app.output)))
         else:
-            print("\x1b[2J\x1b[H\x1b[3J", end="", flush=True)
-        self._display.reprint_transcript()
+            repaint(get_app_session().output)
 
     def _repaint_after_shrink(self) -> None:
         """Repaint once the terminal stopped shrinking, which left rows of
-        the live UI behind (see resize.py). In fullscreen the UI covers the
-        screen: the repaint waits for fullscreen exit, as set_theme's does."""
-        if not (self.app and self.app.is_running):
-            return
-        if self.is_fullscreen:
-            self._repaint_on_fullscreen_exit = True
-            return
-        self._repaint_console()
-        self._invalidate()
+        the live UI behind (see resize.py)."""
+        if self.app and self.app.is_running:
+            self._repaint_unless_fullscreen()
 
     def _invalidate(self) -> None:
         """Trigger UI refresh and sync app.full_screen with fullscreen mode."""

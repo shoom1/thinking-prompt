@@ -14,8 +14,9 @@ import threading
 from typing import TYPE_CHECKING, Any, Callable
 
 from prompt_toolkit import print_formatted_text
-from prompt_toolkit.formatted_text import ANSI, AnyFormattedText, FormattedText
-from prompt_toolkit.styles import Style
+from prompt_toolkit.formatted_text import ANSI, AnyFormattedText, FormattedText, to_formatted_text
+from prompt_toolkit.renderer import print_formatted_text as print_to_output
+from prompt_toolkit.styles import Style, default_pygments_style, default_ui_style, merge_styles
 
 from ._text import truncate_ansi_to_lines, truncate_to_lines
 from .history import FormattedTextHistory
@@ -29,7 +30,7 @@ from .rich_utils import (
 from .types import ContentFormat, Overflow
 
 if TYPE_CHECKING:
-    from prompt_toolkit.output import ColorDepth
+    from prompt_toolkit.output import ColorDepth, Output
 
     from .styles import ThinkingPromptStyles
 
@@ -179,9 +180,9 @@ class Display:
             prompt: The prompt string that was shown.
             text: The user's input text.
         """
-        # Store as ONE formatted entry so reprint_transcript emits a single
-        # print matching the add-time echo below. Two styled entries would
-        # be reprinted separately (each print adds a trailing newline, and
+        # Store as ONE formatted entry so a repaint (transcript()) has a
+        # single print matching the add-time echo below. Two styled entries
+        # would be reprinted separately (each print adds a trailing newline, and
         # the prefix has none of its own), splitting ">>> hello" across
         # lines. One input is also one history_limit entry this way.
         self._history.append_formatted([
@@ -470,13 +471,15 @@ class Display:
         with self._pending_lock:
             self._pending_output.clear()
 
-    def reprint_transcript(self) -> None:
-        """Re-print every transcript entry to the console in the current theme.
+    def transcript(self) -> list[AnyFormattedText]:
+        """Every transcript entry as the console shows it, in the current
+        theme: what a repaint prints (print_now), as it is now.
 
-        Console-only: nothing is appended to history. Thinking entries are
-        truncated to their recorded truncate_lines, reproducing the form
-        originally echoed. Runs on the event loop (called from set_theme).
+        Nothing is appended to history. Thinking entries are truncated to
+        their recorded truncate_lines, reproducing the form originally
+        echoed.
         """
+        contents: list[AnyFormattedText] = []
         for entry in self._history.iter_entries():
             if entry.kind == "styled":
                 # Mirror the add-time console normalization: stored text
@@ -490,11 +493,11 @@ class Display:
                     ) + "\n"
                 else:
                     text = text + "\n"
-                self._print_to_console(FormattedText([(entry.style, text)]))
+                contents.append(FormattedText([(entry.style, text)]))
             elif entry.kind == "formatted":
-                self._print_to_console(FormattedText(entry.fragments))
+                contents.append(FormattedText(entry.fragments))
             elif entry.kind == "ansi" and entry.truncate_lines is not None:
-                self._print_to_console(
+                contents.append(
                     ANSI(
                         truncate_ansi_to_lines(
                             entry.source.rstrip("\n"),
@@ -505,4 +508,17 @@ class Display:
                     )
                 )
             else:  # markdown/code (fresh render via cache) and untruncated ansi
-                self._print_to_console(FormattedText(self._history.render_entry(entry)))
+                contents.append(FormattedText(self._history.render_entry(entry)))
+        return contents
+
+    def print_now(self, output: Output, contents: list[AnyFormattedText]) -> None:
+        """Print ``contents`` to ``output`` at once, each as _print_to_console
+        would (print_formatted_text's style and newline), for a caller that
+        has the terminal to itself: a run_in_terminal job, or no app running.
+        print_formatted_text itself queues one run_in_terminal job per call
+        while an app runs, each redrawing the app."""
+        style = merge_styles([default_ui_style(), default_pygments_style(), self._get_style()])
+        color_depth = self._get_color_depth() or output.get_default_color_depth()
+        for content in contents:
+            fragments = [*to_formatted_text(content, auto_convert=True), ("", "\n")]
+            print_to_output(output, fragments, style, color_depth=color_depth)

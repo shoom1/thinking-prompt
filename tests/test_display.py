@@ -711,6 +711,12 @@ class TestTranscriptWiring:
         assert s._display.history._max_entries == 3
 
 
+def _texts(contents) -> list[str]:
+    from prompt_toolkit.formatted_text import fragment_list_to_text, to_formatted_text
+
+    return [fragment_list_to_text(to_formatted_text(c)) for c in contents]
+
+
 class TestThinkingEchoRepaintParity:
     """The console echo of a finished thinking box and its repaint (after
     set_theme(repaint=True)) must print the same text. Fullscreen mode
@@ -718,9 +724,7 @@ class TestThinkingEchoRepaintParity:
 
     @staticmethod
     def _printed(display: Display) -> list[str]:
-        from prompt_toolkit.formatted_text import fragment_list_to_text, to_formatted_text
-
-        out = [fragment_list_to_text(to_formatted_text(c)) for c in display._pending_output]
+        out = _texts(display._pending_output)
         display.drop_pending()
         return out
 
@@ -728,8 +732,7 @@ class TestThinkingEchoRepaintParity:
     def test_content_that_fits_is_not_marked_truncated(self, fullscreen_display, fmt):
         fullscreen_display.thinking("a\nb\n", truncate_lines=2, content_format=fmt)
         echoed = self._printed(fullscreen_display)
-        fullscreen_display.reprint_transcript()
-        repainted = self._printed(fullscreen_display)
+        repainted = _texts(fullscreen_display.transcript())
 
         assert echoed == ["a\nb\n"]
         assert repainted == echoed
@@ -752,6 +755,5 @@ class TestThinkingEchoTail:
             content, truncate_lines=3, content_format=fmt, overflow="tail"
         )
         echoed = self._printed(fullscreen_display)
-        fullscreen_display.reprint_transcript()
-        assert self._printed(fullscreen_display) == echoed
+        assert _texts(fullscreen_display.transcript()) == echoed
         assert echoed == ["...\nline 7\nline 8\nline 9\n"]

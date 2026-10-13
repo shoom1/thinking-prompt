@@ -74,6 +74,24 @@ class _ShortOutput(DummyOutput):
         return self._below_cursor
 
 
+class _RecordingOutput(_ShortOutput):
+    """A _ShortOutput that keeps what's written to it, text and escapes."""
+
+    def __init__(self, rows: int, columns: int = 80) -> None:
+        super().__init__(rows, columns=columns)
+        self.written: list[str] = []
+
+    def write(self, data: str) -> None:
+        self.written.append(data)
+
+    def write_raw(self, data: str) -> None:
+        self.written.append(data)
+
+    def text(self) -> str:
+        """Everything written, "\\r" dropped."""
+        return "".join(self.written).replace("\r", "")
+
+
 @contextmanager
 def piped_session(
     *, rows: int | None = None, below_cursor: int | None = None, columns: int = 80, **kwargs: Any
@@ -2530,7 +2548,8 @@ class TestSessionRepaintsAfterShrinking:
                     session.app.output.resize(**size)
                     session.app.invalidate()
                     await wait_until(lambda: session.app.render_counter > renders)
-                    await asyncio.sleep(cls.DELAY * 4)
+                    # The repaint, if one was due, has happened.
+                    await wait_until(lambda: session._shrinks._handle is None)
 
                 await run_with(session, handler, script)
             return repaint.call_count, session._repaint_on_fullscreen_exit
@@ -2546,3 +2565,38 @@ class TestSessionRepaintsAfterShrinking:
 
     async def test_in_fullscreen_the_repaint_waits_for_fullscreen_exit(self):
         assert await self._resize(fullscreen=True, columns=60) == (0, True)
+
+
+class TestRepaintWhileRunning:
+    """A repaint (set_theme(repaint=True), a shrink) of a running session is
+    one run_in_terminal job: the screen and scrollback cleared and the
+    transcript printed in one go."""
+
+    async def test_two_repaints_in_a_row_print_the_transcript_once(self):
+        output = _RecordingOutput(24)
+
+        async def handler(text: str) -> None:
+            pass
+
+        with create_pipe_input() as inp, create_app_session(input=inp, output=output):
+            session = ThinkingPromptSession()
+
+            async def script(run: asyncio.Task[None]) -> None:
+                for i in range(30):
+                    session.add_response(f"entry {i}")
+                await wait_until(lambda: "entry 29\n" in output.text())
+                renders = session.app.render_counter
+                session._repaint_console()
+                session._repaint_console()
+                session.add_response("after")  # printed behind both repaints
+                await wait_until(lambda: "after\n" in output.text())
+
+                text = output.text()
+                assert text.count("\x1b[3J") == 2
+                repainted = text[text.rindex("\x1b[3J"):]
+                assert [repainted.count(f"entry {i}\n") for i in range(30)] == [1] * 30
+                assert repainted.index("entry 29\n") < repainted.index("after\n")
+                # The UI is redrawn once a job, not once an entry.
+                assert session.app.render_counter - renders < 10
+
+            await run_with(session, handler, script)
