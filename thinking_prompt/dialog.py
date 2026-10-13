@@ -181,9 +181,8 @@ class Dialog:
     escapable: bool = True
     width: int | None = None
     top: int | None = None
-    # When set, the body is wrapped in a ScrollablePane so the dialog
-    # renders in one shot instead of growing line-by-line as the renderer
-    # measures content.
+    # When set, the dialog's total height: the body is wrapped in a
+    # ScrollablePane and scrolls when it overflows.
     height: int | None = None
     # "box", "inline", or None for the session's dialog_placement.
     placement: Placement | None = None
@@ -376,7 +375,7 @@ def _dropdown_dialog(
     """Pick one option; Cancel and Escape return None.
 
     Box: a radio list with OK / Cancel. Inline: one numbered action per
-    option, with the cursor starting on ``default``.
+    option. Either way the cursor starts on ``default``.
     """
     if not options:
         raise ValueError("dropdown_dialog() needs at least one option")
@@ -388,9 +387,9 @@ def _dropdown_dialog(
             placement="inline",
         )
 
-    radio: RadioList[str] = RadioList(values=[(opt, opt) for opt in options])
-    if default is not None and default in options:
-        radio.current_value = default
+    # default= also puts the cursor there (setting current_value afterwards
+    # left it on the first option); one that isn't an option picks the first.
+    radio: RadioList[str] = RadioList(values=[(opt, opt) for opt in options], default=default)
 
     dialog = Dialog(title, HSplit([Label(text=text), radio]), placement="box")
     # Buttons set after construction: OK's handler needs the dialog itself.
@@ -465,6 +464,11 @@ class DialogManager:
     def inline_view(self) -> InlineView | None:
         """The open inline dialog, if any: the session's inline slot shows it."""
         return self._inline.view
+
+    def box_rows(self, width: int, max_rows: int) -> int:
+        """Rows the open box dialog takes; 0 when none is open. The session's
+        inline slot reserves them outside full screen."""
+        return self._box.rows(width, max_rows)
 
     def _create_key_bindings(self) -> KeyBindings:
         """Create key bindings for dialog (Escape handler)."""

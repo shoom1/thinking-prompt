@@ -43,6 +43,7 @@ from prompt_toolkit.history import History, InMemoryHistory
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.key_binding.key_processor import KeyPressEvent
 from prompt_toolkit.layout import AnyContainer, DynamicContainer, Window
+from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.output import ColorDepth
 from prompt_toolkit.styles import DynamicStyle
 
@@ -264,6 +265,8 @@ class ThinkingPromptSession:
         self._dialog_manager: DialogManager | None = None
         # Shown in the layout's inline-dialog slot while no inline dialog is open.
         self._no_inline_dialog = Window(height=0)
+        # Blank rows as tall as an open box dialog: see _inline_dialog_content.
+        self._box_dialog_room = Window(height=self._box_dialog_rows)
 
         # Create components
         self.default_buffer = self._create_default_buffer()
@@ -1286,10 +1289,30 @@ class ThinkingPromptSession:
         return self._dialog_placement
 
     def _inline_dialog_content(self) -> AnyContainer:
-        """What the layout's inline-dialog slot shows: the open inline dialog, or nothing."""
+        """What the layout's inline-dialog slot shows: the open inline dialog,
+        room for an open box dialog outside full screen, or nothing.
+
+        Outside full screen the app gets only the rows its layout asks for,
+        plus those free below the cursor, and a box dialog floats over the
+        layout without asking for any: with the prompt at the bottom of the
+        terminal, it was clipped to the prompt's few rows.
+        """
         manager = self._dialog_manager
-        view = manager.inline_view if manager is not None else None
-        return view.container if view is not None else self._no_inline_dialog
+        if manager is None:
+            return self._no_inline_dialog
+        if manager.inline_view is not None:
+            return manager.inline_view.container
+        if self._is_fullscreen:
+            return self._no_inline_dialog  # full screen has every row already
+        return self._box_dialog_room
+
+    def _box_dialog_rows(self) -> Dimension:
+        """The box dialog's rows, to reserve. Flexible down to none, so a
+        dialog taller than the terminal can't overflow the layout."""
+        manager = self._dialog_manager
+        size = self.app.output.get_size()
+        rows = manager.box_rows(size.columns, size.rows) if manager is not None else 0
+        return Dimension(min=0, preferred=rows, max=rows)
 
     @property
     def _dialogs(self) -> DialogManager:
@@ -1410,7 +1433,8 @@ class ThinkingPromptSession:
             title: Dialog title.
             text: Dialog body text.
             options: List of options to choose from.
-            default: Default selected option (optional).
+            default: The option selected, with the cursor on it, when the
+                dialog opens (optional; the first option otherwise).
             placement: "box" or "inline"; None (default) uses the session's
                 dialog_placement.
 
@@ -1529,9 +1553,7 @@ class ThinkingPromptSession:
                    - None: center (default)
                    - 0 or positive: offset from top
                    - negative: offset from bottom (e.g., -1 = 1 row from bottom)
-            height: Fixed total dialog height. When set, the dialog is
-                    allocated the full height in one render frame instead
-                    of growing line-by-line. Body overflow scrolls.
+            height: Fixed total dialog height; body overflow scrolls.
                     When None (default), the dialog sizes to its content.
             placement: "box" or "inline"; None (default) uses the session's
                     dialog_placement.
