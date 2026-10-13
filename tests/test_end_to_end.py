@@ -357,8 +357,6 @@ def first_line_shown(session: ThinkingPromptSession) -> int | None:
     return shown[0] if shown else None
 
 
-
-
 class TestRedraws:
     """The screen is redrawn when something changes or animates, never on
     a fixed timer."""
@@ -1748,6 +1746,8 @@ class TestInlineDialogs:
 
 
 class TestInlineSettings:
+    """The settings dialog inline: settings rows, then Save / Cancel, one cursor."""
+
     async def test_values_sit_after_their_labels_in_a_wide_terminal(self):
         items = [
             CheckboxItem(key="stream", label="Stream", default=True),
@@ -1761,8 +1761,6 @@ class TestInlineSettings:
         name = next(line for line in frame if "Name" in line)
         assert stream.index("true") - stream.index("Stream") == len("Stream") + 2
         assert name.index("bob") - name.index("Name") == len("Stream") + 2
-
-    """The settings dialog inline: settings rows, then Save / Cancel, one cursor."""
 
     @staticmethod
     def _items() -> list[Any]:
