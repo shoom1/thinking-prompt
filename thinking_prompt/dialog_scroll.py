@@ -173,7 +173,13 @@ class ScrollRegion(ScrollablePane):
         width = write_position.width
         self._visible_rows = write_position.height
         rows = self.content.preferred_height(width, self.max_available_height).preferred
-        self._overflowing = rows > self._visible_rows
+        overflowing = rows > self._visible_rows
+        if overflowing != self._overflowing:
+            # What depends on overflow is sized before the region draws (the
+            # inline hint, the box scrollbar's column), so the next render
+            # picks it up.
+            get_app().invalidate()
+        self._overflowing = overflowing
         if self._scrollbar and self._overflowing:
             # The scrollbar takes a column, so the content may wrap to more rows.
             rows = self.content.preferred_height(width - 1, self.max_available_height).preferred

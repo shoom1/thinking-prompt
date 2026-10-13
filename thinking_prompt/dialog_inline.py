@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Callable
 
 from prompt_toolkit.application.current import get_app
-from prompt_toolkit.formatted_text import FormattedText, StyleAndTextTuples, to_formatted_text
+from prompt_toolkit.formatted_text import FormattedText
 from prompt_toolkit.layout import Container, HSplit, VSplit, Window, to_container
 from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.layout.dimension import Dimension
@@ -177,18 +177,7 @@ def _text_row(style: str, text: str | Callable[[], str]) -> Window:
     def fragments() -> FormattedText:
         return FormattedText([(style, text() if callable(text) else text)])
 
-    control = _LiveText(fragments) if callable(text) else FormattedTextControl(fragments)
-    return Window(control, dont_extend_height=True, wrap_lines=True)
-
-
-class _LiveText(FormattedTextControl):
-    """Text worked out each time it's drawn, not once per render. The hint
-    depends on whether the text region overflows, which it learns while
-    drawing, after the rows are sized; a once-per-render text would show the
-    previous state and, with nothing else changing, stay stale."""
-
-    def _get_formatted_text_cached(self) -> StyleAndTextTuples:
-        return to_formatted_text(self.text, self.style)
+    return Window(FormattedTextControl(fragments), dont_extend_height=True, wrap_lines=True)
 
 
 def _hint(dialog: Dialog, stops: list[Container], text: ScrollRegion | None) -> str:
