@@ -370,6 +370,12 @@ whole dialog: title, borders, buttons, hint. What doesn't fit scrolls: rows
 with a cursor (settings, lists, actions) follow the cursor, and a text body
 scrolls with PgUp/PgDn (and ↑↓ in a box). Every helper takes `max_height=`.
 
+**Small terminals.** A box dialog that can't fit the terminal at all
+(narrower than its buttons, or shorter than its frame, buttons and one body
+row) shows a short notice in its place, with the size it needs. Esc still
+cancels it and Enter presses its focused button. It comes back as soon as the
+terminal is big enough.
+
 **Upgrading from 0.3:** `DialogConfig` and `BaseDialog` were removed.
 
 | 0.3 | 0.4 |
@@ -506,7 +512,9 @@ it scroll with the cursor.
 **Aligning values:** values start two columns after the longest label
 (`align_values="labels"`, the default). `align_values="right"` puts them at
 the row's right edge, and a number starts them at that column, cutting longer
-labels with `…`.
+labels with `…`. When a row is short of width, its label is cut first (down to
+3 columns), then a dropdown or text field gives up its padding, and only then
+is the value itself cut with `…`.
 
 ```python
 result = await session.show_settings_dialog(
