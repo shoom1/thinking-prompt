@@ -9,6 +9,7 @@ from prompt_toolkit.layout import BufferControl, HSplit, Window
 from prompt_toolkit.layout.mouse_handlers import MouseHandlers
 from prompt_toolkit.layout.processors import PasswordProcessor
 from prompt_toolkit.layout.screen import Screen, WritePosition
+from prompt_toolkit.utils import get_cwidth
 
 from thinking_prompt.settings_dialog import (
     CheckboxControl,
@@ -810,6 +811,19 @@ class TestValueColumn:
         row = _row(CheckboxControl(CheckboxItem(key="c", label="Streaming output")), 30, width=20)
         assert row.endswith("false") and len(row) == 19
         assert "…" in row
+
+    def test_fields_are_padded_in_terminal_columns(self):
+        """Wide characters take two columns: a dropdown's ▼ lines up whatever
+        its value, and a text value takes its edit_width."""
+
+        def mark(value: str) -> int:
+            item = DropdownItem(key="d", label="Model", options=["日本語モデル", "beta"], default=value)
+            row = _row(DropdownControl(item), 20)
+            return get_cwidth(row[:row.index("▼")])
+
+        assert mark("日本語モデル") == mark("beta") == 20 + 15 + 1
+        text = _row(TextControl(TextItem(key="t", label="Name", default="名前です")), 20)
+        assert get_cwidth(text) == 20 + 15
 
     def test_a_value_reaching_the_rows_last_column_falls_back_too(self):
         """Values end where "right" ends them, a column short of the row's

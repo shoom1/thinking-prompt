@@ -134,6 +134,13 @@ def _cut(text: str, columns: int) -> str:
     return kept.rstrip() + "…"
 
 
+def _justify(text: str, width: int, left: bool) -> str:
+    """``text`` padded with spaces to ``width`` terminal columns, after it
+    (``left``-justified) or before it."""
+    padding = " " * max(0, width - get_cwidth(text))
+    return text + padding if left else padding + text
+
+
 def _columns(fragments: list[tuple[str, str]]) -> int:
     """The terminal columns (style, text) fragments take."""
     return sum(get_cwidth(text) for _, text in fragments)
@@ -547,8 +554,8 @@ class DropdownControl(SettingControl[DropdownItem]):
         else:
             # The value within the dropdown's width (left-justified when it
             # starts at a column, so the ▼ marks line up), then the indicator.
-            width_ = self._get_dropdown_width()
-            text = value_text.ljust(width_) if self._value_column is not None else value_text.rjust(width_)
+            field_width = self._get_dropdown_width()
+            text = _justify(value_text, field_width, left=self._value_column is not None)
             value = [
                 (value_style, f"{text} "),
                 (f"{value_style} class:select-arrow", "▼"),
@@ -766,8 +773,7 @@ class TextControl(SettingControl[TextItem]):
             text = str(self._value)
         else:
             text = "(empty)"
-        field_width = self._item.edit_width
-        return text.ljust(field_width) if self._value_column is not None else text.rjust(field_width)
+        return _justify(text, self._item.edit_width, left=self._value_column is not None)
 
     def get_container(self) -> Container:
         """Return the (cached) container that switches between view/edit modes."""
