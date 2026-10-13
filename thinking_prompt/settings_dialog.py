@@ -295,9 +295,10 @@ def _selector_value(options: list[str], value: Any, value_style: str) -> _RowVal
     )
 
 
-def _widest_selector(options: list[str]) -> int:
-    """The most columns a ``◀ option ▶`` selector over ``options`` takes."""
-    return max((_selector_value(options, option, "").columns() for option in options), default=0)
+def _widest_selector(options: list[str], value: Any) -> int:
+    """The most columns a ``◀ option ▶`` selector over ``options`` takes,
+    showing any of them or ``value`` (a default can be none of them)."""
+    return max(_selector_value(options, shown, "").columns() for shown in [*options, value])
 
 
 class SettingControl(RowControl, ABC, Generic[T]):
@@ -364,8 +365,9 @@ class SettingControl(RowControl, ABC, Generic[T]):
 
     def widest_value(self) -> int:
         """The most columns this setting's value takes in full
-        (_RowValue.columns), whatever it is set to; 0 with no value on the
-        setting's row."""
+        (_RowValue.columns): showing any of its options, or what it shows
+        now (a text setting's value can outgrow it as it's edited); 0 with
+        no value on the setting's row."""
         return 0
 
     @abstractmethod
@@ -513,7 +515,7 @@ class InlineSelectControl(SettingControl[InlineSelectItem]):
         return frozenset({"←→ change"})
 
     def widest_value(self) -> int:
-        return _widest_selector(self._item.options)
+        return _widest_selector(self._item.options, self._value)
 
     def cycle(self, delta: int) -> None:
         """Move through options by delta (+1 or -1), clamped to boundaries."""
@@ -579,11 +581,9 @@ class DropdownControl(SettingControl[DropdownItem]):
 
     def widest_value(self) -> int:
         if self._inline:
-            return _widest_selector(self._item.options)
-        return max(
-            (self._menu_value(option, "").columns() for option in self._item.options),
-            default=self._menu_value("", "").columns(),
-        )
+            return _widest_selector(self._item.options, self._value)
+        shown = [*self._item.options, str(self._value) if self._value else ""]
+        return max(self._menu_value(text, "").columns() for text in shown)
 
     def _menu_value(self, text: str, style: str) -> _RowValue:
         """``text`` within the dropdown's width (left-justified when it
@@ -889,8 +889,7 @@ class TextControl(SettingControl[TextItem]):
         return text
 
     def widest_value(self) -> int:
-        # A longer text takes more, row by row: the field is what it normally takes.
-        return self._item.edit_width
+        return self._row_value("").columns()
 
     def _row_value(self, style: str) -> _RowValue:
         """The value within edit_width: left-justified at a value column,

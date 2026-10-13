@@ -765,12 +765,24 @@ class TestOptionItems:
             lambda: DropdownControl(DropdownItem(key="a", label="A", options=["x"], width=20)),
             20 + len(" ▼"),
         ),
+        (
+            lambda: InlineSelectControl(
+                InlineSelectItem(key="a", label="A", options=["S", "M"], default="Not an option")
+            ),
+            len("◀ Not an option ▶"),
+        ),
         (lambda: TextControl(TextItem(key="a", label="A", edit_width=12)), 12),
+        (lambda: TextControl(TextItem(key="a", label="A", edit_width=5)), len("(empty)")),
+        (
+            lambda: TextControl(TextItem(key="a", label="A", default="a long default", edit_width=5)),
+            len("a long default"),
+        ),
         (lambda: OptionsControl(ChecklistItem(key="a", label="A", options=["x"])), 0),
     ],
 )
 def test_widest_value(make, widest):
-    """The most columns a setting's value can take in full, whatever it's set to."""
+    """The most columns a setting's value takes in full: showing any of its
+    options, or what it shows now."""
     assert make().widest_value() == widest
 
 
@@ -1162,8 +1174,9 @@ class TestRowsShortOfWidth:
 
 class TestAlignValues:
     @staticmethod
-    def _column(items, **kwargs):
+    def _column(items, shown="box", **kwargs):
         dialog = SettingsDialog("S", items, **kwargs)
+        dialog._placement = shown  # as show_dialog() resolves it
         dialog.build_body()
         return dialog._controls[0]._value_column
 
@@ -1203,6 +1216,14 @@ class TestAlignValues:
         assert column.at(60) == 60 - 1 - 20
         assert column.at(200) == 2 + 50 + 2
         assert column.at(20) == 2 + len("API key") + 2
+
+    def test_an_inline_dropdown_is_measured_as_the_selector_it_shows(self):
+        items = [
+            DropdownItem(key="m", label="Model", description="d" * 60, options=["a", "b"], width=30),
+        ]
+        # Inline, the value is "◀ a ▶"; in a box, a 30-column menu field and " ▼".
+        assert self._column(items, shown="inline").at(80) == 2 + 60 + 2
+        assert self._column(items, shown="box").at(80) == 80 - 1 - (30 + 2)
 
     def test_list_labels_and_descriptions_dont_move_the_values(self):
         items = [

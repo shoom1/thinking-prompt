@@ -521,11 +521,11 @@ it scroll with the cursor.
 description (`align_values="labels"`, the default), so descriptions don't run
 under them; a description too long to leave room for the widest value still
 does. Check and radio lists, whose labels and descriptions sit on rows of
-their own, don't count. `align_values="right"` puts them at
-the row's right edge, and a number starts them at that column, cutting longer
-labels with `…`. When a row is short of width, its label is cut first (down to
-3 columns), then a dropdown or text field gives up its padding, and only then
-is the value itself cut with `…`.
+their own, don't count. `align_values="right"` puts values at the row's right
+edge, and a number starts them at that column, cutting longer labels with `…`.
+When a row is short of width, its label is cut first (down to 3 columns), then
+a dropdown or text field gives up its padding, and only then is the value
+itself cut with `…`.
 
 ```python
 result = await session.show_settings_dialog(
