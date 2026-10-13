@@ -188,9 +188,10 @@ class _BoxFloat(Float):
     """The box's float: centered over the drawn area, or, outside full
     screen, anchored to the window that holds its reserved rows.
 
-    ``room`` gives that window when it is in the layout now (None in full
-    screen, where it isn't, and its cursor position would fall back to
-    (0, 0)). Asked on each draw, since full screen can switch with a
+    ``room`` gives that window when it is in the layout now and was drawn
+    with every row it asked for (None in full screen, where it isn't, and
+    its cursor position would fall back to (0, 0); None too when squeezed
+    short, where the box would flip or shrink: it centers then). Asked on each draw, since full screen can switch with a
     dialog open. The anchor is the window's top-left, so with ``ycursor``
     and ``allow_cover_cursor`` the box's top border lands on its first row.
     An explicit top or bottom keeps its offset in both modes.
@@ -235,7 +236,7 @@ class BoxPresenter:
         self._title = ""
         self._escapable = True
         self._float = _BoxFloat(
-            self._session.box_dialog_room,
+            self._session._box_room,
             content=ConditionalContainer(
                 content=DynamicContainer(lambda: self._capped),
                 filter=Condition(lambda: self.view is not None),

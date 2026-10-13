@@ -1077,6 +1077,74 @@ class TestBoxOverItsRoom:
             await run_with(session, handler, script)
 
 
+class TestBoxInASqueezedRoom:
+    """When the terminal leaves the reserved rows fewer than the box needs,
+    the box is centered as before, not flipped over the thinking box or the
+    status bar, nor squeezed into "Window too small"."""
+
+    @staticmethod
+    def _form() -> list[Any]:
+        return [CheckboxItem(key=f"s{i}", label=f"Setting {i}") for i in range(11)]
+
+    async def _frame_with(
+        self, make_dialog: Callable[[ThinkingPromptSession], Any], *, thought_lines: int = 0, **terminal: Any
+    ) -> tuple[list[str], int, int]:
+        """The settled frame with the dialog open, the prompt row and the status row."""
+        closed: list[bool] = []
+        seen: list[tuple[list[str], int, int]] = []
+
+        async def handler(text: str) -> None:
+            if thought_lines:
+                async with session.thinking() as ctx:
+                    ctx.append("\n".join(f"thought {i}" for i in range(thought_lines)))
+                    await make_dialog(session)
+            else:
+                await make_dialog(session)
+            closed.append(True)
+
+        with piped_session(**terminal) as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                # A notice has no focused window, so dialog_rendered can't hold.
+                await wait_until(lambda: dialog_open(session))
+                await asyncio.sleep(0.3)
+                seen.append((screen_lines(session), *prompt_and_status_rows(session)))
+                inp.send_text(ESCAPE * 2)
+                await wait_until(lambda: closed == [True])
+
+            await run_with(session, handler, script)
+        return seen[0]
+
+    @pytest.mark.parametrize("rows", [24, 30])
+    async def test_a_settings_form_in_a_thinking_box_is_drawn_whole(self, rows):
+        frame, prompt, status = await self._frame_with(
+            lambda s: s.show_settings_dialog("Settings", self._form(), placement="box"),
+            thought_lines=20, rows=rows,
+        )
+        text = "\n".join(frame)
+        assert all(f"Setting {i}" in text for i in range(11)), frame
+        top = next(i for i, line in enumerate(frame) if "┌" in line)
+        bottom = max(i for i, line in enumerate(frame) if "┘" in line)
+        assert top > 0 and bottom < status, frame
+        assert not any(line.strip() in ("^", "v", "▲", "▼") for line in frame), frame
+        assert frame[status].startswith("Ctrl+C"), frame
+
+    @pytest.mark.parametrize("rows", [5, 6])
+    async def test_a_message_dialog_in_a_tiny_terminal_is_not_too_small(self, rows):
+        frame, _, _ = await self._frame_with(
+            lambda s: s.message_dialog("Hello", "Some text", placement="box"), rows=rows
+        )
+        assert not any("Window too sm" in line for line in frame), frame
+
+    @pytest.mark.parametrize("rows", [7, 8, 9])
+    async def test_the_status_bar_stays_whole_in_a_short_terminal(self, rows):
+        frame, prompt, status = await self._frame_with(
+            lambda s: s.show_settings_dialog("Settings", self._form()[:2], placement="box"), rows=rows
+        )
+        assert frame[status].startswith("Ctrl+C") and "│" not in frame[status], frame
+
+
 class TestBoxMaxHeight:
     """A box dialog is no taller than its max_height and the terminal (less
     the prompt's rows); its body scrolls within that."""

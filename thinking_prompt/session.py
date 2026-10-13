@@ -28,7 +28,7 @@ if TYPE_CHECKING:
     from .thinking_box import ThinkingBox
     from .types import ContentCallback, ContentFormat, InputHandler, Overflow
 
-from prompt_toolkit.application import Application
+from prompt_toolkit.application import Application, get_app
 from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.completion import Completer
 from prompt_toolkit.data_structures import Point
@@ -70,7 +70,13 @@ class _RoomControl(UIControl):
     """Blank content whose menu position is its top-left corner, which a
     float attached to the window can use as its anchor."""
 
+    def __init__(self) -> None:
+        # (render_counter, rows) of the last draw: whether the room got its
+        # rows in this render.
+        self.drawn: tuple[int, int] | None = None
+
     def create_content(self, width: int, height: int) -> UIContent:
+        self.drawn = (get_app().render_counter, height)
         # The first line holds a space: an empty one maps no position to the screen.
         return UIContent(
             get_line=lambda i: [("", " ")] if i == 0 else [],
@@ -283,7 +289,8 @@ class ThinkingPromptSession:
         # Blank rows as tall as an open box dialog: see _inline_dialog_content.
         # Its control reports a menu position at its top-left: the box floats
         # from there (a window not in focus records no cursor position).
-        self._box_dialog_room = Window(_RoomControl(), height=self._box_dialog_rows)
+        self._room_control = _RoomControl()
+        self._box_dialog_room = Window(self._room_control, height=self._box_dialog_rows)
 
         # Create components
         self.default_buffer = self._create_default_buffer()
@@ -1323,11 +1330,18 @@ class ThinkingPromptSession:
             return self._no_inline_dialog  # full screen has every row already
         return self._box_dialog_room
 
-    def box_dialog_room(self) -> Window | None:
-        """The window holding a box dialog's reserved rows if it is in the
-        layout now (the box floats over it), else None."""
+    def _box_room(self) -> Window | None:
+        """The window holding a box dialog's reserved rows, if it is in the
+        layout now and was drawn in this render with every row it asked for
+        (the box floats over it), else None. A room squeezed short would flip
+        the box over the thinking box, or squeeze it, so the box centers."""
         room = self._box_dialog_room
-        return room if self._inline_dialog_content() is room else None
+        if self._inline_dialog_content() is not room:
+            return None
+        drawn = self._room_control.drawn
+        if drawn is None or drawn[0] != self.app.render_counter:
+            return None
+        return room if drawn[1] >= self._box_dialog_rows().preferred else None
 
     def _box_dialog_rows(self) -> Dimension:
         """The box dialog's rows, to reserve. Flexible down to none, so a
