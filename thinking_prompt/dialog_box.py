@@ -13,8 +13,8 @@ from typing import TYPE_CHECKING
 from prompt_toolkit.application.current import get_app
 from prompt_toolkit.filters import Condition
 from prompt_toolkit.layout import (
-    AnyContainer,
     ConditionalContainer,
+    Container,
     DynamicContainer,
     Float,
     FloatContainer,
@@ -25,7 +25,7 @@ from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.widgets import Button
 from prompt_toolkit.widgets import Dialog as _DialogWidget
 
-from .dialog_scroll import ScrollRegion, dialog_cap, focusable_windows
+from .dialog_scroll import AtMost, ScrollRegion, dialog_cap, focusable_windows
 
 if TYPE_CHECKING:
     from .dialog import Dialog
@@ -122,18 +122,19 @@ class BoxPresenter:
     def __init__(self, session: ThinkingPromptSession) -> None:
         self._session = session
         self.view: BoxView | None = None
+        # The open dialog's widget, no taller than rows(). The float takes
+        # its content's height: given a height of its own, FloatContainer
+        # would no longer trim it to the rows left under top= (or above
+        # a negative one), cutting off the title or the buttons.
+        self._capped: Container = Window()
         self._float = Float(
             content=ConditionalContainer(
-                content=DynamicContainer(self._content),
+                content=DynamicContainer(lambda: self._capped),
                 filter=Condition(lambda: self.view is not None),
             ),
-            height=self._height,
             allow_cover_cursor=True,
         )
         self._installed = False
-
-    def _content(self) -> AnyContainer:
-        return self.view.widget if self.view is not None else Window()
 
     def install(self) -> None:
         """Wrap the session's layout container in a FloatContainer (once)."""
@@ -161,10 +162,12 @@ class BoxPresenter:
             self._float.bottom = abs(dialog.top)
 
         self.view = view
+        self._capped = AtMost(to_container(view.widget), self._cap)
         return view
 
     def close(self) -> None:
         self.view = None
+        self._capped = Window()
 
     def rows(self, width: int, max_rows: int) -> int:
         """Rows the open dialog takes in a ``width``-column, ``max_rows``-row
@@ -179,7 +182,8 @@ class BoxPresenter:
         cap = dialog_cap(self.view.max_height, max_rows)
         return max(wanted.min, min(wanted.preferred, cap))
 
-    def _height(self) -> int:
-        """The float's height: the open dialog's rows in the app's terminal."""
+    def _cap(self, width: int) -> int:
+        """The open dialog's rows in the app's terminal: rows(), as the
+        session reserves them. (``width``, the float's, is the dialog's own.)"""
         size = get_app().output.get_size()
         return self.rows(size.columns, size.rows)

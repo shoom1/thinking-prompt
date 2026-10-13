@@ -154,8 +154,3 @@ class TestBoxPresenter:
         view = presenter.open(self._long(max_height=2))
         smallest = to_container(view.widget).preferred_height(80, 24).min
         assert presenter.rows(80, 24) == smallest > 2
-
-    def test_the_float_takes_the_rows_in_the_apps_terminal(self):
-        presenter = self._presenter()
-        presenter.open(self._long())
-        assert presenter._float.get_height() == presenter.rows(80, 40)  # DummyOutput: 80x40

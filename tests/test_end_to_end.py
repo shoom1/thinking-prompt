@@ -980,6 +980,19 @@ class TestBoxMaxHeight:
         )
         assert on_frame(frame, "Tiny") and on_frame(frame, "hello")
 
+    @pytest.mark.parametrize("top", [8, -6])
+    async def test_offset_by_top_it_keeps_its_title_and_buttons(self, top):
+        """Placed rows from the top or bottom, a dialog too tall for the
+        rows left there is trimmed to them, its title and buttons kept."""
+        frame = await first_dialog_frame(
+            lambda s: s.show_dialog(
+                Dialog("Long", self.TEXT, [ButtonConfig("OK")], top=top, placement="box")
+            ),
+            rows=24,
+        )
+        shown = frame[:24]  # a float can draw past the terminal's last row, unseen
+        assert on_frame(shown, "Long") and on_frame(shown, "OK"), frame
+
     async def test_a_settings_form_follows_the_cursor_within_its_max_height(self):
         items = [CheckboxItem(key=f"s{i}", label=f"Setting {i:02}") for i in range(20)]
         results: list[Any] = []
