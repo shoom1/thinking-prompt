@@ -509,8 +509,11 @@ if result:
 **Height:** pass `max_height=N` to cap the dialog at N rows; settings beyond
 it scroll with the cursor.
 
-**Aligning values:** values start two columns after the longest label
-(`align_values="labels"`, the default). `align_values="right"` puts them at
+**Aligning values:** values start two columns after the longest label or
+description (`align_values="labels"`, the default), so descriptions don't run
+under them; a description too long to leave room for the widest value still
+does. Check and radio lists, whose labels and descriptions sit on rows of
+their own, don't count. `align_values="right"` puts them at
 the row's right edge, and a number starts them at that column, cutting longer
 labels with `…`. When a row is short of width, its label is cut first (down to
 3 columns), then a dropdown or text field gives up its padding, and only then

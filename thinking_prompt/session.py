@@ -1617,8 +1617,9 @@ class ThinkingPromptSession:
                     scroll with the cursor. None (default): the terminal's
                     rows less the prompt's.
             align_values: Where values start: "labels" (default, two
-                    columns after the longest label), "right" (the row's
-                    right edge), or a column number (labels cut with "…").
+                    columns after the longest label or description),
+                    "right" (the row's right edge), or a column number
+                    (labels cut with "…").
             placement: "box" or "inline"; None (default) uses the session's
                     dialog_placement.
 

@@ -19,10 +19,12 @@ from thinking_prompt.settings_dialog import (
     DropdownItem,
     InlineSelectControl,
     InlineSelectItem,
+    OptionsControl,
     SettingsDialog,
     TextControl,
     TextItem,
     _RowValue,
+    _ValueColumn,
 )
 
 
@@ -749,8 +751,42 @@ class TestOptionItems:
         assert ChecklistItem and RadioItem
 
 
+@pytest.mark.parametrize(
+    "make,widest",
+    [
+        (lambda: CheckboxControl(CheckboxItem(key="a", label="A")), len("false")),
+        (
+            lambda: InlineSelectControl(
+                InlineSelectItem(key="a", label="A", options=["S", "Medium", "XL"])
+            ),
+            len("◀ Medium ▶"),
+        ),
+        (
+            lambda: DropdownControl(DropdownItem(key="a", label="A", options=["x"], width=20)),
+            20 + len(" ▼"),
+        ),
+        (lambda: TextControl(TextItem(key="a", label="A", edit_width=12)), 12),
+        (lambda: OptionsControl(ChecklistItem(key="a", label="A", options=["x"])), 0),
+    ],
+)
+def test_widest_value(make, widest):
+    """The most columns a setting's value can take in full, whatever it's set to."""
+    assert make().widest_value() == widest
+
+
+def test_an_inline_dropdowns_widest_value_is_its_widest_option():
+    control = DropdownControl(DropdownItem(key="a", label="A", options=["x", "Longest"], width=20))
+    control.set_inline(True)
+    assert control.widest_value() == len("◀ Longest ▶")
+
+
+def _fixed(column: int | None) -> _ValueColumn | None:
+    """Values at ``column`` whatever the row's width; None: at the right edge."""
+    return None if column is None else _ValueColumn(column)
+
+
 def _row(control, column, width: int = 60) -> str:
-    control.set_value_column(column)
+    control.set_value_column(_fixed(column))
     return "".join(text for _, text in control.create_content(width, 1).get_line(0))
 
 
@@ -890,7 +926,7 @@ class TestValueColumn:
 
     async def test_the_text_field_starts_at_the_column_while_editing(self):
         control = TextControl(TextItem(key="t", label="Name", default="bob"))
-        control.set_value_column(20)
+        control.set_value_column(_ValueColumn(20))
         control.enter_edit_mode()
         (row,) = _drawn(control.get_container(), 60)
         assert _field(row) == list(range(20, 35))
@@ -898,7 +934,7 @@ class TestValueColumn:
 
     async def test_while_editing_a_long_label_is_cut_before_the_field(self):
         control = TextControl(TextItem(key="t", label="A rather long label", default="bob"))
-        control.set_value_column(12)
+        control.set_value_column(_ValueColumn(12))
         control.enter_edit_mode()
         (row,) = _drawn(control.get_container(), 60)
         assert _text(row)[:15] == "❯ A rather… bob"
@@ -1048,7 +1084,7 @@ class TestRowsShortOfWidth:
     # The menu follows the shrunk field.
     def test_the_menu_position_follows_a_shrunk_field(self):
         control = _dropdown(label="Model for summaries", default="o1")
-        control.set_value_column(10)
+        control.set_value_column(_ValueColumn(10))
         content = control.create_content(20, 1)
         line = "".join(text for _, text in content.get_line(0))
         assert line == "  Mo… " + "o1".ljust(11) + " ▼"
@@ -1056,7 +1092,7 @@ class TestRowsShortOfWidth:
 
     def test_the_menu_position_counts_characters_ahead_of_the_value(self):
         control = _dropdown(label="設定モデル名前名前名前")
-        control.set_value_column(30)
+        control.set_value_column(_ValueColumn(30))
         content = control.create_content(30, 1)
         line = "".join(text for _, text in content.get_line(0))
         assert content.menu_position.x == line.index("o1")
@@ -1074,7 +1110,7 @@ class TestRowsShortOfWidth:
     )
     async def test_the_edit_field_follows_the_layout(self, column, width, cells):
         control = _text_setting()
-        control.set_value_column(column)
+        control.set_value_column(_fixed(column))
         control.enter_edit_mode()
         (row,) = _drawn(control.get_container(), width)
         assert _field(row) == list(cells)
@@ -1082,7 +1118,7 @@ class TestRowsShortOfWidth:
 
     async def test_the_edit_field_starts_where_the_value_was_drawn(self):
         control = _text_setting()
-        control.set_value_column(20)
+        control.set_value_column(_ValueColumn(20))
         shown = _row(control, 20, width=30)
         control.enter_edit_mode()
         (row,) = _drawn(control.get_container(), 30)
@@ -1101,7 +1137,7 @@ class TestRowsShortOfWidth:
     @pytest.mark.parametrize("default", ["alexander", "alexander the great"])
     async def test_a_long_value_keeps_the_minimum_in_a_narrow_row(self, column, password, default):
         control = TextControl(TextItem(key="t", label="Display name", default=default, password=password))
-        control.set_value_column(column)
+        control.set_value_column(_fixed(column))
         control.enter_edit_mode()
         (row,) = _drawn(control.get_container(), 14)
         assert _field(row) == list(range(5, 13))
@@ -1111,7 +1147,7 @@ class TestRowsShortOfWidth:
         control = TextControl(
             TextItem(key="t", label="Name", default="a value of nineteen", password=password)
         )
-        control.set_value_column(10)
+        control.set_value_column(_ValueColumn(10))
         control.enter_edit_mode()
         (row,) = _drawn(control.get_container(), 60)
         assert _field(row) == list(range(10, 25))
@@ -1137,16 +1173,43 @@ class TestAlignValues:
             TextItem(key="b", label="API key"),
             ChecklistItem(key="c", label="A much longer check list label", options=["x"]),
         ]
-        assert self._column(items) == 2 + len("API key") + 2
+        assert self._column(items).at(60) == 2 + len("API key") + 2
 
     def test_labels_are_measured_in_terminal_columns(self):
         items = [CheckboxItem(key="a", label="設定"), CheckboxItem(key="b", label="abc")]
-        assert self._column(items) == 2 + 4 + 2
+        assert self._column(items).at(60) == 2 + 4 + 2
 
     def test_right_and_a_column(self):
-        items = [CheckboxItem(key="a", label="Stream")]
+        items = [CheckboxItem(key="a", label="Stream", description="Show tokens as they arrive")]
         assert self._column(items, align_values="right") is None
-        assert self._column(items, align_values=24) == 24
+        column = self._column(items, align_values=24)
+        assert (column.at(60), column.at(20)) == (24, 24)  # a set column doesn't move
+
+    def test_values_clear_the_longest_description(self):
+        items = [
+            CheckboxItem(key="a", label="Stream", description="Show tokens as they arrive"),
+            TextItem(key="b", label="API key", edit_width=10),
+        ]
+        assert self._column(items).at(80) == 2 + len("Show tokens as they arrive") + 2
+
+    def test_a_description_too_long_for_the_values_runs_under_them(self):
+        items = [
+            CheckboxItem(key="a", label="Stream", description="x" * 50),
+            TextItem(key="b", label="API key", edit_width=20),
+        ]
+        column = self._column(items)
+        # As far right as the widest value (the 20-column field) still fits
+        # before the row's last column, never left of the labels.
+        assert column.at(60) == 60 - 1 - 20
+        assert column.at(200) == 2 + 50 + 2
+        assert column.at(20) == 2 + len("API key") + 2
+
+    def test_list_labels_and_descriptions_dont_move_the_values(self):
+        items = [
+            CheckboxItem(key="a", label="Stream"),
+            ChecklistItem(key="c", label="Tools", description="y" * 40, options=["x"]),
+        ]
+        assert self._column(items).at(80) == 2 + len("Stream") + 2
 
     def test_a_form_of_lists_only_needs_no_column(self):
         dialog = SettingsDialog("S", [ChecklistItem(key="c", label="Tools", options=["x", "y"])])

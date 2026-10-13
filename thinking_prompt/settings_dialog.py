@@ -9,7 +9,7 @@ Enter edits text in place. Ctrl+S saves, Escape cancels.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Generic, Literal, TypeVar, Union
 
@@ -99,7 +99,8 @@ class RadioItem(SettingsItem):
 T = TypeVar("T", bound=SettingsItem)
 
 # Where settings values start: "labels" (two columns after the longest
-# label), "right" (the row's right edge) or a column, the marker included.
+# label, or description, see SettingsDialog), "right" (the row's right
+# edge) or a column, the marker included.
 AlignValues = Union[Literal["labels", "right"], int]
 
 # The smallest value column: the marker, one label character and a space.
@@ -115,6 +116,21 @@ def _check_align_values(align: object) -> None:
         f'align_values must be "labels", "right" or a column of at least '
         f"{MIN_VALUE_COLUMN}, got {align!r}"
     )
+
+
+@dataclass(frozen=True)
+class _ValueColumn:
+    """Where a form's values start in a row: at ``least``, or further
+    right, as far as ``most``, while a value ``widest`` columns wide still
+    fits before the row's last column (_layout_row's edge)."""
+
+    least: int
+    most: int = 0
+    widest: int = 0
+
+    def at(self, width: int) -> int:
+        """The column in a row ``width`` columns wide."""
+        return max(self.least, min(self.most, width - 1 - self.widest))
 
 
 def _cut(text: str, columns: int) -> str:
@@ -158,6 +174,12 @@ class _RowValue:
     after: tuple[tuple[str, str], ...] = ()
     lead: int = 0
     trail: int = 0
+
+    def columns(self) -> int:
+        """The columns the value takes in full: its decoration, padding and
+        field, or its text where that is wider."""
+        decoration = _columns(self.before) + _columns(self.after)
+        return decoration + self.lead + self.trail + max(self.field, get_cwidth(self.text))
 
     def fragments(self, layout: _RowLayout) -> list[tuple[str, str]]:
         return [
@@ -217,9 +239,9 @@ def _layout_row(
         text = _justify(_cut(value.text, field), field, value.left)
         return _RowLayout(label, start, field, text, lead, trail)
 
-    if column is not None and column + decoration + padding + full <= edge:
+    if column is not None and column + value.columns() <= edge:
         return laid_out(_cut(label, column - marker - 1), column, full, value.lead, value.trail)
-    start = edge - decoration - padding - full
+    start = edge - value.columns()
     if start - marker - 1 >= keep:
         return laid_out(_cut(label, start - marker - 1), start, full, value.lead, value.trail)
     label = _cut(label, keep)
@@ -273,6 +295,11 @@ def _selector_value(options: list[str], value: Any, value_style: str) -> _RowVal
     )
 
 
+def _widest_selector(options: list[str]) -> int:
+    """The most columns a ``◀ option ▶`` selector over ``options`` takes."""
+    return max((_selector_value(options, option, "").columns() for option in options), default=0)
+
+
 class SettingControl(RowControl, ABC, Generic[T]):
     """Base class for setting controls with view/edit modes.
 
@@ -286,7 +313,7 @@ class SettingControl(RowControl, ABC, Generic[T]):
         self._editing = False
         self._has_focus = False
         # Where the value starts (set_value_column); None: the right edge.
-        self._value_column: int | None = None
+        self._value_column: _ValueColumn | None = None
 
     @property
     def item(self) -> T:
@@ -324,10 +351,22 @@ class SettingControl(RowControl, ABC, Generic[T]):
         """Update focus state (called by parent container)."""
         self._has_focus = has_focus
 
-    def set_value_column(self, column: int | None) -> None:
-        """Start the value at column ``column`` of the row, the marker
-        included; None puts it at the row's right edge."""
+    def set_value_column(self, column: _ValueColumn | None) -> None:
+        """Start the value at ``column`` of the row (counted with the marker,
+        and depending on the row's width); None puts it at the row's right
+        edge."""
         self._value_column = column
+
+    def _column(self, width: int) -> int | None:
+        """Where the value starts in a row ``width`` columns wide; None: the
+        row's right edge."""
+        return None if self._value_column is None else self._value_column.at(width)
+
+    def widest_value(self) -> int:
+        """The most columns this setting's value takes in full
+        (_RowValue.columns), whatever it is set to; 0 with no value on the
+        setting's row."""
+        return 0
 
     @abstractmethod
     def create_content(self, width: int, height: int) -> UIContent:
@@ -382,7 +421,7 @@ class SettingControl(RowControl, ABC, Generic[T]):
         indicator_style = "class:setting-indicator" if is_selected else ""
         label_style = "class:setting-label-selected" if is_selected else "class:setting-label"
 
-        layout = _layout_row(width, self._item.label, self._value_column, value)
+        layout = _layout_row(width, self._item.label, self._column(width), value)
         padding = max(1, layout.column - get_cwidth(indicator) - get_cwidth(layout.label))
 
         row: list[tuple[str, str]] = [
@@ -416,6 +455,9 @@ class CheckboxControl(SettingControl[CheckboxItem]):
     @property
     def hints(self) -> frozenset[str]:
         return frozenset({"Space toggle"})
+
+    def widest_value(self) -> int:
+        return get_cwidth("false")  # wider than "true"
 
     def toggle(self) -> None:
         """Toggle the checkbox value."""
@@ -469,6 +511,9 @@ class InlineSelectControl(SettingControl[InlineSelectItem]):
     @property
     def hints(self) -> frozenset[str]:
         return frozenset({"←→ change"})
+
+    def widest_value(self) -> int:
+        return _widest_selector(self._item.options)
 
     def cycle(self, delta: int) -> None:
         """Move through options by delta (+1 or -1), clamped to boundaries."""
@@ -531,6 +576,25 @@ class DropdownControl(SettingControl[DropdownItem]):
     @property
     def hints(self) -> frozenset[str]:
         return frozenset({"←→ change"}) if self._inline else frozenset()
+
+    def widest_value(self) -> int:
+        if self._inline:
+            return _widest_selector(self._item.options)
+        return max(
+            (self._menu_value(option, "").columns() for option in self._item.options),
+            default=self._menu_value("", "").columns(),
+        )
+
+    def _menu_value(self, text: str, style: str) -> _RowValue:
+        """``text`` within the dropdown's width (left-justified when it
+        starts at a column, so the ▼ marks line up), then the indicator."""
+        return _RowValue(
+            text,
+            style,
+            self._get_dropdown_width(),
+            left=self._value_column is not None,
+            after=((style, " "), (f"{style} class:select-arrow", "▼")),
+        )
 
     def cycle(self, delta: int) -> None:
         """Move through options by delta (+1 or -1), clamped to the ends."""
@@ -608,15 +672,7 @@ class DropdownControl(SettingControl[DropdownItem]):
         if self._inline:
             value = _selector_value(self._item.options, self._value, value_style)
         else:
-            # The value within the dropdown's width (left-justified when it
-            # starts at a column, so the ▼ marks line up), then the indicator.
-            value = _RowValue(
-                str(self._value) if self._value else "",
-                value_style,
-                self._get_dropdown_width(),
-                left=self._value_column is not None,
-                after=((value_style, " "), (f"{value_style} class:select-arrow", "▼")),
-            )
+            value = self._menu_value(str(self._value) if self._value else "", value_style)
 
         lines = self._build_setting_row(width, value, is_selected)
         # The menu opens under the value, where this row draws it (get_float).
@@ -832,6 +888,10 @@ class TextControl(SettingControl[TextItem]):
             text = "(empty)"
         return text
 
+    def widest_value(self) -> int:
+        # A longer text takes more, row by row: the field is what it normally takes.
+        return self._item.edit_width
+
     def _row_value(self, style: str) -> _RowValue:
         """The value within edit_width: left-justified at a value column,
         else right-justified."""
@@ -921,7 +981,7 @@ class _EditRow(Container):
 
     def preferred_width(self, max_available_width: int) -> Dimension:
         item = self._control.item
-        column = self._control._value_column
+        column = self._control._column(max_available_width)
         if column is None:
             column = get_cwidth(MARKER) + get_cwidth(item.label) + 2
         return Dimension(min=0, preferred=column + item.edit_width)
@@ -944,7 +1004,7 @@ class _EditRow(Container):
         layout = _layout_row(
             width,
             control.item.label,
-            control._value_column,
+            control._column(width),
             # The field doesn't depend on the buffer: edit_width, scrolling
             # long text, whatever the text (or password) is.
             _RowValue("", "", edit_width, left=control._value_column is not None),
@@ -1050,9 +1110,11 @@ class SettingsDialog(Dialog):
     - Ctrl+S: save and close
     - Escape: cancel edit or close dialog
 
-    Values start two columns after the longest label by default
-    (align_values="labels"); "right" puts them at the row's right edge,
-    and a number at that column, cutting longer labels with "…".
+    Values start two columns after the longest label or description by
+    default (align_values="labels"), though a description too long to leave
+    room for the widest value runs on under the values; "right" puts them
+    at the row's right edge, and a number at that column, cutting longer
+    labels with "…".
 
     Returns a dictionary of changed values when closed, or None if cancelled.
     """
@@ -1087,18 +1149,25 @@ class SettingsDialog(Dialog):
         # Original values for change detection, as each control reports them.
         self._original_values: dict[str, Any] = {c.item.key: c.value for c in self._controls}
 
-    def _value_column(self) -> int | None:
+    def _value_column(self) -> _ValueColumn | None:
         """Where values start (see align_values); None: the row's right edge."""
         if self._align_values == "right":
             return None
-        if self._align_values == "labels":
-            # Check and radio lists have their label on a row of its own.
-            labels = [
-                get_cwidth(c.item.label) for c in self._controls
-                if not isinstance(c, OptionsControl)
-            ]
-            return get_cwidth(MARKER) + max(labels, default=0) + 2
-        return int(self._align_values)
+        if self._align_values != "labels":
+            return _ValueColumn(int(self._align_values))
+        # Check and radio lists have their label, and description, on rows
+        # with no value. A description starts where labels do (under the
+        # marker's columns).
+        rows = [c for c in self._controls if not isinstance(c, OptionsControl)]
+
+        def after(texts: Iterable[str]) -> int:
+            return get_cwidth(MARKER) + max((get_cwidth(t) for t in texts), default=0) + 2
+
+        return _ValueColumn(
+            after(c.item.label for c in rows),
+            after(c.item.description for c in rows),
+            max((c.widest_value() for c in rows), default=0),
+        )
 
     def _create_control(self, item: SettingsItem) -> SettingControl:
         """Create the appropriate control for a settings item."""
@@ -1187,11 +1256,13 @@ class SettingsDialog(Dialog):
 
         # Set initial focus indicator on first control
         self._controls[0].set_has_focus(True)
+        for control in self._controls:
+            if isinstance(control, DropdownControl):
+                control.set_inline(inline)
+        # After set_inline: an inline dropdown's value is a selector.
         column = self._value_column()
         for control in self._controls:
             control.set_value_column(column)
-            if isinstance(control, DropdownControl):
-                control.set_inline(inline)
 
         # Use empty window_too_small to suppress brief "Window too small" message during layout
         controls_container = HSplit(

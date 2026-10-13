@@ -1954,6 +1954,29 @@ class TestInlineSettings:
         assert stream.index("true") - stream.index("Stream") == len("Stream") + 2
         assert name.index("bob") - name.index("Name") == len("Stream") + 2
 
+    @pytest.mark.parametrize("placement", ["inline", "box"])
+    async def test_descriptions_end_before_the_values(self, placement):
+        items = [
+            DropdownItem(
+                key="theme", label="Theme", description="Application color scheme",
+                options=["Light", "System"], default="System", width=20,
+            ),
+            TextItem(key="name", label="Username", description="Your display name", default="Guest", edit_width=20),
+            CheckboxItem(
+                key="notify", label="Enable Notifications", description="Show desktop notifications", default=True,
+            ),
+        ]
+        frame = await first_dialog_frame(
+            lambda s: s.show_settings_dialog("Settings", items, placement=placement),
+            rows=24, columns=100,
+        )
+        # Descriptions start where labels do: each ends two columns short
+        # of the values, at least.
+        row = next(line for line in frame if "Username" in line)
+        label_to_value = row.index("Guest") - row.index("Username")
+        for description in ("Application color scheme", "Your display name", "Show desktop notifications"):
+            assert len(description) + 2 <= label_to_value, (description, frame)
+
     @pytest.mark.parametrize("align", ["labels", "right"])
     async def test_a_narrow_terminal_cuts_labels_and_keeps_every_value(self, align):
         items = [
