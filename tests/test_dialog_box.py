@@ -190,6 +190,22 @@ class TestBoxTooSmall:
         assert presenter.rows(80, 3) == 3
         assert presenter.rows(80, 24) > 3
 
+    def test_a_box_exactly_as_wide_as_it_needs_is_drawn(self):
+        presenter, _ = self._open()
+        needs_width, needs_rows = presenter._smallest(80, 24)
+        assert needs_width == 27
+        assert presenter._notice(needs_width, 24) is None
+        assert presenter._notice(needs_width - 1, 24) is not None
+
+    def test_a_box_exactly_as_tall_as_it_needs_is_drawn(self):
+        presenter, _ = self._open()
+        needs_width, needs_rows = presenter._smallest(80, 24)
+        assert needs_rows == 4
+        assert presenter._notice(80, needs_rows) is None
+        assert presenter._notice(80, needs_rows - 1) is not None
+        assert presenter.rows(80, needs_rows) == needs_rows
+        assert presenter.rows(80, needs_rows - 1) == needs_rows - 1
+
 
 class TestSmallestIsMeasuredOncePerDraw:
     @staticmethod
