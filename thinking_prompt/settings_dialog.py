@@ -28,7 +28,6 @@ from prompt_toolkit.layout import (
     Float,
     FloatContainer,
     HSplit,
-    VSplit,
     Window,
 )
 from prompt_toolkit.layout.controls import FormattedTextControl, UIContent, UIControl
@@ -141,9 +140,81 @@ def _justify(text: str, width: int, left: bool) -> str:
     return text + padding if left else padding + text
 
 
-def _columns(fragments: list[tuple[str, str]]) -> int:
+def _columns(fragments: Sequence[tuple[str, str]]) -> int:
     """The terminal columns (style, text) fragments take."""
     return sum(get_cwidth(text) for _, text in fragments)
+
+
+@dataclass(frozen=True)
+class _RowValue:
+    """A row's value as ``_layout_row`` takes it: its text, the field it
+    normally takes (``left``- or right-justified), and the decoration
+    fragments around the field."""
+    text: str
+    style: str
+    field: int
+    left: bool = True
+    before: tuple[tuple[str, str], ...] = ()
+    after: tuple[tuple[str, str], ...] = ()
+
+    def fragments(self, layout: _RowLayout) -> list[tuple[str, str]]:
+        return [*self.before, (self.style, layout.text), *self.after]
+
+
+@dataclass(frozen=True)
+class _RowLayout:
+    label: str   # as drawn, cut or not
+    column: int  # where the value starts, its decoration included
+    field: int   # the field width used
+    text: str    # the value text as drawn, padded to the field
+
+
+def _layout_row(
+    width: int,
+    label: str,
+    column: int | None,
+    value: _RowValue,
+    min_field: int | None = None,
+) -> _RowLayout:
+    """Lay a label/value row out in ``width`` terminal columns.
+
+    The one rule for where a value is drawn, and so for the menu under it
+    and the field that edits it. The row gives way in this order:
+
+    1. the value at ``column``, in full, the label cut to keep a space;
+    2. the value in full at the right edge (the row's last column but
+       one), the label cut to fit before it, down to 3 columns;
+    3. the label at 3 columns, the field shrunk to what is left, down to
+       ``min_field`` (default: the text's width);
+    4. the value text cut with "…" to what is left, at least 1 column.
+
+    The decoration stays throughout. Past that the row is clipped. A
+    ``min_field`` beyond the text (an edited field) is kept by cutting the
+    label below 3 columns first.
+    """
+    marker = get_cwidth(MARKER)
+    text_width = get_cwidth(value.text)
+    minimum = text_width if min_field is None else min_field
+    decoration = _columns(value.before) + _columns(value.after)
+    edge = width - 1
+    keep = min(3, get_cwidth(label))
+    full = max(value.field, text_width)
+
+    def laid_out(label: str, start: int, field: int) -> _RowLayout:
+        text = _justify(_cut(value.text, field), field, value.left)
+        return _RowLayout(label, start, field, text)
+
+    if column is not None and column + decoration + full <= edge:
+        return laid_out(_cut(label, column - marker - 1), column, full)
+    start = edge - decoration - full
+    if start - marker - 1 >= keep:
+        return laid_out(_cut(label, start - marker - 1), start, full)
+    label = _cut(label, keep)
+    start = marker + get_cwidth(label) + 1
+    if edge - start - decoration < minimum and minimum > text_width:
+        label = _cut(label, max(1, edge - decoration - minimum - marker - 1))
+        start = marker + get_cwidth(label) + 1
+    return laid_out(label, start, max(1, edge - start - decoration))
 
 
 def _cycled(options: list[str], value: Any, delta: int) -> Any:
@@ -162,9 +233,9 @@ def _cycled(options: list[str], value: Any, delta: int) -> Any:
     return options[max(0, min(len(options) - 1, idx + delta))]
 
 
-def _selector_value(options: list[str], value: Any, value_style: str) -> list[tuple[str, str]]:
-    """``◀ value ▶`` fragments. The arrows layer class:select-arrow over the
-    value style; at either end the missing arrow's place is kept blank."""
+def _selector_value(options: list[str], value: Any, value_style: str) -> _RowValue:
+    """``◀ value ▶``: the arrows layer class:select-arrow over the value
+    style; at either end the missing arrow's place is kept blank."""
     try:
         idx = options.index(value)
     except ValueError:
@@ -172,7 +243,8 @@ def _selector_value(options: list[str], value: Any, value_style: str) -> list[tu
     arrow_style = f"{value_style} class:select-arrow"
     left = (value_style, "  ") if idx == 0 else (arrow_style, "◀ ")
     right = (value_style, "  ") if idx == len(options) - 1 else (arrow_style, " ▶")
-    return [left, (value_style, str(value) if value else ""), right]
+    text = str(value) if value else ""
+    return _RowValue(text, value_style, get_cwidth(text), before=(left,), after=(right,))
 
 
 class SettingControl(RowControl, ABC, Generic[T]):
@@ -231,21 +303,6 @@ class SettingControl(RowControl, ABC, Generic[T]):
         included; None puts it at the row's right edge."""
         self._value_column = column
 
-    def _value_start(self, width: int, value_width: int) -> int | None:
-        """The column a ``value_width``-column value starts at in a
-        ``width``-column row: the value column, or the one that ends the
-        value at the row's right edge when it wouldn't fit after it. None
-        with no value column: the row puts the value at its right edge.
-        The right edge is the row's last column but one, as "right" has it.
-
-        The one rule for where a value is drawn, and so for the menu under
-        it and the field that edits it.
-        """
-        column = self._value_column
-        if column is not None and column + value_width > width - 1:
-            return width - 1 - value_width  # too narrow: at the right edge
-        return column
-
     @abstractmethod
     def create_content(self, width: int, height: int) -> UIContent:
         """Create the visual content for this control."""
@@ -286,35 +343,28 @@ class SettingControl(RowControl, ABC, Generic[T]):
     def _build_setting_row(
         self,
         width: int,
-        value: list[tuple[str, str]],
+        value: _RowValue,
         is_selected: bool,
+        min_field: int | None = None,
     ) -> list[FormattedText]:
         """Build the standard setting row with optional description.
 
-        ``value`` is the value as (style, text) fragments. It starts at the
-        value column (set_value_column), the label cut with "…" to keep a
-        space before it; with no column, or when the value wouldn't fit
-        after it, the value ends at the row's right edge. Returns a list of
-        FormattedText lines (1 or 2 depending on description).
+        ``value`` is laid out by _layout_row at the value column
+        (set_value_column), or at the row's right edge with none. Returns a
+        list of FormattedText lines (1 or 2 depending on description).
         """
         indicator = MARKER if is_selected else NO_MARKER
         indicator_style = "class:setting-indicator" if is_selected else ""
         label_style = "class:setting-label-selected" if is_selected else "class:setting-label"
 
-        label = self._item.label
-        value_width = _columns(value)
-        column = self._value_start(width, value_width)
-        if column is None:
-            padding = max(1, width - get_cwidth(indicator) - get_cwidth(label) - value_width - 1)
-        else:
-            label = _cut(label, column - get_cwidth(indicator) - 1)
-            padding = max(1, column - get_cwidth(indicator) - get_cwidth(label))
+        layout = _layout_row(width, self._item.label, self._value_column, value, min_field)
+        padding = max(1, layout.column - get_cwidth(indicator) - get_cwidth(layout.label))
 
         row: list[tuple[str, str]] = [
             (indicator_style, indicator),
-            (label_style, label),
+            (label_style, layout.label),
             ("", " " * padding),
-            *value,
+            *value.fragments(layout),
         ]
 
         lines = [FormattedText(row)]
@@ -357,7 +407,8 @@ class CheckboxControl(SettingControl[CheckboxItem]):
             value_text = "false"
             value_style = "class:setting-value-false-selected" if is_selected else "class:setting-value-false"
 
-        lines = self._build_setting_row(width, [(value_style, value_text)], is_selected)
+        value = _RowValue(value_text, value_style, get_cwidth(value_text))
+        lines = self._build_setting_row(width, value, is_selected)
 
         def get_line(i: int) -> FormattedText:
             return lines[i] if i < len(lines) else FormattedText([])
@@ -548,27 +599,27 @@ class DropdownControl(SettingControl[DropdownItem]):
         is_selected = self._check_focus()
         value_style = "class:setting-value-selected" if is_selected else "class:setting-value"
 
-        value_text = str(self._value) if self._value else ""
         if self._inline:
             value = _selector_value(self._item.options, self._value, value_style)
         else:
             # The value within the dropdown's width (left-justified when it
             # starts at a column, so the ▼ marks line up), then the indicator.
-            field_width = self._get_dropdown_width()
-            text = _justify(value_text, field_width, left=self._value_column is not None)
-            value = [
-                (value_style, f"{text} "),
-                (f"{value_style} class:select-arrow", "▼"),
-            ]
+            value = _RowValue(
+                str(self._value) if self._value else "",
+                value_style,
+                self._get_dropdown_width(),
+                left=self._value_column is not None,
+                after=((value_style, " "), (f"{value_style} class:select-arrow", "▼")),
+            )
 
         lines = self._build_setting_row(width, value, is_selected)
-        # The menu floats under the value, where this row draws it (get_float).
-        column = self._value_start(width, _columns(value))
         menu_position = None
-        if column is not None:
-            # prompt_toolkit's menu position counts characters into the line,
-            # not terminal columns: the characters drawn ahead of the value.
-            ahead = lines[0][: len(lines[0]) - len(value)]
+        if self._value_column is not None:
+            # The menu floats under the value, where this row draws it
+            # (get_float). prompt_toolkit's menu position counts characters
+            # into the line, not terminal columns: those drawn ahead of it.
+            drawn = len(value.before) + 1 + len(value.after)
+            ahead = lines[0][: len(lines[0]) - drawn]
             menu_position = Point(x=sum(len(text) for _, text, *_ in ahead), y=0)
 
         def get_line(i: int) -> FormattedText:
@@ -755,14 +806,12 @@ class TextControl(SettingControl[TextItem]):
             return UIContent(get_line=lambda i: FormattedText([]), line_count=0)
 
         is_selected = self._check_focus()
-        value_text = self._shown_value()
-
         if not self._value:
             value_style = "class:setting-desc-selected" if is_selected else "class:setting-desc"
         else:
             value_style = "class:setting-value-selected" if is_selected else "class:setting-value"
 
-        lines = self._build_setting_row(width, [(value_style, value_text)], is_selected)
+        lines = self._build_setting_row(width, self._row_value(value_style), is_selected)
 
         def get_line(i: int) -> FormattedText:
             return lines[i] if i < len(lines) else FormattedText([])
@@ -770,15 +819,21 @@ class TextControl(SettingControl[TextItem]):
         return UIContent(get_line=get_line, line_count=len(lines))
 
     def _shown_value(self) -> str:
-        """The value as its row shows it, within edit_width: left-justified
-        at a value column, else right-justified."""
+        """The value as its row shows it."""
         if self._item.password and self._value:
             text = "••••••"
         elif self._value:
             text = str(self._value)
         else:
             text = "(empty)"
-        return _justify(text, self._item.edit_width, left=self._value_column is not None)
+        return text
+
+    def _row_value(self, style: str) -> _RowValue:
+        """The value within edit_width: left-justified at a value column,
+        else right-justified."""
+        return _RowValue(
+            self._shown_value(), style, self._item.edit_width, left=self._value_column is not None
+        )
 
     def get_container(self) -> Container:
         """Return the (cached) container that switches between view/edit modes."""
@@ -812,24 +867,10 @@ class TextControl(SettingControl[TextItem]):
             input_processors=[PasswordProcessor()] if self._item.password else None,
         )
 
-        # Cache the buffer window for focus management
-        edit_width = self._item.edit_width
-        self._buffer_window = Window(buffer_control, width=edit_width, style="class:text-area")
-
-        row: Container
-        if self._value_column is None:
-            # Label on the left; flexible padding pushes the field to the right edge.
-            label_window = Window(
-                FormattedTextControl(lambda: FormattedText([
-                    ("class:setting-indicator", MARKER),
-                    ("class:setting-label-selected", self._item.label),
-                ])),
-                width=get_cwidth(MARKER) + get_cwidth(self._item.label) + 2,
-            )
-            row = VSplit([label_window, Window(), self._buffer_window])
-        else:
-            # The field starts where the row draws the value.
-            row = _EditRow(self, self._buffer_window)
+        # Cache the buffer window for focus management. It takes the width
+        # the row gives it; the buffer scrolls long text sideways.
+        self._buffer_window = Window(buffer_control, style="class:text-area")
+        row = _EditRow(self, self._buffer_window)
 
         if self._item.description:
             desc_row = Window(
@@ -857,11 +898,12 @@ class TextControl(SettingControl[TextItem]):
 
 
 class _EditRow(Container):
-    """A text setting's row while its value is edited at a value column:
-    the label, cut with "…" to fit, then the input field where the row
-    draws the value (_value_start). Laid out from the row's width at each
-    redraw, so a row too narrow for the column keeps the field, as it
-    keeps the value."""
+    """A text setting's row while its value is edited: the label, cut with
+    "…" to fit, then the input field where the row draws the value
+    (_layout_row), at the width it gives. Laid out from the row's width at
+    each redraw, so a row too narrow for the column keeps the field, as it
+    keeps the value. The field keeps min(8, edit_width) columns: the label
+    is cut further to keep them."""
 
     def __init__(self, control: TextControl, field: Window) -> None:
         self._control = control
@@ -874,8 +916,11 @@ class _EditRow(Container):
             child.reset()
 
     def preferred_width(self, max_available_width: int) -> Dimension:
-        column = self._control._value_column or 0
-        return Dimension(min=0, preferred=column + self._control.item.edit_width)
+        item = self._control.item
+        column = self._control._value_column
+        if column is None:
+            column = get_cwidth(MARKER) + get_cwidth(item.label) + 2
+        return Dimension(min=0, preferred=column + item.edit_width)
 
     def preferred_height(self, width: int, max_available_height: int) -> Dimension:
         return Dimension.exact(1)
@@ -890,10 +935,17 @@ class _EditRow(Container):
         z_index: int | None,
     ) -> None:
         width = write_position.width
-        # Never None: the row has a value column.
-        start = self._control._value_start(width, get_cwidth(self._control._shown_value())) or 0
-        start = max(0, min(start, width))
-        field = min(self._control.item.edit_width, width - start)
+        control = self._control
+        edit_width = control.item.edit_width
+        layout = _layout_row(
+            width,
+            control.item.label,
+            control._value_column,
+            control._row_value(""),
+            min_field=min(8, edit_width),
+        )
+        start = max(0, min(layout.column, width))
+        field = min(layout.field, width - start)
         x = write_position.xpos
         for child, child_width in ((self._label, start), (self._field, field), (self._rest, width - start - field)):
             child.write_to_screen(

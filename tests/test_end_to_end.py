@@ -25,6 +25,7 @@ from thinking_prompt import (
     CheckboxItem,
     ChecklistItem,
     Dialog,
+    DropdownItem,
     InlineSelectItem,
     RadioItem,
     TextItem,
@@ -1761,6 +1762,27 @@ class TestInlineSettings:
         name = next(line for line in frame if "Name" in line)
         assert stream.index("true") - stream.index("Stream") == len("Stream") + 2
         assert name.index("bob") - name.index("Name") == len("Stream") + 2
+
+    @pytest.mark.parametrize("align", ["labels", "right"])
+    async def test_a_narrow_terminal_cuts_labels_and_keeps_every_value(self, align):
+        items = [
+            CheckboxItem(key="stream", label="Stream responses", default=True),
+            DropdownItem(key="model", label="Model for summaries", options=["gpt-4o", "o1"], default="o1"),
+            TextItem(key="name", label="Display name", default="bob"),
+        ]
+        frame = await first_dialog_frame(
+            lambda s: s.show_settings_dialog("Settings", items, placement="inline", align_values=align),
+            rows=24, columns=24,
+        )
+        rows = {
+            value: next(line.strip().lstrip("❯ ") for line in frame if line.strip().lstrip("❯ ").startswith(label))
+            for label, value in (("Stream", "true"), ("Model", "o1"), ("Dis", "bob"))
+        }
+        for value, row in rows.items():
+            assert value in row, row
+            label = row[: row.index(value)].replace("◀", "").strip()
+            assert label.endswith("…"), row  # cut where it didn't fit
+            assert len(label) >= 3, row  # and never below 3 columns
 
     @staticmethod
     def _items() -> list[Any]:

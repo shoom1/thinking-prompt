@@ -22,6 +22,7 @@ from thinking_prompt.settings_dialog import (
     SettingsDialog,
     TextControl,
     TextItem,
+    _RowValue,
 )
 
 
@@ -641,7 +642,7 @@ class TestSettingsRows:
         from thinking_prompt.settings_dialog import CheckboxControl
 
         control = CheckboxControl(CheckboxItem(key="s", label="Stream"))
-        (row,) = control._build_setting_row(40, [("", "true")], True)
+        (row,) = control._build_setting_row(40, _RowValue("true", "", 4), True)
         assert row[0] == ("class:setting-indicator", "❯ ")
 
     def test_inline_dropdown_is_a_selector_without_a_popup(self):
@@ -907,10 +908,182 @@ class TestValueColumn:
         assert _field(row) == list(range(36 - 1 - 15, 36 - 1))
         assert _text(row)[2:23] == shown[2:23] == "A rather long la… bob"
 
-    def test_without_a_column_the_text_field_is_at_the_right_edge(self):
+    async def test_without_a_column_the_text_field_is_at_the_right_edge(self):
         control = TextControl(TextItem(key="t", label="Name"))
-        label, padding, field = control._build_edit_container().children
-        assert field is control._buffer_window
+        control.enter_edit_mode()
+        (row,) = _drawn(control.get_container(), 40)
+        assert _field(row) == list(range(39 - 15, 39))
+
+
+def _dropdown(label: str = "Model for summaries", default: str = "o1") -> DropdownControl:
+    return DropdownControl(DropdownItem(key="d", label=label, options=["gpt-4o", "o1"], default=default))
+
+
+def _selector(label: str = "Model name", options=("a", "gpt-4o-mini", "z"), default="gpt-4o-mini"):
+    return InlineSelectControl(InlineSelectItem(key="s", label=label, options=list(options), default=default))
+
+
+def _text_setting(label: str = "Display name", default: str = "bob") -> TextControl:
+    return TextControl(TextItem(key="t", label=label, default=default))
+
+
+class TestRowsShortOfWidth:
+    """A label/value row gives way in order: the value at its column, in full;
+    at the right edge, the label cut; the label at 3 columns and the field
+    shrunk; the value cut. Its decoration stays."""
+
+    # Checkbox: no padding, no decoration.
+    def test_checkbox_in_full_at_the_column(self):
+        control = CheckboxControl(CheckboxItem(key="c", label="Stream responses", default=True))
+        assert _row(control, 20, width=30) == "  Stream responses  true"
+
+    def test_checkbox_at_the_right_edge_with_a_cut_label(self):
+        control = CheckboxControl(CheckboxItem(key="c", label="Stream responses", default=True))
+        assert _row(control, 20, width=20) == "  Stream resp… true"
+        assert _row(control, None, width=20) == "  Stream resp… true"
+
+    def test_checkbox_with_a_3_column_label_cuts_the_value(self):
+        control = CheckboxControl(CheckboxItem(key="c", label="Stream responses", default=True))
+        assert _row(control, None, width=8) == "  St… …"
+
+    def test_a_label_of_3_columns_or_fewer_is_never_cut(self):
+        for label in ("Abc", "Go", "A"):
+            control = CheckboxControl(CheckboxItem(key="c", label=label, default=True))
+            assert _row(control, None, width=8).startswith(f"  {label} ")
+            assert _row(control, 6, width=8).startswith(f"  {label} ")
+
+    def test_a_floor_row_is_clipped_without_raising(self):
+        control = CheckboxControl(CheckboxItem(key="c", label="Stream responses", default=True))
+        for width in (0, 1, 3, 5):
+            _row(control, None, width=width)
+            _row(control, 10, width=width)
+
+    # Selector: no padding, ◀ / ▶ around the option.
+    def test_selector_in_full_at_the_column(self):
+        assert _row(_selector(), 14, width=40) == "  Model name  ◀ gpt-4o-mini ▶"
+
+    def test_selector_at_the_right_edge_with_a_cut_label(self):
+        assert _row(_selector(), 14, width=24) == "  Mode… ◀ gpt-4o-mini ▶"
+
+    def test_selector_cuts_the_option_and_keeps_its_arrows(self):
+        assert _row(_selector(), None, width=20) == "  Mo… ◀ gpt-4o-m… ▶"
+        assert _row(_selector(), 14, width=20) == "  Mo… ◀ gpt-4o-m… ▶"
+
+    def test_an_inline_dropdown_gives_way_like_a_selector(self):
+        control = _dropdown(label="Model name", default="o1")
+        control.set_inline(True)
+        assert _row(control, 14, width=24) == "  Model name  ◀ o1  "
+        assert _row(control, None, width=12) == "  Mo… ◀ …  "
+
+    # Box dropdown: padded to its width, ▼ after.
+    def test_dropdown_in_full_at_the_column(self):
+        assert _row(_dropdown(), 22) == "  Model for summaries " + "o1".ljust(15) + " ▼"
+
+    def test_dropdown_at_the_right_edge_with_a_cut_label(self):
+        assert _row(_dropdown(), None, width=34) == "  Model for su… " + "o1".rjust(15) + " ▼"
+        assert _row(_dropdown(), 30, width=34) == "  Model for su… " + "o1".ljust(15) + " ▼"
+
+    def test_without_a_column_a_long_label_gives_way_to_the_value(self):
+        row = _row(_dropdown(), None, width=40)
+        assert row.startswith("  Model for summaries")
+        assert row.endswith("o1 ▼") and len(row) == 39
+        row = _row(_dropdown(), None, width=30)
+        assert "…" in row and row.endswith("o1 ▼") and len(row) == 29
+
+    def test_dropdown_shrinks_its_field_with_the_label_at_3_columns(self):
+        assert _row(_dropdown(), None, width=20) == "  Mo… " + "o1".rjust(11) + " ▼"
+        assert _row(_dropdown(), 22, width=20) == "  Mo… " + "o1".ljust(11) + " ▼"
+
+    def test_dropdown_cuts_its_value_and_keeps_the_arrow(self):
+        control = _dropdown(default="gpt-4o")
+        assert _row(control, 22, width=12) == "  Mo… gp… ▼"
+        assert _row(control, None, width=12) == "  Mo… gp… ▼"
+
+    # Text field: padded to edit_width, no decoration.
+    def test_text_in_full_at_the_column(self):
+        assert _row(_text_setting(), 16, width=40) == "  Display name  " + "bob".ljust(15)
+
+    def test_text_at_the_right_edge_with_a_cut_label(self):
+        assert _row(_text_setting(), 16, width=30) == "  Display na… " + "bob".ljust(15)
+        assert _row(_text_setting(), None, width=30) == "  Display na… " + "bob".rjust(15)
+
+    def test_text_shrinks_its_field_with_the_label_at_3_columns(self):
+        assert _row(_text_setting(), 16, width=15) == "  Di… " + "bob".ljust(8)
+        assert _row(_text_setting(), None, width=15) == "  Di… " + "bob".rjust(8)
+
+    def test_text_cuts_its_value(self):
+        assert _row(_text_setting(default="alexander"), 16, width=12) == "  Di… alex…"
+
+    # Terminal columns, not characters.
+    def test_a_wide_label_is_cut_by_columns(self):
+        control = CheckboxControl(CheckboxItem(key="c", label="設定モデル名前", default=True))
+        row = _row(control, None, width=14)
+        assert row == "  設定…  true"
+        assert get_cwidth(row) == 13
+
+    def test_a_wide_value_is_cut_by_columns(self):
+        control = _selector(label="Mod", options=("x", "日本語モデル", "y"), default="日本語モデル")
+        row = _row(control, None, width=22)
+        assert row == "  Mod ◀ 日本語モデ… ▶"
+        assert get_cwidth(row) == 21
+
+    # The menu follows the shrunk field.
+    def test_the_menu_position_follows_a_shrunk_field(self):
+        control = _dropdown(label="Model for summaries", default="o1")
+        control.set_value_column(10)
+        content = control.create_content(20, 1)
+        line = "".join(text for _, text in content.get_line(0))
+        assert line == "  Mo… " + "o1".ljust(11) + " ▼"
+        assert content.menu_position.x == line.index("o1") == 6
+
+    def test_the_menu_position_counts_characters_ahead_of_the_value(self):
+        control = _dropdown(label="設定モデル名前名前名前")
+        control.set_value_column(30)
+        content = control.create_content(30, 1)
+        line = "".join(text for _, text in content.get_line(0))
+        assert content.menu_position.x == line.index("o1")
+
+    # Editing a text setting: the field takes the layout's start and width.
+    @pytest.mark.parametrize(
+        "column,width,cells",
+        [
+            (20, 30, range(14, 29)),   # at the right edge, label cut
+            (None, 30, range(14, 29)),
+            (None, 24, range(8, 23)),  # "right": the field is visible
+            (20, 14, range(5, 13)),    # the 8-column minimum cuts the label further
+            (None, 14, range(5, 13)),
+        ],
+    )
+    async def test_the_edit_field_follows_the_layout(self, column, width, cells):
+        control = _text_setting()
+        control.set_value_column(column)
+        control.enter_edit_mode()
+        (row,) = _drawn(control.get_container(), width)
+        assert _field(row) == list(cells)
+        assert len(cells) >= 8
+
+    async def test_the_edit_field_starts_where_the_value_was_drawn(self):
+        control = _text_setting()
+        control.set_value_column(20)
+        shown = _row(control, 20, width=30)
+        control.enter_edit_mode()
+        (row,) = _drawn(control.get_container(), 30)
+        assert _field(row)[0] == shown.index("bob")
+
+    async def test_a_row_too_narrow_for_the_minimum_does_not_collapse(self):
+        control = _text_setting()
+        control.enter_edit_mode()
+        for width in (12, 8, 6, 3, 1):
+            (row,) = _drawn(control.get_container(), width)
+            assert len(row) == width
+            assert all(x < width for x in _field(row))
+
+    async def test_a_small_edit_width_is_its_own_minimum(self):
+        control = TextControl(TextItem(key="t", label="Display name", default="bob", edit_width=5))
+        control.set_value_column(None)
+        control.enter_edit_mode()
+        (row,) = _drawn(control.get_container(), 12)
+        assert len(_field(row)) == 5
 
 
 class TestAlignValues:
