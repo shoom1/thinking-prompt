@@ -189,3 +189,29 @@ class TestBoxTooSmall:
         presenter, _ = self._open()
         assert presenter.rows(80, 3) == 3
         assert presenter.rows(80, 24) > 3
+
+
+class TestSmallestIsMeasuredOncePerDraw:
+    @staticmethod
+    def _counting() -> tuple[BoxPresenter, list]:
+        session = MagicMock()
+        session.app.layout.container = Window()
+        presenter = BoxPresenter(session)
+        presenter.open(Dialog("T", "B", [ButtonConfig("OK")]))
+        calls: list = []
+        measure = presenter._measure_smallest
+        presenter._measure_smallest = lambda w, r: (calls.append((w, r)), measure(w, r))[1]
+        return presenter, calls
+
+    def test_repeated_questions_in_one_render_measure_once(self):
+        presenter, calls = self._counting()
+        for _ in range(3):
+            presenter.rows(80, 24)
+        assert calls == [(80, 24)]
+
+    def test_another_terminal_size_measures_again(self):
+        presenter, calls = self._counting()
+        presenter.rows(80, 24)
+        presenter.rows(40, 24)
+        presenter.rows(40, 10)
+        assert calls == [(80, 24), (40, 24), (40, 10)]

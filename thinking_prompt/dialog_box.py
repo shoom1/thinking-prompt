@@ -201,6 +201,9 @@ class BoxPresenter:
             allow_cover_cursor=True,
         )
         self._installed = False
+        # _smallest's last answer and the question it answered: asked several
+        # times per draw, and measuring the whole body each time is slow.
+        self._smallest_memo: tuple[tuple[int, int, int], tuple[int, int]] | None = None
 
     def install(self) -> None:
         """Wrap the session's layout container in a FloatContainer (once)."""
@@ -230,6 +233,7 @@ class BoxPresenter:
         self.view = view
         self._title = dialog.title
         self._escapable = dialog.escapable
+        self._smallest_memo = None
         self._capped = _BoxOrNotice(
             AtMost(to_container(view.widget), self._cap), self._notice_in_app
         )
@@ -237,6 +241,7 @@ class BoxPresenter:
 
     def close(self) -> None:
         self.view = None
+        self._smallest_memo = None
         self._capped = Window()
 
     def rows(self, width: int, max_rows: int) -> int:
@@ -257,7 +262,18 @@ class BoxPresenter:
 
     def _smallest(self, width: int, max_rows: int) -> tuple[int, int]:
         """The open dialog's smallest size (columns, rows): its frame, buttons
-        row and one body row."""
+        row and one body row. Measured once per draw: the answer is kept
+        for the same terminal size and render, so a resize or a new render
+        (after a content change) measures again."""
+        assert self.view is not None
+        key = (width, max_rows, get_app().render_counter)
+        if self._smallest_memo is not None and self._smallest_memo[0] == key:
+            return self._smallest_memo[1]
+        smallest = self._measure_smallest(width, max_rows)
+        self._smallest_memo = (key, smallest)
+        return smallest
+
+    def _measure_smallest(self, width: int, max_rows: int) -> tuple[int, int]:
         assert self.view is not None
         widget = to_container(self.view.widget)
         # A box given a width reports no minimum for it, so the width comes
