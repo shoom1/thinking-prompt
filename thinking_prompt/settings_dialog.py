@@ -941,7 +941,9 @@ class _EditRow(Container):
             width,
             control.item.label,
             control._value_column,
-            control._row_value(""),
+            # The field doesn't depend on the buffer: edit_width, scrolling
+            # long text, whatever the text (or password) is.
+            _RowValue("", "", edit_width, left=control._value_column is not None),
             min_field=min(8, edit_width),
         )
         start = max(0, min(layout.column, width))

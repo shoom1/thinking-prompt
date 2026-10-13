@@ -1078,6 +1078,26 @@ class TestRowsShortOfWidth:
             assert len(row) == width
             assert all(x < width for x in _field(row))
 
+    @pytest.mark.parametrize("column", [20, None])
+    @pytest.mark.parametrize("password", [False, True])
+    @pytest.mark.parametrize("default", ["alexander", "alexander the great"])
+    async def test_a_long_value_keeps_the_minimum_in_a_narrow_row(self, column, password, default):
+        control = TextControl(TextItem(key="t", label="Display name", default=default, password=password))
+        control.set_value_column(column)
+        control.enter_edit_mode()
+        (row,) = _drawn(control.get_container(), 14)
+        assert _field(row) == list(range(5, 13))
+
+    @pytest.mark.parametrize("password", [False, True])
+    async def test_a_long_value_gets_exactly_edit_width_in_a_wide_row(self, password):
+        control = TextControl(
+            TextItem(key="t", label="Name", default="a value of nineteen", password=password)
+        )
+        control.set_value_column(10)
+        control.enter_edit_mode()
+        (row,) = _drawn(control.get_container(), 60)
+        assert _field(row) == list(range(10, 25))
+
     async def test_a_small_edit_width_is_its_own_minimum(self):
         control = TextControl(TextItem(key="t", label="Display name", default="bob", edit_width=5))
         control.set_value_column(None)
