@@ -217,6 +217,14 @@ class TestTextRegion:
             _render(view.container, 10)
         assert ("PgUp/PgDn scroll" in view.hint) is offered
 
+    def test_the_scroll_keys_sit_between_navigation_and_selection_in_the_hint(self):
+        view = build_inline(Dialog("T", LONG, [ButtonConfig("A"), ButtonConfig("B")]))
+        layout = Layout(view.container)
+        with set_app(_app(layout)):
+            layout.focus(view.actions[0].window)
+            _render(view.container, 10)
+        assert view.hint == "↑↓ navigate · PgUp/PgDn scroll · Enter select · Esc cancel"
+
 
 class TestInlineSizes:
     """The rows share the cap: fixed rows, then the actions, then a text body."""

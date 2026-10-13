@@ -1246,7 +1246,7 @@ class TestInlineMaxHeight:
                 await wait_until(lambda: dialog_rendered(session))
                 inp.send_text(DOWN * 20)
                 await wait_until(lambda: cursor_row(session) == "❯ 1. Save")
-                assert inline_height(session) <= 12
+                assert inline_height(session) == 12
                 inp.send_text(ESCAPE)
                 await wait_until(lambda: results == [None])
 
