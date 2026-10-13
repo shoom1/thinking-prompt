@@ -1335,6 +1335,7 @@ class ThinkingPromptSession:
         no_text: str = "No",
         *,
         placement: Placement | None = None,
+        max_height: int | None = None,
     ) -> bool:
         """
         Show a Yes/No confirmation dialog.
@@ -1346,6 +1347,9 @@ class ThinkingPromptSession:
             no_text: Text for No button (default: "No").
             placement: "box" or "inline"; None (default) uses the session's
                 dialog_placement.
+            max_height: The most rows the dialog takes; what doesn't fit
+                scrolls (see Dialog.max_height). None (default): the
+                terminal's rows less the prompt's.
 
         Returns:
             True if Yes was clicked, False if No or Escape.
@@ -1355,7 +1359,7 @@ class ThinkingPromptSession:
                 delete_file()
         """
         from .dialog import _yes_no_dialog
-        dialog = _yes_no_dialog(title, text, yes_text, no_text, self._resolve_placement(placement))
+        dialog = _yes_no_dialog(title, text, yes_text, no_text, self._resolve_placement(placement), max_height)
         return cast(bool, await self._dialogs.show(dialog))
 
     async def message_dialog(
@@ -1365,6 +1369,7 @@ class ThinkingPromptSession:
         ok_text: str = "OK",
         *,
         placement: Placement | None = None,
+        max_height: int | None = None,
     ) -> None:
         """
         Show an informational message dialog.
@@ -1375,12 +1380,15 @@ class ThinkingPromptSession:
             ok_text: Text for OK button (default: "OK").
             placement: "box" or "inline"; None (default) uses the session's
                 dialog_placement.
+            max_height: The most rows the dialog takes; what doesn't fit
+                scrolls (see Dialog.max_height). None (default): the
+                terminal's rows less the prompt's.
 
         Example:
             await session.message_dialog("Info", "Operation completed.")
         """
         from .dialog import _message_dialog
-        dialog = _message_dialog(title, text, ok_text, self._resolve_placement(placement))
+        dialog = _message_dialog(title, text, ok_text, self._resolve_placement(placement), max_height)
         await self._dialogs.show(dialog)
 
     async def choice_dialog(
@@ -1390,6 +1398,7 @@ class ThinkingPromptSession:
         choices: Sequence[str],
         *,
         placement: Placement | None = None,
+        max_height: int | None = None,
     ) -> str | None:
         """
         Show a dialog with multiple choice buttons.
@@ -1400,6 +1409,9 @@ class ThinkingPromptSession:
             choices: List of choice strings (each becomes a button).
             placement: "box" or "inline"; None (default) uses the session's
                 dialog_placement.
+            max_height: The most rows the dialog takes; what doesn't fit
+                scrolls (see Dialog.max_height). None (default): the
+                terminal's rows less the prompt's.
 
         Returns:
             The selected choice string, or None if Escape was pressed.
@@ -1414,7 +1426,7 @@ class ThinkingPromptSession:
                 save_file()
         """
         from .dialog import _choice_dialog
-        dialog = _choice_dialog(title, text, choices, self._resolve_placement(placement))
+        dialog = _choice_dialog(title, text, choices, self._resolve_placement(placement), max_height)
         return cast(Optional[str], await self._dialogs.show(dialog))
 
     async def dropdown_dialog(
@@ -1425,6 +1437,7 @@ class ThinkingPromptSession:
         default: str | None = None,
         *,
         placement: Placement | None = None,
+        max_height: int | None = None,
     ) -> str | None:
         """
         Show a dialog with a dropdown/radio list selection.
@@ -1437,6 +1450,9 @@ class ThinkingPromptSession:
                 dialog opens (optional; the first option otherwise).
             placement: "box" or "inline"; None (default) uses the session's
                 dialog_placement.
+            max_height: The most rows the dialog takes; what doesn't fit
+                scrolls (see Dialog.max_height). None (default): the
+                terminal's rows less the prompt's.
 
         Returns:
             The selected option string, or None if cancelled.
@@ -1450,7 +1466,7 @@ class ThinkingPromptSession:
             )
         """
         from .dialog import _dropdown_dialog
-        dialog = _dropdown_dialog(title, text, options, default, self._resolve_placement(placement))
+        dialog = _dropdown_dialog(title, text, options, default, self._resolve_placement(placement), max_height)
         return cast(Optional[str], await self._dialogs.show(dialog))
 
     async def checklist_dialog(
@@ -1461,6 +1477,7 @@ class ThinkingPromptSession:
         defaults: Sequence[str] = (),
         *,
         placement: Placement | None = None,
+        max_height: int | None = None,
     ) -> list[str] | None:
         """
         Show a check list: any number of options, one per line.
@@ -1472,6 +1489,9 @@ class ThinkingPromptSession:
             defaults: Options checked at first (others are ignored).
             placement: "box" or "inline"; None (default) uses the session's
                 dialog_placement.
+            max_height: The most rows the dialog takes; what doesn't fit
+                scrolls (see Dialog.max_height). None (default): the
+                terminal's rows less the prompt's.
 
         Returns:
             The checked options in option order, or None if cancelled.
@@ -1485,7 +1505,7 @@ class ThinkingPromptSession:
             )
         """
         from .dialog import _checklist_dialog
-        dialog = _checklist_dialog(title, text, options, defaults, self._resolve_placement(placement))
+        dialog = _checklist_dialog(title, text, options, defaults, self._resolve_placement(placement), max_height)
         return cast("list[str] | None", await self._dialogs.show(dialog))
 
     async def show_dialog(self, dialog: Dialog) -> Any:
@@ -1534,7 +1554,7 @@ class ThinkingPromptSession:
         *,
         width: int | None = 60,
         top: int | None = None,
-        height: int | None = None,
+        max_height: int | None = None,
         placement: Placement | None = None,
     ) -> dict[str, Any] | None:
         """
@@ -1553,8 +1573,9 @@ class ThinkingPromptSession:
                    - None: center (default)
                    - 0 or positive: offset from top
                    - negative: offset from bottom (e.g., -1 = 1 row from bottom)
-            height: Fixed total dialog height; body overflow scrolls.
-                    When None (default), the dialog sizes to its content.
+            max_height: The most rows the dialog takes; settings beyond it
+                    scroll with the cursor. None (default): the terminal's
+                    rows less the prompt's.
             placement: "box" or "inline"; None (default) uses the session's
                     dialog_placement.
 
@@ -1579,7 +1600,7 @@ class ThinkingPromptSession:
         """
         from .settings_dialog import SettingsDialog
         dialog = SettingsDialog(
-            title, items, can_cancel, width=width, top=top, height=height, placement=placement
+            title, items, can_cancel, width=width, top=top, max_height=max_height, placement=placement
         )
         return cast(
             "dict[str, Any] | None", await self._dialogs.show(dialog)

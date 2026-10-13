@@ -2,26 +2,19 @@
 from __future__ import annotations
 
 import asyncio
-import os
-from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 from prompt_toolkit.application import create_app_session
 from prompt_toolkit.input import create_pipe_input
-from prompt_toolkit.layout import FloatContainer, Window
+from prompt_toolkit.layout import FloatContainer, Window, to_container
+from prompt_toolkit.layout.layout import walk
 from prompt_toolkit.output import DummyOutput
 from prompt_toolkit.widgets import Button, Label
 
-from thinking_prompt import dialog_box
 from thinking_prompt.dialog import ButtonConfig, Dialog
-from thinking_prompt.dialog_box import (
-    MIN_DIALOG_HEIGHT,
-    TERMINAL_BUFFER_ROWS,
-    TERMINAL_TOO_SMALL,
-    BoxPresenter,
-    build_box,
-)
+from thinking_prompt.dialog_box import BoxPresenter, build_box
+from thinking_prompt.dialog_scroll import TERMINAL_BUFFER_ROWS, ScrollRegion
 
 
 def _resolved_style(window: Window) -> str:
@@ -83,6 +76,13 @@ class TestBuildBox:
         with pytest.raises(TypeError, match=r"Use ButtonConfig\(label, handler=\.\.\.\)"):
             build_box(Old())
 
+    def test_the_body_scrolls_in_a_region(self):
+        view = build_box(Dialog("T", "B", [ButtonConfig("OK")]))
+        assert any(isinstance(c, ScrollRegion) for c in walk(to_container(view.widget)))
+
+    def test_the_view_keeps_the_max_height(self):
+        assert build_box(Dialog("T", "B", [ButtonConfig("OK")], max_height=7)).max_height == 7
+
 
 class TestBoxPresenter:
     @staticmethod
@@ -102,27 +102,45 @@ class TestBoxPresenter:
     @pytest.mark.parametrize("top,expected", [(None, (None, None)), (2, (2, None)), (-1, (None, 1))])
     def test_open_positions_the_float_by_top(self, top, expected):
         presenter = self._presenter()
-        presenter.open(Dialog("T", "B", [ButtonConfig("OK")], top=top), None)
+        presenter.open(Dialog("T", "B", [ButtonConfig("OK")], top=top))
         assert (presenter._float.top, presenter._float.bottom) == expected
 
-    def test_open_pins_the_float_height_and_close_clears_the_view(self):
+    @staticmethod
+    def _long(**kwargs) -> Dialog:
+        return Dialog("T", "\n".join(f"line {i}" for i in range(30)), [ButtonConfig("OK")], **kwargs)
+
+    def test_open_sets_the_view_and_close_clears_it(self):
         presenter = self._presenter()
-        view = presenter.open(Dialog("T", "B", [ButtonConfig("OK")]), 15)
+        view = presenter.open(Dialog("T", "B", [ButtonConfig("OK")]))
         assert presenter.view is view
-        assert presenter._float.height == 15
         presenter.close()
         assert presenter.view is None
+        assert presenter.rows(80, 24) == 0
 
-    def test_effective_height_clamps_to_the_terminal(self, monkeypatch):
-        monkeypatch.setattr(dialog_box, "shutil", SimpleNamespace(get_terminal_size=lambda: os.terminal_size((80, 20))))
+    def test_rows_fit_the_terminal_less_the_prompts_rows(self):
         presenter = self._presenter()
-        assert presenter.effective_height(Dialog()) is None
-        assert presenter.effective_height(Dialog(height=10)) == 10
-        assert presenter.effective_height(Dialog(height=50)) == 20 - TERMINAL_BUFFER_ROWS
+        presenter.open(self._long())
+        assert presenter.rows(80, 24) == 24 - TERMINAL_BUFFER_ROWS
 
-    def test_effective_height_reports_a_terminal_that_is_too_small(self, monkeypatch):
-        rows = MIN_DIALOG_HEIGHT + TERMINAL_BUFFER_ROWS - 1
-        monkeypatch.setattr(dialog_box, "shutil", SimpleNamespace(get_terminal_size=lambda: os.terminal_size((80, rows))))
+    def test_rows_stop_at_max_height(self):
         presenter = self._presenter()
-        assert presenter.effective_height(Dialog(height=10)) is TERMINAL_TOO_SMALL
-        presenter._session.add_error.assert_called_once()
+        presenter.open(self._long(max_height=12))
+        assert presenter.rows(80, 24) == 12
+
+    def test_a_short_dialog_takes_its_own_rows(self):
+        presenter = self._presenter()
+        view = presenter.open(Dialog("T", "B", [ButtonConfig("OK")], max_height=12))
+        own = to_container(view.widget).preferred_height(80, 24).preferred
+        assert own < 12
+        assert presenter.rows(80, 24) == own
+
+    def test_rows_never_go_below_what_the_frame_and_one_body_row_need(self):
+        presenter = self._presenter()
+        view = presenter.open(self._long(max_height=2))
+        smallest = to_container(view.widget).preferred_height(80, 24).min
+        assert presenter.rows(80, 24) == smallest > 2
+
+    def test_the_float_takes_the_rows_in_the_apps_terminal(self):
+        presenter = self._presenter()
+        presenter.open(self._long())
+        assert presenter._float.get_height() == presenter.rows(80, 40)  # DummyOutput: 80x40
