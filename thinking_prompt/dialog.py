@@ -526,10 +526,12 @@ class DialogManager:
         return kb
 
     def _text_region(self) -> ScrollRegion | None:
-        """The open dialog's text body, which scrolls by keys; None when
-        no dialog is open or its body has cursor stops."""
+        """The open dialog's text body (box or inline), which scrolls by keys;
+        None when no dialog is open or its body has cursor stops."""
         if self._box.view is not None:
             return self._box.view.text_region
+        if self._inline.view is not None:
+            return self._inline.view.text_region
         return None
 
     def _text_overflows(self) -> bool:

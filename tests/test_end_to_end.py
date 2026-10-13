@@ -182,6 +182,13 @@ def prompt_and_status_rows(session: ThinkingPromptSession) -> tuple[int, int]:
     return where[prompt].ypos, where[status].ypos
 
 
+def inline_height(session: ThinkingPromptSession) -> int:
+    """The inline dialog's rows in the last frame: between the separator
+    under the prompt and the status bar."""
+    prompt, status = prompt_and_status_rows(session)
+    return status - prompt - 2
+
+
 def cursor_row(session: ThinkingPromptSession) -> str | None:
     """The rendered row under the ❯ cursor, e.g. "❯ 1. Yes" (None if none is drawn)."""
     return next((line for line in screen_lines(session) if line.startswith("❯")), None)
@@ -1078,6 +1085,87 @@ class TestBoxTextScrolling:
             await run_with(session, handler, script)
 
 
+class TestInlineMaxHeight:
+    """An inline dialog fits its max_height (and its text body the
+    terminal); its text scrolls with PgUp/PgDn."""
+
+    TEXT = "\n".join(f"line {i:02}" for i in range(40))
+
+    async def _message(self, text: str, rows: int, script_body, **kwargs: Any) -> None:
+        closed: list[bool] = []
+
+        async def handler(_: str) -> None:
+            await session.message_dialog("Long", text, placement="inline", **kwargs)
+            closed.append(True)
+
+        with piped_session(rows=rows) as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                await wait_until(lambda: cursor_row(session) == "❯ 1. OK")
+                await script_body(session, inp)
+                inp.send_text(ENTER)
+                await wait_until(lambda: closed == [True])
+
+            await run_with(session, handler, script)
+
+    async def test_stays_within_its_max_height(self):
+        async def check(session: ThinkingPromptSession, inp: PipeInput) -> None:
+            assert inline_height(session) == 12
+
+        await self._message(self.TEXT, 40, check, max_height=12)
+
+    async def test_a_text_fits_the_terminal_by_default(self):
+        async def check(session: ThinkingPromptSession, inp: PipeInput) -> None:
+            assert inline_height(session) <= 24 - 4
+            assert first_line_shown(session) == 0
+
+        await self._message(self.TEXT, 24, check)
+
+    async def test_pagedown_and_pageup_page_through_the_text(self):
+        async def keys(session: ThinkingPromptSession, inp: PipeInput) -> None:
+            await wait_until(lambda: on_screen(session, "PgUp/PgDn scroll"))
+            inp.send_text(PGDN)
+            await wait_until(lambda: (first_line_shown(session) or 0) > 1)
+            scrolled = first_line_shown(session)
+            inp.send_text(DOWN)  # inline, ↓ is the cursor's: one action, it stays
+            await asyncio.sleep(0.2)
+            assert first_line_shown(session) == scrolled
+            inp.send_text(PGUP)
+            await wait_until(lambda: first_line_shown(session) == 0)
+
+        await self._message(self.TEXT, 24, keys)
+
+    async def test_the_hint_has_no_scroll_keys_when_the_text_fits(self):
+        async def check(session: ThinkingPromptSession, inp: PipeInput) -> None:
+            assert not on_screen(session, "PgUp/PgDn")
+
+        await self._message("just a line", 24, check)
+
+    async def test_a_settings_form_follows_the_cursor_within_its_max_height(self):
+        items = [CheckboxItem(key=f"s{i}", label=f"Setting {i:02}") for i in range(20)]
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.show_settings_dialog(
+                "Many", items, max_height=12, placement="inline"
+            ))
+
+        with piped_session(rows=40) as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                inp.send_text(DOWN * 20)
+                await wait_until(lambda: cursor_row(session) == "❯ 1. Save")
+                assert inline_height(session) <= 12
+                inp.send_text(ESCAPE)
+                await wait_until(lambda: results == [None])
+
+            await run_with(session, handler, script)
+
+
 class TestDialogLifetime:
     """A dialog lives only as long as the app that can answer it."""
 
@@ -1441,8 +1529,8 @@ class TestInlineDialogs:
 
     async def test_a_long_text_body_is_drawn_in_full(self):
         """A text body has no cursor stops: it's drawn above the scrolling
-        region at full height (not cut to MAX_ROWS), and the actions below
-        it stay reachable."""
+        region, and when it fits the terminal it's drawn in full (not cut to
+        MAX_ROWS); the actions below it stay reachable."""
         body = [f"body line {i}" for i in range(1, 21)]
         results: list[Any] = []
 
