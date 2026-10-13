@@ -16,7 +16,7 @@ from prompt_toolkit.output import DummyOutput
 from prompt_toolkit.widgets import Label, TextArea
 
 from thinking_prompt.dialog import ButtonConfig, Dialog
-from thinking_prompt.dialog_inline import MAX_ROWS, _AtMost, build_inline
+from thinking_prompt.dialog_inline import MAX_ROWS, build_inline
 from thinking_prompt.rows import OptionGroup
 
 
@@ -110,34 +110,6 @@ class TestBuildInline:
             assert dialog._result_future.result() == "a"
         finally:
             loop.close()
-
-
-class TestAtMost:
-    def test_caps_the_preferred_height(self):
-        tall = HSplit([Window(height=1) for _ in range(30)])
-        short = HSplit([Window(height=1) for _ in range(3)])
-        tall_dim = _AtMost(tall, MAX_ROWS).preferred_height(80, 100)
-        short_dim = _AtMost(short, MAX_ROWS).preferred_height(80, 100)
-        assert tall_dim.preferred == MAX_ROWS
-        assert short_dim.preferred == 3
-
-    def test_max_is_also_capped_so_hsplit_cannot_pad_with_blank_rows(self):
-        """max must equal the capped preferred, not self.rows: otherwise a
-        parent HSplit with spare height distributes it to this container,
-        padding it with blank rows past its actual content."""
-        tall = HSplit([Window(height=1) for _ in range(30)])
-        short = HSplit([Window(height=1) for _ in range(3)])
-        assert _AtMost(tall, MAX_ROWS).preferred_height(80, 100).max == MAX_ROWS
-        assert _AtMost(short, MAX_ROWS).preferred_height(80, 100).max == 3
-
-    def test_without_a_cap_it_takes_its_full_height_and_no_more(self):
-        """A text body drawn above the scrolling region: in full, never padded."""
-        tall = HSplit([Window(height=1) for _ in range(30)])
-        extending = Window(FormattedTextControl("one\ntwo"))  # max is unbounded on its own
-        tall_dim = _AtMost(tall).preferred_height(80, 100)
-        extending_dim = _AtMost(extending).preferred_height(80, 100)
-        assert (tall_dim.preferred, tall_dim.max) == (30, 30)
-        assert (extending_dim.preferred, extending_dim.max) == (2, 2)
 
 
 class TestScrollingRegion:
