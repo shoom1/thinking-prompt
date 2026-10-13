@@ -564,7 +564,12 @@ class DropdownControl(SettingControl[DropdownItem]):
         lines = self._build_setting_row(width, value, is_selected)
         # The menu floats under the value, where this row draws it (get_float).
         column = self._value_start(width, _columns(value))
-        menu_position = None if column is None else Point(x=column, y=0)
+        menu_position = None
+        if column is not None:
+            # prompt_toolkit's menu position counts characters into the line,
+            # not terminal columns: the characters drawn ahead of the value.
+            ahead = lines[0][: len(lines[0]) - len(value)]
+            menu_position = Point(x=sum(len(text) for _, text, *_ in ahead), y=0)
 
         def get_line(i: int) -> FormattedText:
             return lines[i] if i < len(lines) else FormattedText([])

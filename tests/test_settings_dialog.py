@@ -855,6 +855,29 @@ class TestValueColumn:
         assert rows[0].index("beta") == rows[1].index("┌") == value
         assert "beta" in rows[2]  # the menu has room for its options
 
+    @staticmethod
+    def _wide_menu_open(width: int, label: str, **kwargs) -> list[str]:
+        items = [
+            DropdownItem(key="d", label=label, options=["alpha", "beta"], default="beta"),
+            *(CheckboxItem(key=k, label=k) for k in ("a", "b", "c")),
+        ]
+        dialog = SettingsDialog("S", items, **kwargs)
+        body = dialog.build_body()
+        dialog._controls[0].enter_edit_mode()
+        return [_text(row) for row in _drawn(body, width, 4)]
+
+    def test_a_wide_label_does_not_shift_the_menu_off_its_value(self):
+        rows = self._wide_menu_open(60, "モデル名", align_values=20)
+        assert get_cwidth(rows[0][: rows[0].index("beta")]) == 20
+        assert get_cwidth(rows[1][: rows[1].index("┌")]) == 20
+
+    def test_a_wide_label_in_a_narrow_row_keeps_the_menu_under_the_value(self):
+        rows = self._wide_menu_open(70, "モデル名モデル名モデル名モデル名モデル名", align_values=40)
+        assert get_cwidth(rows[0][: rows[0].index("beta")]) == get_cwidth(
+            rows[1][: rows[1].index("┌")]
+        )
+        assert "┌" in rows[1] and not rows[1].startswith("┌")
+
     def test_without_a_column_the_menu_floats_at_the_right_edge(self):
         menu = DropdownControl(DropdownItem(key="d", label="Model", options=["a", "b"])).get_float()
         assert (menu.left, menu.right) == (None, 0)
