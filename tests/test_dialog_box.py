@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 import pytest
 from prompt_toolkit.application import create_app_session
 from prompt_toolkit.input import create_pipe_input
-from prompt_toolkit.layout import FloatContainer, FormattedTextControl, Window, to_container
+from prompt_toolkit.layout import FloatContainer, FormattedTextControl, HSplit, Window, to_container
 from prompt_toolkit.layout.layout import walk
 from prompt_toolkit.output import DummyOutput
 from prompt_toolkit.widgets import Button, Label, RadioList
@@ -15,6 +15,7 @@ from prompt_toolkit.widgets import Button, Label, RadioList
 from thinking_prompt.dialog import ButtonConfig, Dialog
 from thinking_prompt.dialog_box import BoxPresenter, build_box
 from thinking_prompt.dialog_scroll import TERMINAL_BUFFER_ROWS, ScrollRegion
+from thinking_prompt.rows import OptionGroup
 
 
 def _resolved_style(window: Window) -> str:
@@ -93,6 +94,16 @@ class TestBuildBox:
 
     def test_the_body_scrolls_in_a_region(self):
         view = build_box(Dialog("T", "B", [ButtonConfig("OK")]))
+        assert any(isinstance(c, ScrollRegion) for c in walk(to_container(view.widget)))
+
+    def test_a_list_that_scrolls_itself_is_not_in_a_region(self):
+        body = HSplit([Label("Pick:"), RadioList([("a", "A"), ("b", "B")])])
+        view = build_box(Dialog("T", body, [ButtonConfig("OK")]))
+        assert not any(isinstance(c, ScrollRegion) for c in walk(to_container(view.widget)))
+
+    def test_a_body_with_several_stops_scrolls_in_a_region(self):
+        group = OptionGroup(["a", "b"], multiple=True)
+        view = build_box(Dialog("T", HSplit([r.window for r in group.rows]), [ButtonConfig("OK")]))
         assert any(isinstance(c, ScrollRegion) for c in walk(to_container(view.widget)))
 
     def test_the_view_keeps_the_max_height(self):

@@ -59,13 +59,21 @@ class BoxView:
 def build_box(dialog: Dialog) -> BoxView:
     """Build prompt_toolkit's Dialog widget for ``dialog``.
 
-    The body sits in a ScrollRegion: when the dialog is capped
-    (BoxPresenter.rows), it scrolls with the cursor, or by keys for a text body.
+    When the dialog is capped (BoxPresenter.rows), a body that is one window
+    taking the cursor (a radio list, a text field) is squeezed and scrolls
+    itself. Any other body sits in a ScrollRegion: it scrolls with the
+    cursor (settings rows, a check list), or by keys for a text body.
     """
     content = to_container(dialog.build_body())
-    body = ScrollRegion(content, scrollbar=True)
-    # Nothing in it takes focus (a text body): it scrolls by keys.
-    text_region = body if not focusable_windows(content) else None
+    stops = focusable_windows(content)
+    body: Container = content
+    text_region: ScrollRegion | None = None
+    # In a ScrollRegion, a window taller than the region fills it while it
+    # has the focus, and the text above it (a dropdown's question) never shows.
+    if len(stops) != 1:
+        body = ScrollRegion(content, scrollbar=True)
+        # Nothing in it takes focus (a text body): it scrolls by keys.
+        text_region = body if not stops else None
 
     # Each ButtonConfig's style and focused flag apply however the dialog was made.
     buttons: list[Button] = []

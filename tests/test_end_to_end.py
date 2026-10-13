@@ -1100,6 +1100,40 @@ class TestBoxTextScrolling:
             await run_with(session, handler, script)
 
 
+class TestBoxLongLists:
+    """A box dialog's list taller than its cap scrolls with the cursor, and
+    the text above the list shows whenever the cursor is at the top."""
+
+    async def test_a_long_dropdown_keeps_its_question(self):
+        """A radio list scrolls itself: the dialog squeezes it under the
+        question, which stays put."""
+        options = [f"option {i:02}" for i in range(30)]
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.dropdown_dialog(
+                "Pick", "Which one?", options, placement="box"
+            ))
+
+        with piped_session(rows=24) as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                assert on_screen(session, "Which one?"), screen_lines(session)
+                assert not on_screen(session, "^^")  # one scrollbar, the list's
+                inp.send_text(DOWN * 29)
+                await wait_until(lambda: on_screen(session, "option 29"))
+                assert on_screen(session, "Which one?"), screen_lines(session)
+                inp.send_text(UP * 29)
+                await wait_until(lambda: on_screen(session, "option 00"))
+                assert on_screen(session, "Which one?"), screen_lines(session)
+                inp.send_text(DOWN * 3 + ENTER + TAB + ENTER)  # option 03, then OK
+                await wait_until(lambda: results == ["option 03"])
+
+            await run_with(session, handler, script)
+
+
 class TestInlineMaxHeight:
     """An inline dialog fits its max_height (and its text body the
     terminal); its text scrolls with PgUp/PgDn."""
