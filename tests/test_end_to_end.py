@@ -1212,6 +1212,20 @@ class TestInlineMaxHeight:
 
         await self._message(self.TEXT, 24, keys)
 
+    async def test_a_short_terminal_takes_the_blank_rows_first(self):
+        """In 8 rows, 4 for the dialog: its title, a text line, the action
+        and the hint, which says the text scrolls; no blank row."""
+
+        async def check(session: ThinkingPromptSession, inp: PipeInput) -> None:
+            await settled_renders(session)
+            prompt, status = prompt_and_status_rows(session)
+            rows = screen_lines(session)[prompt + 2:status]
+            assert rows[0] == "Long" and rows[1].startswith("line "), rows
+            assert rows[-2] == "❯ 1. OK" and "PgUp/PgDn scroll" in rows[-1], rows
+            assert "" not in rows, rows
+
+        await self._message(self.TEXT, 8, check)
+
     async def test_the_hint_has_no_scroll_keys_when_the_text_fits(self):
         async def check(session: ThinkingPromptSession, inp: PipeInput) -> None:
             assert not on_screen(session, "PgUp/PgDn")

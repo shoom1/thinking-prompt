@@ -67,14 +67,17 @@ class InlineView:
 
 class _Sizes:
     """How an inline dialog's rows share its cap (dialog_cap): the fixed rows
-    (title, hint, blank rows) first, then the region of cursor stops and
-    actions, so they stay reachable, then a text body. Without max_height
-    the region keeps to MAX_ROWS."""
+    (title, hint) first, then the region of cursor stops and actions, so
+    they stay reachable, then a text body. Blank rows take a row each only
+    while that leaves a row each for the text body and the region: in a
+    short terminal they go first. Without max_height the region keeps to
+    MAX_ROWS."""
 
     def __init__(
         self, max_height: int | None, region: ScrollRegion | None, text: ScrollRegion | None
     ) -> None:
         self.fixed: list[Container] = []
+        self._blanks = 0
         self._max_height = max_height
         self._region = region
         self._text = text
@@ -82,10 +85,26 @@ class _Sizes:
     def _cap(self) -> int:
         return dialog_cap(self._max_height, terminal_rows())
 
-    def _room(self, width: int) -> int:
-        """Rows left after the fixed rows."""
+    def _fixed_rows(self, width: int) -> int:
         cap = self._cap()
-        return cap - sum(row.preferred_height(width, cap).preferred for row in self.fixed)
+        return sum(row.preferred_height(width, cap).preferred for row in self.fixed)
+
+    def _blanks_kept(self, width: int) -> int:
+        """How many blank rows keep their row: as many as leave a row each
+        for the text body and the region."""
+        content = sum(part is not None for part in (self._text, self._region))
+        return max(0, min(self._blanks, self._cap() - self._fixed_rows(width) - content))
+
+    def blank(self) -> Callable[[int], int]:
+        """The rows of one more blank row, by width: 1 while it's kept, else
+        0. The last blank rows go first."""
+        index = self._blanks
+        self._blanks += 1
+        return lambda width: 1 if index < self._blanks_kept(width) else 0
+
+    def _room(self, width: int) -> int:
+        """Rows left after the fixed rows and the blank rows kept."""
+        return self._cap() - self._fixed_rows(width) - self._blanks_kept(width)
 
     def region(self, width: int) -> int:
         room = self._room(width) - (1 if self._text is not None else 0)
@@ -138,12 +157,15 @@ def build_inline(dialog: Dialog) -> InlineView:
         rows.append(row)
         sizes.fixed.append(row)
 
+    def blank() -> None:
+        rows.append(AtMost(_blank_row(), sizes.blank()))
+
     if dialog.title:
         fixed(_text_row("class:dialog-title", dialog.title))
     if text is not None:
         rows.append(AtMost(text, sizes.text))
         if actions:
-            fixed(_blank_row())
+            blank()
     if region is not None:
         rows.append(AtMost(region, sizes.region))
 
@@ -151,7 +173,7 @@ def build_inline(dialog: Dialog) -> InlineView:
         return _hint(dialog, stops(), text)
 
     if hint() or text is not None:
-        fixed(_blank_row())
+        blank()
         fixed(_text_row("class:dialog-hint", hint))
 
     navigator = RowNavigator(stops, is_editing=dialog._is_editing, tab=True, actions=actions)
