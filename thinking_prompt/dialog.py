@@ -181,9 +181,8 @@ class Dialog:
     escapable: bool = True
     width: int | None = None
     top: int | None = None
-    # When set, the body is wrapped in a ScrollablePane so the dialog
-    # renders in one shot instead of growing line-by-line as the renderer
-    # measures content.
+    # When set, the dialog's total height: the body is wrapped in a
+    # ScrollablePane and scrolls when it overflows.
     height: int | None = None
     # "box", "inline", or None for the session's dialog_placement.
     placement: Placement | None = None
@@ -465,6 +464,11 @@ class DialogManager:
     def inline_view(self) -> InlineView | None:
         """The open inline dialog, if any: the session's inline slot shows it."""
         return self._inline.view
+
+    def box_rows(self, width: int, max_rows: int) -> int:
+        """Rows the open box dialog takes; 0 when none is open. The session's
+        inline slot reserves them outside full screen."""
+        return self._box.rows(width, max_rows)
 
     def _create_key_bindings(self) -> KeyBindings:
         """Create key bindings for dialog (Escape handler)."""

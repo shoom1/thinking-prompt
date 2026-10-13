@@ -46,23 +46,31 @@ RIGHT = "\x1b[C"
 
 
 class _ShortOutput(DummyOutput):
-    """A DummyOutput whose terminal is ``rows`` rows tall (DummyOutput: 40)."""
+    """A DummyOutput whose terminal is ``rows`` rows tall (DummyOutput: 40),
+    with ``below_cursor`` rows free under the prompt if given."""
 
-    def __init__(self, rows: int) -> None:
+    def __init__(self, rows: int, below_cursor: int | None = None) -> None:
         super().__init__()
         self._rows = rows
+        self._below_cursor = below_cursor
 
     def get_size(self) -> Size:
         return Size(rows=self._rows, columns=80)
 
+    def get_rows_below_cursor_position(self) -> int:
+        if self._below_cursor is None:
+            return super().get_rows_below_cursor_position()
+        return self._below_cursor
+
 
 @contextmanager
 def piped_session(
-    *, rows: int | None = None, **kwargs: Any
+    *, rows: int | None = None, below_cursor: int | None = None, **kwargs: Any
 ) -> Iterator[tuple[ThinkingPromptSession, PipeInput]]:
     """A session whose Application reads from a pipe and renders nowhere
-    (in a ``rows``-row terminal if given)."""
-    output = DummyOutput() if rows is None else _ShortOutput(rows)
+    (in a ``rows``-row terminal if given, with ``below_cursor`` rows free
+    under the prompt if given)."""
+    output = DummyOutput() if rows is None else _ShortOutput(rows, below_cursor)
     with create_pipe_input() as inp, create_app_session(input=inp, output=output):
         yield ThinkingPromptSession(**kwargs), inp
 
@@ -121,6 +129,20 @@ def screen_lines(session: ThinkingPromptSession) -> list[str]:
         "".join(screen.data_buffer[y][x].char for x in range(width)).strip()
         for y in range(screen.height)
     ]
+
+
+def record_dialog_frames(session: ThinkingPromptSession) -> list[list[str]]:
+    """Every frame rendered while a dialog is open, from now on, as screen_lines()."""
+    frames: list[list[str]] = []
+    render = session.app.renderer.render
+
+    def recording(app: Any, layout: Any, is_done: bool = False) -> None:
+        render(app, layout, is_done)
+        if dialog_open(session):
+            frames.append(screen_lines(session))
+
+    session.app.renderer.render = recording  # type: ignore[method-assign]
+    return frames
 
 
 def prompt_and_status_rows(session: ThinkingPromptSession) -> tuple[int, int]:
@@ -800,6 +822,83 @@ class TestDialogsEndToEnd:
                 await wait_until(lambda: dialog_open(session))
                 inp.send_text(ESCAPE)
                 await wait_until(lambda: results == [False])
+
+            await run_with(session, handler, script)
+
+
+class TestDialogsAtTheBottomOfTheTerminal:
+    """With the prompt on the terminal's last rows, the app gets only the rows
+    its layout asks for. A dialog shows whole on the frame it opens, without
+    a key press to redraw it."""
+
+    OPTIONS = ["Light", "Dark", "System", "High Contrast"]
+
+    async def _first_frame(self, open_dialog: Callable[[ThinkingPromptSession], Any]) -> list[str]:
+        """The first frame drawn with the dialog open, the prompt at the bottom."""
+        closed: list[bool] = []
+
+        async def handler(text: str) -> None:
+            await open_dialog(session)
+            closed.append(True)
+
+        with piped_session(rows=24, below_cursor=4) as (session, inp):
+            frames = record_dialog_frames(session)
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: len(frames) > 0)
+                inp.send_text(ESCAPE)
+                await wait_until(lambda: closed == [True])
+
+            await run_with(session, handler, script)
+        return frames[0]
+
+    def _shows(self, frame: list[str], *texts: str) -> bool:
+        return all(any(text in line for line in frame) for text in texts)
+
+    async def test_a_box_dialog_opens_whole(self):
+        frame = await self._first_frame(
+            lambda s: s.dropdown_dialog("Select Theme", "Pick:", self.OPTIONS, default="System")
+        )
+        assert self._shows(frame, "Select Theme", *self.OPTIONS, "OK", "Cancel"), frame
+
+    async def test_a_box_dialog_with_a_height_keeps_its_title(self):
+        body = "\n".join(f"line {i}" for i in range(30))
+        frame = await self._first_frame(
+            lambda s: s.show_dialog(Dialog("Select Theme", body, [ButtonConfig("OK")], height=12))
+        )
+        assert self._shows(frame, "Select Theme", "line 0", "OK"), frame
+
+    async def test_a_box_dialog_taller_than_the_terminal_keeps_the_layout(self):
+        options = [f"Option {i}" for i in range(40)]
+        frame = await self._first_frame(lambda s: s.dropdown_dialog("Select Theme", "Pick:", options))
+        assert self._shows(frame, "Select Theme", ">>>", "Ctrl+C: cancel"), frame
+        assert not self._shows(frame, "Window too small"), frame
+
+    async def test_an_inline_dialog_opens_whole(self):
+        frame = await self._first_frame(
+            lambda s: s.dropdown_dialog(
+                "Select Theme", "Pick:", self.OPTIONS, default="System", placement="inline"
+            )
+        )
+        assert self._shows(frame, "Select Theme", *self.OPTIONS), frame
+
+    async def test_full_screen_reserves_no_rows_for_a_box_dialog(self):
+        closed: list[bool] = []
+
+        async def handler(text: str) -> None:
+            await session.dropdown_dialog("Select Theme", "Pick:", self.OPTIONS)
+            closed.append(True)
+
+        with piped_session(rows=24, enable_fullscreen=True) as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                session.switch_to_fullscreen()
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                assert prompt_and_status_rows(session) == (21, 23)
+                inp.send_text(ESCAPE)
+                await wait_until(lambda: closed == [True])
 
             await run_with(session, handler, script)
 

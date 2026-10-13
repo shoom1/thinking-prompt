@@ -206,8 +206,8 @@ class BoxPresenter:
             self._float.top = None
             self._float.bottom = abs(dialog.top)
 
-        # Pin the Float height so prompt_toolkit allocates the full height in
-        # one render frame instead of measuring the content over several.
+        # A fixed height (clamped to the terminal) pins the Float's; None
+        # lets it take the dialog's own.
         self._float.height = effective_height
 
         self.view = view
@@ -215,3 +215,10 @@ class BoxPresenter:
 
     def close(self) -> None:
         self.view = None
+
+    def rows(self, width: int, max_rows: int) -> int:
+        """Rows the open dialog takes in a ``width``-column terminal; 0 when
+        none is open."""
+        if self.view is None:
+            return 0
+        return to_container(self.view.widget).preferred_height(width, max_rows).preferred
