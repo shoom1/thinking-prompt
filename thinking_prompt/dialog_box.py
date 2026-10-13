@@ -68,10 +68,18 @@ def build_box(dialog: Dialog) -> BoxView:
     stops = focusable_windows(content)
     body: Container = content
     text_region: ScrollRegion | None = None
-    # In a ScrollRegion, a window taller than the region fills it while it
-    # has the focus, and the text above it (a dropdown's question) never shows.
+    # A body whose stops are one window stays out of a region: there, a
+    # focused window taller than the region fills it, and the text above
+    # it (a dropdown's question) never shows.
     if len(stops) != 1:
-        body = ScrollRegion(content, scrollbar=True)
+
+        def at_first_stop() -> bool:
+            # Back at the first stop, the region scrolls to its top: rows
+            # above that stop (a check list's text) show again.
+            first = focusable_windows(content)[:1]
+            return bool(first) and get_app().layout.has_focus(first[0])
+
+        body = ScrollRegion(content, at_first_stop, scrollbar=True)
         # Nothing in it takes focus (a text body): it scrolls by keys.
         text_region = body if not stops else None
 

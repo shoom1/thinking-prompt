@@ -1133,6 +1133,32 @@ class TestBoxLongLists:
 
             await run_with(session, handler, script)
 
+    async def test_a_long_check_list_shows_its_text_again_back_at_the_top(self):
+        options = [f"option {i:02}" for i in range(20)]
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.checklist_dialog(
+                "Tools", "Pick any of these", options, max_height=12, placement="box"
+            ))
+
+        with piped_session(rows=40) as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                assert on_screen(session, "Pick any of these")
+                inp.send_text(DOWN * 19)
+                await wait_until(lambda: on_screen(session, "❯ [ ] option 19"))
+                assert not on_screen(session, "Pick any of these")  # scrolled off
+                inp.send_text(UP * 19)
+                await wait_until(lambda: on_screen(session, "❯ [ ] option 00"))
+                assert on_screen(session, "Pick any of these"), screen_lines(session)
+                inp.send_text(ESCAPE)
+                await wait_until(lambda: results == [None])
+
+            await run_with(session, handler, script)
+
 
 class TestInlineMaxHeight:
     """An inline dialog fits its max_height (and its text body the
