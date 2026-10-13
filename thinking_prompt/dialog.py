@@ -515,6 +515,9 @@ class DialogManager:
         def page_down(event: Any) -> None:
             self._scroll_text(pages=1)
 
+        # Inline, ↑↓ are the cursor's: RowNavigator's own up/down, bound on
+        # the dialog's container, outrank these app-level bindings anyway;
+        # in_box says the intent.
         @kb.add("up", filter=text_overflows & in_box)
         def line_up(event: Any) -> None:
             self._scroll_text(lines=-1)
