@@ -12,6 +12,7 @@ import threading
 from collections.abc import Awaitable, Iterator
 from contextlib import contextmanager
 from typing import Any, Callable
+from unittest.mock import patch
 
 import pytest
 from prompt_toolkit.application import create_app_session
@@ -2502,3 +2503,46 @@ class TestBoxMenuFloatsOnClose:
                 await wait_until(lambda: not on_screen(session, "alpha"))
 
             await run_with(session, handler, script)
+
+
+class TestSessionRepaintsAfterShrinking:
+    """The session repaints (clears the screen and scrollback and prints
+    the transcript again) once the terminal stops shrinking."""
+
+    DELAY = 0.02
+
+    @classmethod
+    async def _resize(cls, fullscreen: bool = False, **size: int) -> tuple[int, bool]:
+        """Resize a running session's terminal (24x80) to ``size``; the
+        repaints that follow, and whether one waits for fullscreen exit."""
+
+        async def handler(text: str) -> None:
+            pass
+
+        with piped_session(rows=24, columns=80, enable_fullscreen=True) as (session, inp):
+            session._shrinks._delay = cls.DELAY
+            if fullscreen:
+                session.switch_to_fullscreen()
+            with patch.object(session, "_repaint_console") as repaint:
+
+                async def script(run: asyncio.Task[None]) -> None:
+                    renders = session.app.render_counter
+                    session.app.output.resize(**size)
+                    session.app.invalidate()
+                    await wait_until(lambda: session.app.render_counter > renders)
+                    await asyncio.sleep(cls.DELAY * 4)
+
+                await run_with(session, handler, script)
+            return repaint.call_count, session._repaint_on_fullscreen_exit
+
+    async def test_a_narrower_terminal_repaints(self):
+        assert await self._resize(columns=60) == (1, False)
+
+    async def test_a_shorter_terminal_repaints(self):
+        assert await self._resize(rows=12) == (1, False)
+
+    async def test_a_wider_terminal_does_not_repaint(self):
+        assert await self._resize(columns=100) == (0, False)
+
+    async def test_in_fullscreen_the_repaint_waits_for_fullscreen_exit(self):
+        assert await self._resize(fullscreen=True, columns=60) == (0, True)

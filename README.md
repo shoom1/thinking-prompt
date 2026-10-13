@@ -171,6 +171,14 @@ idle prompt costs no CPU:
 - Text that can't say when it changes is re-read every 0.1 s while it's
   shown: a content callback passed to `start_thinking()`, and a prompt
   `message` or `status_text` given as a callable.
+- When the terminal gets narrower or shorter, the session repaints once
+  the size holds for 0.25 s: it clears the screen and scrollback and prints
+  the transcript again, as `set_theme(repaint=True)` does. A narrower
+  window re-wraps the UI's full-width rows and a shorter one pushes its top
+  into scrollback, so the old frame can't be erased row by row. Shell
+  output from before the session, anything printed outside it (plain
+  `print()`) and entries `history_limit` dropped don't come back. In
+  fullscreen the repaint waits for fullscreen exit.
 
 ### Long Content
 
