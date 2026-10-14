@@ -325,23 +325,16 @@ result = await session.show_dialog(Dialog(
 
 A button either returns a fixed `result` or runs a `handler`, which decides
 what happens: `set_result(...)` or `cancel()` closes the dialog, doing
-nothing keeps it open (e.g. while input is invalid). For custom content,
-pass any prompt_toolkit container as `body`, or subclass `Dialog` and
-override `build_body()` / `get_buttons()`:
+nothing keeps it open (e.g. while input is invalid). For a form, give the dialog `fields` and read what they hold with
+`dialog.values`; for other content, pass any prompt_toolkit container as
+`body`, or subclass `Dialog` and override `build_body()` / `get_buttons()`:
 
 ```python
-from prompt_toolkit.layout import HSplit
-from prompt_toolkit.widgets import Label, TextArea
+from thinking_prompt import ButtonConfig, Dialog, TextField
 
 class LoginDialog(Dialog):
     title = "Login"
-
-    def __init__(self):
-        super().__init__()
-        self.user = TextArea(multiline=False)
-
-    def build_body(self):
-        return HSplit([Label("Username:"), self.user])
+    fields = [TextField("user", "Username")]
 
     def get_buttons(self):
         return [
@@ -350,8 +343,8 @@ class LoginDialog(Dialog):
         ]
 
     def login(self):
-        if self.user.text:  # stays open while empty
-            self.set_result(self.user.text)
+        if self.values["user"]:  # stays open while empty
+            self.set_result(self.values["user"])
 
 name = await session.show_dialog(LoginDialog())
 ```
@@ -362,10 +355,10 @@ Escape closes any dialog and returns `None` (or the dialog's
 subclass.
 
 A `Dialog` has no buttons unless you give it some, and it needs something
-to take keyboard focus: at least one button, or a focusable body (e.g. a
+to take keyboard focus: at least one button, fields, or a focusable body (e.g. a
 `TextArea`, closed with Escape). Otherwise `show_dialog()` raises
 `ValueError`. Other options: `escape_result`, `escapable`, `width` (box
-only; never narrower than the buttons), `max_height`.
+only; never narrower than the buttons), `max_height`, `fields`, `align_values`.
 
 **Where a box sits.** Under the prompt, above the status bar: where an inline
 dialog would be. When the rest of the screen takes rows (a thinking box, a
@@ -376,7 +369,7 @@ need is it centered over the screen.
 **Long content scrolls.** A dialog is never taller than the terminal (less
 the prompt's rows), nor than `max_height` rows if you pass it — counting the
 whole dialog: title, borders, buttons, hint. What doesn't fit scrolls: rows
-with a cursor (settings, lists, actions) follow the cursor, and a text body
+with a cursor (fields, lists, actions) follow the cursor, and a text body
 scrolls with PgUp/PgDn (and ↑↓ in a box). Every helper takes `max_height=`.
 
 **Small terminals.** A box dialog that can't fit the terminal at all
@@ -394,8 +387,13 @@ terminal is big enough.
 | `get_buttons()` returning `("OK", handler)` | `ButtonConfig("OK", handler=handler)` |
 | `escape_result = _UNSET` | `escapable = False` |
 | `BaseDialog` subclass relying on its default OK button | `buttons = (ButtonConfig("OK"),)` |
-| `Dialog(height=N)`, `show_settings_dialog(height=N)` | `max_height=N`: the dialog sizes to its content, up to N rows |
-| `top` on a dialog subclass, `SettingsDialog(top=N)`, `show_settings_dialog(top=N)` | Drop it: a box sits under the prompt, where an inline dialog would (a subclass's `top` attribute is ignored) |
+| `Dialog(height=N)` | `max_height=N`: the dialog sizes to its content, up to N rows |
+| `top` on a dialog subclass | Drop it: a box sits under the prompt, where an inline dialog would (a subclass's `top` attribute is ignored) |
+| `SettingsDialog(title, items, ...)`, `show_settings_dialog(title, items, ...)` | `Dialog(title, fields=items, buttons=..., width=60)`: see Form fields |
+| `SettingsItem`, `InlineSelectItem`, `DropdownItem`, `CheckboxItem`, `TextItem` | `Field`, `SelectField`, `DropdownField`, `CheckboxField`, `TextField` (frozen; same attributes) |
+| A settings dialog's changed-values result | Compare `dialog.values` with your config, or `config.update(values)` |
+| `can_cancel=False` | One Done button and `escapable=False` |
+| Ctrl+S in a settings dialog | Removed: Tab (or ↓ inline) to the Save button |
 
 ### Inline dialogs
 
@@ -423,23 +421,22 @@ await session.show_dialog(Dialog("Pick", "Which one?", buttons, placement="inlin
 
 One cursor walks every row: ↑↓ move (Tab / Shift+Tab too), Enter runs the
 highlighted action, 1–9 run an action directly, Esc closes an escapable
-dialog. Settings are edited in place: ←→ change a selector (dropdown settings
+dialog. Fields are edited in place: ←→ change a selector (dropdowns
 become selectors inline), Space toggles a checkbox, Enter edits a text field.
 
 Check lists and radio lists show one option per line, in both styles:
 
 ```python
-from thinking_prompt import ChecklistItem, RadioItem
+from thinking_prompt import ChecklistField, RadioField
 
 tools = await session.checklist_dialog(
     "Tools", "Enable any:", ["search", "code", "files"], defaults=["search"],
 )   # the checked options, or None if cancelled
 
-await session.show_settings_dialog("Settings", [
-    ChecklistItem(key="tools", label="Tools", options=["search", "code"]),
-    RadioItem(key="mode", label="Mode", options=["fast", "careful"], default="fast"),
-])
-```
+await session.show_dialog(Dialog("Settings", fields=[
+    ChecklistField("tools", "Tools", options=["search", "code"]),
+    RadioField("mode", "Mode", options=["fast", "careful"], default="fast"),
+], buttons=[ButtonConfig("Done")]))```
 
 A long text body scrolls with PgUp/PgDn, and the hint line says so while it
 overflows; rows and actions scroll within 12 rows, following the cursor,
@@ -449,74 +446,53 @@ Dialogs need a running session; to ask something before
 `run_async()` starts or after it ends, use prompt_toolkit's own `choice()`
 (prompt_toolkit 3.0.52 or later).
 
-### Settings Dialog
+### Form fields
 
-A form-based dialog for configuring multiple settings at once:
+Any dialog can hold form fields, under its body. `dialog.values` holds what
+they're set to, by key; a button handler returns it. A settings dialog is a
+few lines:
 
 ```python
-from thinking_prompt.settings_dialog import (
-    SettingsDialog,
-    DropdownItem,
-    InlineSelectItem,
-    TextItem,
-    CheckboxItem,
+from thinking_prompt import (
+    ButtonConfig, CheckboxField, Dialog, DropdownField, TextField,
 )
 
-items = [
-    DropdownItem(
-        key="theme",
-        label="Theme",
-        description="Application color scheme",
-        options=["Light", "Dark", "System"],
-        default="System",
-    ),
-    InlineSelectItem(
-        key="font_size",
-        label="Font Size",
-        options=["Small", "Medium", "Large"],
-        default="Medium",
-    ),
-    TextItem(
-        key="username",
-        label="Username",
-        default="Guest",
-    ),
-    TextItem(
-        key="api_key",
-        label="API Key",
-        password=True,
-    ),
-    CheckboxItem(
-        key="notifications",
-        label="Enable Notifications",
-        description="Show desktop notifications",
-        default=True,
-    ),
-]
-
-dialog = SettingsDialog(title="Settings", items=items)
-result = await session.show_dialog(dialog)
-
-if result:
-    # result is a dict of changed values only
-    for key, value in result.items():
-        print(f"{key}: {value}")
+dialog = Dialog(
+    "Settings",
+    fields=[
+        DropdownField("model", "Model", options=["gpt-4", "o1"], default=config["model"]),
+        CheckboxField("stream", "Stream responses", default=config["stream"]),
+        TextField("name", "Name", description="Shown to others", default=config["name"]),
+    ],
+    buttons=[
+        ButtonConfig("Save", handler=lambda: dialog.set_result(dialog.values)),
+        ButtonConfig("Cancel"),
+    ],
+    width=60,
+)
+values = await session.show_dialog(dialog)   # every field's value, or None
+if values is not None:
+    config.update(values)
 ```
 
-**Control Types:**
-| Control | Description | Navigation |
-|---------|-------------|------------|
-| `DropdownItem` | Expandable dropdown list with `▼` indicator; in inline dialogs, a `◀`/`▶` selector instead | Enter to open, Up/Down to select, Enter to confirm (inline: Left/Right to cycle) |
-| `InlineSelectItem` | Inline cycling with `◀`/`▶` indicators | Left/Right to cycle through options |
-| `TextItem` | Text input (optional password masking) | Enter to edit, Enter/Escape to confirm/cancel |
-| `CheckboxItem` | Boolean toggle (`true`/`false`) | Space/Enter/Left/Right to toggle |
-| `ChecklistItem` | Check list, one `[x]` option per line; value: the checked options, in option order | Up/Down to move between options, Space/Enter to toggle |
-| `RadioItem` | Radio list, one `(•)` option per line; value: the picked option | Up/Down to move between options, Space/Enter to pick |
+Fields are frozen, so a list of them can be a subclass's `fields` class
+attribute; each dialog keeps its own values. Keys must be unique.
 
-**Navigation:** Up/Down moves between controls, Tab cycles through controls and buttons, Ctrl+S saves.
+| Field | Shows | Keys |
+|---|---|---|
+| `DropdownField` | The value with `▼`; in a box Enter opens a menu of the options, inline it's a `◀`/`▶` selector | Enter to open, ↑↓ to choose, Enter to keep (inline: ←→) |
+| `SelectField` | A `◀ value ▶` selector | ←→ (or Space) to step through the options |
+| `TextField` | Text, edited in place (`password=True` shows dots) | Enter to edit, Enter/Escape to keep/drop the edit |
+| `CheckboxField` | `true` / `false` | Space, Enter or ←→ to toggle |
+| `ChecklistField` | One `[x]` option per line; value: the checked ones, in option order | ↑↓ between options, Space/Enter to toggle |
+| `RadioField` | One `(•)` option per line; value: the picked one | ↑↓ between options, Space/Enter to pick |
 
-**Height:** pass `max_height=N` to cap the dialog at N rows; settings beyond
-it scroll with the cursor.
+Every field takes `key`, `label`, `description` and `default`. A check or
+radio list with no label and no description shows just its options.
+
+**Keys:** in a box, ↑↓ move a row at a time and Tab / Shift+Tab a field at a
+time (Tab on to the buttons after the last field; a radio list is entered at
+its picked option). Inline, one cursor walks the rows and the actions.
 
 **Aligning values:** values start two columns after the longest label or
 description (`align_values="labels"`, the default), so descriptions don't run
@@ -526,16 +502,7 @@ their own, don't count. `align_values="right"` puts values at the row's right
 edge, and a number starts them at that column, cutting longer labels with `…`.
 When a row is short of width, its label is cut first (down to 3 columns), then
 a dropdown or text field gives up its padding, and only then is the value
-itself cut with `…`.
-
-```python
-result = await session.show_settings_dialog(
-    title="Settings",
-    items=items,
-    max_height=15,
-    align_values=24,
-)
-```
+itself cut with `…`. A box with no `width` is as wide as its fields' rows.
 
 ### Session Options
 
@@ -636,7 +603,8 @@ colorless rendering regardless of theme, while keeping bold/italic.
 | 0.3 | 0.4 |
 |---|---|
 | `ThinkingPromptSession(styles=s)` | `ThinkingPromptSession(theme=s)` |
-| `show_settings_dialog(..., styles=...)`, `SettingsDialog(..., styles=...)` | Drop it (it was never applied). `width=` and `max_height=` (which replaces `height=`) are keyword-only. |
+| `SettingsDialog(..., styles=...)` | Removed with the settings dialog (see Form fields). |
+| `setting_*` style fields (`setting_label`, `setting_value_true`, ...) | `field_*` (`field_label`, `field_value_true`, ...); the `setting-*` classes are `field-*` |
 | `assistant_prefix`, `select_value`, `user_separator` | Removed: no component drew with them. |
 | `checkbox_mark` (styled nothing) | Now styles the `[x]` / `(•)` marks of check and radio lists. |
 
@@ -662,7 +630,7 @@ See the `examples/` directory for complete demos:
 - `demo_animated_separator.py` - Different animation configurations
 - `demo_task_progress.py` - Rich-styled task progress with in-place status updates
 - `dialog_test.py` - Dialog system demo (yes/no, message, choice, dropdown)
-- `settings_dialog_demo.py` - Settings dialog with all control types
+- `settings_dialog_demo.py` - A settings dialog built from Dialog fields, box and inline
 - `demo_showcase.py` - Feature showcase for demos and screenshots; dialogs start inline, `/inline` switches to boxes
 - `completer_demo.py` - Slash-command autocompletion (like Claude Code)
 - `demo_themes.py` - Built-in themes and runtime theme switching
