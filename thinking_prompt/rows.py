@@ -166,9 +166,9 @@ class OptionRow(RowControl):
             if self.group.multiple
             else ("(•)" if marked else "( )")
         )
-        label_style = "class:setting-label-selected" if selected else "class:setting-label"
+        label_style = "class:field-label-selected" if selected else "class:field-label"
         line: StyleAndTextTuples = [
-            ("class:setting-indicator" if selected else "", MARKER if selected else NO_MARKER),
+            ("class:field-indicator" if selected else "", MARKER if selected else NO_MARKER),
             ("", " " * self.indent),
             ("class:checkbox-mark", mark),
             (label_style, f" {self.option}"),

@@ -158,19 +158,19 @@ class ThinkingPromptStyles:
     checkbox_mark: str = ""  # [x] / (•) marks of check and radio lists. Defaults to color_accent
 
     # ==========================================================================
-    # Settings list
+    # Dialog form fields
     # ==========================================================================
-    setting_indicator: str = ""  # Defaults to color_accent
-    setting_label: str = ""  # Defaults to color_text
-    setting_label_selected: str = ""  # Defaults to color_accent
-    setting_value: str = ""  # Defaults to color_text_muted
-    setting_value_selected: str = ""  # Defaults to color_accent italic
-    setting_value_true: str = ""  # Defaults to color_success
-    setting_value_true_selected: str = ""  # Defaults to color_success italic
-    setting_value_false: str = ""  # Defaults to color_text_muted
-    setting_value_false_selected: str = ""  # Defaults to color_text_muted italic
-    setting_desc: str = ""  # Defaults to color_text_dim
-    setting_desc_selected: str = ""  # Defaults to color_text_muted
+    field_indicator: str = ""  # Defaults to color_accent
+    field_label: str = ""  # Defaults to color_text
+    field_label_selected: str = ""  # Defaults to color_accent
+    field_value: str = ""  # Defaults to color_text_muted
+    field_value_selected: str = ""  # Defaults to color_accent italic
+    field_value_true: str = ""  # Defaults to color_success
+    field_value_true_selected: str = ""  # Defaults to color_success italic
+    field_value_false: str = ""  # Defaults to color_text_muted
+    field_value_false_selected: str = ""  # Defaults to color_text_muted italic
+    field_desc: str = ""  # Defaults to color_text_dim
+    field_desc_selected: str = ""  # Defaults to color_text_muted
 
     # ==========================================================================
     # Scrollbar
@@ -255,9 +255,9 @@ class ThinkingPromptStyles:
             dialog_button_focused="bold reverse",
             radio_selected="bold",
             checkbox_selected="bold",
-            setting_label_selected="bold",
-            setting_value_selected="italic",
-            setting_desc_selected="italic",
+            field_label_selected="bold",
+            field_value_selected="italic",
+            field_desc_selected="italic",
             status_bar="reverse",
             color_depth=ColorDepth.DEPTH_1_BIT,
         )
@@ -345,18 +345,18 @@ class ThinkingPromptStyles:
             "text_area": _style_str(_bg(self.color_bg_input), _fg(self.color_text_bright)),
             "select_arrow": _fg(self.color_text_muted),
             "checkbox_mark": _fg(self.color_accent),
-            # Settings list
-            "setting_indicator": _fg(self.color_accent),
-            "setting_label": _fg(self.color_text),
-            "setting_label_selected": _fg(self.color_accent),
-            "setting_value": _fg(self.color_text_muted),
-            "setting_value_selected": _style_str(_fg(self.color_accent), "italic"),
-            "setting_value_true": _fg(self.color_success),
-            "setting_value_true_selected": _style_str(_fg(self.color_success), "italic"),
-            "setting_value_false": _fg(self.color_text_muted),
-            "setting_value_false_selected": _style_str(_fg(self.color_text_muted), "italic"),
-            "setting_desc": _fg(self.color_text_dim),
-            "setting_desc_selected": _fg(self.color_text_muted),
+            # Dialog form fields
+            "field_indicator": _fg(self.color_accent),
+            "field_label": _fg(self.color_text),
+            "field_label_selected": _fg(self.color_accent),
+            "field_value": _fg(self.color_text_muted),
+            "field_value_selected": _style_str(_fg(self.color_accent), "italic"),
+            "field_value_true": _fg(self.color_success),
+            "field_value_true_selected": _style_str(_fg(self.color_success), "italic"),
+            "field_value_false": _fg(self.color_text_muted),
+            "field_value_false_selected": _style_str(_fg(self.color_text_muted), "italic"),
+            "field_desc": _fg(self.color_text_dim),
+            "field_desc_selected": _fg(self.color_text_muted),
             # Scrollbar
             "scrollbar_background": _bg(self.color_bg_dark),
             "scrollbar_button": _bg(self.color_text_dim),
@@ -415,22 +415,22 @@ class ThinkingPromptStyles:
             'select-arrow': r("select_arrow"),
             'checkbox-mark': r("checkbox_mark"),
             # Settings list
-            'setting-indicator': r("setting_indicator"),
-            'setting-label': r("setting_label"),
-            'setting-label-selected': r("setting_label_selected"),
-            'setting-value': r("setting_value"),
-            'setting-value-selected': r("setting_value_selected"),
-            'setting-value-true': r("setting_value_true"),
-            'setting-value-true-selected': r("setting_value_true_selected"),
-            'setting-value-false': r("setting_value_false"),
-            'setting-value-false-selected': r("setting_value_false_selected"),
-            'setting-desc': r("setting_desc"),
-            'setting-desc-selected': r("setting_desc_selected"),
+            'field-indicator': r("field_indicator"),
+            'field-label': r("field_label"),
+            'field-label-selected': r("field_label_selected"),
+            'field-value': r("field_value"),
+            'field-value-selected': r("field_value_selected"),
+            'field-value-true': r("field_value_true"),
+            'field-value-true-selected': r("field_value_true_selected"),
+            'field-value-false': r("field_value_false"),
+            'field-value-false-selected': r("field_value_false_selected"),
+            'field-desc': r("field_desc"),
+            'field-desc-selected': r("field_desc_selected"),
             # Dropdown menu (uses shared menu styles)
-            'setting-dropdown': r("menu_bg"),
-            'setting-dropdown-border': r("menu_border"),
-            'setting-dropdown-item': r("menu_item"),
-            'setting-dropdown-selected': r("menu_item_selected"),
+            'field-dropdown': r("menu_bg"),
+            'field-dropdown-border': r("menu_border"),
+            'field-dropdown-item': r("menu_item"),
+            'field-dropdown-selected': r("menu_item_selected"),
             # Completion menu (uses shared menu styles)
             'completion-menu': r("menu_bg"),
             'completion-menu.completion': r("menu_item"),

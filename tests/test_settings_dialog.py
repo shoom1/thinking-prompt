@@ -655,19 +655,19 @@ class TestRowStyles:
         "make,value,style",
         [
             (lambda: CheckboxControl(CheckboxItem(key="c", label="Label", default=True)),
-             "true", "setting-value-true"),
+             "true", "field-value-true"),
             (lambda: CheckboxControl(CheckboxItem(key="c", label="Label")),
-             "false", "setting-value-false"),
+             "false", "field-value-false"),
             (lambda: InlineSelectControl(InlineSelectItem(key="s", label="Label", options=["a", "b"], default="a")),
-             "a", "setting-value"),
+             "a", "field-value"),
             (lambda: _inline_dropdown(key="d", label="Label", options=["a", "b"], default="a"),
-             "a", "setting-value"),
+             "a", "field-value"),
             (lambda: DropdownControl(DropdownItem(key="d", label="Label", options=["a", "b"], default="a")),
-             "a", "setting-value"),
+             "a", "field-value"),
             (lambda: TextControl(TextItem(key="t", label="Label", default="bob")),
-             "bob", "setting-value"),
+             "bob", "field-value"),
             (lambda: TextControl(TextItem(key="t", label="Label")),
-             "(empty)", "setting-desc"),
+             "(empty)", "field-desc"),
         ],
         ids=["checked", "unchecked", "select", "inline-dropdown", "dropdown", "text", "empty-text"],
     )
@@ -675,14 +675,14 @@ class TestRowStyles:
     def test_label_and_value(self, make, value, style, selected):
         line = _line(make(), selected)
         suffix = "-selected" if selected else ""
-        assert f"class:setting-label{suffix}" in _style_of(line, "Label")
+        assert f"class:field-label{suffix}" in _style_of(line, "Label")
         assert f"class:{style}{suffix}" in _style_of(line, value)
 
     @pytest.mark.parametrize("selected", [False, True], ids=["idle", "selected"])
     def test_a_description(self, selected):
         control = CheckboxControl(CheckboxItem(key="c", label="Label", description="Says more"))
         suffix = "-selected" if selected else ""
-        assert _line(control, selected, row=1) == [("", "  "), (f"class:setting-desc{suffix}", "Says more")]
+        assert _line(control, selected, row=1) == [("", "  "), (f"class:field-desc{suffix}", "Says more")]
 
     @pytest.mark.parametrize("selected", [False, True], ids=["idle", "selected"])
     def test_a_lists_label_and_description(self, selected):
@@ -690,8 +690,8 @@ class TestRowStyles:
             ChecklistItem(key="t", label="Label", description="Says more", options=["a"])
         )
         suffix = "-selected" if selected else ""
-        assert _line(control, selected) == [("", "  "), (f"class:setting-label{suffix}", "Label")]
-        assert _line(control, selected, row=1) == [("", "  "), (f"class:setting-desc{suffix}", "Says more")]
+        assert _line(control, selected) == [("", "  "), (f"class:field-label{suffix}", "Label")]
+        assert _line(control, selected, row=1) == [("", "  "), (f"class:field-desc{suffix}", "Says more")]
 
     async def test_a_description_stays_under_the_edit_field(self):
         control = TextControl(TextItem(key="t", label="Name", description="Says more", default="bob"))
@@ -699,7 +699,7 @@ class TestRowStyles:
         row, description = _drawn(control.get_container(), 30, height=2)
         assert _field(row)
         assert _text(description).rstrip() == "  Says more"
-        assert all("class:setting-desc-selected" in style for _, style in description[2:11])
+        assert all("class:field-desc-selected" in style for _, style in description[2:11])
 
     @pytest.mark.parametrize(
         "make",
@@ -727,7 +727,7 @@ class TestSettingsRows:
 
         control = CheckboxControl(CheckboxItem(key="s", label="Stream"))
         (row,) = control._build_setting_row(40, _RowValue("true", "", 4), True)
-        assert row[0] == ("class:setting-indicator", "❯ ")
+        assert row[0] == ("class:field-indicator", "❯ ")
 
     def test_inline_dropdown_is_a_selector_without_a_popup(self):
         from thinking_prompt.settings_dialog import DropdownControl

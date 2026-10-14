@@ -316,7 +316,7 @@ def _add_selector_keys(kb: KeyBindings, cycle: Callable[[int], None], when: Filt
 
 def _description(description: str, selected: bool) -> FormattedText:
     """A setting's description row, under its label."""
-    style = "class:setting-desc-selected" if selected else "class:setting-desc"
+    style = "class:field-desc-selected" if selected else "class:field-desc"
     return FormattedText([("", "  "), (style, description)])
 
 
@@ -431,8 +431,8 @@ class SettingControl(RowControl, ABC, Generic[T]):
         list of FormattedText lines (1 or 2 depending on description).
         """
         indicator = MARKER if is_selected else NO_MARKER
-        indicator_style = "class:setting-indicator" if is_selected else ""
-        label_style = "class:setting-label-selected" if is_selected else "class:setting-label"
+        indicator_style = "class:field-indicator" if is_selected else ""
+        label_style = "class:field-label-selected" if is_selected else "class:field-label"
 
         layout = _layout_row(width, self._item.label, self._column(width), value)
         padding = max(1, layout.column - get_cwidth(indicator) - get_cwidth(layout.label))
@@ -469,10 +469,10 @@ class CheckboxControl(SettingControl[CheckboxItem]):
         is_selected = self._check_focus()
         if self._value:
             value_text = "true"
-            value_style = "class:setting-value-true-selected" if is_selected else "class:setting-value-true"
+            value_style = "class:field-value-true-selected" if is_selected else "class:field-value-true"
         else:
             value_text = "false"
-            value_style = "class:setting-value-false-selected" if is_selected else "class:setting-value-false"
+            value_style = "class:field-value-false-selected" if is_selected else "class:field-value-false"
         value = _RowValue(value_text, value_style, get_cwidth(value_text))
         return _content(self._build_setting_row(width, value, is_selected))
 
@@ -507,7 +507,7 @@ class InlineSelectControl(SettingControl[InlineSelectItem]):
     def create_content(self, width: int, height: int) -> UIContent:
         """Render the inline select row with left/right arrows."""
         is_selected = self._check_focus()
-        value_style = "class:setting-value-selected" if is_selected else "class:setting-value"
+        value_style = "class:field-value-selected" if is_selected else "class:field-value"
         value = _selector_value(self._item.options, self._value, value_style)
         return _content(self._build_setting_row(width, value, is_selected))
 
@@ -533,7 +533,7 @@ class DropdownControl(SettingControl[DropdownItem]):
             _DropdownMenuControl(self),
             width=self._get_dropdown_width(),
             height=Dimension(min=1, preferred=self._preferred_menu_rows()),
-            style="class:setting-dropdown",
+            style="class:field-dropdown",
         )
         # Inline dialogs show a dropdown as a ←/→ selector, with no popup menu.
         self._inline = False
@@ -623,7 +623,7 @@ class DropdownControl(SettingControl[DropdownItem]):
     def create_content(self, width: int, height: int) -> UIContent:
         """Render the dropdown row with down arrow indicator."""
         is_selected = self._check_focus()
-        value_style = "class:setting-value-selected" if is_selected else "class:setting-value"
+        value_style = "class:field-value-selected" if is_selected else "class:field-value"
 
         if self._inline:
             value = _selector_value(self._item.options, self._value, value_style)
@@ -642,7 +642,7 @@ class DropdownControl(SettingControl[DropdownItem]):
         """Return the Float for the dropdown menu (to be added at dialog level)."""
         framed_menu = Frame(
             body=self._menu_window,
-            style="class:setting-dropdown-border",
+            style="class:field-dropdown-border",
         )
 
         # Directly under its row, at the value: the menu position the row gives
@@ -722,7 +722,7 @@ class _DropdownMenuControl(UIControl):
         lines = []
         for row, i in enumerate(range(offset, min(count, offset + height))):
             opt = options[i]
-            style = "class:setting-dropdown-selected" if i == selected else "class:setting-dropdown-item"
+            style = "class:field-dropdown-selected" if i == selected else "class:field-dropdown-item"
             text = opt[:text_width] if len(opt) > text_width else opt.ljust(text_width)
             fragments = [(style, text)]
             if scrolls:
@@ -791,9 +791,9 @@ class TextControl(SettingControl[TextItem]):
 
         is_selected = self._check_focus()
         if not self._value:
-            value_style = "class:setting-desc-selected" if is_selected else "class:setting-desc"
+            value_style = "class:field-desc-selected" if is_selected else "class:field-desc"
         else:
-            value_style = "class:setting-value-selected" if is_selected else "class:setting-value"
+            value_style = "class:field-value-selected" if is_selected else "class:field-value"
         return _content(self._build_setting_row(width, self._row_value(value_style), is_selected))
 
     def _shown_value(self) -> str:
@@ -937,8 +937,8 @@ class _MarkedLabel(UIControl):
     def create_content(self, width: int, height: int) -> UIContent:
         label = _cut(self._item.label, width - get_cwidth(MARKER) - 1)
         line = FormattedText([
-            ("class:setting-indicator", MARKER),
-            ("class:setting-label-selected", label),
+            ("class:field-indicator", MARKER),
+            ("class:field-label-selected", label),
         ])
         return UIContent(get_line=lambda i: line, line_count=1)
 
@@ -984,7 +984,7 @@ class OptionsControl(SettingControl[Any]):
     def create_content(self, width: int, height: int) -> UIContent:
         """The label row (and description), highlighted while an option has focus."""
         selected = any(has_focus(row.window) for row in self._group.rows)
-        label_style = "class:setting-label-selected" if selected else "class:setting-label"
+        label_style = "class:field-label-selected" if selected else "class:field-label"
         lines = [FormattedText([("", NO_MARKER), (label_style, self._item.label)])]
         if self._item.description:
             lines.append(_description(self._item.description, selected))
