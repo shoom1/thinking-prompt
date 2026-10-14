@@ -21,15 +21,19 @@ import asyncio
 from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.document import Document
 
-from thinking_prompt import ThinkingPromptSession, AppInfo, Spinner, __version__
-from thinking_prompt.settings_dialog import (
-    SettingsDialog,
-    DropdownField,
-    SelectField,
-    TextField,
+from thinking_prompt import (
+    AppInfo,
+    ButtonConfig,
     CheckboxField,
     ChecklistField,
+    Dialog,
+    DropdownField,
     RadioField,
+    SelectField,
+    Spinner,
+    TextField,
+    ThinkingPromptSession,
+    __version__,
 )
 
 # Check if rich is available for fancy welcome
@@ -351,7 +355,7 @@ async def main():
             return
 
         if cmd == "settings":
-            settings_items = [
+            settings_fields = [
                 DropdownField(
                     key="theme",
                     label="Theme",
@@ -405,30 +409,39 @@ async def main():
                     default=("Web search",),
                 ),
             ]
-            dialog = SettingsDialog(
-                title="Settings",
-                items=settings_items,
+            dialog = Dialog(
+                "Settings",
+                fields=settings_fields,
                 max_height=16,
                 width=60,
                 placement=placement,
             )
+            dialog.buttons = [
+                ButtonConfig("Save", handler=lambda: dialog.set_result(dialog.values)),
+                ButtonConfig("Cancel"),
+            ]
+            before = dialog.values
             result = await session.show_dialog(dialog)
-            if result:
-                # Keep secrets out of the rendered diff, even in demos.
-                password_keys = {
-                    item.key for item in settings_items
-                    if isinstance(item, TextField) and item.password
-                }
-                changes = [
-                    f"- **{k}**: {'***' if k in password_keys and v else v}"
-                    for k, v in result.items()
-                ]
-                session.add_response(
-                    "## Settings Updated\n\n" + "\n".join(changes),
-                    markdown=True
-                )
-            else:
+            if result is None:
                 session.add_response("Settings cancelled")
+                return
+            changed = {k: v for k, v in result.items() if v != before[k]}
+            if not changed:
+                session.add_response("No settings changed")
+                return
+            # Keep secrets out of the rendered diff, even in demos.
+            password_keys = {
+                f.key for f in settings_fields
+                if isinstance(f, TextField) and f.password
+            }
+            changes = [
+                f"- **{k}**: {'***' if k in password_keys and v else v}"
+                for k, v in changed.items()
+            ]
+            session.add_response(
+                "## Settings Updated\n\n" + "\n".join(changes),
+                markdown=True,
+            )
             return
 
         # Use context manager for thinking

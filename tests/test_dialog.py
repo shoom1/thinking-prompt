@@ -342,9 +342,8 @@ class TestDialogNeedsRunningSession:
             lambda s: s.choice_dialog("T", "B", ["a"]),
             lambda s: s.dropdown_dialog("T", "B", ["a"]),
             lambda s: s.checklist_dialog("T", "B", ["a"]),
-            lambda s: s.show_settings_dialog("T", []),
         ],
-        ids=["show_dialog", "yes_no", "message", "choice", "dropdown", "checklist", "settings"],
+        ids=["show_dialog", "yes_no", "message", "choice", "dropdown", "checklist"],
     )
     async def test_raises_before_the_session_runs(self, open_dialog):
         from thinking_prompt import ThinkingPromptSession

@@ -108,8 +108,8 @@ class RadioField(Field):
 
 T = TypeVar("T", bound=Field)
 
-# Where settings values start: "labels" (two columns after the longest
-# label, or description, see SettingsDialog), "right" (the row's right
+# Where field values start: "labels" (two columns after the longest
+# label or description), "right" (the row's right
 # edge) or a column, the marker included.
 AlignValues = Union[Literal["labels", "right"], int]
 

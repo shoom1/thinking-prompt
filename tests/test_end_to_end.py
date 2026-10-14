@@ -28,8 +28,8 @@ from thinking_prompt import (
     ChecklistField,
     Dialog,
     DropdownField,
-    SelectField,
     RadioField,
+    SelectField,
     TextField,
     ThinkingPromptSession,
 )
@@ -37,7 +37,6 @@ from thinking_prompt import (
 CTRL_A = "\x01"
 CTRL_C = "\x03"
 CTRL_D = "\x04"
-CTRL_S = "\x13"
 CTRL_T = "\x14"
 ENTER = "\r"
 ESCAPE = "\x1b"
@@ -91,6 +90,18 @@ class _RecordingOutput(_ShortOutput):
     def text(self) -> str:
         """Everything written, "\\r" dropped."""
         return "".join(self.written).replace("\r", "")
+
+
+def settings_form(fields: list[Any], *, title: str = "Settings", **kwargs: Any) -> Dialog:
+    """A settings form as a client builds one: the fields, then Save (every
+    value) and Cancel; 60 columns wide in a box unless ``width`` says."""
+    kwargs.setdefault("width", 60)
+    dialog = Dialog(title, fields=fields, **kwargs)
+    dialog.buttons = [
+        ButtonConfig("Save", handler=lambda: dialog.set_result(dialog.values)),
+        ButtonConfig("Cancel"),
+    ]
+    return dialog
 
 
 @contextmanager
@@ -630,9 +641,7 @@ class TestCtrlDInDialog:
 
         async def handler(text: str) -> None:
             results.append(
-                await session.show_settings_dialog(
-                    "Settings", [TextField(key="name", label="Name", default="abc")]
-                )
+                await session.show_dialog(settings_form([TextField(key="name", label="Name", default="abc")]))
             )
 
         with piped_session() as (session, inp):
@@ -652,7 +661,7 @@ class TestCtrlDInDialog:
                 assert not run.done(), "Ctrl+D in a dialog must not exit the app"
                 inp.send_text(ENTER)
                 await wait_until(lambda: not editing())
-                inp.send_text(CTRL_S)
+                inp.send_text(TAB + ENTER)
                 await wait_until(lambda: results == [{"name": "bc"}])
 
             await run_with(session, handler, script)
@@ -1006,7 +1015,7 @@ class TestBoxOverItsRoom:
     async def test_a_settings_form_leaves_the_status_bar_whole(self):
         items = [CheckboxField(key=f"s{i}", label=f"Setting {i}") for i in range(4)]
         frame, prompt, status = await self._open_at_top(
-            lambda s: s.show_settings_dialog("Settings", items, placement="box"), rows=30
+            lambda s: s.show_dialog(settings_form(items, placement="box")), rows=30
         )
         assert next(i for i, line in enumerate(frame) if "┌" in line) == prompt + 2, frame
         assert frame[status].startswith("Ctrl+C: cancel") and "│" not in frame[status], frame
@@ -1028,7 +1037,7 @@ class TestBoxOverItsRoom:
             CheckboxField(key=f"s{i}", label=f"Setting {i}", description=f"About {i}") for i in range(11)
         ]
         frame, _, status = await self._open_at_top(
-            lambda s: s.show_settings_dialog("Settings", items, placement="box"),
+            lambda s: s.show_dialog(settings_form(items, placement="box")),
             rows=24, message="line one\nline two\n>>> ",
         )
         last_prompt_line = next(i for i, line in enumerate(frame) if line.startswith(">>>"))
@@ -1081,7 +1090,7 @@ class TestBoxInASqueezedRoom:
     @pytest.mark.parametrize("rows", [24, 30])
     async def test_a_settings_form_shares_the_rows_with_a_thinking_box(self, rows):
         frame, prompt, status = await self._frame_with(
-            lambda s: s.show_settings_dialog("Settings", self._form(), placement="box"),
+            lambda s: s.show_dialog(settings_form(self._form(), placement="box")),
             thought_lines=20, rows=rows,
         )
         top = next(i for i, line in enumerate(frame) if "┌" in line)
@@ -1104,7 +1113,7 @@ class TestBoxInASqueezedRoom:
     @pytest.mark.parametrize("rows", [7, 8, 9])
     async def test_the_status_bar_stays_whole_in_a_short_terminal(self, rows):
         frame, prompt, status = await self._frame_with(
-            lambda s: s.show_settings_dialog("Settings", self._form()[:2], placement="box"), rows=rows
+            lambda s: s.show_dialog(settings_form(self._form()[:2], placement="box")), rows=rows
         )
         assert frame[status].startswith("Ctrl+C") and "│" not in frame[status], frame
 
@@ -1150,9 +1159,7 @@ class TestBoxMaxHeight:
         results: list[Any] = []
 
         async def handler(text: str) -> None:
-            results.append(await session.show_settings_dialog(
-                "Many", items, max_height=12, placement="box"
-            ))
+            results.append(await session.show_dialog(settings_form(items, title="Many", max_height=12, placement="box")))
 
         with piped_session(rows=40) as (session, inp):
 
@@ -1389,9 +1396,7 @@ class TestInlineMaxHeight:
         results: list[Any] = []
 
         async def handler(text: str) -> None:
-            results.append(await session.show_settings_dialog(
-                "Many", items, max_height=12, placement="inline"
-            ))
+            results.append(await session.show_dialog(settings_form(items, title="Many", max_height=12, placement="inline")))
 
         with piped_session(rows=40) as (session, inp):
 
@@ -1906,7 +1911,7 @@ class TestInlineSettings:
             TextField(key="name", label="Name", default="bob"),
         ]
         frame = await first_dialog_frame(
-            lambda s: s.show_settings_dialog("Settings", items, placement="inline"),
+            lambda s: s.show_dialog(settings_form(items, placement="inline")),
             rows=24, columns=120,
         )
         stream = next(line for line in frame if "Stream" in line)
@@ -1927,7 +1932,7 @@ class TestInlineSettings:
             ),
         ]
         frame = await first_dialog_frame(
-            lambda s: s.show_settings_dialog("Settings", items, placement=placement),
+            lambda s: s.show_dialog(settings_form(items, placement=placement)),
             rows=24, columns=100,
         )
         # Descriptions start where labels do: each ends two columns short
@@ -1945,7 +1950,7 @@ class TestInlineSettings:
             TextField(key="name", label="Display name", default="bob"),
         ]
         frame = await first_dialog_frame(
-            lambda s: s.show_settings_dialog("Settings", items, placement="inline", align_values=align),
+            lambda s: s.show_dialog(settings_form(items, placement="inline", align_values=align)),
             rows=24, columns=24,
         )
         rows = {
@@ -1976,7 +1981,7 @@ class TestInlineSettings:
         results: list[Any] = []
 
         async def handler(text: str) -> None:
-            results.append(await session.show_settings_dialog("Settings", self._items(), placement="inline"))
+            results.append(await session.show_dialog(settings_form(self._items(), placement="inline")))
 
         with piped_session() as (session, inp):
 
@@ -1996,27 +2001,11 @@ class TestInlineSettings:
 
             await run_with(session, handler, script)
 
-    async def test_ctrl_s_saves(self):
-        results: list[Any] = []
-
-        async def handler(text: str) -> None:
-            results.append(await session.show_settings_dialog("Settings", self._items(), placement="inline"))
-
-        with piped_session() as (session, inp):
-
-            async def script(run: asyncio.Task[None]) -> None:
-                inp.send_text("go" + ENTER)
-                await wait_until(lambda: dialog_rendered(session))
-                inp.send_text(DOWN + " " + CTRL_S)
-                await wait_until(lambda: results == [{"stream": True}])
-
-            await run_with(session, handler, script)
-
     async def test_escape_while_editing_text_only_ends_the_edit(self):
         results: list[Any] = []
 
         async def handler(text: str) -> None:
-            results.append(await session.show_settings_dialog("Settings", self._items(), placement="inline"))
+            results.append(await session.show_dialog(settings_form(self._items(), placement="inline")))
 
         with piped_session() as (session, inp):
 
@@ -2038,7 +2027,7 @@ class TestInlineSettings:
         results: list[Any] = []
 
         async def handler(text: str) -> None:
-            results.append(await session.show_settings_dialog("Settings", [], placement="inline"))
+            results.append(await session.show_dialog(settings_form([], placement="inline")))
 
         with piped_session() as (session, inp):
 
@@ -2054,7 +2043,7 @@ class TestInlineSettings:
         results: list[Any] = []
 
         async def handler(text: str) -> None:
-            results.append(await session.show_settings_dialog("Settings", self._items()))
+            results.append(await session.show_dialog(settings_form(self._items())))
 
         with piped_session() as (session, inp):
 
@@ -2063,7 +2052,7 @@ class TestInlineSettings:
                 await wait_until(lambda: dialog_rendered(session))
                 inp.send_text(RIGHT + DOWN + " ")  # Model: b; Stream: on
                 inp.send_text(TAB + TAB + ENTER)   # Name, then the Save button
-                await wait_until(lambda: results == [{"model": "b", "stream": True}])
+                await wait_until(lambda: results == [{"model": "b", "stream": True, "name": ""}])
 
             await run_with(session, handler, script)
 
@@ -2071,17 +2060,16 @@ class TestInlineSettings:
         results: list[Any] = []
 
         async def handler(text: str) -> None:
-            results.append(await session.show_settings_dialog("Settings", self._items()))
+            results.append(await session.show_dialog(settings_form(self._items())))
 
         with piped_session() as (session, inp):
 
             async def script(run: asyncio.Task[None]) -> None:
                 inp.send_text("go" + ENTER)
                 await wait_until(lambda: dialog_rendered(session))
-                # Still on Model after Shift+Tab (not wrapped to the buttons):
-                # → changes it, and Ctrl+S, a settings key, saves.
-                inp.send_text(SHIFT_TAB + RIGHT + CTRL_S)
-                await wait_until(lambda: results == [{"model": "b"}])
+                # Still on Model after Shift+Tab (not wrapped to the buttons): → changes it.
+                inp.send_text(SHIFT_TAB + RIGHT + TAB * 3 + ENTER)  # Model, then Stream, Name and Save
+                await wait_until(lambda: results == [{"model": "b", "stream": False, "name": ""}])
 
             await run_with(session, handler, script)
 
@@ -2093,7 +2081,7 @@ class TestInlineSettings:
         ]
 
         async def handler(text: str) -> None:
-            results.append(await session.show_settings_dialog("Settings", items))
+            results.append(await session.show_dialog(settings_form(items)))
 
         with piped_session() as (session, inp):
 
@@ -2102,7 +2090,7 @@ class TestInlineSettings:
                 await wait_until(lambda: dialog_rendered(session))
                 inp.send_text(DOWN + DOWN + " ")  # the last option: check "code"
                 inp.send_text(TAB + ENTER)        # on to the Save button
-                await wait_until(lambda: results == [{"tools": ["search", "code"]}])
+                await wait_until(lambda: results == [{"stream": False, "tools": ["search", "code"]}])
 
             await run_with(session, handler, script)
 
@@ -2114,7 +2102,7 @@ class TestInlineSettings:
         ]
 
         async def handler(text: str) -> None:
-            results.append(await session.show_settings_dialog("Settings", items, placement="inline"))
+            results.append(await session.show_dialog(settings_form(items, placement="inline")))
 
         with piped_session() as (session, inp):
 
@@ -2144,9 +2132,7 @@ class TestSettingsInANarrowBox:
         results: list[Any] = []
 
         async def handler(text: str) -> None:
-            results.append(await session.show_settings_dialog(
-                "Settings", items, width=40, align_values=30, placement="box"
-            ))
+            results.append(await session.show_dialog(settings_form(items, width=40, align_values=30, placement="box")))
 
         def from_the_right(text: str) -> int:
             """How far from the end of its row ``text`` starts."""
@@ -2166,8 +2152,8 @@ class TestSettingsInANarrowBox:
                 assert from_the_right("bob") == shown
                 inp.send_text("by" + ENTER)
                 await wait_until(lambda: not TestInlineSettings._editing(session))
-                inp.send_text(CTRL_S)
-                await wait_until(lambda: results == [{"name": "bobby"}])
+                inp.send_text(TAB * 2 + ENTER)  # Stream, then Save
+                await wait_until(lambda: results == [{"name": "bobby", "stream": False}])
 
             await run_with(session, handler, script)
 
@@ -2304,7 +2290,7 @@ class TestBoxTooSmall:
     async def test_a_settings_form_in_a_narrow_box_shows_the_notice_then_fits_at_40(self):
         for cols, small in [(24, True), (40, False)]:
             frame = await first_dialog_frame(
-                lambda s: s.show_settings_dialog("Settings", self.ITEMS, placement="box"),
+                lambda s: s.show_dialog(settings_form(self.ITEMS, placement="box")),
                 rows=14, columns=cols,
             )
             text = self._text(frame)
@@ -2375,9 +2361,7 @@ class TestBoxDropdownMenu:
         results: list[Any] = []
 
         async def handler(text: str) -> None:
-            results.append(await session.show_settings_dialog(
-                "Settings", self._items(), placement="box", align_values=align
-            ))
+            results.append(await session.show_dialog(settings_form(self._items(), placement="box", align_values=align)))
 
         with piped_session(rows=30) as (session, inp):
 
@@ -2398,8 +2382,10 @@ class TestBoxDropdownMenu:
                 assert "└" in lines[row + 5]
                 inp.send_text(DOWN + ENTER)  # gamma
                 await wait_until(lambda: not on_screen(session, "alpha"))
-                inp.send_text(CTRL_S)
-                await wait_until(lambda: results == [{"d": "gamma"}])
+                inp.send_text(TAB * 5 + ENTER)  # from Model through c, e, f, g to Save
+                await wait_until(lambda: results == [{
+                    "a": False, "b": False, "d": "gamma", "c": False, "e": False, "f": False, "g": False,
+                }])
 
             await run_with(session, handler, script)
 
@@ -2414,7 +2400,7 @@ class TestBoxDropdownMenu:
         results: list[Any] = []
 
         async def handler(text: str) -> None:
-            results.append(await session.show_settings_dialog("Settings", items, placement="box"))
+            results.append(await session.show_dialog(settings_form(items, placement="box")))
 
         with piped_session(rows=14) as (session, inp):
 
@@ -2432,8 +2418,8 @@ class TestBoxDropdownMenu:
                 assert "│opt0" not in frame  # scrolled: the menu's first option is out of view
                 inp.send_text(ENTER)
                 await wait_until(lambda: not on_screen(session, "│opt"))  # the menu closed
-                inp.send_text(CTRL_S)
-                await wait_until(lambda: results == [{"d": "opt6"}])
+                inp.send_text(TAB * 2 + ENTER)
+                await wait_until(lambda: results == [{"a": False, "b": False, "d": "opt6", "c": False}])
 
             await run_with(session, handler, script)
 
@@ -2444,7 +2430,7 @@ class TestBoxMenuFloatsOnClose:
         closed: list[bool] = []
 
         async def handler(text: str) -> None:
-            await session.show_settings_dialog("Settings", items, placement="box")
+            await session.show_dialog(settings_form(items, placement="box"))
             closed.append(True)
 
         with piped_session(rows=30) as (session, inp):

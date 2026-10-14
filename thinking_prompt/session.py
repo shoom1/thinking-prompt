@@ -23,7 +23,6 @@ from typing import (
 
 if TYPE_CHECKING:
     from .dialog import Dialog, DialogManager
-    from .fields import Field
     from .thinking_box import ThinkingBox
     from .types import ContentCallback, ContentFormat, InputHandler, Overflow
 
@@ -1513,65 +1512,3 @@ class ThinkingPromptSession:
             result = await session.show_dialog(MyDialog())
         """
         return await self._dialogs.show(dialog)
-
-    async def show_settings_dialog(
-        self,
-        title: str,
-        items: list[Field],
-        can_cancel: bool = True,
-        *,
-        width: int | None = 60,
-        max_height: int | None = None,
-        align_values: Literal["labels", "right"] | int = "labels",
-        placement: Placement | None = None,
-    ) -> dict[str, Any] | None:
-        """
-        Show a settings dialog and return changed values.
-
-        Args:
-            title: Dialog title.
-            items: List of Field objects defining the form.
-            can_cancel: If True (default), shows Save/Cancel buttons.
-                       If False, shows only Done button.
-            width: Dialog width control (box only):
-                   - None or 0: auto-size to content
-                   - positive int: preferred width (default 60), never
-                     narrower than the buttons
-                   - -1: maximum width (stretch to fill)
-            max_height: The most rows the dialog takes; settings beyond it
-                    scroll with the cursor. None (default): the terminal's
-                    rows less the prompt's.
-            align_values: Where values start: "labels" (default, two
-                    columns after the longest label or description),
-                    "right" (the row's right edge), or a column number
-                    (labels cut with "…").
-            placement: "box" or "inline"; None (default) uses the session's
-                    dialog_placement.
-
-        Returns:
-            Dictionary of changed values if saved, or None if cancelled.
-            An empty dict {} means no values were changed.
-
-        Example:
-            from thinking_prompt import DropdownField, CheckboxField
-
-            result = await session.show_settings_dialog(
-                title="Settings",
-                items=[
-                    DropdownField(key="model", label="Model",
-                                options=["gpt-4", "gpt-3.5"], default="gpt-4"),
-                    CheckboxField(key="stream", label="Stream Output", default=True),
-                ],
-            )
-            if result is not None:
-                for key, value in result.items():
-                    update_setting(key, value)
-        """
-        from .settings_dialog import SettingsDialog
-        dialog = SettingsDialog(
-            title, items, can_cancel, width=width, max_height=max_height,
-            align_values=align_values, placement=placement,
-        )
-        return cast(
-            "dict[str, Any] | None", await self._dialogs.show(dialog)
-        )

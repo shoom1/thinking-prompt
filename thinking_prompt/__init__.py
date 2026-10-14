@@ -50,7 +50,6 @@ from .fields import (
 from .layout import ThinkingHeader
 from .rich_utils import _renderable_to_ansi as rich_to_ansi
 from .session import ThinkingPromptSession
-from .settings_dialog import SettingsDialog
 from .spinner import Spinner
 from .streaming import StreamingContent
 from .styles import (
@@ -100,8 +99,6 @@ __all__ = [
     "DropdownField",
     "ChecklistField",
     "RadioField",
-    # Settings Dialog
-    "SettingsDialog",
     # Layout
     "ThinkingHeader",
     "Spinner",
