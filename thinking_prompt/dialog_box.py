@@ -104,7 +104,9 @@ def build_box(dialog: Dialog) -> BoxView:
         title=dialog.title,
         body=body,
         buttons=buttons,
-        width=_width_dimension(dialog.width),
+        # Never narrower than its buttons, inside the frame: below that the
+        # box collapses to an empty frame.
+        width=_width_dimension(dialog.width, _buttons_row(buttons) + 2),
         with_background=False,  # Use styled dialog, no light overlay
     )
     return BoxView(
@@ -112,15 +114,23 @@ def build_box(dialog: Dialog) -> BoxView:
     )
 
 
-def _width_dimension(width: int | None) -> Dimension | None:
-    """None/0 = auto-size, -1 = as wide as possible, >0 = preferred width."""
+def _width_dimension(width: int | None, least: int) -> Dimension | None:
+    """None/0 = auto-size, -1 = as wide as possible, >0 = preferred width,
+    at least ``least``."""
     if width is None or width == 0:
         return None
     if width == -1:
         # Max width - use large preferred with no max constraint
         return Dimension(preferred=9999)
     # Preferred width (allows shrinking if terminal is smaller)
-    return Dimension(preferred=width)
+    return Dimension(preferred=max(width, least))
+
+
+def _buttons_row(buttons: list[Button]) -> int:
+    """The columns ``buttons`` take side by side (VSplit's padding=1
+    between): the one row of a box that can't be squeezed."""
+    widths = [b.window.preferred_width(1000).min for b in buttons]
+    return sum(widths) + max(len(widths) - 1, 0)
 
 
 def _apply_button_style(button: Button, extra_style: str) -> None:
@@ -335,11 +345,8 @@ class BoxPresenter:
         assert self.view is not None
         widget = to_container(self.view.widget)
         # A box given a width reports no minimum for it, so the width comes
-        # from the buttons row, the one thing that can't be squeezed: the
-        # buttons side by side (VSplit's padding=1 between), inside the frame.
-        buttons = [b.window.preferred_width(max(width, 1)).min for b in self.view.buttons]
-        row = sum(buttons) + max(len(buttons) - 1, 0)
-        needs_width = max(widget.preferred_width(width).min, row + 2)
+        # from the buttons row, inside the frame.
+        needs_width = max(widget.preferred_width(width).min, _buttons_row(self.view.buttons) + 2)
         # Height at the width the box would get: below its minimum width the
         # box collapses, and reports a frame's two rows and no more.
         box_width = min(widget.preferred_width(width).preferred, max(width, needs_width))

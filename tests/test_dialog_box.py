@@ -131,6 +131,13 @@ class TestBoxPresenter:
         presenter.open(Dialog("T", "B", [ButtonConfig("OK")], top=top))
         assert (presenter._float.top, presenter._float.bottom) == expected
 
+    def test_a_width_never_makes_the_box_narrower_than_its_buttons(self):
+        """Two 12-column buttons, a column between them, and the frame."""
+        view = build_box(Dialog("T", "B", [ButtonConfig("Delete"), ButtonConfig("Cancel")], width=14))
+        assert to_container(view.widget).preferred_width(80).preferred == 12 + 1 + 12 + 2
+        wide = build_box(Dialog("T", "B", [ButtonConfig("OK")], width=40))
+        assert to_container(wide.widget).preferred_width(80).preferred == 40
+
     @staticmethod
     def _long(**kwargs) -> Dialog:
         return Dialog("T", "\n".join(f"line {i}" for i in range(30)), [ButtonConfig("OK")], **kwargs)

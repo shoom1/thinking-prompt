@@ -1635,9 +1635,10 @@ class ThinkingPromptSession:
             items: List of SettingsItem objects defining the form.
             can_cancel: If True (default), shows Save/Cancel buttons.
                        If False, shows only Done button.
-            width: Dialog width control:
+            width: Dialog width control (box only):
                    - None or 0: auto-size to content
-                   - positive int: minimum width (default 60)
+                   - positive int: preferred width (default 60), never
+                     narrower than the buttons
                    - -1: maximum width (stretch to fill)
             top: Vertical position:
                    - None: outside full screen, under the prompt over

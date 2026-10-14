@@ -369,8 +369,8 @@ subclass.
 A `Dialog` has no buttons unless you give it some, and it needs something
 to take keyboard focus: at least one button, or a focusable body (e.g. a
 `TextArea`, closed with Escape). Otherwise `show_dialog()` raises
-`ValueError`. Other options: `escape_result`, `escapable`, `width`, `top`,
-`max_height`.
+`ValueError`. Other options: `escape_result`, `escapable`, `width` (box
+only; never narrower than the buttons), `top`, `max_height`.
 
 **Long content scrolls.** A dialog is never taller than the terminal (less
 the prompt's rows), nor than `max_height` rows if you pass it — counting the

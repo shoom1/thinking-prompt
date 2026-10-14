@@ -137,7 +137,8 @@ class Dialog:
             closed with Escape).
         escape_result: What Escape and cancel() return (default None).
         escapable: If False, Escape does nothing (default True).
-        width: None/0 = auto, >0 = preferred width, -1 = full width (box only).
+        width: None/0 = auto, >0 = preferred width (never narrower than
+            the buttons), -1 = full width (box only).
         top: Box only. None: outside full screen, under the prompt over the
             rows reserved for it above the status bar (centered when those
             are squeezed); centered in full screen. >=0: rows from the top.

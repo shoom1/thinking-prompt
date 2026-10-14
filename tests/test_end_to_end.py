@@ -1202,6 +1202,17 @@ class TestBoxMaxHeight:
         shown = frame[:24]  # a float can draw past the terminal's last row, unseen
         assert on_frame(shown, "Long") and on_frame(shown, "OK"), frame
 
+    async def test_a_width_narrower_than_its_buttons_still_shows_them(self):
+        frame = await first_dialog_frame(
+            lambda s: s.show_dialog(Dialog(
+                "Delete files?", "This removes 3 files.",
+                [ButtonConfig("Delete", result=True), ButtonConfig("Cancel", result=False)],
+                width=14, placement="box",
+            )),
+            rows=24,
+        )
+        assert on_frame(frame, "This removes") and on_frame(frame, "Delete") and on_frame(frame, "Cancel"), frame
+
     async def test_a_settings_form_follows_the_cursor_within_its_max_height(self):
         items = [CheckboxItem(key=f"s{i}", label=f"Setting {i:02}") for i in range(20)]
         results: list[Any] = []
