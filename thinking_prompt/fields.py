@@ -407,6 +407,20 @@ class FieldControl(RowControl, ABC, Generic[T]):
         no value on the setting's row."""
         return 0
 
+    def preferred_width(self, max_available_width: int) -> int:
+        """The columns this field's rows take uncut, so an auto-width box is
+        wide enough for them: the marker, the label, the gap and the widest
+        value (from the value column when one is set, which counts the
+        marker, the longest label and the gap), the row's last column (see
+        _layout_row) and, wider still, the description row."""
+        widest = self.widest_value()
+        if self._value_column is None:
+            row = get_cwidth(MARKER) + get_cwidth(self._item.label) + 2 + widest
+        else:
+            row = self._value_column.least + widest + 1
+        description = self._item.description
+        return max(row, 2 + get_cwidth(description) if description else 0)
+
     @abstractmethod
     def create_content(self, width: int, height: int) -> UIContent:
         """Create the visual content for this control."""
@@ -971,6 +985,13 @@ class OptionsFieldControl(FieldControl[Any]):
             picked = [item.default] if item.default is not None else []
             self._group = OptionGroup(item.options, multiple=False, selected=picked, indent=2)
         self._container = HSplit([self._window, *(row.window for row in self._group.rows)])
+
+    def preferred_width(self, max_available_width: int) -> int:
+        """The label row's columns (and its description's); the option rows
+        say their own."""
+        description = self._item.description
+        label = get_cwidth(NO_MARKER) + get_cwidth(self._item.label)
+        return max(label, 2 + get_cwidth(description) if description else 0)
 
     @property
     def value(self) -> Any:

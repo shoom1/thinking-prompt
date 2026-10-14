@@ -11,7 +11,7 @@ from prompt_toolkit.application import Application
 from prompt_toolkit.application.current import set_app
 from prompt_toolkit.input import DummyInput
 from prompt_toolkit.keys import Keys
-from prompt_toolkit.layout import BufferControl, FloatContainer, HSplit, Layout
+from prompt_toolkit.layout import BufferControl, FloatContainer, HSplit, Layout, to_container
 from prompt_toolkit.layout.mouse_handlers import MouseHandlers
 from prompt_toolkit.layout.processors import PasswordProcessor
 from prompt_toolkit.layout.screen import Screen, WritePosition
@@ -31,6 +31,8 @@ from thinking_prompt import (
     SelectField,
     TextField,
 )
+from thinking_prompt.dialog import _checklist_dialog
+from thinking_prompt.dialog_box import build_box
 from thinking_prompt.dialog_scroll import focusable_windows
 from thinking_prompt.fields import (
     CheckboxFieldControl,
@@ -1392,3 +1394,56 @@ class TestDropdownMenuColumns:
     def test_auto_width_counts_columns(self):
         control = DropdownFieldControl(DropdownField("k", "L", options=["日本語", "ab"], width=None))
         assert control._get_dropdown_width() == 6 + 4
+
+
+class TestAutoWidth:
+    LABEL = "Stream responses from the model"  # 31 columns
+
+    @staticmethod
+    def _widths(dialog):
+        """The field rows' preferred widths once laid out in a box."""
+        dialog._placement = "box"
+        dialog._content()
+        return [control.preferred_width(200) for control in dialog._form.controls]
+
+    def test_rows_want_the_marker_label_gap_widest_value_and_last_column(self):
+        d = Dialog("S", fields=[CheckboxField("a", self.LABEL), TextField("n", "Name")])
+        # "labels": the value column after the longest label; then the row's
+        # widest value (5 for false, the 15-column text field) and one column.
+        column = 2 + len(self.LABEL) + 2
+        assert self._widths(d) == [column + 5 + 1, column + 15 + 1]
+
+    def test_right_aligned_rows(self):
+        d = Dialog("S", fields=[CheckboxField("a", self.LABEL)], align_values="right")
+        assert self._widths(d) == [2 + len(self.LABEL) + 2 + 5]
+
+    def test_a_column(self):
+        d = Dialog("S", fields=[CheckboxField("a", "A")], align_values=40)
+        assert self._widths(d) == [40 + 5 + 1]
+
+    def test_a_description_wider_than_the_row(self):
+        d = Dialog("S", fields=[CheckboxField("a", "A", description="x" * 50)], align_values="right")
+        assert self._widths(d) == [2 + 50]
+
+    def test_wide_characters_count_columns(self):
+        d = Dialog("S", fields=[CheckboxField("a", "設定")], align_values="right")
+        assert self._widths(d) == [2 + 4 + 2 + 5]
+
+    def test_a_list_wants_its_label_and_options(self):
+        option = "Stream responses from the model as they arrive"  # 46
+        d = Dialog("S", fields=[ChecklistField("t", "Tools", options=[option, "検索"])])
+        (control,) = d._form.controls
+        assert control.preferred_width(200) == 2 + len("Tools")
+        rows = [row.window.content for row in control._group.rows]
+        assert [row.preferred_width(200) for row in rows] == [2 + 2 + 3 + 1 + len(option), 2 + 2 + 3 + 1 + 4]
+
+    def test_an_auto_width_box_fits_its_field_rows(self):
+        d = Dialog("S", fields=[CheckboxField("a", self.LABEL)], buttons=[ButtonConfig("OK")])
+        d._placement = "box"
+        assert to_container(build_box(d).widget).preferred_width(200).preferred >= 2 + 31 + 2 + 5 + 1
+
+    def test_an_auto_width_check_list_box_fits_a_long_option(self):
+        option = "Stream responses from the model as they arrive"
+        d = _checklist_dialog("T", "Pick:", [option, "b"])
+        d._placement = "box"
+        assert to_container(build_box(d).widget).preferred_width(200).preferred >= 2 + 3 + 1 + len(option)

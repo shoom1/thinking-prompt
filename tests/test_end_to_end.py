@@ -2661,3 +2661,25 @@ class TestDialogFields:
                 await wait_until(lambda: results == [("hi!", {"m": "z"})])
 
             await run_with(session, handler, script)
+
+    async def test_an_auto_width_box_shows_a_long_label_whole(self):
+        label = "Stream responses from the model"
+        dialog = Dialog("T", fields=[CheckboxField("a", label)], placement="box")
+        dialog.buttons = [ButtonConfig("OK")]
+        closed: list[bool] = []
+
+        async def handler(text: str) -> None:
+            await session.show_dialog(dialog)
+            closed.append(True)
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                line = next(line for line in screen_lines(session) if label in line)
+                assert "false" in line
+                inp.send_text(ESCAPE)
+                await wait_until(lambda: closed == [True])
+
+            await run_with(session, handler, script)
