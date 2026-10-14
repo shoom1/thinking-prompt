@@ -3,7 +3,7 @@ thinking_prompt - A prompt_toolkit extension with thinking box support.
 
 This library provides a chat-like interface with a thinking box that appears
 above the prompt during processing. The thinking box supports real-time
-streaming updates and can be expanded to full-screen mode.
+streaming updates and can be expanded to show all of its content.
 
 Example:
     from thinking_prompt import ThinkingPromptSession, AppInfo
@@ -25,9 +25,8 @@ Example:
 
     asyncio.run(session.run_async())
 
-Key bindings (defaults; set expand_key/fullscreen_key on the session):
-    Ctrl+T: Expand/collapse thinking box (in prompt mode)
-    Ctrl+E: Toggle fullscreen mode (with enable_fullscreen=True)
+Key bindings (defaults; set expand_key on the session):
+    Ctrl+T: Expand/collapse thinking box
     Ctrl+C: Cancel current thinking or exit
     Ctrl+D: Exit application (empty input line only)
 """

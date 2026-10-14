@@ -2,15 +2,14 @@
 Display - Handles output to console and history buffer.
 
 This module provides the Display class which manages all output for
-ThinkingPromptSession, writing to both the console (for prompt mode)
-and the FormattedTextHistory (for fullscreen mode).
+ThinkingPromptSession, writing to both the console and the
+FormattedTextHistory (the transcript a repaint reprints).
 
 Rich and Pygments integration utilities live in rich_utils; the names
 are re-exported here for backward compatibility.
 """
 from __future__ import annotations
 
-import threading
 from typing import TYPE_CHECKING, Any, Callable
 
 from prompt_toolkit import print_formatted_text
@@ -49,17 +48,13 @@ class Display:
     """
     Handles output to console and history buffer.
 
-    Output behavior depends on mode:
-    - Prompt mode: Write to both console and history
-    - Fullscreen mode: Cache console output, write only to history
-
-    When exiting fullscreen, call flush_pending() to output cached content.
+    Writes output to the console and records it in the history: the
+    transcript a repaint prints again.
     """
 
     def __init__(
         self,
         get_style: Callable[[], Style],
-        is_fullscreen: Callable[[], bool] = lambda: False,
         thinking_styles: ThinkingPromptStyles | None = None,
         get_color_depth: Callable[[], ColorDepth | None] = lambda: None,
         history_limit: int | None = None,
@@ -71,8 +66,6 @@ class Display:
             get_style: Callable returning the current prompt_toolkit Style for
                       rendering output. Called on every print so a runtime
                       theme change (see set_theme()) takes effect immediately.
-            is_fullscreen: Callback that returns True if fullscreen mode is active.
-                          Console output is cached in fullscreen mode.
             thinking_styles: Optional ThinkingPromptStyles for markdown rendering.
             get_color_depth: Callable that returns the effective color depth hint
                             for print_formatted_text. Defaults to a no-op
@@ -81,10 +74,7 @@ class Display:
                           None (default) means unbounded.
         """
         self._get_style = get_style
-        self._is_fullscreen = is_fullscreen
         self._get_color_depth = get_color_depth
-        self._pending_lock = threading.Lock()
-        self._pending_output: list[AnyFormattedText] = []
         self._thinking_styles = thinking_styles
         # Assigned before _history is constructed: the render callbacks
         # below close over self._rich_theme/_code_theme so a later
@@ -115,7 +105,7 @@ class Display:
 
     @property
     def history(self) -> FormattedTextHistory:
-        """Get the history buffer for fullscreen display."""
+        """Get the history buffer (the transcript)."""
         return self._history
 
     @property
@@ -130,28 +120,15 @@ class Display:
         self._code_theme = styles.code_theme
         self._history.invalidate_render_caches()
 
-    def set_on_change(self, callback: Callable[[], None]) -> None:
-        """
-        Set callback for history changes (for UI invalidation).
-
-        Args:
-            callback: Function to call when history changes.
-        """
-        self._history.set_on_change(callback)
-
     # =========================================================================
     # Core Output Helpers
     # =========================================================================
 
     def _print_to_console(self, content: AnyFormattedText) -> None:
-        """Print to console or cache if in fullscreen mode."""
-        if self._is_fullscreen():
-            with self._pending_lock:
-                self._pending_output.append(content)
-        else:
-            print_formatted_text(
-                content, style=self._get_style(), color_depth=self._get_color_depth()
-            )
+        """Print to the console."""
+        print_formatted_text(
+            content, style=self._get_style(), color_depth=self._get_color_depth()
+        )
 
     def _output_styled(self, style: str, text: str) -> None:
         """Output styled text to history and console."""
@@ -437,39 +414,14 @@ class Display:
             self._output_ansi(content)
 
     def clear(self) -> None:
-        """Clear the history buffer and any pending console output.
+        """Clear the history buffer.
 
         Clearing the terminal screen itself is the caller's job: while
         an Application is running it must go through the renderer so the
         renderer's state stays in sync with the screen (see
         ThinkingPromptSession.clear()).
         """
-        # Clear history buffer
         self._history.clear()
-
-        # Clear any pending output
-        with self._pending_lock:
-            self._pending_output.clear()
-
-    def flush_pending(self) -> None:
-        """
-        Flush cached console output.
-
-        Call this when exiting fullscreen mode to output content that was
-        cached during fullscreen.
-        """
-        with self._pending_lock:
-            pending = list(self._pending_output)
-            self._pending_output.clear()
-        for content in pending:
-            print_formatted_text(
-                content, style=self._get_style(), color_depth=self._get_color_depth()
-            )
-
-    def drop_pending(self) -> None:
-        """Discard cached fullscreen console output (superseded by repaint)."""
-        with self._pending_lock:
-            self._pending_output.clear()
 
     def transcript(self) -> list[AnyFormattedText]:
         """Every transcript entry as the console shows it, in the current

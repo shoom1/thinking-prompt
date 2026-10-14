@@ -3,14 +3,13 @@ ThinkingPromptSession - A chat-like interface with thinking box.
 
 This module provides a PromptSession-like interface that adds a thinking box
 above the input. The thinking box appears when processing user input and
-can be expanded to full-screen mode with chat history.
+can be expanded to show all of its content.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
 import os
-import threading
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager, suppress
 from typing import (
@@ -95,8 +94,6 @@ class ThinkingPromptSession:
     additional features:
     - A thinking box that appears above the input during processing
     - Expand/collapse of thinking boxes (Ctrl+T by default)
-    - Optional fullscreen mode showing the chat history (Ctrl+E by default,
-      with enable_fullscreen=True)
 
     The handler decides whether to show a thinking box: start one with
     start_thinking() or the thinking() context manager, and write to it.
@@ -136,8 +133,6 @@ class ThinkingPromptSession:
         editing_mode: EditingMode = EditingMode.EMACS,
         enable_status_bar: bool = True,
         status_text: AnyFormattedText = "Ctrl+C: cancel | Ctrl+D: exit",
-        enable_fullscreen: bool = False,
-        fullscreen_key: str = "c-e",
         expand_key: str = "c-t",
         max_thinking_height: int = 15,
         thinking_title: str = "Thinking",
@@ -165,11 +160,7 @@ class ThinkingPromptSession:
             editing_mode: Editing mode (EMACS or VI).
             enable_status_bar: Whether to show status bar.
             status_text: Text to display in status bar.
-            enable_fullscreen: Let fullscreen_key switch to a full-screen
-                view of the transcript. Default: off.
-            fullscreen_key: Toggles full screen (prompt_toolkit key name).
-                Default: "c-e" (Ctrl+E).
-            expand_key: Expands/collapses thinking boxes in prompt mode.
+            expand_key: Expands/collapses thinking boxes.
                 Default: "c-t" (Ctrl+T).
             max_thinking_height: Max lines for collapsed thinking box (must be >= 2).
             thinking_title: Header title of boxes started without one.
@@ -182,8 +173,8 @@ class ThinkingPromptSession:
             echo_input: Whether to echo user input to console before thinking.
             echo_thinking: Whether a finished box's text is printed to the
                 console when its finish call doesn't say. Default: True.
-            history_limit: Max transcript entries kept for fullscreen history
-                          and repaint; oldest trimmed. None = unbounded.
+            history_limit: Max transcript entries kept for repaints; oldest
+                          trimmed. None = unbounded.
             dialog_placement: How dialogs are drawn unless they say otherwise:
                 "box" (default) floats a framed dialog over the session;
                 "inline" draws rows between the prompt and the status bar.
@@ -222,29 +213,18 @@ class ThinkingPromptSession:
         self._complete_while_typing = complete_while_typing
         self._completions_menu_height = completions_menu_height
 
-        # Fullscreen state (thread-safe)
-        self._is_fullscreen: bool = False
-        self._fullscreen_lock = threading.RLock()
-        # Set by set_theme(repaint=True), or by the terminal shrinking, while
-        # in fullscreen; consumed by switch_to_prompt(), which repaints
-        # instead of flushing pending output.
-        self._repaint_on_fullscreen_exit: bool = False
-
         # Convert styles dataclass to prompt_toolkit Style
         self._style = self._styles.to_style()
 
         # Display handles all output to console and history
         self._display = Display(
             get_style=lambda: self._style,
-            is_fullscreen=lambda: self.is_fullscreen,  # Use property for thread safety
             thinking_styles=self._styles,
             get_color_depth=self._effective_color_depth,
             history_limit=history_limit,
         )
 
-        self._fullscreen_key = fullscreen_key
         self._expand_key = expand_key
-        self._fullscreen_enabled = enable_fullscreen
 
         # Redraws on demand: writes redraw now, animations ask for their
         # next frame; nothing redraws on a timer (see _create_application).
@@ -301,9 +281,6 @@ class ThinkingPromptSession:
         self.default_buffer = self._create_default_buffer()
         self.layout = self._create_session_layout()
         self.app = self._create_application()
-
-        # Set up history change callback for UI invalidation
-        self._display.set_on_change(self._invalidate)
 
     def _get_prompt_string(self) -> str:
         """Get the prompt's visible text (any AnyFormattedText form, e.g.
@@ -390,8 +367,6 @@ class ThinkingPromptSession:
             default_buffer=self.default_buffer,
             message=lambda: self._polled(self._message),
             max_thinking_height=self._max_thinking_height,
-            history=self._display.history,
-            is_fullscreen=lambda: self._is_fullscreen,
             get_status_text=lambda: self._polled(self._status_text),
             is_status_bar_enabled=lambda: self._enable_status_bar,
             thinking_manager=self._manager,
@@ -417,8 +392,6 @@ class ThinkingPromptSession:
             style=DynamicStyle(lambda: self._style),
             key_bindings=kb,
             editing_mode=self._editing_mode,
-            full_screen=False,  # Fixed for the app's lifetime; see _invalidate()
-            mouse_support=Condition(lambda: self._is_fullscreen),  # Only in fullscreen
             # No refresh_interval: redrawn when something changes or an
             # animation asks (FrameScheduler), so an idle prompt costs
             # nothing. Bursts of writes are capped at 30 redraws a second.
@@ -519,25 +492,10 @@ class ThinkingPromptSession:
             self.default_buffer.validate_and_handle()
 
         # Expand/collapse — toggle all via manager
-        def can_toggle() -> bool:
-            if not self._manager.can_toggle():
-                return False
-            return not self._is_fullscreen
-
-        @kb.add(self._expand_key, filter=Condition(can_toggle))
+        @kb.add(self._expand_key, filter=Condition(self._manager.can_toggle))
         def toggle_expand(event: KeyPressEvent) -> None:
             self._manager.toggle_all()
             self._invalidate()
-
-        # Fullscreen toggle key binding (only when enabled)
-        if self._fullscreen_enabled:
-            @kb.add(self._fullscreen_key)
-            def toggle_fullscreen(event: KeyPressEvent) -> None:
-                """Toggle fullscreen mode."""
-                if self._is_fullscreen:
-                    self.switch_to_prompt()
-                else:
-                    self.switch_to_fullscreen()
 
         return kb
 
@@ -557,24 +515,23 @@ class ThinkingPromptSession:
     ) -> None:
         """Switch the active theme at runtime.
 
-        The live UI (prompt, thinking boxes, dialogs, fullscreen history)
-        re-renders in the new theme on the next paint. Content already
-        printed to the terminal (prompt-mode scrollback) keeps its
-        original colors — only the Display's ``get_style`` callable and
-        the Application's ``DynamicStyle`` are re-read; scrollback lines
-        already written to the terminal are not retroactively recolored,
-        unless ``repaint=True`` is passed.
+        The live UI (prompt, thinking boxes, dialogs) re-renders in the
+        new theme on the next paint. Content already printed to the
+        terminal (scrollback) keeps its original colors — only the
+        Display's ``get_style`` callable and the Application's
+        ``DynamicStyle`` are re-read; scrollback lines already written to
+        the terminal are not retroactively recolored, unless
+        ``repaint=True`` is passed.
 
         Args:
             theme: Theme name ('dark', 'light', 'mono', 'terminal', 'auto')
                 or a ThinkingPromptStyles instance.
             repaint: If True, clear the screen and scrollback and re-print
                 the transcript in the new theme. Markdown and code re-render
-                from source; rich/raw ANSI keeps its original colors. In
-                fullscreen mode the repaint is deferred to fullscreen exit,
-                replacing the pending-output flush. Terminals that do not
-                support scrollback erase (CSI 3J) keep old content above the
-                viewport; the visible screen still repaints fully.
+                from source; rich/raw ANSI keeps its original colors.
+                Terminals that do not support scrollback erase (CSI 3J)
+                keep old content above the viewport; the visible screen
+                still repaints fully.
 
         Raises:
             ValueError: For unknown theme names.
@@ -584,17 +541,8 @@ class ThinkingPromptSession:
         self._style = resolved.to_style()
         self._display.set_theme(resolved)
         if repaint:
-            self._repaint_unless_fullscreen()
+            self._repaint_console()
         self._invalidate()
-
-    def _repaint_unless_fullscreen(self) -> None:
-        """Repaint now, or in fullscreen (where the UI covers the screen) at
-        fullscreen exit."""
-        with self._fullscreen_lock:
-            if self._is_fullscreen:
-                self._repaint_on_fullscreen_exit = True
-            else:
-                self._repaint_console()
 
     def _repaint_console(self) -> None:
         """Clear screen + scrollback and print the transcript, as it is now,
@@ -623,21 +571,12 @@ class ThinkingPromptSession:
         """Repaint once the terminal stopped shrinking, which left rows of
         the live UI behind (see resize.py)."""
         if self.app and self.app.is_running:
-            self._repaint_unless_fullscreen()
+            self._repaint_console()
 
     def _invalidate(self) -> None:
-        """Trigger UI refresh and sync app.full_screen with fullscreen mode."""
-        if self.app:
-            # This does NOT switch to the alternate screen: prompt_toolkit's
-            # Renderer fixes that choice when the Application is built
-            # (full_screen=False above). "Fullscreen" here means the history
-            # window is shown and the inline app grows to the terminal
-            # height. app.full_screen is still read at runtime — it gates
-            # prompt_toolkit's page-navigation key bindings.
-            self.app.full_screen = self._is_fullscreen
-
-            if self.app.is_running:
-                self.app.invalidate()
+        """Trigger a UI refresh."""
+        if self.app and self.app.is_running:
+            self.app.invalidate()
 
     # =========================================================================
     # Welcome Message
@@ -965,16 +904,9 @@ class ThinkingPromptSession:
         """
         Clear the display and reset to startup state.
 
-        Clears the terminal screen and history buffer, re-prints the welcome
-        message, and returns to prompt mode.
+        Clears the terminal screen and history buffer, and re-prints the
+        welcome message.
         """
-        # Exit fullscreen if active
-        with self._fullscreen_lock:
-            self._is_fullscreen = False
-            self._manager.force_expanded(False)
-            # clear() supersedes any deferred repaint: nothing left to repaint.
-            self._repaint_on_fullscreen_exit = False
-
         # Clear the terminal screen. While the app is running this must
         # go through the renderer — a raw escape write behind its back
         # leaves the renderer's notion of the screen stale and corrupts
@@ -995,40 +927,8 @@ class ThinkingPromptSession:
         self._invalidate()
 
     # =========================================================================
-    # UI State API
+    # Exiting
     # =========================================================================
-
-    @property
-    def is_fullscreen(self) -> bool:
-        """Check if app is in fullscreen mode."""
-        with self._fullscreen_lock:
-            return self._is_fullscreen
-
-    def switch_to_fullscreen(self) -> None:
-        """Switch to fullscreen mode (no-op if fullscreen is disabled)."""
-        if not self._fullscreen_enabled:
-            return
-        with self._fullscreen_lock:
-            if not self._is_fullscreen:
-                self._is_fullscreen = True
-                # Every box shows in full, ones started here too.
-                self._manager.force_expanded(True)
-                self._invalidate()
-
-    def switch_to_prompt(self) -> None:
-        """Switch back to prompt mode from fullscreen."""
-        with self._fullscreen_lock:
-            if self._is_fullscreen:
-                self._is_fullscreen = False
-                # Back to the user's expand/collapse choice.
-                self._manager.force_expanded(False)
-                if self._repaint_on_fullscreen_exit:
-                    self._repaint_on_fullscreen_exit = False
-                    self._display.drop_pending()
-                    self._repaint_console()
-                else:
-                    self._display.flush_pending()  # Output cached content to console
-                self._invalidate()
 
     def exit(self) -> None:
         """
@@ -1348,11 +1248,11 @@ class ThinkingPromptSession:
         """What the layout's inline-dialog slot shows: the open inline dialog,
         rows for an open box dialog to float over, or nothing.
 
-        A box dialog floats over the layout without asking for rows: outside
-        full screen, with the prompt at the bottom of the terminal, it was
-        clipped to the prompt's few rows. Rows here put it where an inline
-        dialog would be, in and out of full screen, sharing the terminal
-        with the rest of the layout the way an inline dialog does.
+        A box dialog floats over the layout without asking for rows: with
+        the prompt at the bottom of the terminal, it was clipped to the
+        prompt's few rows. Rows here put it where an inline dialog would
+        be, sharing the terminal with the rest of the layout the way an
+        inline dialog does.
         """
         manager = self._dialog_manager
         if manager is None:
@@ -1364,8 +1264,8 @@ class ThinkingPromptSession:
     def _box_room(self) -> tuple[Window, int] | None:
         """The window holding a box dialog's reserved rows and the rows it
         got, if it is in the layout now and was drawn in this render, else
-        None. The rest of the layout (a thinking box, a longer prompt, the
-        transcript in full screen) can leave it fewer than it asked for."""
+        None. The rest of the layout (a thinking box, a longer prompt) can
+        leave it fewer than it asked for."""
         room = self._box_dialog_room
         if self._inline_dialog_content() is not room:
             return None

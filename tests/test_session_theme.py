@@ -1,8 +1,6 @@
 """Tests for theme selection and color-depth enforcement on the session."""
 from __future__ import annotations
 
-from unittest.mock import patch
-
 import pytest
 from prompt_toolkit.output import ColorDepth
 
@@ -156,32 +154,6 @@ class TestRepaint:
         assert "\x1b[3J" in out          # scrollback erase
         assert "earlier message" in out  # transcript reprinted
 
-    def test_repaint_in_fullscreen_defers_to_exit_and_replaces_flush(self, capsys):
-        from prompt_toolkit.application.current import create_app_session
-        from prompt_toolkit.output.defaults import create_output
-
-        s = ThinkingPromptSession(theme="dark", enable_fullscreen=True)
-        s.app = MagicMock()
-        s.app.is_running = True
-        s.switch_to_fullscreen()
-        s.add_response("during fullscreen")  # cached in pending, not printed
-
-        capsys.readouterr()
-
-        s.set_theme("light", repaint=True)
-        assert capsys.readouterr().out == ""  # deferred: nothing printed yet
-
-        # With no app running the repaint prints at once (a running app
-        # gets it as a run_in_terminal job: TestRepaintWhileRunning in
-        # test_end_to_end).
-        s.app.is_running = False
-        with create_app_session(output=create_output()):
-            s.switch_to_prompt()
-        out = capsys.readouterr().out
-        # transcript reprint includes the message exactly once (pending dropped)
-        assert out.count("during fullscreen") == 1
-        assert "\x1b[3J" in out
-
     def test_thinking_truncation_reproduced_on_repaint(self, capsys):
         from prompt_toolkit.application.current import create_app_session
         from prompt_toolkit.output.defaults import create_output
@@ -233,32 +205,9 @@ class TestRepaint:
             out = capsys.readouterr().out
         assert ">>> hello" in out
 
-    def test_clear_resets_repaint_on_fullscreen_exit_flag(self):
-        """session.clear() must reset _repaint_on_fullscreen_exit; otherwise
-        a later fullscreen exit fires an unrequested repaint (renderer.clear
-        + CSI 3J + reprint) instead of the normal flush_pending path."""
-        s = ThinkingPromptSession(theme="dark", enable_fullscreen=True)
-        s.app = MagicMock()
-        s.app.is_running = True
-
-        s.switch_to_fullscreen()
-        s.set_theme("light", repaint=True)
-        assert s._repaint_on_fullscreen_exit is True
-
-        s.clear()
-        assert s._repaint_on_fullscreen_exit is False
-
-        s.switch_to_fullscreen()
-        with patch.object(s, "_repaint_console") as repaint:
-            s.switch_to_prompt()
-
-        # flush_pending path taken, not the repaint path.
-        repaint.assert_not_called()
-
-
 class TestLayoutAppliesThemeClasses:
-    """The prompt and history style fields only work if the layout tags
-    those windows with their classes. (Async: rendering the input buffer
+    """The prompt style field only works if the layout tags its window
+    with its class. (Async: rendering the input buffer
     starts a history-loading task, which needs a running loop.)"""
 
     @staticmethod
@@ -283,9 +232,3 @@ class TestLayoutAppliesThemeClasses:
     async def test_prompt_window_uses_prompt_class(self):
         s = ThinkingPromptSession(message="PROMPT> ")
         assert "class:prompt" in self._cell_style(s, "PROMPT>")
-
-    async def test_fullscreen_history_uses_history_class(self):
-        s = ThinkingPromptSession()
-        s._is_fullscreen = True
-        s.add_response("RESPONSE-TEXT")
-        assert "class:history" in self._cell_style(s, "RESPONSE-TEXT").split()

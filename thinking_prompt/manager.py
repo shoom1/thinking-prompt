@@ -59,10 +59,9 @@ class ThinkingBoxManager:
 
     Thread-safe via RLock.
 
-    Expansion is one mode shared by every box: the user's choice (Ctrl+T),
-    forced on while the session is in full screen. The user's choice
-    resets to collapsed when the last box finishes, so each new thinking
-    phase starts collapsed.
+    Expansion is one mode shared by every box: the user's choice (Ctrl+T).
+    It resets to collapsed when the last box finishes, so each new
+    thinking phase starts collapsed.
 
     With ``frames``, boxes ask for their own redraws: a write redraws now,
     a spinner asks for its next frame, and a box fed by a content callback
@@ -104,12 +103,11 @@ class ThinkingBoxManager:
         self._boxes: list[ThinkingBox] = []  # in creation order
         self._seq_counter = 0
         self._expanded = False  # the user's choice (Ctrl+T)
-        self._forced = False  # full screen: every box expanded
         self._lock = threading.RLock()
 
     def _box_expanded(self) -> bool:
         """The mode every box reads (plain reads: no lock needed)."""
-        return self._forced or self._expanded
+        return self._expanded
 
     def create_box(
         self,
@@ -282,12 +280,6 @@ class ThinkingBoxManager:
         with self._lock:
             self._expanded = False
 
-    def force_expanded(self, on: bool) -> None:
-        """While on (full screen), every box is expanded, new ones too.
-        Turning it off brings back the user's choice."""
-        with self._lock:
-            self._forced = on
-
     def can_toggle(self) -> bool:
         """
         Check if toggle is available.
@@ -399,7 +391,7 @@ class ThinkingBoxManager:
 
     @property
     def is_expanded(self) -> bool:
-        """True if boxes are currently expanded (by the user, or full screen)."""
+        """True if boxes are currently expanded."""
         with self._lock:
             return self._box_expanded()
 

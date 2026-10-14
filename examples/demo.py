@@ -68,7 +68,7 @@ async def main():
         chunks.append("\n")
         await asyncio.sleep(0.3)
 
-        # Finish - content is printed to console (if not in fullscreen)
+        # Finish - content is printed to console
         ctx.finish()
 
         # Add response to chat history

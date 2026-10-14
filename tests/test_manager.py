@@ -301,12 +301,9 @@ class TestEcho:
         assert history_texts(display) == ["1\n2\n3\n4\n\n", "1\n2\n3\n4\n\n"]
 
     def test_the_echo_runs_outside_the_manager_lock(self):
-        """Echoing under the manager lock would deadlock with switch_to_fullscreen.
-
-        That method takes the fullscreen lock and then the manager lock; the
-        echo asks the Display whether it is fullscreen, which takes the
-        fullscreen lock.
-        """
+        """The echo prints with the manager lock released: nothing that
+        waits for the lock (a draw, a write from another thread) waits
+        for the print."""
         got: list[bool] = []
 
         def probe(lock) -> None:
@@ -315,13 +312,13 @@ class TestEcho:
                 lock.release()
             got.append(ok)
 
-        def is_fullscreen() -> bool:  # Display.thinking asks this while echoing
+        def print_to_console(content) -> None:
             t = threading.Thread(target=probe, args=(mgr._lock,))
             t.start()
             t.join()
-            return True
 
-        display = Display(get_style=lambda: Style([]), is_fullscreen=is_fullscreen)
+        display = Display(get_style=lambda: Style([]))
+        display._print_to_console = print_to_console
         mgr = make_manager(display)
         mgr.finish(mgr.create_box(lambda: "x\n"))
         assert got == [True]

@@ -80,42 +80,6 @@ class TestExpandMode:
         assert control.is_expanded is True
 
 
-class TestFullScreen:
-    """Full screen expands every box, including ones started there (#4)."""
-
-    def test_forced_mode_expands_every_box_including_new_ones(self):
-        manager = make_manager()
-        a = manager.create_box(lambda: LONG)
-
-        manager.force_expanded(True)
-        b = manager.create_box(lambda: LONG)
-        assert manager.is_expanded
-        assert a._control.is_expanded and b._control.is_expanded
-
-        manager.force_expanded(False)
-        assert not a._control.is_expanded and not b._control.is_expanded
-
-    def test_leaving_full_screen_restores_the_users_mode(self):
-        manager = make_manager()
-        a = manager.create_box(lambda: LONG)
-        manager.toggle_all()
-
-        manager.force_expanded(True)
-        manager.force_expanded(False)
-
-        assert a._control.is_expanded
-
-    def test_session_boxes_started_in_full_screen_are_expanded(self):
-        session = ThinkingPromptSession(enable_fullscreen=True)
-        session.switch_to_fullscreen()
-        session.start_thinking(lambda: LONG)
-        (box,) = session._manager.get_sorted_boxes()
-        assert box._control.is_expanded
-
-        session.switch_to_prompt()
-        assert not box._control.is_expanded
-
-
 class TestOwnership:
     """A box belongs to the task that created it (#2)."""
 

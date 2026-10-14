@@ -6,7 +6,7 @@ import dataclasses
 import pytest
 from prompt_toolkit.keys import Keys
 
-from tests.helpers import echoed, history_texts
+from tests.helpers import echoed, history_texts, keep_console
 from thinking_prompt import AppInfo, Spinner, ThinkingPromptSession
 
 
@@ -29,12 +29,6 @@ class TestAppInfo:
 class TestDefaults:
     """A session with no AppInfo."""
 
-    def test_full_screen_is_off(self):
-        session = ThinkingPromptSession()
-        session.switch_to_fullscreen()
-        assert not session.is_fullscreen
-        assert (Keys.ControlE,) not in _bound_keys(session)
-
     def test_ctrl_t_expands(self):
         assert (Keys.ControlT,) in _bound_keys(ThinkingPromptSession())
 
@@ -47,17 +41,6 @@ class TestDefaults:
 
 class TestOptions:
     """Each option takes effect on a session without an AppInfo."""
-
-    def test_enable_fullscreen_turns_on_ctrl_e(self):
-        session = ThinkingPromptSession(enable_fullscreen=True)
-        assert (Keys.ControlE,) in _bound_keys(session)
-        session.switch_to_fullscreen()
-        assert session.is_fullscreen
-
-    def test_fullscreen_key_rebinds_the_toggle(self):
-        session = ThinkingPromptSession(enable_fullscreen=True, fullscreen_key="c-f")
-        assert (Keys.ControlF,) in _bound_keys(session)
-        assert (Keys.ControlE,) not in _bound_keys(session)
 
     def test_expand_key_rebinds_expand_and_its_hint(self):
         session = ThinkingPromptSession(expand_key="c-x")
@@ -78,11 +61,11 @@ class TestOptions:
 
     def test_echo_thinking_off_keeps_boxes_off_the_console(self):
         session = ThinkingPromptSession(echo_thinking=False)
-        session._is_fullscreen = True  # the Display caches console output in full screen
+        keep_console(session._display)
         box = session.start_thinking()
         box.append("x\n")
         box.finish()
-        assert session._display._pending_output == []
+        assert echoed(session._display) == []
         assert history_texts(session._display) == ["x\n\n"]
 
     def test_options_after_message_are_keyword_only(self):
@@ -90,10 +73,24 @@ class TestOptions:
             ThinkingPromptSession(">>> ", AppInfo(name="t"))  # type: ignore[misc]
 
 
+class TestFullScreenIsGone:
+    @pytest.mark.parametrize("option", [{"enable_fullscreen": True}, {"fullscreen_key": "c-e"}])
+    def test_its_options_are_gone(self, option):
+        with pytest.raises(TypeError):
+            ThinkingPromptSession(**option)
+
+    @pytest.mark.parametrize("name", ["is_fullscreen", "switch_to_fullscreen", "switch_to_prompt"])
+    def test_its_methods_are_gone(self, name):
+        assert not hasattr(ThinkingPromptSession, name)
+
+    def test_ctrl_e_is_left_to_prompt_toolkit(self):
+        assert (Keys.ControlE,) not in _bound_keys(ThinkingPromptSession())
+
+
 def _banner(app_info: AppInfo | None) -> tuple[list[str], list[str]]:
     """What the session's banner put in history and on the console."""
     session = ThinkingPromptSession(app_info=app_info)
-    session._is_fullscreen = True  # the Display caches console output in full screen
+    keep_console(session._display)
     session._print_welcome()
     return history_texts(session._display), echoed(session._display)
 

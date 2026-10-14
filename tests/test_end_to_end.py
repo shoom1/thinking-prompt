@@ -958,34 +958,12 @@ class TestDialogsAtTheBottomOfTheTerminal:
         )
         assert self._shows(frame, "Select Theme", *self.OPTIONS), frame
 
-    async def test_full_screen_reserves_rows_for_a_box_dialog_too(self):
-        closed: list[bool] = []
-
-        async def handler(text: str) -> None:
-            await session.dropdown_dialog("Select Theme", "Pick:", self.OPTIONS)
-            closed.append(True)
-
-        with piped_session(rows=24, enable_fullscreen=True) as (session, inp):
-
-            async def script(run: asyncio.Task[None]) -> None:
-                session.switch_to_fullscreen()
-                inp.send_text("go" + ENTER)
-                await wait_until(lambda: dialog_rendered(session))
-                prompt, status = prompt_and_status_rows(session)
-                frame = screen_lines(session)
-                assert next(i for i, line in enumerate(frame) if "┌" in line) == prompt + 2, frame
-                assert status == 23 and frame[status].startswith("Ctrl+C"), frame
-                inp.send_text(ESCAPE)
-                await wait_until(lambda: closed == [True])
-
-            await run_with(session, handler, script)
-
 
 class TestBoxOverItsRoom:
     """The box sits over the rows the session reserved for it, between the
-    prompt and the status bar, where an inline dialog would be, in and out
-    of full screen; not centered over the whole drawn area (which covered
-    the status bar, or the prompt)."""
+    prompt and the status bar, where an inline dialog would be; not
+    centered over the whole drawn area (which covered the status bar, or
+    the prompt)."""
 
     @staticmethod
     def _rows(session: ThinkingPromptSession) -> tuple[list[str], int, int]:
@@ -1058,89 +1036,6 @@ class TestBoxOverItsRoom:
             (line,) = [line for line in frame if text in line]
             assert "│" not in line and "┌" not in line, frame
         assert frame[status].startswith("Ctrl+C") and "│" not in frame[status], frame
-
-    async def test_full_screen_puts_the_box_under_the_prompt_too(self):
-        closed: list[bool] = []
-
-        async def handler(text: str) -> None:
-            await session.message_dialog("Hello", "Some text", placement="box")
-            closed.append(True)
-
-        with piped_session(rows=24, enable_fullscreen=True) as (session, inp):
-
-            async def script(run: asyncio.Task[None]) -> None:
-                session.switch_to_fullscreen()
-                inp.send_text("go" + ENTER)
-                await wait_until(lambda: dialog_rendered(session))
-                prompt, status = prompt_and_status_rows(session)
-                frame = screen_lines(session)
-                assert next(i for i, line in enumerate(frame) if "┌" in line) == prompt + 2, frame
-                assert max(i for i, line in enumerate(frame) if "┘" in line) < status, frame
-                inp.send_text(ESCAPE)
-                await wait_until(lambda: closed == [True])
-
-            await run_with(session, handler, script)
-
-    async def test_full_screen_shares_the_rows_with_a_long_transcript(self):
-        items = [CheckboxItem(key=f"s{i}", label=f"Setting {i}") for i in range(11)]
-        closed: list[bool] = []
-
-        async def handler(text: str) -> None:
-            await session.show_settings_dialog("Settings", items, placement="box")
-            closed.append(True)
-
-        with piped_session(rows=24, enable_fullscreen=True) as (session, inp):
-
-            async def script(run: asyncio.Task[None]) -> None:
-                for i in range(60):
-                    session.add_response(f"transcript line {i}")
-                session.switch_to_fullscreen()
-                inp.send_text("go" + ENTER)
-                await wait_until(lambda: dialog_rendered(session))
-                prompt, status = prompt_and_status_rows(session)
-                frame = screen_lines(session)
-                assert next(i for i, line in enumerate(frame) if "┌" in line) == prompt + 2, frame
-                assert max(i for i, line in enumerate(frame) if "┘" in line) < status, frame
-                assert any("transcript line" in line for line in frame[:prompt]), frame
-                text = "\n".join(frame)
-                assert "Setting 0" in text and "Setting 10" not in text, frame  # it scrolls
-                inp.send_text(ESCAPE)
-                await wait_until(lambda: closed == [True])
-
-            await run_with(session, handler, script)
-
-    async def test_toggling_full_screen_keeps_an_open_box_under_the_prompt(self):
-        closed: list[bool] = []
-
-        async def handler(text: str) -> None:
-            await session.message_dialog("Hello", "Some text", placement="box")
-            closed.append(True)
-
-        async def after_render(session: ThinkingPromptSession, change: Callable[[], None]) -> None:
-            before = session.app.render_counter
-            change()
-            await wait_until(lambda: session.app.render_counter > before)
-            await asyncio.sleep(0.05)
-
-        def box_under_prompt(session: ThinkingPromptSession) -> bool:
-            prompt, _ = prompt_and_status_rows(session)
-            return next(i for i, line in enumerate(screen_lines(session)) if "┌" in line) == prompt + 2
-
-        with piped_session(rows=30, enable_fullscreen=True) as (session, inp):
-
-            async def script(run: asyncio.Task[None]) -> None:
-                inp.send_text("go" + ENTER)
-                await wait_until(lambda: dialog_rendered(session))
-                assert box_under_prompt(session), screen_lines(session)
-                await after_render(session, session.switch_to_fullscreen)
-                assert box_under_prompt(session), screen_lines(session)
-                await after_render(session, session.switch_to_prompt)
-                assert box_under_prompt(session), screen_lines(session)
-                inp.send_text(ESCAPE)
-                await wait_until(lambda: closed == [True])
-
-            await run_with(session, handler, script)
-
 
 class TestBoxInASqueezedRoom:
     """When the rest of the layout takes rows from the box's (a thinking
@@ -1571,8 +1466,8 @@ class TestInlineDialogs:
     async def test_no_padding_when_the_layout_has_spare_height(self):
         """Regression: _AtMost used to let HSplit distribute spare layout
         height to the inline dialog, padding it with blank rows up to
-        MAX_ROWS instead of sizing to its actual content (fullscreen mode,
-        or any render with rows to spare)."""
+        MAX_ROWS instead of sizing to its actual content (in any render
+        with rows to spare)."""
         from prompt_toolkit.layout import Window
         from prompt_toolkit.layout.controls import FormattedTextControl
         from prompt_toolkit.layout.layout import walk
@@ -1582,11 +1477,9 @@ class TestInlineDialogs:
         async def handler(text: str) -> None:
             results.append(await session.show_dialog(self._dialog()))
 
-        with piped_session() as (session, inp):
-            # Fullscreen mode gives the layout spare height (history fills
-            # whatever the dialog doesn't use) on a 40-row DummyOutput.
-            session._is_fullscreen = True
-            session._invalidate()
+        # Every row under the prompt free: the layout gets the 40 rows the
+        # dialog doesn't fill.
+        with piped_session(rows=40, below_cursor=40) as (session, inp):
 
             async def script(run: asyncio.Task[None]) -> None:
                 inp.send_text("go" + ENTER)
@@ -2577,17 +2470,15 @@ class TestSessionRepaintsAfterShrinking:
     DELAY = 0.02
 
     @classmethod
-    async def _resize(cls, fullscreen: bool = False, **size: int) -> tuple[int, bool]:
+    async def _resize(cls, **size: int) -> int:
         """Resize a running session's terminal (24x80) to ``size``; the
-        repaints that follow, and whether one waits for fullscreen exit."""
+        repaints that follow."""
 
         async def handler(text: str) -> None:
             pass
 
-        with piped_session(rows=24, columns=80, enable_fullscreen=True) as (session, inp):
+        with piped_session(rows=24, columns=80) as (session, inp):
             session._shrinks._delay = cls.DELAY
-            if fullscreen:
-                session.switch_to_fullscreen()
             with patch.object(session, "_repaint_console") as repaint:
 
                 async def script(run: asyncio.Task[None]) -> None:
@@ -2599,19 +2490,16 @@ class TestSessionRepaintsAfterShrinking:
                     await wait_until(lambda: session._shrinks._handle is None)
 
                 await run_with(session, handler, script)
-            return repaint.call_count, session._repaint_on_fullscreen_exit
+            return repaint.call_count
 
     async def test_a_narrower_terminal_repaints(self):
-        assert await self._resize(columns=60) == (1, False)
+        assert await self._resize(columns=60) == 1
 
     async def test_a_shorter_terminal_repaints(self):
-        assert await self._resize(rows=12) == (1, False)
+        assert await self._resize(rows=12) == 1
 
     async def test_a_wider_terminal_does_not_repaint(self):
-        assert await self._resize(columns=100) == (0, False)
-
-    async def test_in_fullscreen_the_repaint_waits_for_fullscreen_exit(self):
-        assert await self._resize(fullscreen=True, columns=60) == (0, True)
+        assert await self._resize(columns=100) == 0
 
 
 class TestRepaintWhileRunning:

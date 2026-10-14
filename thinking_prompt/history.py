@@ -3,9 +3,7 @@ Typed transcript history for ThinkingPromptSession.
 
 Stores typed entries (styled text, explicit fragments, markdown/code
 sources, baked ANSI) with per-entry render caches so theme switches can
-re-render markdown/code from source. Public method names are unchanged
-from the original fragment-list implementation; layout.py consumes
-get_formatted_text() as before.
+re-render markdown/code from source. A repaint prints them again.
 """
 from __future__ import annotations
 
@@ -67,7 +65,7 @@ class FormattedTextHistory:
     Thread-safe typed transcript of display output.
 
     Stores typed entries (styled text, explicit fragments, markdown/code
-    sources, baked ANSI) to mimic console output in fullscreen mode.
+    sources, baked ANSI) as the console showed them, for repaints.
     Markdown and code entries keep their source and a render cache so a
     theme switch can re-render them via ``invalidate_render_caches()``;
     ANSI entries are baked once and never re-themed.
@@ -94,17 +92,6 @@ class FormattedTextHistory:
         self._render_markdown = render_markdown
         self._render_code = render_code
         self._lock = threading.RLock()
-        self._on_change: Callable[[], None] | None = None
-        self._revision = 0
-
-    def set_on_change(self, callback: Callable[[], None]) -> None:
-        """Set callback to trigger when history changes."""
-        self._on_change = callback
-
-    def _notify_change(self) -> None:
-        """Notify that history has changed."""
-        if self._on_change:
-            self._on_change()
 
     def _append_entry(self, entry: _Entry) -> None:
         with self._lock:
@@ -112,8 +99,6 @@ class FormattedTextHistory:
             if self._max_entries is not None:
                 while len(self._entries) > self._max_entries:
                     self._entries.pop(0)
-            self._revision += 1
-            self._notify_change()
 
     def append(
         self,
@@ -219,8 +204,6 @@ class FormattedTextHistory:
             for entry in self._entries:
                 if entry.kind in ("markdown", "code"):
                     entry.cache = None
-            self._revision += 1
-            self._notify_change()
 
     def iter_entries(self) -> list[_Entry]:
         """Snapshot of entries (for transcript repaint)."""
@@ -231,21 +214,12 @@ class FormattedTextHistory:
         """Clear all entries."""
         with self._lock:
             self._entries.clear()
-            self._revision += 1
-            self._notify_change()
 
     @property
     def is_empty(self) -> bool:
         """Check if history is empty."""
         with self._lock:
             return len(self._entries) == 0
-
-    @property
-    def revision(self) -> int:
-        """Monotonic change counter; grows on every mutation, never decreases —
-        use instead of len() to detect changes."""
-        with self._lock:
-            return self._revision
 
     def __len__(self) -> int:
         """Number of transcript entries."""
