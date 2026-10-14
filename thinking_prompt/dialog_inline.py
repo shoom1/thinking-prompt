@@ -3,9 +3,10 @@ Inline presentation of dialogs: rows between the prompt and the status bar.
 
 A title, the body, one numbered row per button (ActionRow) and a key hint,
 with one cursor (RowNavigator) over the body's rows and the actions. The
-actions, and a body with cursor stops (settings rows, a check list, a text
-field), scroll within MAX_ROWS rows; a body without (text) is drawn above
-them at full height, clipped if the terminal is too short.
+rows share the dialog's cap (_Sizes): the actions, and a body with cursor
+stops (settings rows, a check list, a text field), scroll in one region
+that follows the cursor; a body without (text) scrolls in its own region
+above them, with PgUp/PgDn.
 """
 from __future__ import annotations
 
@@ -14,118 +15,32 @@ from typing import TYPE_CHECKING, Callable
 
 from prompt_toolkit.application.current import get_app
 from prompt_toolkit.formatted_text import FormattedText
-from prompt_toolkit.layout import (
-    Container,
-    HSplit,
-    ScrollablePane,
-    ScrollOffsets,
-    VSplit,
-    Window,
-    to_container,
-)
-from prompt_toolkit.layout.controls import FormattedTextControl
+from prompt_toolkit.layout import Container, HSplit, VSplit, Window, to_container
+from prompt_toolkit.layout.controls import FormattedTextControl, UIContent
 from prompt_toolkit.layout.dimension import Dimension
-from prompt_toolkit.layout.layout import walk
-from prompt_toolkit.layout.mouse_handlers import MouseHandlers
-from prompt_toolkit.layout.screen import Screen, WritePosition
+from prompt_toolkit.utils import get_cwidth
 
+from .dialog_scroll import AtMost, ScrollRegion, dialog_cap, focusable_windows, terminal_rows
 from .rows import ActionRow, RowControl, RowNavigator
 
 if TYPE_CHECKING:
     from .dialog import Dialog
 
-# Rows and actions scroll within this many rows; the title, a text body and
-# the hint stay put.
+# Without max_height, rows and actions scroll within this many rows; the
+# title, a text body and the hint stay put.
 MAX_ROWS = 12
 
 # Hint line entries, in display order.
-HINT_ORDER = ("↑↓ navigate", "←→ change", "Space toggle", "Enter select", "Esc cancel")
-
-
-class _AtMost(Container):
-    """``content`` no taller than it prefers, and than ``rows`` if given.
-
-    ScrollablePane alone either prefers its content's full height or, given
-    a height, prefers none at all.
-    """
-
-    def __init__(self, content: Container, rows: int | None = None) -> None:
-        self.content = content
-        self.rows = rows
-
-    def reset(self) -> None:
-        self.content.reset()
-
-    def preferred_width(self, max_available_width: int) -> Dimension:
-        return self.content.preferred_width(max_available_width)
-
-    def preferred_height(self, width: int, max_available_height: int) -> Dimension:
-        wanted = self.content.preferred_height(width, max_available_height)
-        # max is capped at the capped preferred (not self.rows): otherwise
-        # HSplit would offer this container spare layout height, and it
-        # would pad with blank rows up to self.rows instead of its content.
-        limit = wanted.preferred if self.rows is None else min(wanted.preferred, self.rows)
-        return Dimension(min=min(wanted.min, limit), max=limit, preferred=limit)
-
-    def write_to_screen(
-        self,
-        screen: Screen,
-        mouse_handlers: MouseHandlers,
-        write_position: WritePosition,
-        parent_style: str,
-        erase_bg: bool,
-        z_index: int | None,
-    ) -> None:
-        self.content.write_to_screen(
-            screen, mouse_handlers, write_position, parent_style, erase_bg, z_index
-        )
-
-    def get_children(self) -> list[Container]:
-        return [self.content]
-
-
-class _ScrollRegion(ScrollablePane):
-    """The scrolling region: keeps the cursor row in view, and scrolls back
-    to its top when the cursor arrives at the first stop (``at_top()``), so
-    rows above the first stop, such as a check list's text, show again.
-    """
-
-    def __init__(self, content: Container, at_top: Callable[[], bool]) -> None:
-        # No scroll offsets: squeezed to one row, the region must show the
-        # cursor row itself, not the row above it.
-        super().__init__(
-            content, scroll_offsets=ScrollOffsets(top=0, bottom=0), show_scrollbar=False
-        )
-        self._at_top = at_top
-        # The window focused at the last render.
-        self._focused: Window | None = None
-
-    def preferred_height(self, width: int, max_available_height: int) -> Dimension:
-        wanted = super().preferred_height(width, max_available_height)
-        # At least one row: squeezed by a short terminal, the region still
-        # shows the cursor row (no scroll offsets) instead of vanishing.
-        return Dimension(min=min(1, wanted.preferred), preferred=wanted.preferred)
-
-    def write_to_screen(
-        self,
-        screen: Screen,
-        mouse_handlers: MouseHandlers,
-        write_position: WritePosition,
-        parent_style: str,
-        erase_bg: bool,
-        z_index: int | None,
-    ) -> None:
-        focused = get_app().layout.current_window
-        # Only on arriving at the first stop (or opening on it): while the
-        # cursor stays there, a tall stop such as a text field scrolls with
-        # its own cursor. The pane scrolls down from the top only if the
-        # first stop wouldn't fit.
-        if focused is not self._focused and self._at_top():
-            self.vertical_scroll = 0
-        self._focused = focused
-        super().write_to_screen(
-            screen, mouse_handlers, write_position, parent_style, erase_bg, z_index
-        )
+HINT_ORDER = (
+    "↑↓ navigate",
+    "PgUp/PgDn scroll",
+    "←→ change",
+    "Space toggle",
+    "Enter select",
+    "Esc cancel",
+)
+# Between hint entries: the hint line breaks only here.
+HINT_SEPARATOR = " · "
 
 
 @dataclass
@@ -136,13 +51,76 @@ class InlineView:
         container: What the layout's inline slot shows.
         focus: What to focus when the dialog opens (None: nothing can take focus).
         actions: One ActionRow per ButtonConfig, in order.
-        hint: The hint line's text ("" when there's nothing to say).
+        hint_text: The hint line's text, worked out at each redraw.
+        text_region: The text body's region (a body with no cursor stops),
+            which scrolls by keys; None otherwise.
     """
 
     container: Container
     focus: Container | None
     actions: list[ActionRow]
-    hint: str
+    hint_text: Callable[[], str]
+    text_region: ScrollRegion | None = None
+
+    @property
+    def hint(self) -> str:
+        """The hint line's text now ("" when there's nothing to say)."""
+        return self.hint_text()
+
+
+class _Sizes:
+    """How an inline dialog's rows share its cap (dialog_cap): the fixed rows
+    (title, hint) first, then the region of cursor stops and actions, so
+    they stay reachable, then a text body. Blank rows take a row each only
+    while that leaves a row each for the text body and the region: in a
+    short terminal they go first. Without max_height the region keeps to
+    MAX_ROWS."""
+
+    def __init__(
+        self, max_height: int | None, region: ScrollRegion | None, text: ScrollRegion | None
+    ) -> None:
+        self.fixed: list[Container] = []
+        self._blanks = 0
+        self._max_height = max_height
+        self._region = region
+        self._text = text
+
+    def _cap(self) -> int:
+        return dialog_cap(self._max_height, terminal_rows())
+
+    def _fixed_rows(self, width: int) -> int:
+        cap = self._cap()
+        return sum(row.preferred_height(width, cap).preferred for row in self.fixed)
+
+    def _blanks_kept(self, width: int) -> int:
+        """How many blank rows keep their row: as many as leave a row each
+        for the text body and the region."""
+        content = sum(part is not None for part in (self._text, self._region))
+        return max(0, min(self._blanks, self._cap() - self._fixed_rows(width) - content))
+
+    def blank(self) -> Callable[[int], int]:
+        """The rows of one more blank row, by width: 1 while it's kept, else
+        0. The last blank rows go first."""
+        index = self._blanks
+        self._blanks += 1
+        return lambda width: 1 if index < self._blanks_kept(width) else 0
+
+    def _room(self, width: int) -> int:
+        """Rows left after the fixed rows and the blank rows kept."""
+        return self._cap() - self._fixed_rows(width) - self._blanks_kept(width)
+
+    def region(self, width: int) -> int:
+        room = self._room(width) - (1 if self._text is not None else 0)
+        if self._max_height is None:
+            room = min(room, MAX_ROWS)
+        return max(1, room)
+
+    def text(self, width: int) -> int:
+        used = 0
+        if self._region is not None:
+            wanted = self._region.preferred_height(width, self._cap()).preferred
+            used = min(wanted, self.region(width))
+        return max(1, self._room(width) - used)
 
 
 def build_inline(dialog: Dialog) -> InlineView:
@@ -154,35 +132,52 @@ def build_inline(dialog: Dialog) -> InlineView:
         for number, cfg in enumerate(configs, start=1)
     ]
     body = to_container(dialog.build_body()) if dialog._has_body() else None
+    has_stops = body is not None and bool(focusable_windows(body))
 
     def stops() -> list[Container]:
-        body_stops = _focusable_windows(body) if body is not None else []
+        body_stops = focusable_windows(body) if body is not None else []
         return [*body_stops, *(action.window for action in actions)]
 
     def at_first_stop() -> bool:
         first = stops()[:1]
         return bool(first) and get_app().layout.has_focus(first[0])
 
-    rows: list[Container] = []
-    if dialog.title:
-        rows.append(_text_row("class:dialog-title", dialog.title))
-
+    # A body with cursor stops scrolls with the actions; one without (text)
+    # scrolls in a region of its own, above them.
+    text = ScrollRegion(body) if body is not None and not has_stops else None
     scrolled: list[Container] = []
-    if body is not None:
-        # A body with cursor stops scrolls with the actions; one without
-        # (text) is drawn above them at full height, as a box dialog shows it.
-        has_stops = bool(_focusable_windows(body))
-        part = scrolled if has_stops else rows
-        part.append(body if has_stops else _AtMost(body))
+    if body is not None and has_stops:
+        scrolled.append(body)
         if actions:
-            part.append(_blank_row())
+            scrolled.append(_blank_row())
     scrolled.extend(action.window for action in actions)
-    if scrolled:
-        rows.append(_AtMost(_ScrollRegion(HSplit(scrolled), at_first_stop), MAX_ROWS))
-    hint = _hint(dialog, stops())
-    if hint:
-        rows.append(_blank_row())
-        rows.append(_text_row("class:dialog-hint", hint))
+    region = ScrollRegion(HSplit(scrolled), at_first_stop) if scrolled else None
+
+    sizes = _Sizes(dialog.max_height, region, text)
+    rows: list[Container] = []
+
+    def fixed(row: Container) -> None:
+        rows.append(row)
+        sizes.fixed.append(row)
+
+    def blank() -> None:
+        rows.append(AtMost(_blank_row(), sizes.blank()))
+
+    if dialog.title:
+        fixed(_text_row("class:dialog-title", dialog.title))
+    if text is not None:
+        rows.append(AtMost(text, sizes.text))
+        if actions:
+            blank()
+    if region is not None:
+        rows.append(AtMost(region, sizes.region))
+
+    def hint() -> str:
+        return _hint(dialog, stops(), text)
+
+    if hint() or text is not None:
+        blank()
+        fixed(Window(_HintControl(hint), dont_extend_height=True))
 
     navigator = RowNavigator(stops, is_editing=dialog._is_editing, tab=True, actions=actions)
     content = HSplit(rows, key_bindings=navigator.key_bindings())
@@ -193,7 +188,7 @@ def build_inline(dialog: Dialog) -> InlineView:
     focus = focused.window if focused is not None else (first[0] if first else None)
 
     # A one-column left margin.
-    return InlineView(VSplit([Window(width=1), content]), focus, actions, hint)
+    return InlineView(VSplit([Window(width=1), content]), focus, actions, hint, text)
 
 
 def _blank_row() -> Window:
@@ -202,33 +197,48 @@ def _blank_row() -> Window:
 
 
 def _text_row(style: str, text: str) -> Window:
+    """A row of ``text``, wrapped."""
     return Window(
-        FormattedTextControl(FormattedText([(style, text)])),
-        dont_extend_height=True,
-        wrap_lines=True,
+        FormattedTextControl(FormattedText([(style, text)])), dont_extend_height=True, wrap_lines=True
     )
 
 
-def _focusable_windows(container: Container) -> list[Container]:
-    return [
-        c for c in walk(container, skip_hidden=True)
-        if isinstance(c, Window) and c.content.is_focusable()
-    ]
+class _HintControl(FormattedTextControl):
+    """The hint line, broken between its entries to fit the row: an entry
+    is never split, and one wider than the row on its own is cut at its
+    edge."""
+
+    def __init__(self, hint: Callable[[], str]) -> None:
+        super().__init__(lambda: FormattedText([("class:dialog-hint", hint())]))
+        self._hint = hint
+
+    def create_content(self, width: int, height: int | None) -> UIContent:
+        lines: list[str] = []
+        for entry in self._hint().split(HINT_SEPARATOR):
+            if lines and get_cwidth(lines[-1] + HINT_SEPARATOR + entry) <= width:
+                lines[-1] += HINT_SEPARATOR + entry
+            else:
+                lines.append(entry)
+        return UIContent(
+            get_line=lambda i: [("class:dialog-hint", lines[i])], line_count=len(lines)
+        )
 
 
-def _hint(dialog: Dialog, stops: list[Container]) -> str:
-    """The keys that do something in this dialog, in HINT_ORDER."""
+def _hint(dialog: Dialog, stops: list[Container], text: ScrollRegion | None) -> str:
+    """The keys that do something in this dialog now, in HINT_ORDER."""
     rows = [s.content for s in stops if isinstance(s, Window) and isinstance(s.content, RowControl)]
     keys: set[str] = set()
     if len(stops) >= 2:
         keys.add("↑↓ navigate")
+    if text is not None and text.overflows:
+        keys.add("PgUp/PgDn scroll")
     for row in rows:
         keys |= row.hints
     if rows:
         keys.add("Enter select")
     if dialog.escapable:
         keys.add("Esc cancel")
-    return " · ".join(key for key in HINT_ORDER if key in keys)
+    return HINT_SEPARATOR.join(key for key in HINT_ORDER if key in keys)
 
 
 class InlinePresenter:

@@ -49,13 +49,14 @@ from typing import (
 from prompt_toolkit.filters import Condition
 from prompt_toolkit.formatted_text import AnyFormattedText
 from prompt_toolkit.key_binding import KeyBindings, merge_key_bindings
-from prompt_toolkit.layout import AnyContainer, HSplit
+from prompt_toolkit.layout import AnyContainer, Float, HSplit
 from prompt_toolkit.layout.containers import is_container
 from prompt_toolkit.widgets import Label, RadioList
 
 from ._text import format_exception_detail
-from .dialog_box import TERMINAL_TOO_SMALL, BoxPresenter
+from .dialog_box import BoxPresenter
 from .dialog_inline import InlinePresenter, InlineView
+from .dialog_scroll import ScrollRegion
 from .rows import OptionGroup, RowNavigator
 from .types import Placement, check_placement
 
@@ -109,7 +110,7 @@ class _NotPassed:
 
 # Dialog() leaves an option at its class default unless the argument is
 # passed. None can't mark "not passed": it's a meaningful value for
-# escape_result, width, top and height.
+# escape_result, width, top and max_height.
 _NOT_PASSED = _NotPassed()
 
 
@@ -137,8 +138,15 @@ class Dialog:
         escape_result: What Escape and cancel() return (default None).
         escapable: If False, Escape does nothing (default True).
         width: None/0 = auto, >0 = preferred width, -1 = full width (box only).
-        top: None = centered, >=0 = rows from top, <0 = rows from bottom (box only).
-        height: Fixed total height; the body scrolls when it overflows (box only).
+        top: Box only. None: outside full screen, under the prompt over the
+            rows reserved for it above the status bar (centered when those
+            are squeezed); centered in full screen. >=0: rows from the top.
+            <0: rows from the bottom.
+        max_height: The most rows the dialog takes, all of it counted (a
+            box's border, title and buttons; an inline dialog's title,
+            body, actions and hint); content that doesn't fit scrolls.
+            None (default): the terminal's rows less the prompt's. Without
+            it, an inline dialog also keeps its rows and actions within 12.
         placement: "box" (a framed dialog floating over the session),
             "inline" (rows between the prompt and the status bar), or None
             (default) for the session's ``dialog_placement``.
@@ -181,9 +189,9 @@ class Dialog:
     escapable: bool = True
     width: int | None = None
     top: int | None = None
-    # When set, the dialog's total height: the body is wrapped in a
-    # ScrollablePane and scrolls when it overflows.
-    height: int | None = None
+    # The most rows the dialog takes; what doesn't fit scrolls. None: the
+    # terminal's rows less the prompt's.
+    max_height: int | None = None
     # "box", "inline", or None for the session's dialog_placement.
     placement: Placement | None = None
 
@@ -197,7 +205,7 @@ class Dialog:
         escapable: bool | _NotPassed = _NOT_PASSED,
         width: int | None | _NotPassed = _NOT_PASSED,
         top: int | None | _NotPassed = _NOT_PASSED,
-        height: int | None | _NotPassed = _NOT_PASSED,
+        max_height: int | None | _NotPassed = _NOT_PASSED,
         placement: Placement | None | _NotPassed = _NOT_PASSED,
     ) -> None:
         if not isinstance(placement, _NotPassed):
@@ -211,12 +219,14 @@ class Dialog:
             "escapable": escapable,
             "width": width,
             "top": top,
-            "height": height,
+            "max_height": max_height,
             "placement": placement,
         }
         for name, value in passed.items():
             if not isinstance(value, _NotPassed):
                 setattr(self, name, value)
+        if self.max_height is not None and self.max_height < 1:
+            raise ValueError(f"max_height must be at least 1, got {self.max_height!r}")
 
         self._result_future: asyncio.Future | None = None
         self._manager: DialogManager | None = None
@@ -235,6 +245,15 @@ class Dialog:
         if is_container(body):
             return body
         return Label(text=cast("AnyFormattedText", body))
+
+    def _screen_floats(self) -> list[Float]:
+        """
+        Floats the body needs over the whole screen while the dialog is
+        open as a box (a dropdown's menu, say), not just over the body.
+
+        Default: none. Called once, after ``build_body``.
+        """
+        return []
 
     def get_buttons(self) -> list[ButtonConfig]:
         """
@@ -335,6 +354,7 @@ def _yes_no_dialog(
     yes_text: str = "Yes",
     no_text: str = "No",
     placement: Placement = "box",
+    max_height: int | None = None,
 ) -> Dialog:
     """Yes/No confirmation: True or False; Escape returns False."""
     return Dialog(
@@ -343,18 +363,27 @@ def _yes_no_dialog(
         [ButtonConfig(yes_text, result=True), ButtonConfig(no_text, result=False)],
         escape_result=False,
         placement=placement,
+        max_height=max_height,
     )
 
 
 def _message_dialog(
-    title: str, text: str, ok_text: str = "OK", placement: Placement = "box"
+    title: str,
+    text: str,
+    ok_text: str = "OK",
+    placement: Placement = "box",
+    max_height: int | None = None,
 ) -> Dialog:
     """A message with one button; returns None."""
-    return Dialog(title, text, [ButtonConfig(ok_text)], placement=placement)
+    return Dialog(title, text, [ButtonConfig(ok_text)], placement=placement, max_height=max_height)
 
 
 def _choice_dialog(
-    title: str, text: str, choices: Sequence[str], placement: Placement = "box"
+    title: str,
+    text: str,
+    choices: Sequence[str],
+    placement: Placement = "box",
+    max_height: int | None = None,
 ) -> Dialog:
     """One button per choice, returning its text; Escape returns None."""
     return Dialog(
@@ -362,6 +391,7 @@ def _choice_dialog(
         text,
         [ButtonConfig(choice, result=choice) for choice in choices],
         placement=placement,
+        max_height=max_height,
     )
 
 
@@ -371,6 +401,7 @@ def _dropdown_dialog(
     options: Sequence[str],
     default: str | None = None,
     placement: Placement = "box",
+    max_height: int | None = None,
 ) -> Dialog:
     """Pick one option; Cancel and Escape return None.
 
@@ -385,13 +416,16 @@ def _dropdown_dialog(
             text,
             [ButtonConfig(opt, result=opt, focused=opt == default) for opt in options],
             placement="inline",
+            max_height=max_height,
         )
 
     # default= also puts the cursor there (setting current_value afterwards
     # left it on the first option); one that isn't an option picks the first.
     radio: RadioList[str] = RadioList(values=[(opt, opt) for opt in options], default=default)
 
-    dialog = Dialog(title, HSplit([Label(text=text), radio]), placement="box")
+    dialog = Dialog(
+        title, HSplit([Label(text=text), radio]), placement="box", max_height=max_height
+    )
     # Buttons set after construction: OK's handler needs the dialog itself.
     dialog.buttons = [
         ButtonConfig("OK", handler=lambda: dialog.set_result(radio.current_value)),
@@ -406,6 +440,7 @@ def _checklist_dialog(
     options: Sequence[str],
     defaults: Sequence[str] = (),
     placement: Placement = "box",
+    max_height: int | None = None,
 ) -> Dialog:
     """Check any number of options, one per line: OK returns the checked ones
     (in option order), Cancel and Escape None."""
@@ -419,7 +454,7 @@ def _checklist_dialog(
     option_list = HSplit(rows, key_bindings=navigation)
     body = HSplit([Label(text=text), option_list]) if text else option_list
 
-    dialog = Dialog(title, body, placement=placement)
+    dialog = Dialog(title, body, placement=placement, max_height=max_height)
     # Buttons set after construction: OK's handler needs the dialog itself.
     dialog.buttons = [
         ButtonConfig("OK", handler=lambda: dialog.set_result(group.checked)),
@@ -471,7 +506,8 @@ class DialogManager:
         return self._box.rows(width, max_rows)
 
     def _create_key_bindings(self) -> KeyBindings:
-        """Create key bindings for dialog (Escape handler)."""
+        """Escape, and the keys that scroll a text body that doesn't fit:
+        PgUp/PgDn, and in a box also ↑↓ (its buttons use ←→ and Tab)."""
         kb = KeyBindings()
 
         @kb.add("escape", filter=Condition(lambda: self._visible))
@@ -480,7 +516,48 @@ class DialogManager:
             if dialog and dialog.escapable:
                 dialog.set_result(dialog.escape_result)
 
+        text_overflows = Condition(self._text_overflows)
+        in_box = Condition(lambda: self._box.view is not None)
+
+        @kb.add("pageup", filter=text_overflows)
+        def page_up(event: Any) -> None:
+            self._scroll_text(pages=-1)
+
+        @kb.add("pagedown", filter=text_overflows)
+        def page_down(event: Any) -> None:
+            self._scroll_text(pages=1)
+
+        # Inline, ↑↓ are the cursor's: RowNavigator's own up/down, bound on
+        # the dialog's container, outrank these app-level bindings anyway;
+        # in_box says the intent.
+        @kb.add("up", filter=text_overflows & in_box)
+        def line_up(event: Any) -> None:
+            self._scroll_text(lines=-1)
+
+        @kb.add("down", filter=text_overflows & in_box)
+        def line_down(event: Any) -> None:
+            self._scroll_text(lines=1)
+
         return kb
+
+    def _text_region(self) -> ScrollRegion | None:
+        """The open dialog's text body (box or inline), which scrolls by keys;
+        None when no dialog is open or its body has cursor stops."""
+        if self._box.view is not None:
+            return self._box.view.text_region
+        if self._inline.view is not None:
+            return self._inline.view.text_region
+        return None
+
+    def _text_overflows(self) -> bool:
+        region = self._text_region()
+        return self._visible and region is not None and region.overflows
+
+    def _scroll_text(self, *, lines: int = 0, pages: int = 0) -> None:
+        region = self._text_region()
+        if region is not None:
+            region.scroll(lines)
+            region.page(pages)
 
     def _inject_float_container(self) -> None:
         """Install the box dialogs' float and the Escape binding (one-time)."""
@@ -510,10 +587,6 @@ class DialogManager:
 
         Returns:
             The result value set by the dialog (via button click or Escape).
-            If the dialog's ``height`` is set and the terminal is too small
-            to fit the minimum viable dialog, shows an error to the user and
-            returns ``dialog.escape_result`` (or None if the dialog isn't
-            escapable) without showing the dialog.
 
         Raises:
             RuntimeError: If the session isn't running (not started yet, or
@@ -569,14 +642,6 @@ class DialogManager:
 
         self._inject_float_container()
 
-        effective_height: int | None = None
-        if placement == "box":
-            # Clamp dialog.height against terminal height (if height is set).
-            clamped = self._box.effective_height(dialog)
-            if clamped is TERMINAL_TOO_SMALL:
-                return dialog.escape_result if dialog.escapable else None
-            effective_height = clamped
-
         # Everything after claiming the slot runs under the finally below:
         # if building or focusing the dialog raises (a bug in a custom
         # build_body, nothing focusable), the manager must not be left
@@ -586,7 +651,7 @@ class DialogManager:
             future = dialog._prepare(self, placement)
             target: AnyContainer | None
             if placement == "box":
-                box = self._box.open(dialog, effective_height)
+                box = self._box.open(dialog)
                 # A ButtonConfig(focused=True) button, else the first
                 # focusable element of the dialog.
                 target = box.initial_focus or box.widget

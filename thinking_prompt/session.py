@@ -28,9 +28,11 @@ if TYPE_CHECKING:
     from .thinking_box import ThinkingBox
     from .types import ContentCallback, ContentFormat, InputHandler, Overflow
 
-from prompt_toolkit.application import Application
+from prompt_toolkit.application import Application, get_app, run_in_terminal
+from prompt_toolkit.application.current import get_app_session
 from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.completion import Completer
+from prompt_toolkit.data_structures import Point
 from prompt_toolkit.enums import DEFAULT_BUFFER, EditingMode
 from prompt_toolkit.filters import Condition, has_focus
 from prompt_toolkit.formatted_text import (
@@ -43,8 +45,9 @@ from prompt_toolkit.history import History, InMemoryHistory
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.key_binding.key_processor import KeyPressEvent
 from prompt_toolkit.layout import AnyContainer, DynamicContainer, Window
+from prompt_toolkit.layout.controls import UIContent, UIControl
 from prompt_toolkit.layout.dimension import Dimension
-from prompt_toolkit.output import ColorDepth
+from prompt_toolkit.output import ColorDepth, Output
 from prompt_toolkit.styles import DynamicStyle
 
 from ._text import format_exception_detail
@@ -53,6 +56,7 @@ from .display import Display
 from .frames import POLL_INTERVAL, FrameScheduler
 from .layout import create_layout
 from .manager import ThinkingBoxManager
+from .resize import ShrinkRepaint
 from .rich_utils import _is_rich_renderable
 from .spinner import Spinner
 from .styles import ThinkingPromptStyles, resolve_theme
@@ -62,6 +66,25 @@ logger = logging.getLogger(__name__)
 
 # on_input() returns the handler it registers with its own type.
 _HandlerT = TypeVar("_HandlerT", bound="InputHandler")
+
+
+class _RoomControl(UIControl):
+    """Blank content whose menu position is its top-left corner, which a
+    float attached to the window can use as its anchor."""
+
+    def __init__(self) -> None:
+        # (render_counter, rows) of the last draw: whether the room got its
+        # rows in this render.
+        self.drawn: tuple[int, int] | None = None
+
+    def create_content(self, width: int, height: int) -> UIContent:
+        self.drawn = (get_app().render_counter, height)
+        # The first line holds a space: an empty one maps no position to the screen.
+        return UIContent(
+            get_line=lambda i: [("", " ")] if i == 0 else [],
+            line_count=height,
+            menu_position=Point(x=0, y=0),
+        )
 
 
 class ThinkingPromptSession:
@@ -202,8 +225,9 @@ class ThinkingPromptSession:
         # Fullscreen state (thread-safe)
         self._is_fullscreen: bool = False
         self._fullscreen_lock = threading.RLock()
-        # Set by set_theme(repaint=True) while in fullscreen; consumed by
-        # switch_to_prompt(), which repaints instead of flushing pending output.
+        # Set by set_theme(repaint=True), or by the terminal shrinking, while
+        # in fullscreen; consumed by switch_to_prompt(), which repaints
+        # instead of flushing pending output.
         self._repaint_on_fullscreen_exit: bool = False
 
         # Convert styles dataclass to prompt_toolkit Style
@@ -225,6 +249,8 @@ class ThinkingPromptSession:
         # Redraws on demand: writes redraw now, animations ask for their
         # next frame; nothing redraws on a timer (see _create_application).
         self._frames = FrameScheduler(lambda: self.app.invalidate())
+        # A repaint once the terminal stops shrinking (see resize.py).
+        self._shrinks = ShrinkRepaint(self._repaint_after_shrink)
 
         # Thinking box manager: the boxes on screen, and their echo when
         # they end. expand_key flows through to each box so the truncation
@@ -266,7 +292,10 @@ class ThinkingPromptSession:
         # Shown in the layout's inline-dialog slot while no inline dialog is open.
         self._no_inline_dialog = Window(height=0)
         # Blank rows as tall as an open box dialog: see _inline_dialog_content.
-        self._box_dialog_room = Window(height=self._box_dialog_rows)
+        # Its control reports a menu position at its top-left: the box floats
+        # from there (a window not in focus records no cursor position).
+        self._room_control = _RoomControl()
+        self._box_dialog_room = Window(self._room_control, height=self._box_dialog_rows)
 
         # Create components
         self.default_buffer = self._create_default_buffer()
@@ -383,7 +412,7 @@ class ThinkingPromptSession:
         # Key bindings
         kb = self._create_key_bindings()
 
-        return Application(
+        app: Application = Application(
             layout=self.layout,
             style=DynamicStyle(lambda: self._style),
             key_bindings=kb,
@@ -396,6 +425,9 @@ class ThinkingPromptSession:
             min_redraw_interval=1 / 30,
             color_depth=self._effective_color_depth,
         )
+        # Every resize redraws: each draw tells _shrinks the terminal's size.
+        app.before_render += lambda sender: self._shrinks.seen(sender.output.get_size())
+        return app
 
     def _create_key_bindings(self) -> KeyBindings:
         """Create key bindings for the session."""
@@ -552,23 +584,46 @@ class ThinkingPromptSession:
         self._style = resolved.to_style()
         self._display.set_theme(resolved)
         if repaint:
-            if self.is_fullscreen:
+            self._repaint_unless_fullscreen()
+        self._invalidate()
+
+    def _repaint_unless_fullscreen(self) -> None:
+        """Repaint now, or in fullscreen (where the UI covers the screen) at
+        fullscreen exit."""
+        with self._fullscreen_lock:
+            if self._is_fullscreen:
                 self._repaint_on_fullscreen_exit = True
             else:
                 self._repaint_console()
-        self._invalidate()
 
     def _repaint_console(self) -> None:
-        """Clear screen + scrollback and re-print the transcript."""
-        if self.app and self.app.is_running:
-            self.app.renderer.clear()
-            # Renderer.clear() resets the screen model; scrollback erase is
-            # not part of its contract, so emit CSI 3J directly.
-            self.app.output.write_raw("\x1b[3J")
-            self.app.output.flush()
+        """Clear screen + scrollback and print the transcript, as it is now,
+        again. While the app runs that's one run_in_terminal job (the UI
+        erased and redrawn once), queued in order with the prints
+        print_formatted_text queues: one already queued prints before the
+        clear, a later one after the transcript, and two repaints in a row
+        print it once."""
+        contents = self._display.transcript()
+
+        def repaint(output: Output) -> None:
+            output.erase_screen()
+            output.cursor_goto(0, 0)
+            # Scrollback erase isn't part of Output's interface: CSI 3J.
+            output.write_raw("\x1b[3J")
+            self._display.print_now(output, contents)
+            output.flush()
+
+        app = self.app
+        if app and app.is_running and app.loop is not None:
+            app.loop.call_soon_threadsafe(lambda: run_in_terminal(lambda: repaint(app.output)))
         else:
-            print("\x1b[2J\x1b[H\x1b[3J", end="", flush=True)
-        self._display.reprint_transcript()
+            repaint(get_app_session().output)
+
+    def _repaint_after_shrink(self) -> None:
+        """Repaint once the terminal stopped shrinking, which left rows of
+        the live UI behind (see resize.py)."""
+        if self.app and self.app.is_running:
+            self._repaint_unless_fullscreen()
 
     def _invalidate(self) -> None:
         """Trigger UI refresh and sync app.full_screen with fullscreen mode."""
@@ -1130,6 +1185,7 @@ class ThinkingPromptSession:
             with suppress(asyncio.CancelledError):
                 await loop_task
             self._frames.cancel()
+            self._shrinks.cancel()
 
     async def _run_handler(
         self,
@@ -1306,6 +1362,19 @@ class ThinkingPromptSession:
             return self._no_inline_dialog  # full screen has every row already
         return self._box_dialog_room
 
+    def _box_room(self) -> Window | None:
+        """The window holding a box dialog's reserved rows, if it is in the
+        layout now and was drawn in this render with every row it asked for
+        (the box floats over it), else None. A room squeezed short would flip
+        the box over the thinking box, or squeeze it, so the box centers."""
+        room = self._box_dialog_room
+        if self._inline_dialog_content() is not room:
+            return None
+        drawn = self._room_control.drawn
+        if drawn is None or drawn[0] != self.app.render_counter:
+            return None
+        return room if drawn[1] >= self._box_dialog_rows().preferred else None
+
     def _box_dialog_rows(self) -> Dimension:
         """The box dialog's rows, to reserve. Flexible down to none, so a
         dialog taller than the terminal can't overflow the layout."""
@@ -1335,6 +1404,7 @@ class ThinkingPromptSession:
         no_text: str = "No",
         *,
         placement: Placement | None = None,
+        max_height: int | None = None,
     ) -> bool:
         """
         Show a Yes/No confirmation dialog.
@@ -1346,6 +1416,9 @@ class ThinkingPromptSession:
             no_text: Text for No button (default: "No").
             placement: "box" or "inline"; None (default) uses the session's
                 dialog_placement.
+            max_height: The most rows the dialog takes; what doesn't fit
+                scrolls (see Dialog.max_height). None (default): the
+                terminal's rows less the prompt's.
 
         Returns:
             True if Yes was clicked, False if No or Escape.
@@ -1355,7 +1428,7 @@ class ThinkingPromptSession:
                 delete_file()
         """
         from .dialog import _yes_no_dialog
-        dialog = _yes_no_dialog(title, text, yes_text, no_text, self._resolve_placement(placement))
+        dialog = _yes_no_dialog(title, text, yes_text, no_text, self._resolve_placement(placement), max_height)
         return cast(bool, await self._dialogs.show(dialog))
 
     async def message_dialog(
@@ -1365,6 +1438,7 @@ class ThinkingPromptSession:
         ok_text: str = "OK",
         *,
         placement: Placement | None = None,
+        max_height: int | None = None,
     ) -> None:
         """
         Show an informational message dialog.
@@ -1375,12 +1449,15 @@ class ThinkingPromptSession:
             ok_text: Text for OK button (default: "OK").
             placement: "box" or "inline"; None (default) uses the session's
                 dialog_placement.
+            max_height: The most rows the dialog takes; what doesn't fit
+                scrolls (see Dialog.max_height). None (default): the
+                terminal's rows less the prompt's.
 
         Example:
             await session.message_dialog("Info", "Operation completed.")
         """
         from .dialog import _message_dialog
-        dialog = _message_dialog(title, text, ok_text, self._resolve_placement(placement))
+        dialog = _message_dialog(title, text, ok_text, self._resolve_placement(placement), max_height)
         await self._dialogs.show(dialog)
 
     async def choice_dialog(
@@ -1390,6 +1467,7 @@ class ThinkingPromptSession:
         choices: Sequence[str],
         *,
         placement: Placement | None = None,
+        max_height: int | None = None,
     ) -> str | None:
         """
         Show a dialog with multiple choice buttons.
@@ -1400,6 +1478,9 @@ class ThinkingPromptSession:
             choices: List of choice strings (each becomes a button).
             placement: "box" or "inline"; None (default) uses the session's
                 dialog_placement.
+            max_height: The most rows the dialog takes; what doesn't fit
+                scrolls (see Dialog.max_height). None (default): the
+                terminal's rows less the prompt's.
 
         Returns:
             The selected choice string, or None if Escape was pressed.
@@ -1414,7 +1495,7 @@ class ThinkingPromptSession:
                 save_file()
         """
         from .dialog import _choice_dialog
-        dialog = _choice_dialog(title, text, choices, self._resolve_placement(placement))
+        dialog = _choice_dialog(title, text, choices, self._resolve_placement(placement), max_height)
         return cast(Optional[str], await self._dialogs.show(dialog))
 
     async def dropdown_dialog(
@@ -1425,6 +1506,7 @@ class ThinkingPromptSession:
         default: str | None = None,
         *,
         placement: Placement | None = None,
+        max_height: int | None = None,
     ) -> str | None:
         """
         Show a dialog with a dropdown/radio list selection.
@@ -1437,6 +1519,9 @@ class ThinkingPromptSession:
                 dialog opens (optional; the first option otherwise).
             placement: "box" or "inline"; None (default) uses the session's
                 dialog_placement.
+            max_height: The most rows the dialog takes; what doesn't fit
+                scrolls (see Dialog.max_height). None (default): the
+                terminal's rows less the prompt's.
 
         Returns:
             The selected option string, or None if cancelled.
@@ -1450,7 +1535,7 @@ class ThinkingPromptSession:
             )
         """
         from .dialog import _dropdown_dialog
-        dialog = _dropdown_dialog(title, text, options, default, self._resolve_placement(placement))
+        dialog = _dropdown_dialog(title, text, options, default, self._resolve_placement(placement), max_height)
         return cast(Optional[str], await self._dialogs.show(dialog))
 
     async def checklist_dialog(
@@ -1461,6 +1546,7 @@ class ThinkingPromptSession:
         defaults: Sequence[str] = (),
         *,
         placement: Placement | None = None,
+        max_height: int | None = None,
     ) -> list[str] | None:
         """
         Show a check list: any number of options, one per line.
@@ -1472,6 +1558,9 @@ class ThinkingPromptSession:
             defaults: Options checked at first (others are ignored).
             placement: "box" or "inline"; None (default) uses the session's
                 dialog_placement.
+            max_height: The most rows the dialog takes; what doesn't fit
+                scrolls (see Dialog.max_height). None (default): the
+                terminal's rows less the prompt's.
 
         Returns:
             The checked options in option order, or None if cancelled.
@@ -1485,7 +1574,7 @@ class ThinkingPromptSession:
             )
         """
         from .dialog import _checklist_dialog
-        dialog = _checklist_dialog(title, text, options, defaults, self._resolve_placement(placement))
+        dialog = _checklist_dialog(title, text, options, defaults, self._resolve_placement(placement), max_height)
         return cast("list[str] | None", await self._dialogs.show(dialog))
 
     async def show_dialog(self, dialog: Dialog) -> Any:
@@ -1534,7 +1623,8 @@ class ThinkingPromptSession:
         *,
         width: int | None = 60,
         top: int | None = None,
-        height: int | None = None,
+        max_height: int | None = None,
+        align_values: Literal["labels", "right"] | int = "labels",
         placement: Placement | None = None,
     ) -> dict[str, Any] | None:
         """
@@ -1550,11 +1640,18 @@ class ThinkingPromptSession:
                    - positive int: minimum width (default 60)
                    - -1: maximum width (stretch to fill)
             top: Vertical position:
-                   - None: center (default)
+                   - None: outside full screen, under the prompt over
+                     the rows reserved for it (centered if those are
+                     squeezed); centered in full screen (default)
                    - 0 or positive: offset from top
                    - negative: offset from bottom (e.g., -1 = 1 row from bottom)
-            height: Fixed total dialog height; body overflow scrolls.
-                    When None (default), the dialog sizes to its content.
+            max_height: The most rows the dialog takes; settings beyond it
+                    scroll with the cursor. None (default): the terminal's
+                    rows less the prompt's.
+            align_values: Where values start: "labels" (default, two
+                    columns after the longest label or description),
+                    "right" (the row's right edge), or a column number
+                    (labels cut with "…").
             placement: "box" or "inline"; None (default) uses the session's
                     dialog_placement.
 
@@ -1579,7 +1676,8 @@ class ThinkingPromptSession:
         """
         from .settings_dialog import SettingsDialog
         dialog = SettingsDialog(
-            title, items, can_cancel, width=width, top=top, height=height, placement=placement
+            title, items, can_cancel, width=width, top=top, max_height=max_height,
+            align_values=align_values, placement=placement,
         )
         return cast(
             "dict[str, Any] | None", await self._dialogs.show(dialog)

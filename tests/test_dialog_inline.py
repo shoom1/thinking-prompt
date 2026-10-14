@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
 from prompt_toolkit.application import Application
 from prompt_toolkit.application.current import set_app
 from prompt_toolkit.formatted_text import fragment_list_to_text, to_formatted_text
@@ -16,7 +17,7 @@ from prompt_toolkit.output import DummyOutput
 from prompt_toolkit.widgets import Label, TextArea
 
 from thinking_prompt.dialog import ButtonConfig, Dialog
-from thinking_prompt.dialog_inline import MAX_ROWS, _AtMost, build_inline
+from thinking_prompt.dialog_inline import MAX_ROWS, build_inline
 from thinking_prompt.rows import OptionGroup
 
 
@@ -36,8 +37,11 @@ def _texts(view) -> list[str]:
 
 
 def _region(view) -> ScrollablePane:
-    """The inline dialog's scrolling region."""
-    (pane,) = [c for c in walk(view.container) if isinstance(c, ScrollablePane)]
+    """The inline dialog's scrolling region of cursor stops and actions."""
+    (pane,) = [
+        c for c in walk(view.container)
+        if isinstance(c, ScrollablePane) and c is not view.text_region
+    ]
     return pane
 
 
@@ -112,34 +116,6 @@ class TestBuildInline:
             loop.close()
 
 
-class TestAtMost:
-    def test_caps_the_preferred_height(self):
-        tall = HSplit([Window(height=1) for _ in range(30)])
-        short = HSplit([Window(height=1) for _ in range(3)])
-        tall_dim = _AtMost(tall, MAX_ROWS).preferred_height(80, 100)
-        short_dim = _AtMost(short, MAX_ROWS).preferred_height(80, 100)
-        assert tall_dim.preferred == MAX_ROWS
-        assert short_dim.preferred == 3
-
-    def test_max_is_also_capped_so_hsplit_cannot_pad_with_blank_rows(self):
-        """max must equal the capped preferred, not self.rows: otherwise a
-        parent HSplit with spare height distributes it to this container,
-        padding it with blank rows past its actual content."""
-        tall = HSplit([Window(height=1) for _ in range(30)])
-        short = HSplit([Window(height=1) for _ in range(3)])
-        assert _AtMost(tall, MAX_ROWS).preferred_height(80, 100).max == MAX_ROWS
-        assert _AtMost(short, MAX_ROWS).preferred_height(80, 100).max == 3
-
-    def test_without_a_cap_it_takes_its_full_height_and_no_more(self):
-        """A text body drawn above the scrolling region: in full, never padded."""
-        tall = HSplit([Window(height=1) for _ in range(30)])
-        extending = Window(FormattedTextControl("one\ntwo"))  # max is unbounded on its own
-        tall_dim = _AtMost(tall).preferred_height(80, 100)
-        extending_dim = _AtMost(extending).preferred_height(80, 100)
-        assert (tall_dim.preferred, tall_dim.max) == (30, 30)
-        assert (extending_dim.preferred, extending_dim.max) == (2, 2)
-
-
 class TestScrollingRegion:
     """Rows and actions scroll within MAX_ROWS; a body without cursor stops
     (text) is drawn in full above them."""
@@ -210,3 +186,103 @@ class TestScrollingRegion:
             layout.focus(view.actions[1].window)
             screen = _render(pane, 1)
         assert "".join(screen.data_buffer[0][x].char for x in range(40)).strip() == "❯ 2. B"
+
+
+def _rows(screen: Screen, height: int) -> list[str]:
+    return ["".join(screen.data_buffer[y][x].char for x in range(40)).strip() for y in range(height)]
+
+
+LONG = "\n".join(f"line {i}" for i in range(30))
+
+
+class TestTextRegion:
+    def test_a_text_body_scrolls_in_its_own_region(self):
+        view = build_inline(_yes_no())
+        assert view.text_region is not None
+        (body,) = [w for w, text in _text_windows(view.container) if text == "This can't be undone."]
+        assert body in list(walk(view.text_region))
+        assert body not in list(walk(_region(view)))
+
+    def test_a_body_with_stops_has_no_text_region(self):
+        group = OptionGroup(["a", "b"], multiple=True)
+        view = build_inline(Dialog("T", HSplit([r.window for r in group.rows]), [ButtonConfig("OK")]))
+        assert view.text_region is None
+
+    @pytest.mark.parametrize("text,offered", [(LONG, True), ("short", False)])
+    def test_the_hint_offers_scrolling_only_while_the_text_overflows(self, text, offered):
+        view = build_inline(Dialog("T", text, [ButtonConfig("OK")]))
+        layout = Layout(view.container)
+        with set_app(_app(layout)):
+            layout.focus(view.actions[0].window)
+            _render(view.container, 10)
+        assert ("PgUp/PgDn scroll" in view.hint) is offered
+
+    def test_the_scroll_keys_sit_between_navigation_and_selection_in_the_hint(self):
+        view = build_inline(Dialog("T", LONG, [ButtonConfig("A"), ButtonConfig("B")]))
+        layout = Layout(view.container)
+        with set_app(_app(layout)):
+            layout.focus(view.actions[0].window)
+            _render(view.container, 10)
+        assert view.hint == "↑↓ navigate · PgUp/PgDn scroll · Enter select · Esc cancel"
+
+
+class TestHintWrapping:
+    """The hint breaks between its entries, never inside one."""
+
+    @staticmethod
+    def _hint_window(view) -> Window:
+        (window,) = [w for w, text in _text_windows(view.container) if text == view.hint]
+        return window
+
+    @staticmethod
+    def _lines(window: Window, width: int) -> list[str]:
+        content = window.content.create_content(width, None)
+        return [fragment_list_to_text(content.get_line(i)) for i in range(content.line_count)]
+
+    def _view(self):
+        group = OptionGroup(["a", "b"], multiple=True)
+        return build_inline(Dialog("T", HSplit([r.window for r in group.rows]), [ButtonConfig("OK")]))
+
+    def test_the_hint_breaks_between_entries(self):
+        window = self._hint_window(self._view())
+        assert self._lines(window, 30) == ["↑↓ navigate · Space toggle", "Enter select · Esc cancel"]
+        assert window.preferred_height(30, 100).preferred == 2
+
+    def test_the_hint_is_one_line_when_it_fits(self):
+        view = self._view()
+        assert self._lines(self._hint_window(view), 80) == [view.hint]
+
+    def test_an_entry_wider_than_the_row_gets_a_line_of_its_own(self):
+        window = self._hint_window(self._view())
+        assert self._lines(window, 11) == ["↑↓ navigate", "Space toggle", "Enter select", "Esc cancel"]
+
+
+class TestInlineSizes:
+    """The rows share the cap: fixed rows, then the actions, then a text body."""
+
+    @staticmethod
+    def _height(view) -> int:
+        # 80 columns: the hint line stays one row (at 40 it nearly wraps).
+        return view.container.preferred_height(80, 100).preferred
+
+    def test_with_max_height_the_whole_dialog_fits(self):
+        view = build_inline(Dialog("T", LONG, [ButtonConfig("A"), ButtonConfig("B")], max_height=10))
+        assert self._height(view) == 10
+
+    def test_without_max_height_actions_keep_to_max_rows(self):
+        view = build_inline(Dialog("T", "", [ButtonConfig(f"a{i}") for i in range(30)]))
+        assert self._height(view) == 1 + MAX_ROWS + 2  # title, the region, blank, hint
+
+    def test_max_height_lifts_the_max_rows_limit(self):
+        view = build_inline(Dialog("T", "", [ButtonConfig(f"a{i}") for i in range(30)], max_height=30))
+        assert self._height(view) == 30
+
+    def test_actions_get_rows_before_the_text(self):
+        view = build_inline(Dialog(
+            "T", LONG, [ButtonConfig("A"), ButtonConfig("B"), ButtonConfig("C")], max_height=10
+        ))
+        layout = Layout(view.container)
+        with set_app(_app(layout)):
+            layout.focus(view.actions[0].window)
+            rows = _rows(_render(view.container, 10), 10)
+        assert [r for r in rows if r.endswith(("1. A", "2. B", "3. C"))] == ["❯ 1. A", "2. B", "3. C"]

@@ -3,52 +3,38 @@ Box presentation of dialogs: prompt_toolkit's framed Dialog widget, floating
 over the session's layout.
 
 DialogManager decides when a dialog opens and closes; this module decides how
-a box dialog looks and where it floats.
+a box dialog looks, where it floats and how tall it is.
 """
 from __future__ import annotations
 
-import shutil
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+import textwrap
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any, Callable
 
+from prompt_toolkit.application.current import get_app
 from prompt_toolkit.filters import Condition
 from prompt_toolkit.layout import (
-    AnyContainer,
     ConditionalContainer,
+    Container,
     DynamicContainer,
     Float,
     FloatContainer,
-    HSplit,
-    ScrollablePane,
+    FormattedTextControl,
     Window,
     to_container,
 )
 from prompt_toolkit.layout.dimension import Dimension
-from prompt_toolkit.widgets import Button
+from prompt_toolkit.widgets import Button, Frame
 from prompt_toolkit.widgets import Dialog as _DialogWidget
 
+from .dialog_scroll import AtMost, ScrollRegion, dialog_cap, focusable_windows
+
 if TYPE_CHECKING:
+    from prompt_toolkit.layout.mouse_handlers import MouseHandlers
+    from prompt_toolkit.layout.screen import Screen, WritePosition
+
     from .dialog import Dialog
     from .session import ThinkingPromptSession
-
-# Chrome height = title bar (2) + button row (2) + padding (1) around the body.
-# Used when a dialog's ``height`` is set to compute the body area from the total.
-CHROME_HEIGHT = 5
-
-# Rows reserved below/above the dialog: prompt area, status bar, margin.
-# When a dialog's ``height`` is set, the effective height is clamped to
-# ``terminal_height - TERMINAL_BUFFER_ROWS`` so the dialog doesn't cover the
-# prompt or overflow the screen.
-TERMINAL_BUFFER_ROWS = 4
-
-# Smallest total dialog height (chrome + body) that's considered usable.
-# With TERMINAL_BUFFER_ROWS = 4, this implies a minimum terminal height of
-# MIN_DIALOG_HEIGHT + TERMINAL_BUFFER_ROWS = 12 rows.
-MIN_DIALOG_HEIGHT = 8
-
-# Returned by BoxPresenter.effective_height() when the terminal is too small
-# to show the dialog. The caller aborts without building the widget.
-TERMINAL_TOO_SMALL = object()
 
 
 @dataclass
@@ -59,11 +45,17 @@ class BoxView:
         widget: prompt_toolkit's Dialog widget.
         buttons: Its Button widgets, one per ButtonConfig, in order.
         focused_button: The first ``ButtonConfig(focused=True)`` button, if any.
+        max_height: The dialog's max_height (None: the terminal's).
+        text_region: The body's region when nothing in the body takes focus (a text body): it scrolls by keys.
+        floats: Floats the body needs over the whole screen (Dialog._screen_floats), drawn over the box.
     """
 
     widget: _DialogWidget
     buttons: list[Button]
     focused_button: Button | None = None
+    max_height: int | None = None
+    text_region: ScrollRegion | None = None
+    floats: list[Float] = field(default_factory=list)
 
     @property
     def initial_focus(self) -> Window | None:
@@ -71,24 +63,32 @@ class BoxView:
         return self.focused_button.window if self.focused_button else None
 
 
-def build_box(dialog: Dialog, effective_height: int | None = None) -> BoxView:
+def build_box(dialog: Dialog) -> BoxView:
     """Build prompt_toolkit's Dialog widget for ``dialog``.
 
-    Args:
-        dialog: The dialog to draw.
-        effective_height: Height after terminal clamping; overrides
-            ``dialog.height``. None means use ``dialog.height`` directly.
+    When the dialog is capped (BoxPresenter.rows), a body that is one window
+    taking the cursor (a radio list, a text field) is squeezed and scrolls
+    itself. Any other body sits in a ScrollRegion: it scrolls with the
+    cursor (settings rows, a check list), or by keys for a text body.
     """
-    body: AnyContainer = dialog.build_body()
+    content = to_container(dialog.build_body())
+    stops = focusable_windows(content)
+    body: Container = content
+    text_region: ScrollRegion | None = None
+    # A body whose stops are one window stays out of a region: there, a
+    # focused window taller than the region fills it, and the text above
+    # it (a dropdown's question) never shows.
+    if len(stops) != 1:
 
-    # Pin body height so the Dialog renders in one shot (opt-in via the
-    # ``height`` attribute). Overflow scrolls within the pane.
-    h = effective_height if effective_height is not None else dialog.height
-    if h is not None and h > 0:
-        body = HSplit(
-            [ScrollablePane(to_container(body), show_scrollbar=True)],
-            height=Dimension.exact(max(1, h - CHROME_HEIGHT)),
-        )
+        def at_first_stop() -> bool:
+            # Back at the first stop, the region scrolls to its top: rows
+            # above that stop (a check list's text) show again.
+            first = focusable_windows(content)[:1]
+            return bool(first) and get_app().layout.has_focus(first[0])
+
+        body = ScrollRegion(content, at_first_stop, scrollbar=True)
+        # Nothing in it takes focus (a text body): it scrolls by keys.
+        text_region = body if not stops else None
 
     # Each ButtonConfig's style and focused flag apply however the dialog was made.
     buttons: list[Button] = []
@@ -107,7 +107,9 @@ def build_box(dialog: Dialog, effective_height: int | None = None) -> BoxView:
         width=_width_dimension(dialog.width),
         with_background=False,  # Use styled dialog, no light overlay
     )
-    return BoxView(widget, buttons, focused)
+    return BoxView(
+        widget, buttons, focused, dialog.max_height, text_region, dialog._screen_floats()
+    )
 
 
 def _width_dimension(width: int | None) -> Dimension | None:
@@ -139,62 +141,129 @@ def _apply_button_style(button: Button, extra_style: str) -> None:
         button.window.style = f"{original} {extra_style}".strip()
 
 
+class _BoxOrNotice(Container):
+    """``box`` (the capped dialog widget), or a notice in its place while the
+    terminal is too small for it.
+
+    The box stays among the children, so its windows keep their focus and
+    key bindings; only its drawing is replaced. ``notice`` gives the
+    notice's container, or None when the box fits: asked on each size
+    question and draw, so the terminal growing brings the box back.
+    """
+
+    def __init__(self, box: Container, notice: Callable[[], Container | None]) -> None:
+        self.box = box
+        self.notice = notice
+
+    def _shown(self) -> Container:
+        return self.notice() or self.box
+
+    def reset(self) -> None:
+        self.box.reset()
+
+    def preferred_width(self, max_available_width: int) -> Dimension:
+        return self._shown().preferred_width(max_available_width)
+
+    def preferred_height(self, width: int, max_available_height: int) -> Dimension:
+        return self._shown().preferred_height(width, max_available_height)
+
+    def write_to_screen(
+        self,
+        screen: Screen,
+        mouse_handlers: MouseHandlers,
+        write_position: WritePosition,
+        parent_style: str,
+        erase_bg: bool,
+        z_index: int | None,
+    ) -> None:
+        self._shown().write_to_screen(
+            screen, mouse_handlers, write_position, parent_style, erase_bg, z_index
+        )
+
+    def get_children(self) -> list[Container]:
+        return [self.box]
+
+
+class _BoxFloat(Float):
+    """The box's float: centered over the drawn area, or, outside full
+    screen, anchored to the window that holds its reserved rows.
+
+    ``room`` gives that window when it is in the layout now and was drawn
+    with every row it asked for (None in full screen, where it isn't, and
+    its cursor position would fall back to (0, 0); None too when squeezed
+    short, where the box would flip or shrink: it centers then). Asked on
+    each draw, since full screen can switch with a dialog open. The anchor is the window's top-left, so with ``ycursor``
+    and ``allow_cover_cursor`` the box's top border lands on its first row.
+    An explicit top or bottom keeps its offset in both modes.
+    """
+
+    def __init__(self, room: Callable[[], Window | None], **kwargs: Any) -> None:
+        self._room = room
+        super().__init__(**kwargs)
+
+    # Float assigns these in __init__; here they are worked out when read.
+    @property
+    def attach_to_window(self) -> Window | None:
+        return self._room() if self._anchored() else None
+
+    @attach_to_window.setter
+    def attach_to_window(self, value: Any) -> None:
+        pass
+
+    @property
+    def ycursor(self) -> bool:
+        return self._anchored() and self._room() is not None
+
+    @ycursor.setter
+    def ycursor(self, value: bool) -> None:
+        pass
+
+    def _anchored(self) -> bool:
+        return self.top is None and self.bottom is None
+
+
 class BoxPresenter:
     """Floats box dialogs over the session's layout."""
 
     def __init__(self, session: ThinkingPromptSession) -> None:
         self._session = session
         self.view: BoxView | None = None
-        self._float = Float(
+        # The open dialog's widget, no taller than rows(). The float takes
+        # its content's height: given a height of its own, FloatContainer
+        # would no longer trim it to the rows left under top= (or above
+        # a negative one), cutting off the title or the buttons.
+        self._capped: Container = Window()
+        self._title = ""
+        self._escapable = True
+        self._float = _BoxFloat(
+            self._session._box_room,
             content=ConditionalContainer(
-                content=DynamicContainer(self._content),
+                content=DynamicContainer(lambda: self._capped),
                 filter=Condition(lambda: self.view is not None),
             ),
             allow_cover_cursor=True,
         )
         self._installed = False
-
-    def _content(self) -> AnyContainer:
-        return self.view.widget if self.view is not None else Window()
+        self._root: FloatContainer | None = None
+        # _smallest's last answer and the question it answered: asked several
+        # times per draw, and measuring the whole body each time is slow.
+        self._smallest_memo: tuple[tuple[int, int, int], tuple[int, int]] | None = None
 
     def install(self) -> None:
         """Wrap the session's layout container in a FloatContainer (once)."""
         if self._installed:
             return
         layout = self._session.app.layout
-        layout.container = FloatContainer(content=layout.container, floats=[self._float])
+        self._root = FloatContainer(content=layout.container, floats=[self._float])
+        layout.container = self._root
         self._installed = True
 
-    def effective_height(self, dialog: Dialog) -> Any:
-        """Clamp ``dialog.height`` to the terminal.
-
-        Returns:
-            None if the dialog didn't ask for a fixed height; TERMINAL_TOO_SMALL
-            (after reporting an error line) if the terminal can't fit the
-            smallest usable dialog; otherwise the clamped height.
-        """
-        if dialog.height is None or dialog.height <= 0:
-            return None
-
-        term_height = shutil.get_terminal_size().lines
-        max_allowed = term_height - TERMINAL_BUFFER_ROWS
-
-        if max_allowed < MIN_DIALOG_HEIGHT:
-            required = MIN_DIALOG_HEIGHT + TERMINAL_BUFFER_ROWS
-            self._session.add_error(
-                f"Not enough room to show dialog: need at least {required} "
-                f"terminal rows, have {term_height}."
-            )
-            return TERMINAL_TOO_SMALL
-
-        return min(dialog.height, max_allowed)
-
-    def open(self, dialog: Dialog, effective_height: int | None) -> BoxView:
+    def open(self, dialog: Dialog) -> BoxView:
         """Build ``dialog`` and float it according to its ``top``."""
-        view = build_box(dialog, effective_height)
+        view = build_box(dialog)
 
         if dialog.top is None:
-            # Center: no top or bottom constraint
+            # No top or bottom: over the room, or centered (see _BoxFloat)
             self._float.top = None
             self._float.bottom = None
         elif dialog.top >= 0:
@@ -206,19 +275,107 @@ class BoxPresenter:
             self._float.top = None
             self._float.bottom = abs(dialog.top)
 
-        # A fixed height (clamped to the terminal) pins the Float's; None
-        # lets it take the dialog's own.
-        self._float.height = effective_height
-
         self.view = view
+        self._title = dialog.title
+        self._escapable = dialog.escapable
+        self._smallest_memo = None
+        self._capped = _BoxOrNotice(
+            AtMost(to_container(view.widget), self._cap), self._notice_in_app
+        )
+        # The body's own floats go on the root, over the whole screen, after
+        # the box's so they draw over it. Hidden with the box: a notice
+        # leaves them no row to attach to.
+        if view.floats:
+            assert self._root is not None  # install() ran
+            boxed = Condition(lambda: self._notice_in_app() is None)
+            for fl in view.floats:
+                fl.content = ConditionalContainer(fl.content, filter=boxed)
+            self._root.floats.extend(view.floats)
         return view
 
     def close(self) -> None:
+        if self.view is not None and self.view.floats:
+            assert self._root is not None
+            for fl in self.view.floats:
+                self._root.floats.remove(fl)
         self.view = None
+        self._smallest_memo = None
+        self._capped = Window()
 
     def rows(self, width: int, max_rows: int) -> int:
-        """Rows the open dialog takes in a ``width``-column terminal; 0 when
-        none is open."""
+        """Rows the open dialog takes in a ``width``-column, ``max_rows``-row
+        terminal: its content's, capped by its max_height and the terminal
+        (dialog_cap), but never fewer than its frame, buttons and one body
+        row need. 0 when none is open."""
         if self.view is None:
             return 0
-        return to_container(self.view.widget).preferred_height(width, max_rows).preferred
+        notice = self._notice(width, max_rows)
+        if notice is not None:
+            return min(self._notice_rows(notice, width), max_rows)
+        widget = to_container(self.view.widget)
+        dialog_width = min(widget.preferred_width(width).preferred, width)
+        wanted = widget.preferred_height(dialog_width, max_rows)
+        cap = dialog_cap(self.view.max_height, max_rows)
+        return max(wanted.min, min(wanted.preferred, cap))
+
+    def _smallest(self, width: int, max_rows: int) -> tuple[int, int]:
+        """The open dialog's smallest size (columns, rows): its frame, buttons
+        row and one body row. Measured once per draw: the answer is kept
+        for the same terminal size and render, so a resize or a new render
+        (after a content change) measures again."""
+        assert self.view is not None
+        key = (width, max_rows, get_app().render_counter)
+        if self._smallest_memo is not None and self._smallest_memo[0] == key:
+            return self._smallest_memo[1]
+        smallest = self._measure_smallest(width, max_rows)
+        self._smallest_memo = (key, smallest)
+        return smallest
+
+    def _measure_smallest(self, width: int, max_rows: int) -> tuple[int, int]:
+        assert self.view is not None
+        widget = to_container(self.view.widget)
+        # A box given a width reports no minimum for it, so the width comes
+        # from the buttons row, the one thing that can't be squeezed: the
+        # buttons side by side (VSplit's padding=1 between), inside the frame.
+        buttons = [b.window.preferred_width(max(width, 1)).min for b in self.view.buttons]
+        row = sum(buttons) + max(len(buttons) - 1, 0)
+        needs_width = max(widget.preferred_width(width).min, row + 2)
+        # Height at the width the box would get: below its minimum width the
+        # box collapses, and reports a frame's two rows and no more.
+        box_width = min(widget.preferred_width(width).preferred, max(width, needs_width))
+        return needs_width, widget.preferred_height(box_width, max_rows).min
+
+    def _notice(self, width: int, max_rows: int) -> Container | None:
+        """The notice to draw in a ``width``-column, ``max_rows``-row terminal
+        if the open dialog's smallest size doesn't fit it, else None."""
+        if self.view is None:
+            return None
+        needs_width, needs_rows = self._smallest(width, max_rows)
+        if needs_width <= width and needs_rows <= max_rows:
+            return None
+        text = f"Terminal too small: needs {needs_width}\u00d7{needs_rows}"
+        if self._escapable:
+            text += " \u00b7 Esc cancels"
+        # Wrapped at spaces to the frame's inside; a longer word is cut.
+        lines = textwrap.wrap(text, max(width - 2, 1))
+        return to_container(Frame(
+            Window(FormattedTextControl("\n".join(lines)), dont_extend_height=True),
+            title=self._title,
+            style="class:dialog.body",
+        ))
+
+    def _notice_in_app(self) -> Container | None:
+        size = get_app().output.get_size()
+        return self._notice(size.columns, size.rows)
+
+    @staticmethod
+    def _notice_rows(notice: Container, width: int) -> int:
+        """The notice's rows in a ``width``-column terminal."""
+        notice_width = min(notice.preferred_width(width).preferred, width)
+        return notice.preferred_height(notice_width, 1000).preferred
+
+    def _cap(self, width: int) -> int:
+        """The open dialog's rows in the app's terminal: rows(), as the
+        session reserves them. (``width``, the float's, is the dialog's own.)"""
+        size = get_app().output.get_size()
+        return self.rows(size.columns, size.rows)

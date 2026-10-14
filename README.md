@@ -171,6 +171,14 @@ idle prompt costs no CPU:
 - Text that can't say when it changes is re-read every 0.1 s while it's
   shown: a content callback passed to `start_thinking()`, and a prompt
   `message` or `status_text` given as a callable.
+- When the terminal gets narrower or shorter, the session repaints once
+  the size holds for 0.25 s: it clears the screen and scrollback and prints
+  the transcript again, as `set_theme(repaint=True)` does. A narrower
+  window re-wraps the UI's full-width rows and a shorter one pushes its top
+  into scrollback, so the old frame can't be erased row by row. Shell
+  output from before the session, anything printed outside it (plain
+  `print()`) and entries `history_limit` dropped don't come back. In
+  fullscreen the repaint waits for fullscreen exit.
 
 ### Long Content
 
@@ -362,7 +370,19 @@ A `Dialog` has no buttons unless you give it some, and it needs something
 to take keyboard focus: at least one button, or a focusable body (e.g. a
 `TextArea`, closed with Escape). Otherwise `show_dialog()` raises
 `ValueError`. Other options: `escape_result`, `escapable`, `width`, `top`,
-`height`.
+`max_height`.
+
+**Long content scrolls.** A dialog is never taller than the terminal (less
+the prompt's rows), nor than `max_height` rows if you pass it — counting the
+whole dialog: title, borders, buttons, hint. What doesn't fit scrolls: rows
+with a cursor (settings, lists, actions) follow the cursor, and a text body
+scrolls with PgUp/PgDn (and ↑↓ in a box). Every helper takes `max_height=`.
+
+**Small terminals.** A box dialog that can't fit the terminal at all
+(narrower than its buttons, or shorter than its frame, buttons and one body
+row) shows a short notice in its place, with the size it needs. Keys still
+reach the hidden dialog: Esc cancels it and Enter presses its focused button. It comes back as soon as the
+terminal is big enough.
 
 **Upgrading from 0.3:** `DialogConfig` and `BaseDialog` were removed.
 
@@ -373,11 +393,12 @@ to take keyboard focus: at least one button, or a focusable body (e.g. a
 | `get_buttons()` returning `("OK", handler)` | `ButtonConfig("OK", handler=handler)` |
 | `escape_result = _UNSET` | `escapable = False` |
 | `BaseDialog` subclass relying on its default OK button | `buttons = (ButtonConfig("OK"),)` |
+| `Dialog(height=N)`, `show_settings_dialog(height=N)` | `max_height=N`: the dialog sizes to its content, up to N rows |
 
 ### Inline dialogs
 
 Any dialog can also be drawn inline: rows under the prompt, above the status
-bar, instead of a box over the transcript. Its buttons become a numbered list:
+bar, in the rows a box dialog would take, but laid out as plain rows instead of a bordered box. Its buttons become a numbered list:
 
 ```
  Delete 3 files?
@@ -418,10 +439,12 @@ await session.show_settings_dialog("Settings", [
 ])
 ```
 
-Long text bodies are shown above the list at full height, clipped if taller
-than the space available (as in a box dialog); rows and actions scroll within
-12 rows, following the cursor. `width`, `top` and `height` apply to box
-dialogs only. Dialogs need a running session; to ask something before
+A long text body scrolls with PgUp/PgDn, and the hint line says so while it
+overflows; rows and actions scroll within 12 rows, following the cursor,
+unless `max_height` says otherwise. `width` and `top` apply to box dialogs
+only.
+
+Dialogs need a running session; to ask something before
 `run_async()` starts or after it ends, use prompt_toolkit's own `choice()`
 (prompt_toolkit 3.0.52 or later).
 
@@ -491,13 +514,25 @@ if result:
 
 **Navigation:** Up/Down moves between controls, Tab cycles through controls and buttons, Ctrl+S saves.
 
-**Fixed dialog height:** Pass `height=N` to `show_settings_dialog()` (or pass `height=` to a `Dialog`) to fix the dialog's total height. Body content that exceeds it scrolls within the dialog. The value is clamped to the terminal size; if the terminal is too small for the minimum dialog (12 rows), the dialog returns its escape result without opening.
+**Height:** pass `max_height=N` to cap the dialog at N rows; settings beyond
+it scroll with the cursor.
+
+**Aligning values:** values start two columns after the longest label or
+description (`align_values="labels"`, the default), so descriptions don't run
+under them; a description too long to leave room for the widest value still
+does. Check and radio lists, whose labels and descriptions sit on rows of
+their own, don't count. `align_values="right"` puts values at the row's right
+edge, and a number starts them at that column, cutting longer labels with `…`.
+When a row is short of width, its label is cut first (down to 3 columns), then
+a dropdown or text field gives up its padding, and only then is the value
+itself cut with `…`.
 
 ```python
 result = await session.show_settings_dialog(
     title="Settings",
     items=items,
-    height=15,
+    max_height=15,
+    align_values=24,
 )
 ```
 
@@ -596,7 +631,7 @@ colorless rendering regardless of theme, while keeping bold/italic.
 | 0.3 | 0.4 |
 |---|---|
 | `ThinkingPromptSession(styles=s)` | `ThinkingPromptSession(theme=s)` |
-| `show_settings_dialog(..., styles=...)`, `SettingsDialog(..., styles=...)` | Drop it (it was never applied). `width=`, `top=` and `height=` are now keyword-only. |
+| `show_settings_dialog(..., styles=...)`, `SettingsDialog(..., styles=...)` | Drop it (it was never applied). `width=`, `top=` and `max_height=` (which replaces `height=`) are keyword-only. |
 | `assistant_prefix`, `select_value`, `user_separator` | Removed: no component drew with them. |
 | `checkbox_mark` (styled nothing) | Now styles the `[x]` / `(•)` marks of check and radio lists. |
 

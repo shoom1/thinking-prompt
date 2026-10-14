@@ -507,7 +507,7 @@ class TestDialog:
         assert (d.title, d.body) == ("", "")
         assert d.get_buttons() == []
         assert (d.escape_result, d.escapable) == (None, True)
-        assert (d.width, d.top, d.height) == (None, None, None)
+        assert (d.width, d.top, d.max_height) == (None, None, None)
 
     def test_positional_title_body_buttons(self):
         buttons = [ButtonConfig("Yes", result=True)]
@@ -788,6 +788,35 @@ class TestPlacement:
         assert running_session._dialogs.inline_view is None
 
 
+class TestMaxHeight:
+    def test_replaces_height(self):
+        assert Dialog(max_height=12).max_height == 12
+        with pytest.raises(TypeError):
+            Dialog(height=12)  # type: ignore[call-arg]
+
+    @pytest.mark.parametrize("rows", [0, -3])
+    def test_must_be_at_least_one_row(self, rows):
+        with pytest.raises(ValueError, match="max_height"):
+            Dialog(max_height=rows)
+
+    def test_a_subclass_can_set_it(self):
+        class Short(Dialog):
+            max_height = 8
+
+        assert Short().max_height == 8
+
+    @pytest.mark.parametrize("placement", ["box", "inline"])
+    @pytest.mark.parametrize("build", [
+        lambda p, h: _yes_no_dialog("T", "B", placement=p, max_height=h),
+        lambda p, h: _message_dialog("T", "B", placement=p, max_height=h),
+        lambda p, h: _choice_dialog("T", "B", ["a"], placement=p, max_height=h),
+        lambda p, h: _dropdown_dialog("T", "B", ["a"], placement=p, max_height=h),
+        lambda p, h: _checklist_dialog("T", "B", ["a"], placement=p, max_height=h),
+    ], ids=["yes_no", "message", "choice", "dropdown", "checklist"])
+    def test_builders_pass_it_on(self, build, placement):
+        assert build(placement, 9).max_height == 9
+
+
 class TestHelperPlacement:
     """Every helper takes placement=; None means the session's dialog_placement."""
 
@@ -819,6 +848,18 @@ class TestHelperPlacement:
         await call(session)
         await call(session, placement="box")
         assert [d.placement for d in shown] == ["inline", "box"]
+
+    @pytest.mark.parametrize("call", [
+        lambda s, **kw: s.yes_no_dialog("T", "B", **kw),
+        lambda s, **kw: s.message_dialog("T", "B", **kw),
+        lambda s, **kw: s.choice_dialog("T", "B", ["a"], **kw),
+        lambda s, **kw: s.dropdown_dialog("T", "B", ["a"], **kw),
+        lambda s, **kw: s.checklist_dialog("T", "B", ["a"], **kw),
+    ], ids=["yes_no", "message", "choice", "dropdown", "checklist"])
+    async def test_max_height_passes_through(self, captured, call):
+        session, shown = captured()
+        await call(session, max_height=9)
+        assert [d.max_height for d in shown] == [9]
 
     async def test_invalid_placement_raises(self, captured):
         session, shown = captured()

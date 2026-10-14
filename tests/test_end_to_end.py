@@ -12,6 +12,7 @@ import threading
 from collections.abc import Awaitable, Iterator
 from contextlib import contextmanager
 from typing import Any, Callable
+from unittest.mock import patch
 
 import pytest
 from prompt_toolkit.application import create_app_session
@@ -25,6 +26,7 @@ from thinking_prompt import (
     CheckboxItem,
     ChecklistItem,
     Dialog,
+    DropdownItem,
     InlineSelectItem,
     RadioItem,
     TextItem,
@@ -41,21 +43,30 @@ ESCAPE = "\x1b"
 TAB = "\t"
 SHIFT_TAB = "\x1b[Z"
 DOWN = "\x1b[B"
+PGUP = "\x1b[5~"
+PGDN = "\x1b[6~"
 UP = "\x1b[A"
 RIGHT = "\x1b[C"
 
 
 class _ShortOutput(DummyOutput):
-    """A DummyOutput whose terminal is ``rows`` rows tall (DummyOutput: 40),
-    with ``below_cursor`` rows free under the prompt if given."""
+    """A DummyOutput whose terminal is ``rows`` rows tall (DummyOutput: 40)
+    and ``columns`` wide, with ``below_cursor`` rows free under the prompt
+    if given."""
 
-    def __init__(self, rows: int, below_cursor: int | None = None) -> None:
+    def __init__(self, rows: int, below_cursor: int | None = None, columns: int = 80) -> None:
         super().__init__()
         self._rows = rows
         self._below_cursor = below_cursor
+        self._columns = columns
+
+    def resize(self, *, rows: int | None = None, columns: int | None = None) -> None:
+        """Change the terminal's size; the next draw sees it."""
+        self._rows = self._rows if rows is None else rows
+        self._columns = self._columns if columns is None else columns
 
     def get_size(self) -> Size:
-        return Size(rows=self._rows, columns=80)
+        return Size(rows=self._rows, columns=self._columns)
 
     def get_rows_below_cursor_position(self) -> int:
         if self._below_cursor is None:
@@ -63,14 +74,32 @@ class _ShortOutput(DummyOutput):
         return self._below_cursor
 
 
+class _RecordingOutput(_ShortOutput):
+    """A _ShortOutput that keeps what's written to it, text and escapes."""
+
+    def __init__(self, rows: int, columns: int = 80) -> None:
+        super().__init__(rows, columns=columns)
+        self.written: list[str] = []
+
+    def write(self, data: str) -> None:
+        self.written.append(data)
+
+    def write_raw(self, data: str) -> None:
+        self.written.append(data)
+
+    def text(self) -> str:
+        """Everything written, "\\r" dropped."""
+        return "".join(self.written).replace("\r", "")
+
+
 @contextmanager
 def piped_session(
-    *, rows: int | None = None, below_cursor: int | None = None, **kwargs: Any
+    *, rows: int | None = None, below_cursor: int | None = None, columns: int = 80, **kwargs: Any
 ) -> Iterator[tuple[ThinkingPromptSession, PipeInput]]:
     """A session whose Application reads from a pipe and renders nowhere
-    (in a ``rows``-row terminal if given, with ``below_cursor`` rows free
+    (in a ``rows``-row, ``columns`` wide terminal if given, with ``below_cursor`` rows free
     under the prompt if given)."""
-    output = DummyOutput() if rows is None else _ShortOutput(rows, below_cursor)
+    output = DummyOutput() if rows is None else _ShortOutput(rows, below_cursor, columns)
     with create_pipe_input() as inp, create_app_session(input=inp, output=output):
         yield ThinkingPromptSession(**kwargs), inp
 
@@ -145,6 +174,30 @@ def record_dialog_frames(session: ThinkingPromptSession) -> list[list[str]]:
     return frames
 
 
+async def first_dialog_frame(
+    open_dialog: Callable[[ThinkingPromptSession], Any], **session_kwargs: Any
+) -> list[str]:
+    """The first frame drawn with the dialog that ``open_dialog`` opens; the
+    dialog is closed with Escape afterwards."""
+    closed: list[bool] = []
+
+    async def handler(text: str) -> None:
+        await open_dialog(session)
+        closed.append(True)
+
+    with piped_session(**session_kwargs) as (session, inp):
+        frames = record_dialog_frames(session)
+
+        async def script(run: asyncio.Task[None]) -> None:
+            inp.send_text("go" + ENTER)
+            await wait_until(lambda: len(frames) > 0)
+            inp.send_text(ESCAPE)
+            await wait_until(lambda: closed == [True])
+
+        await run_with(session, handler, script)
+    return frames[0]
+
+
 def prompt_and_status_rows(session: ThinkingPromptSession) -> tuple[int, int]:
     """The prompt's row and the status bar's row in the last rendered frame."""
     where = session.app.renderer.last_rendered_screen.visible_windows_to_write_positions
@@ -154,6 +207,13 @@ def prompt_and_status_rows(session: ThinkingPromptSession) -> tuple[int, int]:
     )
     status = next(w for w in where if w.style == "class:status")
     return where[prompt].ypos, where[status].ypos
+
+
+def inline_height(session: ThinkingPromptSession) -> int:
+    """The inline dialog's rows in the last frame: between the separator
+    under the prompt and the status bar."""
+    prompt, status = prompt_and_status_rows(session)
+    return status - prompt - 2
 
 
 def cursor_row(session: ThinkingPromptSession) -> str | None:
@@ -305,6 +365,21 @@ def on_screen(session: ThinkingPromptSession, text: str) -> bool:
     return any(text in line for line in screen_lines(session))
 
 
+def on_frame(frame: list[str], text: str) -> bool:
+    return any(text in line for line in frame)
+
+
+def box_height(lines: list[str]) -> int:
+    """The box dialog's rows in ``lines`` (screen_lines()): its top border to its bottom border."""
+    top = next(i for i, line in enumerate(lines) if "┌" in line)
+    bottom = max(i for i, line in enumerate(lines) if "┘" in line)
+    return bottom - top + 1
+
+
+def first_line_shown(session: ThinkingPromptSession) -> int | None:
+    """The first of "line 00", "line 01", ... on screen, or None."""
+    shown = [i for i in range(100) if on_screen(session, f"line {i:02}")]
+    return shown[0] if shown else None
 
 
 class TestRedraws:
@@ -862,10 +937,10 @@ class TestDialogsAtTheBottomOfTheTerminal:
         )
         assert self._shows(frame, "Select Theme", *self.OPTIONS, "OK", "Cancel"), frame
 
-    async def test_a_box_dialog_with_a_height_keeps_its_title(self):
+    async def test_a_box_dialog_with_a_max_height_keeps_its_title(self):
         body = "\n".join(f"line {i}" for i in range(30))
         frame = await self._first_frame(
-            lambda s: s.show_dialog(Dialog("Select Theme", body, [ButtonConfig("OK")], height=12))
+            lambda s: s.show_dialog(Dialog("Select Theme", body, [ButtonConfig("OK")], max_height=12))
         )
         assert self._shows(frame, "Select Theme", "line 0", "OK"), frame
 
@@ -899,6 +974,492 @@ class TestDialogsAtTheBottomOfTheTerminal:
                 assert prompt_and_status_rows(session) == (21, 23)
                 inp.send_text(ESCAPE)
                 await wait_until(lambda: closed == [True])
+
+            await run_with(session, handler, script)
+
+
+class TestBoxOverItsRoom:
+    """Outside full screen the box sits over the rows the session reserved
+    for it, between the prompt and the status bar, not centered over the
+    whole drawn area (which covered the status bar); full screen centers it."""
+
+    @staticmethod
+    def _rows(session: ThinkingPromptSession) -> tuple[list[str], int, int]:
+        frame = screen_lines(session)
+        prompt, status = prompt_and_status_rows(session)
+        return frame, prompt, status
+
+    async def _open_at_top(self, make_dialog: Callable[[ThinkingPromptSession], Any], **terminal: Any) -> tuple[list[str], int, int]:
+        """The frame with the dialog open, the prompt row and the status row."""
+        closed: list[bool] = []
+        seen: list[tuple[list[str], int, int]] = []
+
+        async def handler(text: str) -> None:
+            await make_dialog(session)
+            closed.append(True)
+
+        with piped_session(**terminal) as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                # dialog_rendered needs a focused window; a notice has none.
+                await wait_until(lambda: dialog_open(session) and any("┌" in line for line in screen_lines(session)))
+                seen.append(self._rows(session))
+                inp.send_text(ESCAPE)
+                await wait_until(lambda: closed == [True])
+
+            await run_with(session, handler, script)
+        return seen[0]
+
+    async def test_the_box_starts_on_the_rooms_first_row(self):
+        frame, prompt, status = await self._open_at_top(
+            lambda s: s.message_dialog("Hello", "Some text", placement="box"), rows=30
+        )
+        top = next(i for i, line in enumerate(frame) if "┌" in line)
+        assert top == prompt + 2, frame  # the row after the prompt's separator
+        assert max(i for i, line in enumerate(frame) if "┘" in line) < status
+        assert "Ctrl+C: cancel" in frame[status], frame
+
+    async def test_a_settings_form_leaves_the_status_bar_whole(self):
+        items = [CheckboxItem(key=f"s{i}", label=f"Setting {i}") for i in range(4)]
+        frame, prompt, status = await self._open_at_top(
+            lambda s: s.show_settings_dialog("Settings", items, placement="box"), rows=30
+        )
+        assert next(i for i, line in enumerate(frame) if "┌" in line) == prompt + 2, frame
+        assert frame[status].startswith("Ctrl+C: cancel") and "│" not in frame[status], frame
+
+    async def test_the_notice_takes_the_rooms_place_too(self):
+        frame, prompt, status = await self._open_at_top(
+            lambda s: s.yes_no_dialog("Delete files?", "This removes 3 files.", placement="box"),
+            rows=30, columns=16,
+        )
+        top = next(i for i, line in enumerate(frame) if "┌" in line)
+        assert top == prompt + 2, frame
+        assert any("Terminal too" in line for line in frame[top:status]), frame
+        assert "Ctrl+C" in frame[status] and "│" not in frame[status], frame
+
+    def _fullscreen_box_top(self, session: ThinkingPromptSession) -> tuple[int, int, int]:
+        frame = screen_lines(session)
+        top = next(i for i, line in enumerate(frame) if "┌" in line)
+        height = session.app.renderer.last_rendered_screen.height
+        return top, box_height(frame), height
+
+    async def test_full_screen_centers_the_box(self):
+        closed: list[bool] = []
+
+        async def handler(text: str) -> None:
+            await session.message_dialog("Hello", "Some text", placement="box")
+            closed.append(True)
+
+        with piped_session(rows=24, enable_fullscreen=True) as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                session.switch_to_fullscreen()
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                top, box, height = self._fullscreen_box_top(session)
+                assert top == (height - box) // 2, screen_lines(session)
+                inp.send_text(ESCAPE)
+                await wait_until(lambda: closed == [True])
+
+            await run_with(session, handler, script)
+
+    async def test_toggling_full_screen_moves_an_open_box(self):
+        closed: list[bool] = []
+
+        async def handler(text: str) -> None:
+            await session.message_dialog("Hello", "Some text", placement="box")
+            closed.append(True)
+
+        async def after_render(session: ThinkingPromptSession, change: Callable[[], None]) -> None:
+            before = session.app.render_counter
+            change()
+            await wait_until(lambda: session.app.render_counter > before)
+            await asyncio.sleep(0.05)
+
+        with piped_session(rows=30, enable_fullscreen=True) as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                prompt, _ = prompt_and_status_rows(session)
+                assert next(i for i, line in enumerate(screen_lines(session)) if "┌" in line) == prompt + 2
+                await after_render(session, session.switch_to_fullscreen)
+                top, box, height = self._fullscreen_box_top(session)
+                assert top == (height - box) // 2, screen_lines(session)
+                await after_render(session, session.switch_to_prompt)
+                prompt, _ = prompt_and_status_rows(session)
+                assert next(i for i, line in enumerate(screen_lines(session)) if "┌" in line) == prompt + 2
+                inp.send_text(ESCAPE)
+                await wait_until(lambda: closed == [True])
+
+            await run_with(session, handler, script)
+
+
+class TestBoxInASqueezedRoom:
+    """When the terminal leaves the reserved rows fewer than the box needs,
+    the box is centered as before, not flipped over the thinking box or the
+    status bar, nor squeezed into "Window too small"."""
+
+    @staticmethod
+    def _form() -> list[Any]:
+        return [CheckboxItem(key=f"s{i}", label=f"Setting {i}") for i in range(11)]
+
+    async def _frame_with(
+        self, make_dialog: Callable[[ThinkingPromptSession], Any], *, thought_lines: int = 0, **terminal: Any
+    ) -> tuple[list[str], int, int]:
+        """The settled frame with the dialog open, the prompt row and the status row."""
+        closed: list[bool] = []
+        seen: list[tuple[list[str], int, int]] = []
+
+        async def handler(text: str) -> None:
+            if thought_lines:
+                async with session.thinking() as ctx:
+                    ctx.append("\n".join(f"thought {i}" for i in range(thought_lines)))
+                    await make_dialog(session)
+            else:
+                await make_dialog(session)
+            closed.append(True)
+
+        with piped_session(**terminal) as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                # A notice has no focused window, so dialog_rendered can't hold.
+                await wait_until(lambda: dialog_open(session))
+                await asyncio.sleep(0.3)
+                seen.append((screen_lines(session), *prompt_and_status_rows(session)))
+                inp.send_text(ESCAPE * 2)
+                await wait_until(lambda: closed == [True])
+
+            await run_with(session, handler, script)
+        return seen[0]
+
+    @pytest.mark.parametrize("rows", [24, 30])
+    async def test_a_settings_form_in_a_thinking_box_is_drawn_whole(self, rows):
+        frame, prompt, status = await self._frame_with(
+            lambda s: s.show_settings_dialog("Settings", self._form(), placement="box"),
+            thought_lines=20, rows=rows,
+        )
+        text = "\n".join(frame)
+        assert all(f"Setting {i}" in text for i in range(11)), frame
+        top = next(i for i, line in enumerate(frame) if "┌" in line)
+        bottom = max(i for i, line in enumerate(frame) if "┘" in line)
+        assert top > 0 and bottom < status, frame
+        assert not any(line.strip() in ("^", "v", "▲", "▼") for line in frame), frame
+        assert frame[status].startswith("Ctrl+C"), frame
+
+    @pytest.mark.parametrize("rows", [5, 6])
+    async def test_a_message_dialog_in_a_tiny_terminal_is_not_too_small(self, rows):
+        frame, _, _ = await self._frame_with(
+            lambda s: s.message_dialog("Hello", "Some text", placement="box"), rows=rows
+        )
+        assert not any("Window too sm" in line for line in frame), frame
+
+    @pytest.mark.parametrize("rows", [7, 8, 9])
+    async def test_the_status_bar_stays_whole_in_a_short_terminal(self, rows):
+        frame, prompt, status = await self._frame_with(
+            lambda s: s.show_settings_dialog("Settings", self._form()[:2], placement="box"), rows=rows
+        )
+        assert frame[status].startswith("Ctrl+C") and "│" not in frame[status], frame
+
+
+class TestBoxMaxHeight:
+    """A box dialog is no taller than its max_height and the terminal (less
+    the prompt's rows); its body scrolls within that."""
+
+    TEXT = "\n".join(f"line {i:02}" for i in range(40))
+
+    async def test_stays_within_its_max_height(self):
+        frame = await first_dialog_frame(
+            lambda s: s.message_dialog("Long", self.TEXT, max_height=12, placement="box"), rows=40
+        )
+        assert box_height(frame) == 12
+        assert on_frame(frame, "line 00") and not on_frame(frame, "line 39")
+
+    async def test_fits_the_terminal_by_default(self):
+        frame = await first_dialog_frame(
+            lambda s: s.message_dialog("Long", self.TEXT, placement="box"), rows=24
+        )
+        assert box_height(frame) == 24 - 4
+
+    async def test_opens_in_a_tiny_terminal(self):
+        frame = await first_dialog_frame(
+            lambda s: s.message_dialog("Tiny", "hello", max_height=12, placement="box"), rows=8
+        )
+        assert on_frame(frame, "Tiny") and on_frame(frame, "hello")
+
+    @pytest.mark.parametrize("top", [8, -6])
+    async def test_offset_by_top_it_keeps_its_title_and_buttons(self, top):
+        """Placed rows from the top or bottom, a dialog too tall for the
+        rows left there is trimmed to them, its title and buttons kept."""
+        frame = await first_dialog_frame(
+            lambda s: s.show_dialog(
+                Dialog("Long", self.TEXT, [ButtonConfig("OK")], top=top, placement="box")
+            ),
+            rows=24,
+        )
+        shown = frame[:24]  # a float can draw past the terminal's last row, unseen
+        assert on_frame(shown, "Long") and on_frame(shown, "OK"), frame
+
+    async def test_a_settings_form_follows_the_cursor_within_its_max_height(self):
+        items = [CheckboxItem(key=f"s{i}", label=f"Setting {i:02}") for i in range(20)]
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.show_settings_dialog(
+                "Many", items, max_height=12, placement="box"
+            ))
+
+        with piped_session(rows=40) as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                assert not on_screen(session, "Setting 19")
+                inp.send_text(DOWN * 19)
+                await wait_until(lambda: on_screen(session, "❯ Setting 19"))
+                assert box_height(screen_lines(session)) == 12
+                inp.send_text(ESCAPE)
+                await wait_until(lambda: results == [None])
+
+            await run_with(session, handler, script)
+
+
+class TestBoxTextScrolling:
+    """A box dialog's text body scrolls with PgUp/PgDn and ↑↓ when it
+    doesn't fit; the focused button keeps the focus."""
+
+    TEXT = "\n".join(f"line {i:02}" for i in range(40))
+
+    async def _run(self, text: str, keys_script: Callable[[ThinkingPromptSession, PipeInput], Awaitable[None]]) -> None:
+        closed: list[bool] = []
+
+        async def handler(_: str) -> None:
+            await session.message_dialog("Long", text, max_height=12, placement="box")
+            closed.append(True)
+
+        with piped_session(rows=40) as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                assert first_line_shown(session) == 0
+                await keys_script(session, inp)
+                inp.send_text(ENTER)  # OK still has the focus
+                await wait_until(lambda: closed == [True])
+
+            await run_with(session, handler, script)
+
+    async def test_pagedown_and_pageup_page_through_the_text(self):
+        async def keys(session: ThinkingPromptSession, inp: PipeInput) -> None:
+            inp.send_text(PGDN)
+            await wait_until(lambda: (first_line_shown(session) or 0) > 1)
+            inp.send_text(PGUP)
+            await wait_until(lambda: first_line_shown(session) == 0)
+
+        await self._run(self.TEXT, keys)
+
+    async def test_arrows_scroll_a_line(self):
+        async def keys(session: ThinkingPromptSession, inp: PipeInput) -> None:
+            inp.send_text(DOWN)
+            await wait_until(lambda: first_line_shown(session) == 1)
+            inp.send_text(UP)
+            await wait_until(lambda: first_line_shown(session) == 0)
+
+        await self._run(self.TEXT, keys)
+
+    async def test_scrolling_stops_at_the_end(self):
+        async def keys(session: ThinkingPromptSession, inp: PipeInput) -> None:
+            inp.send_text(PGDN * 20)
+            await wait_until(lambda: on_screen(session, "line 39"))
+            first = first_line_shown(session)
+            inp.send_text(DOWN)
+            await asyncio.sleep(0.2)
+            assert on_screen(session, "line 39") and first_line_shown(session) == first
+
+        await self._run(self.TEXT, keys)
+
+    async def test_keys_do_nothing_when_the_text_fits(self):
+        async def keys(session: ThinkingPromptSession, inp: PipeInput) -> None:
+            inp.send_text(DOWN + PGDN)
+            await asyncio.sleep(0.3)
+            assert first_line_shown(session) == 0
+
+        await self._run("\n".join(f"line {i:02}" for i in range(3)), keys)
+
+    async def test_arrows_still_move_through_a_long_list(self):
+        """A body with cursor stops keeps its own ↑↓: here a radio list taller than the cap."""
+        options = [f"option {i:02}" for i in range(40)]
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.dropdown_dialog(
+                "Pick", "Pick one:", options, max_height=12, placement="box"
+            ))
+
+        with piped_session(rows=40) as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                inp.send_text(DOWN * 3 + ENTER + TAB + ENTER)  # option 03, then OK
+                await wait_until(lambda: results == ["option 03"])
+
+            await run_with(session, handler, script)
+
+
+class TestBoxLongLists:
+    """A box dialog's list taller than its cap scrolls with the cursor, and
+    the text above the list shows whenever the cursor is at the top."""
+
+    async def test_a_long_dropdown_keeps_its_question(self):
+        """A radio list scrolls itself: the dialog squeezes it under the
+        question, which stays put."""
+        options = [f"option {i:02}" for i in range(30)]
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.dropdown_dialog(
+                "Pick", "Which one?", options, placement="box"
+            ))
+
+        with piped_session(rows=24) as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                assert on_screen(session, "Which one?"), screen_lines(session)
+                assert not on_screen(session, "^^")  # one scrollbar, the list's
+                inp.send_text(DOWN * 29)
+                await wait_until(lambda: on_screen(session, "option 29"))
+                assert on_screen(session, "Which one?"), screen_lines(session)
+                inp.send_text(UP * 29)
+                await wait_until(lambda: on_screen(session, "option 00"))
+                assert on_screen(session, "Which one?"), screen_lines(session)
+                inp.send_text(DOWN * 3 + ENTER + TAB + ENTER)  # option 03, then OK
+                await wait_until(lambda: results == ["option 03"])
+
+            await run_with(session, handler, script)
+
+    async def test_a_long_check_list_shows_its_text_again_back_at_the_top(self):
+        options = [f"option {i:02}" for i in range(20)]
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.checklist_dialog(
+                "Tools", "Pick any of these", options, max_height=12, placement="box"
+            ))
+
+        with piped_session(rows=40) as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                assert on_screen(session, "Pick any of these")
+                inp.send_text(DOWN * 19)
+                await wait_until(lambda: on_screen(session, "❯ [ ] option 19"))
+                assert not on_screen(session, "Pick any of these")  # scrolled off
+                inp.send_text(UP * 19)
+                await wait_until(lambda: on_screen(session, "❯ [ ] option 00"))
+                assert on_screen(session, "Pick any of these"), screen_lines(session)
+                inp.send_text(ESCAPE)
+                await wait_until(lambda: results == [None])
+
+            await run_with(session, handler, script)
+
+
+class TestInlineMaxHeight:
+    """An inline dialog fits its max_height (and its text body the
+    terminal); its text scrolls with PgUp/PgDn."""
+
+    TEXT = "\n".join(f"line {i:02}" for i in range(40))
+
+    async def _message(self, text: str, rows: int, script_body, **kwargs: Any) -> None:
+        closed: list[bool] = []
+
+        async def handler(_: str) -> None:
+            await session.message_dialog("Long", text, placement="inline", **kwargs)
+            closed.append(True)
+
+        with piped_session(rows=rows) as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                await wait_until(lambda: cursor_row(session) == "❯ 1. OK")
+                await script_body(session, inp)
+                inp.send_text(ENTER)
+                await wait_until(lambda: closed == [True])
+
+            await run_with(session, handler, script)
+
+    async def test_stays_within_its_max_height(self):
+        async def check(session: ThinkingPromptSession, inp: PipeInput) -> None:
+            assert inline_height(session) == 12
+
+        await self._message(self.TEXT, 40, check, max_height=12)
+
+    async def test_a_text_fits_the_terminal_by_default(self):
+        async def check(session: ThinkingPromptSession, inp: PipeInput) -> None:
+            assert inline_height(session) <= 24 - 4
+            assert first_line_shown(session) == 0
+
+        await self._message(self.TEXT, 24, check)
+
+    async def test_pagedown_and_pageup_page_through_the_text(self):
+        async def keys(session: ThinkingPromptSession, inp: PipeInput) -> None:
+            await wait_until(lambda: on_screen(session, "PgUp/PgDn scroll"))
+            inp.send_text(PGDN)
+            await wait_until(lambda: (first_line_shown(session) or 0) > 1)
+            scrolled = first_line_shown(session)
+            inp.send_text(DOWN)  # inline, ↓ is the cursor's: one action, it stays
+            await asyncio.sleep(0.2)
+            assert first_line_shown(session) == scrolled
+            inp.send_text(PGUP)
+            await wait_until(lambda: first_line_shown(session) == 0)
+
+        await self._message(self.TEXT, 24, keys)
+
+    async def test_a_short_terminal_takes_the_blank_rows_first(self):
+        """In 8 rows, 4 for the dialog: its title, a text line, the action
+        and the hint, which says the text scrolls; no blank row."""
+
+        async def check(session: ThinkingPromptSession, inp: PipeInput) -> None:
+            await settled_renders(session)
+            prompt, status = prompt_and_status_rows(session)
+            rows = screen_lines(session)[prompt + 2:status]
+            assert rows[0] == "Long" and rows[1].startswith("line "), rows
+            assert rows[-2] == "❯ 1. OK" and "PgUp/PgDn scroll" in rows[-1], rows
+            assert "" not in rows, rows
+
+        await self._message(self.TEXT, 8, check)
+
+    async def test_the_hint_has_no_scroll_keys_when_the_text_fits(self):
+        async def check(session: ThinkingPromptSession, inp: PipeInput) -> None:
+            assert not on_screen(session, "PgUp/PgDn")
+
+        await self._message("just a line", 24, check)
+
+    async def test_a_settings_form_follows_the_cursor_within_its_max_height(self):
+        items = [CheckboxItem(key=f"s{i}", label=f"Setting {i:02}") for i in range(20)]
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.show_settings_dialog(
+                "Many", items, max_height=12, placement="inline"
+            ))
+
+        with piped_session(rows=40) as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                inp.send_text(DOWN * 20)
+                await wait_until(lambda: cursor_row(session) == "❯ 1. Save")
+                assert inline_height(session) == 12
+                inp.send_text(ESCAPE)
+                await wait_until(lambda: results == [None])
 
             await run_with(session, handler, script)
 
@@ -1266,8 +1827,8 @@ class TestInlineDialogs:
 
     async def test_a_long_text_body_is_drawn_in_full(self):
         """A text body has no cursor stops: it's drawn above the scrolling
-        region at full height (not cut to MAX_ROWS), and the actions below
-        it stay reachable."""
+        region, and when it fits the terminal it's drawn in full (not cut to
+        MAX_ROWS); the actions below it stay reachable."""
         body = [f"body line {i}" for i in range(1, 21)]
         results: list[Any] = []
 
@@ -1397,6 +1958,64 @@ class TestInlineDialogs:
 
 class TestInlineSettings:
     """The settings dialog inline: settings rows, then Save / Cancel, one cursor."""
+
+    async def test_values_sit_after_their_labels_in_a_wide_terminal(self):
+        items = [
+            CheckboxItem(key="stream", label="Stream", default=True),
+            TextItem(key="name", label="Name", default="bob"),
+        ]
+        frame = await first_dialog_frame(
+            lambda s: s.show_settings_dialog("Settings", items, placement="inline"),
+            rows=24, columns=120,
+        )
+        stream = next(line for line in frame if "Stream" in line)
+        name = next(line for line in frame if "Name" in line)
+        assert stream.index("true") - stream.index("Stream") == len("Stream") + 2
+        assert name.index("bob") - name.index("Name") == len("Stream") + 2
+
+    @pytest.mark.parametrize("placement", ["inline", "box"])
+    async def test_descriptions_end_before_the_values(self, placement):
+        items = [
+            DropdownItem(
+                key="theme", label="Theme", description="Application color scheme",
+                options=["Light", "System"], default="System", width=20,
+            ),
+            TextItem(key="name", label="Username", description="Your display name", default="Guest", edit_width=20),
+            CheckboxItem(
+                key="notify", label="Enable Notifications", description="Show desktop notifications", default=True,
+            ),
+        ]
+        frame = await first_dialog_frame(
+            lambda s: s.show_settings_dialog("Settings", items, placement=placement),
+            rows=24, columns=100,
+        )
+        # Descriptions start where labels do: each ends two columns short
+        # of the values, at least.
+        row = next(line for line in frame if "Username" in line)
+        label_to_value = row.index("Guest") - row.index("Username")
+        for description in ("Application color scheme", "Your display name", "Show desktop notifications"):
+            assert len(description) + 2 <= label_to_value, (description, frame)
+
+    @pytest.mark.parametrize("align", ["labels", "right"])
+    async def test_a_narrow_terminal_cuts_labels_and_keeps_every_value(self, align):
+        items = [
+            CheckboxItem(key="stream", label="Stream responses", default=True),
+            DropdownItem(key="model", label="Model for summaries", options=["gpt-4o", "o1"], default="o1"),
+            TextItem(key="name", label="Display name", default="bob"),
+        ]
+        frame = await first_dialog_frame(
+            lambda s: s.show_settings_dialog("Settings", items, placement="inline", align_values=align),
+            rows=24, columns=24,
+        )
+        rows = {
+            value: next(line.strip().lstrip("❯ ") for line in frame if line.strip().lstrip("❯ ").startswith(label))
+            for label, value in (("Stream", "true"), ("Model", "o1"), ("Dis", "bob"))
+        }
+        for value, row in rows.items():
+            assert value in row, row
+            label = row[: row.index(value)].replace("◀", "").strip()
+            assert label.endswith("…"), row  # cut where it didn't fit
+            assert len(label) >= 3, row  # and never below 3 columns
 
     @staticmethod
     def _items() -> list[Any]:
@@ -1572,6 +2191,187 @@ class TestInlineSettings:
             await run_with(session, handler, script)
 
 
+class TestSettingsInANarrowBox:
+    """At a value column too wide for a box's rows, values end at the rows'
+    right edge, and a text field being edited sits where its value was."""
+
+    async def test_editing_text_keeps_the_form_and_the_field_where_the_value_was(self):
+        items = [
+            TextItem(key="name", label="Name", default="bob"),
+            CheckboxItem(key="stream", label="Stream"),
+        ]
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.show_settings_dialog(
+                "Settings", items, width=40, align_values=30, placement="box"
+            ))
+
+        def from_the_right(text: str) -> int:
+            """How far from the end of its row ``text`` starts."""
+            line = next(line for line in screen_lines(session) if text in line)
+            return len(line) - line.index(text)
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                shown = from_the_right("bob")
+                inp.send_text(ENTER)
+                await wait_until(lambda: TestInlineSettings._editing(session))
+                await settled_renders(session)
+                assert on_screen(session, "Stream") and on_screen(session, "Save"), screen_lines(session)
+                assert from_the_right("bob") == shown
+                inp.send_text("by" + ENTER)
+                await wait_until(lambda: not TestInlineSettings._editing(session))
+                inp.send_text(CTRL_S)
+                await wait_until(lambda: results == [{"name": "bobby"}])
+
+            await run_with(session, handler, script)
+
+
+class TestBoxTooSmall:
+    """A box dialog whose smallest size doesn't fit the terminal draws a
+    notice in its place; the dialog stays open, with its keys."""
+
+    ITEMS = [
+        CheckboxItem(key="s", label="Stream responses", default=True),
+        DropdownItem(key="m", label="Model for summaries", options=["gpt-4o", "o1"], default="o1"),
+        TextItem(key="n", label="Display name", default="bob"),
+    ]
+
+    @staticmethod
+    def _text(frame: list[str]) -> str:
+        """The frame's words, rows joined, so a wrapped notice reads as one line."""
+        return " ".join(line.strip("│┌└┐┘─| ").strip() for line in frame)
+
+    async def _ask(self, make_dialog: Callable[[ThinkingPromptSession], Any], script_keys: Callable[..., Awaitable[None]], **terminal: Any) -> Any:
+        """Open the dialog ``make_dialog`` makes, in a terminal as ``terminal``
+        says; ``script_keys(session, inp, frames)`` runs once it's drawn."""
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await make_dialog(session))
+
+        with piped_session(**terminal) as (session, inp):
+            frames = record_dialog_frames(session)
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: len(frames) > 0)
+                await script_keys(session, inp, frames)
+                await wait_until(lambda: len(results) == 1)
+
+            await run_with(session, handler, script)
+        return results[0]
+
+    @staticmethod
+    def _yes_no(session: ThinkingPromptSession) -> Any:
+        return session.yes_no_dialog("Delete files?", "This removes 3 files.", placement="box")
+
+    async def test_a_narrow_terminal_shows_the_notice_not_the_collapsed_box(self):
+        shown: list[list[str]] = []
+
+        async def keys(session, inp, frames):
+            shown.append(frames[0])
+            inp.send_text(ESCAPE)
+
+        await self._ask(self._yes_no, keys, rows=24, columns=16)
+        text = self._text(shown[0])
+        assert "too small" in text and "27" in text and "Esc cancels" in text, shown[0]
+        assert "Delete" in text  # the title, clipped to the frame
+
+    async def test_escape_cancels_under_the_notice(self):
+        async def keys(session, inp, frames):
+            inp.send_text(ESCAPE)
+
+        assert await self._ask(self._yes_no, keys, rows=24, columns=16) is False
+
+    async def test_enter_presses_the_focused_button_under_the_notice(self):
+        async def keys(session, inp, frames):
+            inp.send_text(ENTER)
+
+        assert await self._ask(self._yes_no, keys, rows=24, columns=16) is True
+
+    async def test_the_dialog_stays_in_the_layout_under_the_notice(self):
+        """Tab and Left/Right between buttons only act on windows drawn, so
+        under the notice they do nothing. But the Dialog's own bindings and
+        its modality (a modal container above the button) are found through the layout's parent relations, which
+        must still reach the dialog from the focused button."""
+        found: list[bool] = []
+
+        async def keys(session, inp, frames):
+            assert "too small" in self._text(frames[0])
+            layout = session.app.layout
+            button = session._dialog_manager._box.view.buttons[0].window
+            parents = []
+            node = layout.get_parent(button)
+            while node is not None:
+                parents.append(node)
+                node = layout.get_parent(node)
+            found.append(any(p.is_modal() for p in parents))
+            inp.send_text(ESCAPE)
+
+        await self._ask(self._yes_no, keys, rows=24, columns=16)
+        assert found == [True]
+
+    async def test_a_dialog_that_ignores_escape_does_not_say_escape_cancels(self):
+        shown: list[list[str]] = []
+
+        def make(session):
+            return session.show_dialog(Dialog("Sure?", "Really?", [ButtonConfig("Yes", result=1)], escapable=False))
+
+        async def keys(session, inp, frames):
+            shown.append(frames[0])
+            inp.send_text(ENTER)
+
+        await self._ask(make, keys, rows=24, columns=10)
+        assert "too small" in self._text(shown[0]) and "Esc" not in self._text(shown[0])
+
+    async def test_a_short_terminal_shows_the_notice(self):
+        shown: list[list[str]] = []
+
+        def make(session):
+            return session.message_dialog("Note", "Saved.\nAll done.", placement="box")
+
+        async def keys(session, inp, frames):
+            shown.append(frames[0])
+            inp.send_text(ESCAPE)
+
+        await self._ask(make, keys, rows=3, columns=80)
+        text = self._text(shown[0])
+        assert "too small" in text and "×4" in text, shown[0]
+        assert "Saved." not in text and "OK" not in text
+
+    async def test_growing_the_terminal_brings_the_box_back(self):
+        grown: list[list[str]] = []
+
+        async def keys(session, inp, frames):
+            assert "too small" in self._text(frames[0])
+            session.app.output.resize(columns=80)
+            session.app.invalidate()
+            await wait_until(lambda: on_screen(session, "Yes"))
+            grown.append(screen_lines(session))
+            inp.send_text(ENTER)
+
+        assert await self._ask(self._yes_no, keys, rows=24, columns=16) is True
+        text = self._text(grown[0])
+        assert "This removes 3 files." in text and "Yes" in text and "No" in text
+        assert "too small" not in text
+
+    async def test_a_settings_form_in_a_narrow_box_shows_the_notice_then_fits_at_40(self):
+        for cols, small in [(24, True), (40, False)]:
+            frame = await first_dialog_frame(
+                lambda s: s.show_settings_dialog("Settings", self.ITEMS, placement="box"),
+                rows=14, columns=cols,
+            )
+            text = self._text(frame)
+            assert ("too small" in text) is small, frame
+            if not small:
+                assert "Stream responses" in text and "Save" in text and "Cancel" in text
+
+
 class TestChecklistDialog:
     async def test_inline(self):
         results: list[Any] = []
@@ -1610,5 +2410,193 @@ class TestChecklistDialog:
                 inp.send_text(" " + DOWN + " ")  # uncheck search, check code
                 inp.send_text(TAB + TAB + ENTER)  # files, then the OK button
                 await wait_until(lambda: results == [["code"]])
+
+            await run_with(session, handler, script)
+
+
+class TestBoxDropdownMenu:
+    """A box dropdown's menu opens under its own row and uses the terminal's room."""
+
+    @staticmethod
+    def _items() -> list[Any]:
+        return [
+            CheckboxItem(key="a", label="Stream"),
+            CheckboxItem(key="b", label="Verbose"),
+            DropdownItem(key="d", label="Model", options=["alpha", "beta", "gamma"], default="beta"),
+            CheckboxItem(key="c", label="Cache"),
+            CheckboxItem(key="e", label="Echo"),
+            CheckboxItem(key="f", label="Fast"),
+            CheckboxItem(key="g", label="Debug"),
+        ]
+
+    @pytest.mark.parametrize("align", ["labels", "right"])
+    async def test_the_menu_opens_under_its_own_row_showing_every_option(self, align):
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.show_settings_dialog(
+                "Settings", self._items(), placement="box", align_values=align
+            ))
+
+        with piped_session(rows=30) as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                inp.send_text(DOWN * 2 + ENTER)
+                await wait_until(lambda: on_screen(session, "alpha"))
+                lines = screen_lines(session)
+                (row,) = [i for i, line in enumerate(lines) if "❯ Model" in line]
+                assert "beta" in lines[row]  # its row isn't covered
+                assert "┌" in lines[row + 1]
+                value = lines[row].index("beta")
+                top = lines[row + 1]
+                assert top.index("┌") <= value < top.index("┐")  # under the value
+                menu = "\n".join(lines[row + 2:row + 5])
+                assert [name in menu for name in ("alpha", "beta", "gamma")] == [True] * 3
+                assert "└" in lines[row + 5]
+                inp.send_text(DOWN + ENTER)  # gamma
+                await wait_until(lambda: not on_screen(session, "alpha"))
+                inp.send_text(CTRL_S)
+                await wait_until(lambda: results == [{"d": "gamma"}])
+
+            await run_with(session, handler, script)
+
+    async def test_a_menu_with_more_options_than_fit_scrolls_and_picks_the_right_one(self):
+        options = [f"opt{i}" for i in range(10)]
+        items = [
+            CheckboxItem(key="a", label="Stream"),
+            CheckboxItem(key="b", label="Verbose"),
+            DropdownItem(key="d", label="Model", options=options, default="opt0", height=10),
+            CheckboxItem(key="c", label="Cache"),
+        ]
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.show_settings_dialog("Settings", items, placement="box"))
+
+        with piped_session(rows=14) as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                inp.send_text(DOWN * 2 + ENTER)
+                await wait_until(lambda: on_screen(session, "│opt0"))
+                frame = "\n".join(screen_lines(session))
+                assert "Window too small" not in frame
+                inp.send_text(DOWN * 6)
+                await wait_until(lambda: on_screen(session, "│opt6"))
+                frame = "\n".join(screen_lines(session))
+                assert "Window too small" not in frame
+                assert "│opt0" not in frame  # scrolled: the menu's first option is out of view
+                inp.send_text(ENTER)
+                await wait_until(lambda: not on_screen(session, "│opt"))  # the menu closed
+                inp.send_text(CTRL_S)
+                await wait_until(lambda: results == [{"d": "opt6"}])
+
+            await run_with(session, handler, script)
+
+
+class TestBoxMenuFloatsOnClose:
+    async def test_closing_a_dialog_with_its_menu_open_leaves_no_stale_float(self):
+        items = [DropdownItem(key="d", label="Model", options=["alpha", "beta"], default="beta")]
+        closed: list[bool] = []
+
+        async def handler(text: str) -> None:
+            await session.show_settings_dialog("Settings", items, placement="box")
+            closed.append(True)
+
+        with piped_session(rows=30) as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                inp.send_text(ENTER)
+                await wait_until(lambda: on_screen(session, "alpha"))
+                assert len(session.app.layout.container.floats) > 1
+                # Escape would only shut the menu: close the form under it.
+                session._dialogs._current_dialog.cancel()
+                await wait_until(lambda: closed == [True])
+                assert len(session.app.layout.container.floats) == 1
+                await wait_until(lambda: not on_screen(session, "alpha"))
+
+            await run_with(session, handler, script)
+
+
+class TestSessionRepaintsAfterShrinking:
+    """The session repaints (clears the screen and scrollback and prints
+    the transcript again) once the terminal stops shrinking."""
+
+    DELAY = 0.02
+
+    @classmethod
+    async def _resize(cls, fullscreen: bool = False, **size: int) -> tuple[int, bool]:
+        """Resize a running session's terminal (24x80) to ``size``; the
+        repaints that follow, and whether one waits for fullscreen exit."""
+
+        async def handler(text: str) -> None:
+            pass
+
+        with piped_session(rows=24, columns=80, enable_fullscreen=True) as (session, inp):
+            session._shrinks._delay = cls.DELAY
+            if fullscreen:
+                session.switch_to_fullscreen()
+            with patch.object(session, "_repaint_console") as repaint:
+
+                async def script(run: asyncio.Task[None]) -> None:
+                    renders = session.app.render_counter
+                    session.app.output.resize(**size)
+                    session.app.invalidate()
+                    await wait_until(lambda: session.app.render_counter > renders)
+                    # The repaint, if one was due, has happened.
+                    await wait_until(lambda: session._shrinks._handle is None)
+
+                await run_with(session, handler, script)
+            return repaint.call_count, session._repaint_on_fullscreen_exit
+
+    async def test_a_narrower_terminal_repaints(self):
+        assert await self._resize(columns=60) == (1, False)
+
+    async def test_a_shorter_terminal_repaints(self):
+        assert await self._resize(rows=12) == (1, False)
+
+    async def test_a_wider_terminal_does_not_repaint(self):
+        assert await self._resize(columns=100) == (0, False)
+
+    async def test_in_fullscreen_the_repaint_waits_for_fullscreen_exit(self):
+        assert await self._resize(fullscreen=True, columns=60) == (0, True)
+
+
+class TestRepaintWhileRunning:
+    """A repaint (set_theme(repaint=True), a shrink) of a running session is
+    one run_in_terminal job: the screen and scrollback cleared and the
+    transcript printed in one go."""
+
+    async def test_two_repaints_in_a_row_print_the_transcript_once(self):
+        output = _RecordingOutput(24)
+
+        async def handler(text: str) -> None:
+            pass
+
+        with create_pipe_input() as inp, create_app_session(input=inp, output=output):
+            session = ThinkingPromptSession()
+
+            async def script(run: asyncio.Task[None]) -> None:
+                for i in range(30):
+                    session.add_response(f"entry {i}")
+                await wait_until(lambda: "entry 29\n" in output.text())
+                renders = session.app.render_counter
+                session._repaint_console()
+                session._repaint_console()
+                session.add_response("after")  # printed behind both repaints
+                await wait_until(lambda: "after\n" in output.text())
+
+                text = output.text()
+                assert text.count("\x1b[3J") == 2
+                repainted = text[text.rindex("\x1b[3J"):]
+                assert [repainted.count(f"entry {i}\n") for i in range(30)] == [1] * 30
+                assert repainted.index("entry 29\n") < repainted.index("after\n")
+                # The UI is redrawn once a job, not once an entry.
+                assert session.app.render_counter - renders < 10
 
             await run_with(session, handler, script)

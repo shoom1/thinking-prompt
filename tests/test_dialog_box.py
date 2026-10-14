@@ -2,26 +2,20 @@
 from __future__ import annotations
 
 import asyncio
-import os
-from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 from prompt_toolkit.application import create_app_session
 from prompt_toolkit.input import create_pipe_input
-from prompt_toolkit.layout import FloatContainer, Window
+from prompt_toolkit.layout import FloatContainer, FormattedTextControl, HSplit, Window, to_container
+from prompt_toolkit.layout.layout import walk
 from prompt_toolkit.output import DummyOutput
-from prompt_toolkit.widgets import Button, Label
+from prompt_toolkit.widgets import Button, Label, RadioList
 
-from thinking_prompt import dialog_box
 from thinking_prompt.dialog import ButtonConfig, Dialog
-from thinking_prompt.dialog_box import (
-    MIN_DIALOG_HEIGHT,
-    TERMINAL_BUFFER_ROWS,
-    TERMINAL_TOO_SMALL,
-    BoxPresenter,
-    build_box,
-)
+from thinking_prompt.dialog_box import BoxPresenter, build_box
+from thinking_prompt.dialog_scroll import TERMINAL_BUFFER_ROWS, ScrollRegion
+from thinking_prompt.rows import OptionGroup
 
 
 def _resolved_style(window: Window) -> str:
@@ -51,6 +45,21 @@ class TestBuildBox:
         view = build_box(Dialog("T", "B", [ButtonConfig("One"), ButtonConfig("Two")]))
         assert view.focused_button is None
         assert view.initial_focus is None
+
+    def test_a_text_body_is_the_text_region(self):
+        view = build_box(Dialog("T", "Just text", [ButtonConfig("OK")]))
+        regions = [c for c in walk(to_container(view.widget)) if isinstance(c, ScrollRegion)]
+        assert len(regions) == 1
+        assert view.text_region is regions[0]
+
+    def test_a_body_with_a_cursor_stop_has_no_text_region(self):
+        body = Window(FormattedTextControl("pick", focusable=True))
+        view = build_box(Dialog("T", body, [ButtonConfig("OK")]))
+        assert view.text_region is None
+
+    def test_a_radio_list_body_has_no_text_region(self):
+        view = build_box(Dialog("T", RadioList([("a", "A"), ("b", "B")]), [ButtonConfig("OK")]))
+        assert view.text_region is None
 
     def test_button_style_is_added_to_the_button_window(self):
         view = build_box(Dialog("T", "B", [ButtonConfig("Danger", result=1, style="class:danger")]))
@@ -83,6 +92,23 @@ class TestBuildBox:
         with pytest.raises(TypeError, match=r"Use ButtonConfig\(label, handler=\.\.\.\)"):
             build_box(Old())
 
+    def test_the_body_scrolls_in_a_region(self):
+        view = build_box(Dialog("T", "B", [ButtonConfig("OK")]))
+        assert any(isinstance(c, ScrollRegion) for c in walk(to_container(view.widget)))
+
+    def test_a_list_that_scrolls_itself_is_not_in_a_region(self):
+        body = HSplit([Label("Pick:"), RadioList([("a", "A"), ("b", "B")])])
+        view = build_box(Dialog("T", body, [ButtonConfig("OK")]))
+        assert not any(isinstance(c, ScrollRegion) for c in walk(to_container(view.widget)))
+
+    def test_a_body_with_several_stops_scrolls_in_a_region(self):
+        group = OptionGroup(["a", "b"], multiple=True)
+        view = build_box(Dialog("T", HSplit([r.window for r in group.rows]), [ButtonConfig("OK")]))
+        assert any(isinstance(c, ScrollRegion) for c in walk(to_container(view.widget)))
+
+    def test_the_view_keeps_the_max_height(self):
+        assert build_box(Dialog("T", "B", [ButtonConfig("OK")], max_height=7)).max_height == 7
+
 
 class TestBoxPresenter:
     @staticmethod
@@ -102,27 +128,106 @@ class TestBoxPresenter:
     @pytest.mark.parametrize("top,expected", [(None, (None, None)), (2, (2, None)), (-1, (None, 1))])
     def test_open_positions_the_float_by_top(self, top, expected):
         presenter = self._presenter()
-        presenter.open(Dialog("T", "B", [ButtonConfig("OK")], top=top), None)
+        presenter.open(Dialog("T", "B", [ButtonConfig("OK")], top=top))
         assert (presenter._float.top, presenter._float.bottom) == expected
 
-    def test_open_pins_the_float_height_and_close_clears_the_view(self):
+    @staticmethod
+    def _long(**kwargs) -> Dialog:
+        return Dialog("T", "\n".join(f"line {i}" for i in range(30)), [ButtonConfig("OK")], **kwargs)
+
+    def test_open_sets_the_view_and_close_clears_it(self):
         presenter = self._presenter()
-        view = presenter.open(Dialog("T", "B", [ButtonConfig("OK")]), 15)
+        view = presenter.open(Dialog("T", "B", [ButtonConfig("OK")]))
         assert presenter.view is view
-        assert presenter._float.height == 15
         presenter.close()
         assert presenter.view is None
+        assert presenter.rows(80, 24) == 0
 
-    def test_effective_height_clamps_to_the_terminal(self, monkeypatch):
-        monkeypatch.setattr(dialog_box, "shutil", SimpleNamespace(get_terminal_size=lambda: os.terminal_size((80, 20))))
+    def test_rows_fit_the_terminal_less_the_prompts_rows(self):
         presenter = self._presenter()
-        assert presenter.effective_height(Dialog()) is None
-        assert presenter.effective_height(Dialog(height=10)) == 10
-        assert presenter.effective_height(Dialog(height=50)) == 20 - TERMINAL_BUFFER_ROWS
+        presenter.open(self._long())
+        assert presenter.rows(80, 24) == 24 - TERMINAL_BUFFER_ROWS
 
-    def test_effective_height_reports_a_terminal_that_is_too_small(self, monkeypatch):
-        rows = MIN_DIALOG_HEIGHT + TERMINAL_BUFFER_ROWS - 1
-        monkeypatch.setattr(dialog_box, "shutil", SimpleNamespace(get_terminal_size=lambda: os.terminal_size((80, rows))))
+    def test_rows_stop_at_max_height(self):
         presenter = self._presenter()
-        assert presenter.effective_height(Dialog(height=10)) is TERMINAL_TOO_SMALL
-        presenter._session.add_error.assert_called_once()
+        presenter.open(self._long(max_height=12))
+        assert presenter.rows(80, 24) == 12
+
+    def test_a_short_dialog_takes_its_own_rows(self):
+        presenter = self._presenter()
+        view = presenter.open(Dialog("T", "B", [ButtonConfig("OK")], max_height=12))
+        own = to_container(view.widget).preferred_height(80, 24).preferred
+        assert own < 12
+        assert presenter.rows(80, 24) == own
+
+    def test_rows_never_go_below_what_the_frame_and_one_body_row_need(self):
+        presenter = self._presenter()
+        view = presenter.open(self._long(max_height=2))
+        smallest = to_container(view.widget).preferred_height(80, 24).min
+        assert presenter.rows(80, 24) == smallest > 2
+
+
+class TestBoxTooSmall:
+    @staticmethod
+    def _open() -> tuple[BoxPresenter, Dialog]:
+        session = MagicMock()
+        session.app.layout.container = Window()
+        presenter = BoxPresenter(session)
+        dialog = Dialog("Delete files?", "Gone.", [ButtonConfig("Yes"), ButtonConfig("No")])
+        presenter.open(dialog)
+        return presenter, dialog
+
+    def test_rows_are_the_notices_while_the_box_is_too_narrow(self):
+        presenter, _ = self._open()
+        box = presenter.rows(80, 24)
+        assert box > 3
+        # The notice, wrapped to 14 columns inside its frame: 4 lines and 2 borders.
+        assert presenter.rows(16, 24) == 6
+        assert presenter.rows(80, 24) == box
+
+    def test_rows_are_the_notices_while_the_box_is_too_short(self):
+        presenter, _ = self._open()
+        assert presenter.rows(80, 3) == 3
+        assert presenter.rows(80, 24) > 3
+
+    def test_a_box_exactly_as_wide_as_it_needs_is_drawn(self):
+        presenter, _ = self._open()
+        needs_width, needs_rows = presenter._smallest(80, 24)
+        assert needs_width == 27
+        assert presenter._notice(needs_width, 24) is None
+        assert presenter._notice(needs_width - 1, 24) is not None
+
+    def test_a_box_exactly_as_tall_as_it_needs_is_drawn(self):
+        presenter, _ = self._open()
+        needs_width, needs_rows = presenter._smallest(80, 24)
+        assert needs_rows == 4
+        assert presenter._notice(80, needs_rows) is None
+        assert presenter._notice(80, needs_rows - 1) is not None
+        assert presenter.rows(80, needs_rows) == needs_rows
+        assert presenter.rows(80, needs_rows - 1) == needs_rows - 1
+
+
+class TestSmallestIsMeasuredOncePerDraw:
+    @staticmethod
+    def _counting() -> tuple[BoxPresenter, list]:
+        session = MagicMock()
+        session.app.layout.container = Window()
+        presenter = BoxPresenter(session)
+        presenter.open(Dialog("T", "B", [ButtonConfig("OK")]))
+        calls: list = []
+        measure = presenter._measure_smallest
+        presenter._measure_smallest = lambda w, r: (calls.append((w, r)), measure(w, r))[1]
+        return presenter, calls
+
+    def test_repeated_questions_in_one_render_measure_once(self):
+        presenter, calls = self._counting()
+        for _ in range(3):
+            presenter.rows(80, 24)
+        assert calls == [(80, 24)]
+
+    def test_another_terminal_size_measures_again(self):
+        presenter, calls = self._counting()
+        presenter.rows(80, 24)
+        presenter.rows(40, 24)
+        presenter.rows(40, 10)
+        assert calls == [(80, 24), (40, 24), (40, 10)]
