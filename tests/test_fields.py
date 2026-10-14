@@ -38,6 +38,7 @@ from thinking_prompt.fields import (
     OptionsFieldControl,
     SelectFieldControl,
     TextFieldControl,
+    _DropdownMenuControl,
     _RowValue,
     _ValueColumn,
 )
@@ -1366,3 +1367,28 @@ def test_the_settings_dialog_is_gone():
     assert not hasattr(thinking_prompt.ThinkingPromptSession, "show_settings_dialog")
     with pytest.raises(ImportError):
         importlib.import_module("thinking_prompt.settings_dialog")
+
+
+class TestDropdownMenuColumns:
+    WIDE = "日本語のオプションです"  # 11 characters, 22 columns
+
+    def _menu_rows(self, **field):
+        control = DropdownFieldControl(DropdownField("k", "Lang", **field))
+        width = control._get_dropdown_width()
+        content = _DropdownMenuControl(control).create_content(width, 4)
+        return width, [content.get_line(i) for i in range(content.line_count)]
+
+    def test_every_row_fills_the_menu_exactly_with_the_scrollbar_last(self):
+        width, rows = self._menu_rows(options=[self.WIDE, "short", "a", "b", "c", "d"], default="short")
+        for row in rows:
+            assert sum(get_cwidth(text) for _, text, *_ in row) == width
+            assert row[-1][0].startswith("class:scrollbar")
+
+    def test_a_cut_option_ends_in_an_ellipsis(self):
+        _, rows = self._menu_rows(options=[self.WIDE, "b"], default="b")
+        text = "".join(text for _, text, *_ in rows[0])
+        assert text.rstrip().endswith("…")
+
+    def test_auto_width_counts_columns(self):
+        control = DropdownFieldControl(DropdownField("k", "L", options=["日本語", "ab"], width=None))
+        assert control._get_dropdown_width() == 6 + 4

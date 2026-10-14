@@ -592,7 +592,7 @@ class DropdownFieldControl(FieldControl[DropdownField]):
         if item.width is not None:
             return item.width
         # Auto-size based on longest option
-        max_opt = max((len(opt) for opt in item.options), default=10)
+        max_opt = max((get_cwidth(opt) for opt in item.options), default=10)
         width = max_opt + 4  # Add padding for indicator
         if item.max_width is not None:
             width = min(width, item.max_width)
@@ -738,7 +738,8 @@ class _DropdownMenuControl(UIControl):
         for row, i in enumerate(range(offset, min(count, offset + height))):
             opt = options[i]
             style = "class:field-dropdown-selected" if i == selected else "class:field-dropdown-item"
-            text = opt[:text_width] if len(opt) > text_width else opt.ljust(text_width)
+            # Cut and padded in terminal columns: a wide character takes two.
+            text = _justify(_cut(opt, text_width), text_width, True)
             fragments = [(style, text)]
             if scrolls:
                 on_thumb = thumb_top <= row < thumb_top + thumb
