@@ -1081,6 +1081,34 @@ class TestBoxOverItsRoom:
 
             await run_with(session, handler, script)
 
+    async def test_full_screen_shares_the_rows_with_a_long_transcript(self):
+        items = [CheckboxItem(key=f"s{i}", label=f"Setting {i}") for i in range(11)]
+        closed: list[bool] = []
+
+        async def handler(text: str) -> None:
+            await session.show_settings_dialog("Settings", items, placement="box")
+            closed.append(True)
+
+        with piped_session(rows=24, enable_fullscreen=True) as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                for i in range(60):
+                    session.add_response(f"transcript line {i}")
+                session.switch_to_fullscreen()
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                prompt, status = prompt_and_status_rows(session)
+                frame = screen_lines(session)
+                assert next(i for i, line in enumerate(frame) if "┌" in line) == prompt + 2, frame
+                assert max(i for i, line in enumerate(frame) if "┘" in line) < status, frame
+                assert any("transcript line" in line for line in frame[:prompt]), frame
+                text = "\n".join(frame)
+                assert "Setting 0" in text and "Setting 10" not in text, frame  # it scrolls
+                inp.send_text(ESCAPE)
+                await wait_until(lambda: closed == [True])
+
+            await run_with(session, handler, script)
+
     async def test_toggling_full_screen_keeps_an_open_box_under_the_prompt(self):
         closed: list[bool] = []
 

@@ -109,6 +109,13 @@ class TestBuildBox:
     def test_the_view_keeps_the_max_height(self):
         assert build_box(Dialog("T", "B", [ButtonConfig("OK")], max_height=7)).max_height == 7
 
+    def test_a_width_never_makes_the_box_narrower_than_its_buttons(self):
+        """Two 12-column buttons, a column between them, and the frame."""
+        view = build_box(Dialog("T", "B", [ButtonConfig("Delete"), ButtonConfig("Cancel")], width=14))
+        assert to_container(view.widget).preferred_width(80).preferred == 12 + 1 + 12 + 2
+        wide = build_box(Dialog("T", "B", [ButtonConfig("OK")], width=40))
+        assert to_container(wide.widget).preferred_width(80).preferred == 40
+
 
 class TestBoxPresenter:
     @staticmethod
@@ -124,13 +131,6 @@ class TestBoxPresenter:
         root = presenter._session.app.layout.container
         assert isinstance(root, FloatContainer)
         assert not isinstance(root.content, FloatContainer)
-
-    def test_a_width_never_makes_the_box_narrower_than_its_buttons(self):
-        """Two 12-column buttons, a column between them, and the frame."""
-        view = build_box(Dialog("T", "B", [ButtonConfig("Delete"), ButtonConfig("Cancel")], width=14))
-        assert to_container(view.widget).preferred_width(80).preferred == 12 + 1 + 12 + 2
-        wide = build_box(Dialog("T", "B", [ButtonConfig("OK")], width=40))
-        assert to_container(wide.widget).preferred_width(80).preferred == 40
 
     @staticmethod
     def _long(**kwargs) -> Dialog:
@@ -206,6 +206,46 @@ class TestBoxTooSmall:
         assert presenter._notice(80, needs_rows - 1) is not None
         assert presenter.rows(80, needs_rows) == needs_rows
         assert presenter.rows(80, needs_rows - 1) == needs_rows - 1
+
+
+class TestBoxRoom:
+    """The box sits over its reserved rows, capped to the rows they got,
+    while those are at least its smallest height; fewer center it."""
+
+    @staticmethod
+    def _open(rows_got: int) -> tuple[BoxPresenter, Window, int]:
+        """A presenter with a dialog open over a room that got ``rows_got``
+        rows; the room, and the dialog's smallest height."""
+        session = MagicMock()
+        session.app.layout.container = Window()
+        room = Window()
+        session._box_room.return_value = (room, rows_got)
+        presenter = BoxPresenter(session)
+        presenter.open(Dialog("Delete files?", "Gone.", [ButtonConfig("Yes"), ButtonConfig("No")]))
+        size = DummyOutput().get_size()
+        return presenter, room, presenter._smallest(size.columns, size.rows)[1]
+
+    def test_its_smallest_height_is_enough(self):
+        _, _, least = self._open(0)
+        presenter, room, _ = self._open(least)
+        assert presenter._float.attach_to_window is room and presenter._float.ycursor
+        assert presenter._cap(80) == least
+
+    def test_fewer_rows_center_it(self):
+        _, _, least = self._open(0)
+        presenter, _, _ = self._open(least - 1)
+        assert presenter._float.attach_to_window is None and not presenter._float.ycursor
+        size = DummyOutput().get_size()
+        assert presenter._cap(80) == presenter.rows(size.columns, size.rows)
+
+    def test_one_draw_gets_one_answer(self):
+        """Asked for its anchor, its cursor flag and its cap in one draw,
+        the box answers alike, even if the terminal's size changes between."""
+        _, _, least = self._open(0)
+        presenter, room, _ = self._open(least)
+        assert presenter._float.attach_to_window is room
+        presenter._least_rows = lambda width, max_rows: least + 1  # the size changed mid-draw
+        assert presenter._float.ycursor and presenter._float.attach_to_window is room
 
 
 class TestSmallestIsMeasuredOncePerDraw:

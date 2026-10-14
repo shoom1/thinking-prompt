@@ -66,7 +66,7 @@ class BoxView:
 def build_box(dialog: Dialog) -> BoxView:
     """Build prompt_toolkit's Dialog widget for ``dialog``.
 
-    When the dialog is capped (BoxPresenter.rows), a body that is one window
+    When the dialog is capped (BoxPresenter._cap), a body that is one window
     taking the cursor (a radio list, a text field) is squeezed and scrolls
     itself. Any other body sits in a ScrollRegion: it scrolls with the
     cursor (settings rows, a check list), or by keys for a text body.
@@ -251,6 +251,11 @@ class BoxPresenter:
         # _smallest's last answer and the question it answered: asked several
         # times per draw, and measuring the whole body each time is slow.
         self._smallest_memo: tuple[tuple[int, int, int], tuple[int, int]] | None = None
+        # _room's last decision and the (render, room rows) it was for: the
+        # float asks for its anchor, its cursor flag and its cap in one
+        # draw, and must get one answer, even if the terminal is resized
+        # meanwhile.
+        self._room_memo: tuple[tuple[int, int], bool] | None = None
 
     def install(self) -> None:
         """Wrap the session's layout container in a FloatContainer (once)."""
@@ -268,6 +273,7 @@ class BoxPresenter:
         self._title = dialog.title
         self._escapable = dialog.escapable
         self._smallest_memo = None
+        self._room_memo = None
         self._capped = _BoxOrNotice(
             AtMost(to_container(view.widget), self._cap), self._notice_in_app
         )
@@ -289,6 +295,7 @@ class BoxPresenter:
                 self._root.floats.remove(fl)
         self.view = None
         self._smallest_memo = None
+        self._room_memo = None
         self._capped = Window()
 
     def rows(self, width: int, max_rows: int) -> int:
@@ -377,8 +384,11 @@ class BoxPresenter:
         room = self._session._box_room()
         if room is None or self.view is None:
             return None
-        size = get_app().output.get_size()
-        return room if room[1] >= self._least_rows(size.columns, size.rows) else None
+        key = (get_app().render_counter, room[1])
+        if self._room_memo is None or self._room_memo[0] != key:
+            size = get_app().output.get_size()
+            self._room_memo = (key, room[1] >= self._least_rows(size.columns, size.rows))
+        return room if self._room_memo[1] else None
 
     def _room_window(self) -> Window | None:
         room = self._room()

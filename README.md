@@ -401,7 +401,7 @@ terminal is big enough.
 | `escape_result = _UNSET` | `escapable = False` |
 | `BaseDialog` subclass relying on its default OK button | `buttons = (ButtonConfig("OK"),)` |
 | `Dialog(height=N)`, `show_settings_dialog(height=N)` | `max_height=N`: the dialog sizes to its content, up to N rows |
-| `Dialog(top=N)`, `show_settings_dialog(top=N)` | Drop it: a box sits under the prompt, where an inline dialog would |
+| `top` on a dialog subclass, `SettingsDialog(top=N)`, `show_settings_dialog(top=N)` | Drop it: a box sits under the prompt, where an inline dialog would (a subclass's `top` attribute is ignored) |
 
 ### Inline dialogs
 

@@ -145,9 +145,10 @@ class Dialog:
             None (default): the terminal's rows less the prompt's. Without
             it, an inline dialog also keeps its rows and actions within 12.
         placement: "box" (a framed dialog floating over the rows between
-            the prompt and the status bar, or centered when those are fewer
-            than it needs), "inline" (those rows themselves), or None
-            (default) for the session's ``dialog_placement``.
+            the prompt and the status bar, scrolling what doesn't fit, or
+            centered when those are fewer than its smallest size), "inline"
+            (those rows themselves), or None (default) for the session's
+            ``dialog_placement``.
 
     Example:
         # Built with arguments
@@ -497,7 +498,7 @@ class DialogManager:
 
     def box_rows(self, width: int, max_rows: int) -> int:
         """Rows the open box dialog takes; 0 when none is open. The session's
-        inline slot reserves them outside full screen."""
+        inline slot reserves them."""
         return self._box.rows(width, max_rows)
 
     def _create_key_bindings(self) -> KeyBindings:
