@@ -979,12 +979,17 @@ class OptionsFieldControl(FieldControl[Any]):
 
     def __init__(self, item: ChecklistField | RadioField) -> None:
         super().__init__(item)
+        # With no label and no description, just the options, not indented:
+        # a dialog's text stands in for the label (checklist_dialog).
+        self._labelled = bool(item.label or item.description)
+        indent = 2 if self._labelled else 0
         if isinstance(item, ChecklistField):
-            self._group = OptionGroup(item.options, multiple=True, selected=list(item.default), indent=2)
+            self._group = OptionGroup(item.options, multiple=True, selected=list(item.default), indent=indent)
         else:
             picked = [item.default] if item.default is not None else []
-            self._group = OptionGroup(item.options, multiple=False, selected=picked, indent=2)
-        self._container = HSplit([self._window, *(row.window for row in self._group.rows)])
+            self._group = OptionGroup(item.options, multiple=False, selected=picked, indent=indent)
+        rows = [row.window for row in self._group.rows]
+        self._container = HSplit([self._window, *rows] if self._labelled else rows)
 
     def preferred_width(self, max_available_width: int) -> int:
         """The label row's columns (and its description's); the option rows
@@ -1007,7 +1012,8 @@ class OptionsFieldControl(FieldControl[Any]):
 
     @property
     def row_count(self) -> int:
-        return super().row_count + len(self._group.rows)
+        label_rows = super().row_count if self._labelled else 0
+        return label_rows + len(self._group.rows)
 
     def is_focusable(self) -> bool:
         return False  # the label row; the option rows take focus

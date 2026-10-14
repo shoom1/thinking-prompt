@@ -864,6 +864,7 @@ class TestDialogsEndToEnd:
             async def script(run: asyncio.Task[None]) -> None:
                 inp.send_text("go" + ENTER)
                 await wait_until(lambda: dialog_rendered(session))
+                assert on_screen(session, "❯ (•) Dark"), screen_lines(session)
                 inp.send_text(DOWN + ENTER + TAB + ENTER)  # the one after "Dark", then OK
                 await wait_until(lambda: results == ["System"])
 
@@ -1263,9 +1264,9 @@ class TestBoxLongLists:
     """A box dialog's list taller than its cap scrolls with the cursor, and
     the text above the list shows whenever the cursor is at the top."""
 
-    async def test_a_long_dropdown_keeps_its_question(self):
-        """A radio list scrolls itself: the dialog squeezes it under the
-        question, which stays put."""
+    async def test_a_long_dropdown_shows_its_question_at_the_top(self):
+        """A radio list's question scrolls with its options, like a check
+        list's: it shows at the top and again back at the first option."""
         options = [f"option {i:02}" for i in range(30)]
         results: list[Any] = []
 
@@ -1280,12 +1281,11 @@ class TestBoxLongLists:
                 inp.send_text("go" + ENTER)
                 await wait_until(lambda: dialog_rendered(session))
                 assert on_screen(session, "Which one?"), screen_lines(session)
-                assert not on_screen(session, "^^")  # one scrollbar, the list's
+                assert not on_screen(session, "^^")  # one scrollbar
                 inp.send_text(DOWN * 29)
                 await wait_until(lambda: on_screen(session, "option 29"))
-                assert on_screen(session, "Which one?"), screen_lines(session)
                 inp.send_text(UP * 29)
-                await wait_until(lambda: on_screen(session, "option 00"))
+                await wait_until(lambda: on_screen(session, "❯ (•) option 00"))
                 assert on_screen(session, "Which one?"), screen_lines(session)
                 inp.send_text(DOWN * 3 + ENTER + TAB + ENTER)  # option 03, then OK
                 await wait_until(lambda: results == ["option 03"])
@@ -2335,7 +2335,7 @@ class TestChecklistDialog:
                 inp.send_text("go" + ENTER)
                 await wait_until(lambda: dialog_rendered(session))
                 inp.send_text(" " + DOWN + " ")  # uncheck search, check code
-                inp.send_text(TAB + TAB + ENTER)  # files, then the OK button
+                inp.send_text(TAB + ENTER)  # Tab leaves the list: the OK button
                 await wait_until(lambda: results == [["code"]])
 
             await run_with(session, handler, script)

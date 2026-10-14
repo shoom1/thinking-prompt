@@ -51,14 +51,13 @@ from prompt_toolkit.formatted_text import AnyFormattedText
 from prompt_toolkit.key_binding import KeyBindings, merge_key_bindings
 from prompt_toolkit.layout import AnyContainer, Container, Float, HSplit, to_container
 from prompt_toolkit.layout.containers import is_container
-from prompt_toolkit.widgets import Label, RadioList
+from prompt_toolkit.widgets import Label
 
 from ._text import format_exception_detail
 from .dialog_box import BoxPresenter
 from .dialog_inline import InlinePresenter, InlineView
 from .dialog_scroll import ScrollRegion, focusable_windows
-from .fields import AlignValues, Field, _check_align_values, _Form
-from .rows import OptionGroup, RowNavigator
+from .fields import AlignValues, ChecklistField, Field, RadioField, _check_align_values, _Form
 from .types import Placement, check_placement
 
 if TYPE_CHECKING:
@@ -444,7 +443,7 @@ def _dropdown_dialog(
 ) -> Dialog:
     """Pick one option; Cancel and Escape return None.
 
-    Box: a radio list with OK / Cancel. Inline: one numbered action per
+    Box: a radio list field with OK / Cancel; Tab goes from the list to OK. Inline: one numbered action per
     option. Either way the cursor starts on ``default``.
     """
     if not options:
@@ -458,16 +457,19 @@ def _dropdown_dialog(
             max_height=max_height,
         )
 
-    # default= also puts the cursor there (setting current_value afterwards
-    # left it on the first option); one that isn't an option picks the first.
-    radio: RadioList[str] = RadioList(values=[(opt, opt) for opt in options], default=default)
-
+    # One option picked: the default, or the first when there's none (or
+    # it isn't an option). The cursor starts on it.
+    picked = default if default in options else options[0]
     dialog = Dialog(
-        title, HSplit([Label(text=text), radio]), placement="box", max_height=max_height
+        title,
+        text,
+        fields=[RadioField("choice", "", options=list(options), default=picked)],
+        placement="box",
+        max_height=max_height,
     )
     # Buttons set after construction: OK's handler needs the dialog itself.
     dialog.buttons = [
-        ButtonConfig("OK", handler=lambda: dialog.set_result(radio.current_value)),
+        ButtonConfig("OK", handler=lambda: dialog.set_result(dialog.values["choice"])),
         ButtonConfig("Cancel"),
     ]
     return dialog
@@ -485,18 +487,16 @@ def _checklist_dialog(
     (in option order), Cancel and Escape None."""
     if not options:
         raise ValueError("checklist_dialog() needs at least one option")
-    group = OptionGroup(options, multiple=True, selected=defaults)
-    rows = [row.window for row in group.rows]
-    # A box dialog's buttons take Tab, so the rows get their own ↑↓; inline,
-    # the dialog's cursor walks the rows and the actions alike.
-    navigation = RowNavigator(lambda: rows).key_bindings() if placement == "box" else None
-    option_list = HSplit(rows, key_bindings=navigation)
-    body = HSplit([Label(text=text), option_list]) if text else option_list
-
-    dialog = Dialog(title, body, placement=placement, max_height=max_height)
+    dialog = Dialog(
+        title,
+        text,
+        fields=[ChecklistField("checked", "", options=list(options), default=tuple(defaults))],
+        placement=placement,
+        max_height=max_height,
+    )
     # Buttons set after construction: OK's handler needs the dialog itself.
     dialog.buttons = [
-        ButtonConfig("OK", handler=lambda: dialog.set_result(group.checked)),
+        ButtonConfig("OK", handler=lambda: dialog.set_result(dialog.values["checked"])),
         ButtonConfig("Cancel"),
     ]
     return dialog
@@ -704,6 +704,10 @@ class DialogManager:
                 self._session.app.layout.focus(target)
             except ValueError as exc:
                 raise ValueError(_nothing_to_focus(dialog)) from exc
+            # Keys typed before the first render find the dialog's key
+            # bindings (set on containers, not controls) through the parent
+            # links, which prompt_toolkit only refreshes when it redraws.
+            self._session.app.layout.update_parents_relations()
             self._session.app.invalidate()
 
             # Wait for result. If the app exits first, nobody can answer the

@@ -1447,3 +1447,17 @@ class TestAutoWidth:
         d = _checklist_dialog("T", "Pick:", [option, "b"])
         d._placement = "box"
         assert to_container(build_box(d).widget).preferred_width(200).preferred >= 2 + 3 + 1 + len(option)
+
+
+class TestUnlabelledLists:
+    def test_no_label_or_description_is_just_the_options_not_indented(self):
+        control = OptionsFieldControl(ChecklistField("t", "", options=["a", "b"]))
+        rows = [row.window for row in control._group.rows]
+        assert control.get_container().children == rows
+        assert control.row_count == 2
+        assert all(row.indent == 0 for row in control._group.rows)
+
+    def test_a_description_alone_keeps_the_label_row(self):
+        control = OptionsFieldControl(ChecklistField("t", "", description="d", options=["a"]))
+        assert control.row_count == 3
+        assert control._group.rows[0].indent == 2
