@@ -110,7 +110,7 @@ class _NotPassed:
 
 # Dialog() leaves an option at its class default unless the argument is
 # passed. None can't mark "not passed": it's a meaningful value for
-# escape_result, width, top and max_height.
+# escape_result, width and max_height.
 _NOT_PASSED = _NotPassed()
 
 
@@ -137,19 +137,18 @@ class Dialog:
             closed with Escape).
         escape_result: What Escape and cancel() return (default None).
         escapable: If False, Escape does nothing (default True).
-        width: None/0 = auto, >0 = preferred width, -1 = full width (box only).
-        top: Box only. None: outside full screen, under the prompt over the
-            rows reserved for it above the status bar (centered when those
-            are squeezed); centered in full screen. >=0: rows from the top.
-            <0: rows from the bottom.
+        width: None/0 = auto, >0 = preferred width (never narrower than
+            the buttons), -1 = full width (box only).
         max_height: The most rows the dialog takes, all of it counted (a
             box's border, title and buttons; an inline dialog's title,
             body, actions and hint); content that doesn't fit scrolls.
             None (default): the terminal's rows less the prompt's. Without
             it, an inline dialog also keeps its rows and actions within 12.
-        placement: "box" (a framed dialog floating over the session),
-            "inline" (rows between the prompt and the status bar), or None
-            (default) for the session's ``dialog_placement``.
+        placement: "box" (a framed dialog floating over the rows between
+            the prompt and the status bar, scrolling what doesn't fit, or
+            centered when those are fewer than its smallest size), "inline"
+            (those rows themselves), or None (default) for the session's
+            ``dialog_placement``.
 
     Example:
         # Built with arguments
@@ -188,7 +187,6 @@ class Dialog:
     escape_result: Any = None
     escapable: bool = True
     width: int | None = None
-    top: int | None = None
     # The most rows the dialog takes; what doesn't fit scrolls. None: the
     # terminal's rows less the prompt's.
     max_height: int | None = None
@@ -204,7 +202,6 @@ class Dialog:
         escape_result: Any = _NOT_PASSED,
         escapable: bool | _NotPassed = _NOT_PASSED,
         width: int | None | _NotPassed = _NOT_PASSED,
-        top: int | None | _NotPassed = _NOT_PASSED,
         max_height: int | None | _NotPassed = _NOT_PASSED,
         placement: Placement | None | _NotPassed = _NOT_PASSED,
     ) -> None:
@@ -218,7 +215,6 @@ class Dialog:
             "escape_result": escape_result,
             "escapable": escapable,
             "width": width,
-            "top": top,
             "max_height": max_height,
             "placement": placement,
         }
@@ -502,7 +498,7 @@ class DialogManager:
 
     def box_rows(self, width: int, max_rows: int) -> int:
         """Rows the open box dialog takes; 0 when none is open. The session's
-        inline slot reserves them outside full screen."""
+        inline slot reserves them."""
         return self._box.rows(width, max_rows)
 
     def _create_key_bindings(self) -> KeyBindings:

@@ -1125,7 +1125,6 @@ class SettingsDialog(Dialog):
         can_cancel: bool = True,
         *,
         width: int | None = 60,
-        top: int | None = None,
         max_height: int | None = None,
         align_values: AlignValues = "labels",
         placement: Placement | None = None,
@@ -1136,7 +1135,7 @@ class SettingsDialog(Dialog):
         # escape_result stays the default None, so nothing but a dict or None
         # can come back from show_settings_dialog().
         super().__init__(
-            title, width=width, top=top, max_height=max_height, escapable=can_cancel, placement=placement
+            title, width=width, max_height=max_height, escapable=can_cancel, placement=placement
         )
         self._items = items
         self._can_cancel = can_cancel

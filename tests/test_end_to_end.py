@@ -958,7 +958,7 @@ class TestDialogsAtTheBottomOfTheTerminal:
         )
         assert self._shows(frame, "Select Theme", *self.OPTIONS), frame
 
-    async def test_full_screen_reserves_no_rows_for_a_box_dialog(self):
+    async def test_full_screen_reserves_rows_for_a_box_dialog_too(self):
         closed: list[bool] = []
 
         async def handler(text: str) -> None:
@@ -971,7 +971,10 @@ class TestDialogsAtTheBottomOfTheTerminal:
                 session.switch_to_fullscreen()
                 inp.send_text("go" + ENTER)
                 await wait_until(lambda: dialog_rendered(session))
-                assert prompt_and_status_rows(session) == (21, 23)
+                prompt, status = prompt_and_status_rows(session)
+                frame = screen_lines(session)
+                assert next(i for i, line in enumerate(frame) if "┌" in line) == prompt + 2, frame
+                assert status == 23 and frame[status].startswith("Ctrl+C"), frame
                 inp.send_text(ESCAPE)
                 await wait_until(lambda: closed == [True])
 
@@ -979,9 +982,10 @@ class TestDialogsAtTheBottomOfTheTerminal:
 
 
 class TestBoxOverItsRoom:
-    """Outside full screen the box sits over the rows the session reserved
-    for it, between the prompt and the status bar, not centered over the
-    whole drawn area (which covered the status bar); full screen centers it."""
+    """The box sits over the rows the session reserved for it, between the
+    prompt and the status bar, where an inline dialog would be, in and out
+    of full screen; not centered over the whole drawn area (which covered
+    the status bar, or the prompt)."""
 
     @staticmethod
     def _rows(session: ThinkingPromptSession) -> tuple[list[str], int, int]:
@@ -1038,13 +1042,24 @@ class TestBoxOverItsRoom:
         assert any("Terminal too" in line for line in frame[top:status]), frame
         assert "Ctrl+C" in frame[status] and "│" not in frame[status], frame
 
-    def _fullscreen_box_top(self, session: ThinkingPromptSession) -> tuple[int, int, int]:
-        frame = screen_lines(session)
-        top = next(i for i, line in enumerate(frame) if "┌" in line)
-        height = session.app.renderer.last_rendered_screen.height
-        return top, box_height(frame), height
+    async def test_a_multi_line_prompt_keeps_its_lines(self):
+        """Two lines more of prompt leave a tall form fewer rows than the
+        terminal less 4: it takes the rows it gets, under the prompt."""
+        items = [
+            CheckboxItem(key=f"s{i}", label=f"Setting {i}", description=f"About {i}") for i in range(11)
+        ]
+        frame, _, status = await self._open_at_top(
+            lambda s: s.show_settings_dialog("Settings", items, placement="box"),
+            rows=24, message="line one\nline two\n>>> ",
+        )
+        last_prompt_line = next(i for i, line in enumerate(frame) if line.startswith(">>>"))
+        assert next(i for i, line in enumerate(frame) if "┌" in line) == last_prompt_line + 2, frame
+        for text in ("line one", "line two", ">>>"):
+            (line,) = [line for line in frame if text in line]
+            assert "│" not in line and "┌" not in line, frame
+        assert frame[status].startswith("Ctrl+C") and "│" not in frame[status], frame
 
-    async def test_full_screen_centers_the_box(self):
+    async def test_full_screen_puts_the_box_under_the_prompt_too(self):
         closed: list[bool] = []
 
         async def handler(text: str) -> None:
@@ -1057,14 +1072,44 @@ class TestBoxOverItsRoom:
                 session.switch_to_fullscreen()
                 inp.send_text("go" + ENTER)
                 await wait_until(lambda: dialog_rendered(session))
-                top, box, height = self._fullscreen_box_top(session)
-                assert top == (height - box) // 2, screen_lines(session)
+                prompt, status = prompt_and_status_rows(session)
+                frame = screen_lines(session)
+                assert next(i for i, line in enumerate(frame) if "┌" in line) == prompt + 2, frame
+                assert max(i for i, line in enumerate(frame) if "┘" in line) < status, frame
                 inp.send_text(ESCAPE)
                 await wait_until(lambda: closed == [True])
 
             await run_with(session, handler, script)
 
-    async def test_toggling_full_screen_moves_an_open_box(self):
+    async def test_full_screen_shares_the_rows_with_a_long_transcript(self):
+        items = [CheckboxItem(key=f"s{i}", label=f"Setting {i}") for i in range(11)]
+        closed: list[bool] = []
+
+        async def handler(text: str) -> None:
+            await session.show_settings_dialog("Settings", items, placement="box")
+            closed.append(True)
+
+        with piped_session(rows=24, enable_fullscreen=True) as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                for i in range(60):
+                    session.add_response(f"transcript line {i}")
+                session.switch_to_fullscreen()
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                prompt, status = prompt_and_status_rows(session)
+                frame = screen_lines(session)
+                assert next(i for i, line in enumerate(frame) if "┌" in line) == prompt + 2, frame
+                assert max(i for i, line in enumerate(frame) if "┘" in line) < status, frame
+                assert any("transcript line" in line for line in frame[:prompt]), frame
+                text = "\n".join(frame)
+                assert "Setting 0" in text and "Setting 10" not in text, frame  # it scrolls
+                inp.send_text(ESCAPE)
+                await wait_until(lambda: closed == [True])
+
+            await run_with(session, handler, script)
+
+    async def test_toggling_full_screen_keeps_an_open_box_under_the_prompt(self):
         closed: list[bool] = []
 
         async def handler(text: str) -> None:
@@ -1077,19 +1122,20 @@ class TestBoxOverItsRoom:
             await wait_until(lambda: session.app.render_counter > before)
             await asyncio.sleep(0.05)
 
+        def box_under_prompt(session: ThinkingPromptSession) -> bool:
+            prompt, _ = prompt_and_status_rows(session)
+            return next(i for i, line in enumerate(screen_lines(session)) if "┌" in line) == prompt + 2
+
         with piped_session(rows=30, enable_fullscreen=True) as (session, inp):
 
             async def script(run: asyncio.Task[None]) -> None:
                 inp.send_text("go" + ENTER)
                 await wait_until(lambda: dialog_rendered(session))
-                prompt, _ = prompt_and_status_rows(session)
-                assert next(i for i, line in enumerate(screen_lines(session)) if "┌" in line) == prompt + 2
+                assert box_under_prompt(session), screen_lines(session)
                 await after_render(session, session.switch_to_fullscreen)
-                top, box, height = self._fullscreen_box_top(session)
-                assert top == (height - box) // 2, screen_lines(session)
+                assert box_under_prompt(session), screen_lines(session)
                 await after_render(session, session.switch_to_prompt)
-                prompt, _ = prompt_and_status_rows(session)
-                assert next(i for i, line in enumerate(screen_lines(session)) if "┌" in line) == prompt + 2
+                assert box_under_prompt(session), screen_lines(session)
                 inp.send_text(ESCAPE)
                 await wait_until(lambda: closed == [True])
 
@@ -1097,9 +1143,10 @@ class TestBoxOverItsRoom:
 
 
 class TestBoxInASqueezedRoom:
-    """When the terminal leaves the reserved rows fewer than the box needs,
-    the box is centered as before, not flipped over the thinking box or the
-    status bar, nor squeezed into "Window too small"."""
+    """When the rest of the layout takes rows from the box's (a thinking
+    box), the box takes the rows it got and scrolls the rest, as an inline
+    dialog does. Only rows fewer than its smallest size center it, never
+    flipped over the status bar nor squeezed into "Window too small"."""
 
     @staticmethod
     def _form() -> list[Any]:
@@ -1136,18 +1183,20 @@ class TestBoxInASqueezedRoom:
         return seen[0]
 
     @pytest.mark.parametrize("rows", [24, 30])
-    async def test_a_settings_form_in_a_thinking_box_is_drawn_whole(self, rows):
+    async def test_a_settings_form_shares_the_rows_with_a_thinking_box(self, rows):
         frame, prompt, status = await self._frame_with(
             lambda s: s.show_settings_dialog("Settings", self._form(), placement="box"),
             thought_lines=20, rows=rows,
         )
-        text = "\n".join(frame)
-        assert all(f"Setting {i}" in text for i in range(11)), frame
         top = next(i for i, line in enumerate(frame) if "┌" in line)
         bottom = max(i for i, line in enumerate(frame) if "┘" in line)
-        assert top > 0 and bottom < status, frame
-        assert not any(line.strip() in ("^", "v", "▲", "▼") for line in frame), frame
+        assert top == prompt + 2 and bottom < status, frame
         assert frame[status].startswith("Ctrl+C"), frame
+        # The thinking box keeps its newest lines in view above the prompt...
+        assert any(line.startswith("thought 19") for line in frame[:prompt]), frame
+        # ...and the form scrolls in the rows left to it.
+        text = "\n".join(frame)
+        assert "Setting 0" in text and "Setting 10" not in text, frame
 
     @pytest.mark.parametrize("rows", [5, 6])
     async def test_a_message_dialog_in_a_tiny_terminal_is_not_too_small(self, rows):
@@ -1189,18 +1238,16 @@ class TestBoxMaxHeight:
         )
         assert on_frame(frame, "Tiny") and on_frame(frame, "hello")
 
-    @pytest.mark.parametrize("top", [8, -6])
-    async def test_offset_by_top_it_keeps_its_title_and_buttons(self, top):
-        """Placed rows from the top or bottom, a dialog too tall for the
-        rows left there is trimmed to them, its title and buttons kept."""
+    async def test_a_width_narrower_than_its_buttons_still_shows_them(self):
         frame = await first_dialog_frame(
-            lambda s: s.show_dialog(
-                Dialog("Long", self.TEXT, [ButtonConfig("OK")], top=top, placement="box")
-            ),
+            lambda s: s.show_dialog(Dialog(
+                "Delete files?", "This removes 3 files.",
+                [ButtonConfig("Delete", result=True), ButtonConfig("Cancel", result=False)],
+                width=14, placement="box",
+            )),
             rows=24,
         )
-        shown = frame[:24]  # a float can draw past the terminal's last row, unseen
-        assert on_frame(shown, "Long") and on_frame(shown, "OK"), frame
+        assert on_frame(frame, "This removes") and on_frame(frame, "Delete") and on_frame(frame, "Cancel"), frame
 
     async def test_a_settings_form_follows_the_cursor_within_its_max_height(self):
         items = [CheckboxItem(key=f"s{i}", label=f"Setting {i:02}") for i in range(20)]

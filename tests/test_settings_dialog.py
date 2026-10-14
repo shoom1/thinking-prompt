@@ -553,9 +553,9 @@ class TestSettingsDialogIsADialog:
     def test_options_pass_through_to_dialog(self):
         from thinking_prompt.dialog import Dialog
 
-        d = SettingsDialog(title="S", items=[], width=40, top=1, max_height=15, can_cancel=False)
+        d = SettingsDialog(title="S", items=[], width=40, max_height=15, can_cancel=False)
         assert isinstance(d, Dialog)
-        assert (d.title, d.width, d.top, d.max_height, d.escapable) == ("S", 40, 1, 15, False)
+        assert (d.title, d.width, d.max_height, d.escapable) == ("S", 40, 15, False)
 
     @pytest.mark.parametrize(
         "can_cancel,labels", [(True, ["Save", "Cancel"]), (False, ["Done"])]
@@ -571,7 +571,7 @@ class TestSettingsDialogIsADialog:
 class TestSettingsDialogOptions:
     """0.4 removes styles= (it was never read) and makes the layout options
     keyword-only: before 0.4 the fourth positional was styles, so a stale
-    positional call must fail instead of shifting into width/top/max_height."""
+    positional call must fail instead of shifting into width/max_height."""
 
     def test_styles_is_gone(self):
         with pytest.raises(TypeError, match="styles"):
@@ -598,16 +598,23 @@ class TestSettingsDialogOptions:
 
     async def test_session_helper_passes_options_through(self, capturing_session):
         session, shown = capturing_session
-        await session.show_settings_dialog("S", [], False, width=40, top=1, max_height=15, align_values=24)
+        await session.show_settings_dialog("S", [], False, width=40, max_height=15, align_values=24)
 
         (dialog,) = shown
         assert dialog._align_values == 24
-        assert (dialog.title, dialog.width, dialog.top, dialog.max_height) == ("S", 40, 1, 15)
+        assert (dialog.title, dialog.width, dialog.max_height) == ("S", 40, 15)
         assert dialog.escapable is False
 
     def test_height_is_gone(self):
         with pytest.raises(TypeError):
             SettingsDialog(title="S", items=[], height=15)
+
+    async def test_top_is_gone(self, capturing_session):
+        session, _ = capturing_session
+        with pytest.raises(TypeError, match="top"):
+            SettingsDialog(title="S", items=[], top=1)
+        with pytest.raises(TypeError, match="top"):
+            await session.show_settings_dialog("S", [], top=1)
 
     async def test_session_helper_rejects_height(self, capturing_session):
         session, shown = capturing_session

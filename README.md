@@ -369,8 +369,15 @@ subclass.
 A `Dialog` has no buttons unless you give it some, and it needs something
 to take keyboard focus: at least one button, or a focusable body (e.g. a
 `TextArea`, closed with Escape). Otherwise `show_dialog()` raises
-`ValueError`. Other options: `escape_result`, `escapable`, `width`, `top`,
-`max_height`.
+`ValueError`. Other options: `escape_result`, `escapable`, `width` (box
+only; never narrower than the buttons), `max_height`.
+
+**Where a box sits.** Under the prompt, above the status bar: where an inline
+dialog would be, in and out of full screen. When the rest of the screen takes
+rows (a thinking box, a longer prompt, the transcript in full screen), the box
+shares them as an inline dialog does: it takes the rows it gets and scrolls
+the rest. Only when those are fewer than its title, one row and its buttons
+need is it centered over the screen.
 
 **Long content scrolls.** A dialog is never taller than the terminal (less
 the prompt's rows), nor than `max_height` rows if you pass it — counting the
@@ -394,6 +401,7 @@ terminal is big enough.
 | `escape_result = _UNSET` | `escapable = False` |
 | `BaseDialog` subclass relying on its default OK button | `buttons = (ButtonConfig("OK"),)` |
 | `Dialog(height=N)`, `show_settings_dialog(height=N)` | `max_height=N`: the dialog sizes to its content, up to N rows |
+| `top` on a dialog subclass, `SettingsDialog(top=N)`, `show_settings_dialog(top=N)` | Drop it: a box sits under the prompt, where an inline dialog would (a subclass's `top` attribute is ignored) |
 
 ### Inline dialogs
 
@@ -441,8 +449,7 @@ await session.show_settings_dialog("Settings", [
 
 A long text body scrolls with PgUp/PgDn, and the hint line says so while it
 overflows; rows and actions scroll within 12 rows, following the cursor,
-unless `max_height` says otherwise. `width` and `top` apply to box dialogs
-only.
+unless `max_height` says otherwise. `width` applies to box dialogs only.
 
 Dialogs need a running session; to ask something before
 `run_async()` starts or after it ends, use prompt_toolkit's own `choice()`
@@ -631,7 +638,7 @@ colorless rendering regardless of theme, while keeping bold/italic.
 | 0.3 | 0.4 |
 |---|---|
 | `ThinkingPromptSession(styles=s)` | `ThinkingPromptSession(theme=s)` |
-| `show_settings_dialog(..., styles=...)`, `SettingsDialog(..., styles=...)` | Drop it (it was never applied). `width=`, `top=` and `max_height=` (which replaces `height=`) are keyword-only. |
+| `show_settings_dialog(..., styles=...)`, `SettingsDialog(..., styles=...)` | Drop it (it was never applied). `width=` and `max_height=` (which replaces `height=`) are keyword-only. |
 | `assistant_prefix`, `select_value`, `user_separator` | Removed: no component drew with them. |
 | `checkbox_mark` (styled nothing) | Now styles the `[x]` / `(•)` marks of check and radio lists. |
 
