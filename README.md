@@ -436,7 +436,8 @@ tools = await session.checklist_dialog(
 await session.show_dialog(Dialog("Settings", fields=[
     ChecklistField("tools", "Tools", options=["search", "code"]),
     RadioField("mode", "Mode", options=["fast", "careful"], default="fast"),
-], buttons=[ButtonConfig("Done")]))```
+], buttons=[ButtonConfig("Done")]))
+```
 
 A long text body scrolls with PgUp/PgDn, and the hint line says so while it
 overflows; rows and actions scroll within 12 rows, following the cursor,
