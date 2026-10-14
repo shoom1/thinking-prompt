@@ -75,7 +75,7 @@ def build_box(dialog: Dialog) -> BoxView:
     When the dialog is capped (BoxPresenter._cap), a body that is one window
     taking the cursor (a radio list, a text field) is squeezed and scrolls
     itself. Any other body sits in a ScrollRegion: it scrolls with the
-    cursor (settings rows, a check list), or by keys for a text body.
+    cursor (form fields, a check list), or by keys for a text body.
     """
     content, start = dialog._content()
     if content is None:
@@ -119,13 +119,13 @@ def build_box(dialog: Dialog) -> BoxView:
         with_background=False,  # Use styled dialog, no light overlay
     )
     return BoxView(
-        widget,
-        buttons,
-        focused,
-        dialog.max_height,
-        text_region,
-        dialog._screen_floats(),
-        start,
+        widget=widget,
+        buttons=buttons,
+        focused_button=focused,
+        max_height=dialog.max_height,
+        text_region=text_region,
+        floats=dialog._screen_floats(),
+        start=start,
     )
 
 

@@ -2561,6 +2561,63 @@ class TestDialogFields:
 
             await run_with(session, handler, script)
 
+    async def test_tab_during_a_text_edit_keeps_the_edit(self):
+        dialog = Dialog(
+            "T",
+            fields=[TextField("user", "Username"), TextField("pw", "Password")],
+            placement="box",
+        )
+        dialog.buttons = [ButtonConfig("OK", handler=lambda: dialog.set_result(dialog.values))]
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.show_dialog(dialog))
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                inp.send_text(ENTER + "bob")         # edit the first field
+                await wait_until(lambda: on_screen(session, "bob"))
+                inp.send_text(TAB)                   # ignored while editing
+                inp.send_text(ENTER)                 # keep
+                await wait_until(lambda: not dialog._is_editing())
+                inp.send_text(TAB + TAB + ENTER)     # Password, then OK
+                await wait_until(lambda: results == [{"user": "bob", "pw": ""}])
+
+            await run_with(session, handler, script)
+
+    async def test_tab_with_a_menu_open_keeps_it_open(self):
+        dialog = Dialog(
+            "T",
+            fields=[DropdownField("d", "Model", options=["alpha", "beta"], default="alpha")],
+            width=40,
+            placement="box",
+        )
+        dialog.buttons = [ButtonConfig("OK", handler=lambda: dialog.set_result(dialog.values))]
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.show_dialog(dialog))
+
+        with piped_session(rows=30) as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                inp.send_text(ENTER)                 # open the menu
+                await wait_until(lambda: on_screen(session, "│beta"))
+                inp.send_text(TAB + SHIFT_TAB)
+                await asyncio.sleep(0.1)
+                assert dialog._is_editing() and on_screen(session, "│beta")
+                inp.send_text(DOWN + ENTER)          # beta
+                await wait_until(lambda: not dialog._is_editing())
+                inp.send_text(TAB + ENTER)
+                await wait_until(lambda: results == [{"d": "beta"}])
+
+            await run_with(session, handler, script)
+
     async def test_a_text_area_above_the_fields_keeps_its_keys(self):
         area = TextArea(multiline=False)
         dialog = Dialog("T", area, fields=[CheckboxField("on", "On")], placement="box")

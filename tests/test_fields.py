@@ -41,6 +41,7 @@ from thinking_prompt.fields import (
     SelectFieldControl,
     TextFieldControl,
     _DropdownMenuControl,
+    _EditRow,
     _RowValue,
     _ValueColumn,
 )
@@ -96,6 +97,46 @@ def _press(kb, key, app) -> None:
 
 
 class TestDialogFields:
+    def test_a_dialog_closed_mid_edit_does_not_reopen_editing(self):
+        d = Dialog("T", fields=[TextField("name", "Name", default="bob")])
+        _shown(d)
+        (control,) = d._form.controls
+        control.enter_edit_mode()
+        control._buffer.text = "changed"
+        assert d._is_editing()
+        d._content()                      # shown again
+        assert not d._is_editing()
+        assert d.values == {"name": "bob"}
+
+    def test_a_dialog_closed_with_a_menu_open_restores_its_value(self):
+        d = Dialog("T", fields=[DropdownField("m", "Model", options=["a", "b"], default="a")])
+        _shown(d)
+        (control,) = d._form.controls
+        control.enter_edit_mode()
+        control._selected_index = 1
+        d._content()
+        assert not d._is_editing()
+        assert d.values == {"m": "a"}
+
+    def test_a_text_fields_edit_row_is_as_wide_as_its_view_row(self):
+        d = Dialog("T", fields=[
+            TextField("a", "A", description="a long description that pushes the value column"),
+            TextField("b", "Bb"),
+        ], align_values="labels")
+        _shown(d)
+        control = d._form.controls[0]
+        assert control._column(100) > control._value_column.least   # pushed by the description
+        row = _EditRow(control, control._buffer_window)
+        assert row.preferred_width(100).preferred == (
+            control._value_column.least + control.item.edit_width + 1
+        )
+
+    def test_a_late_bad_align_values_fails_at_show(self):
+        d = Dialog("T", fields=[CheckboxField("c", "C")])
+        d.align_values = "left"
+        with pytest.raises(ValueError, match="align_values"):
+            _shown(d)
+
     def test_values_in_field_order(self):
         d = Dialog("T", fields=[
             TextField("name", "Name", default="bob"),
@@ -227,6 +268,9 @@ class TestDialogFields:
             assert layout.has_focus(tools._group.rows[0].window)
             _press(content.key_bindings, Keys.BackTab, app)     # the first field stays
             assert layout.has_focus(tools._group.rows[0].window)
+            _press(content.key_bindings, Keys.Down, app)
+            _press(content.key_bindings, Keys.BackTab, app)     # so does its second option
+            assert layout.has_focus(tools._group.rows[1].window)
 
     def test_tab_crosses_from_a_body_into_the_fields_and_back(self):
         area = TextArea()
@@ -772,7 +816,7 @@ class TestSettingsRows:
         from thinking_prompt.fields import CheckboxFieldControl
 
         control = CheckboxFieldControl(CheckboxField(key="s", label="Stream"))
-        (row,) = control._build_setting_row(40, _RowValue("true", "", 4), True)
+        (row,) = control._build_row(40, _RowValue("true", "", 4), True)
         assert row[0] == ("class:field-indicator", "❯ ")
 
     def test_inline_dropdown_is_a_selector_without_a_popup(self):

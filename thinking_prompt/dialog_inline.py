@@ -4,7 +4,7 @@ Inline presentation of dialogs: rows between the prompt and the status bar.
 A title, the body, one numbered row per button (ActionRow) and a key hint,
 with one cursor (RowNavigator) over the body's rows and the actions. The
 rows share the dialog's cap (_Sizes): the actions, and a body with cursor
-stops (settings rows, a check list, a text field), scroll in one region
+stops (form fields, a check list, a text field), scroll in one region
 that follows the cursor; a body without (text) scrolls in its own region
 above them, with PgUp/PgDn.
 """

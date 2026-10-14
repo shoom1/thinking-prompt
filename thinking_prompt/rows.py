@@ -2,8 +2,8 @@
 Dialog rows: focusable one-line controls that one cursor walks.
 
 Inline dialogs are made of rows: numbered actions (ActionRow), check and
-radio options (OptionRow) and the settings dialog's controls. Box dialogs use
-the same rows for check lists and settings forms. RowNavigator moves the
+radio options (OptionRow) and the form fields' controls. Box dialogs use
+the same rows for check lists and form fields. RowNavigator moves the
 cursor between them.
 """
 from __future__ import annotations

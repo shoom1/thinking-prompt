@@ -274,6 +274,15 @@ class TestBuiltinDialogs:
         assert isinstance(control.item, RadioField) and control.item.label == ""
         assert start is control._group.rows[1].window
 
+    @pytest.mark.parametrize("default", [None, "Blue"])
+    def test_box_dropdown_without_a_valid_default_starts_on_the_first_option(self, default):
+        d = _dropdown_dialog("Theme", "Select:", ["Light", "Dark"], default=default)
+        d._placement = "box"
+        _, start = d._content()
+        (control,) = d._form.controls
+        assert start is control._group.rows[0].window
+        assert d.values == {control.item.key: "Light"}
+
 
 # =============================================================================
 # DialogManager Tests

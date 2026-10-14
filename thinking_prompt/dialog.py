@@ -239,7 +239,7 @@ class Dialog:
         self._result_future: asyncio.Future | None = None
         self._manager: DialogManager | None = None
         # The placement this dialog is (or was last) shown with, resolved by
-        # DialogManager; build_body() may read it (the settings dialog does).
+        # DialogManager; _content() lays the fields out for it.
         self._placement: Placement = "box"
 
     def build_body(self) -> AnyContainer:
@@ -271,6 +271,7 @@ class Dialog:
         first thing in the body that takes focus, else the first field's
         start (a radio list's picked option); None for neither.
         """
+        _check_align_values(self.align_values)
         body = to_container(self.build_body()) if self._has_body() else None
         fields = self._form.container(self._placement, self.align_values)
         body_stops = focusable_windows(body) if body is not None else []
@@ -443,8 +444,9 @@ def _dropdown_dialog(
 ) -> Dialog:
     """Pick one option; Cancel and Escape return None.
 
-    Box: a radio list field with OK / Cancel; Tab goes from the list to OK. Inline: one numbered action per
-    option. Either way the cursor starts on ``default``.
+    Box: a radio list field with OK / Cancel; Tab goes from the list to OK.
+    Inline: one numbered action per option. Either way the cursor starts on
+    ``default``.
     """
     if not options:
         raise ValueError("dropdown_dialog() needs at least one option")
@@ -505,7 +507,7 @@ def _checklist_dialog(
 def _nothing_to_focus(dialog: Dialog) -> str:
     return (
         f"Dialog {dialog.title!r} has nothing to focus: give it a "
-        "button (buttons=[ButtonConfig(...)]) or a focusable body."
+        "button (buttons=[ButtonConfig(...)]), fields, or a focusable body."
     )
 
 
@@ -691,8 +693,10 @@ class DialogManager:
             target: AnyContainer | None
             if placement == "box":
                 box = self._box.open(dialog)
-                # A ButtonConfig(focused=True) button, else the first
-                # focusable element of the dialog.
+                # A ButtonConfig(focused=True) button, else where the body's
+                # cursor starts (its first focusable window, else the first
+                # field; a radio list's picked option), else the widget's
+                # first focusable element (a button).
                 target = box.initial_focus or box.widget
             else:
                 target = self._inline.open(dialog).focus

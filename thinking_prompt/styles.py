@@ -414,7 +414,7 @@ class ThinkingPromptStyles:
             'text-area': r("text_area"),
             'select-arrow': r("select_arrow"),
             'checkbox-mark': r("checkbox_mark"),
-            # Settings list
+            # Form fields
             'field-indicator': r("field_indicator"),
             'field-label': r("field_label"),
             'field-label-selected': r("field_label_selected"),
