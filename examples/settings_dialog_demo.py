@@ -7,9 +7,9 @@ import asyncio
 from thinking_prompt import (
     ThinkingPromptSession,
     AppInfo,
-    DropdownItem,
-    CheckboxItem,
-    TextItem,
+    DropdownField,
+    CheckboxField,
+    TextField,
 )
 
 
@@ -45,20 +45,20 @@ async def main():
             result = await session.show_settings_dialog(
                 title="Settings",
                 items=[
-                    DropdownItem(
+                    DropdownField(
                         key="model",
                         label="Model",
                         description="Select the AI model to use",
                         options=["gpt-4", "gpt-4-turbo", "gpt-3.5-turbo"],
                         default=current_settings["model"],
                     ),
-                    CheckboxItem(
+                    CheckboxField(
                         key="stream",
                         label="Stream Output",
                         description="Enable streaming for real-time responses",
                         default=current_settings["stream"],
                     ),
-                    TextItem(
+                    TextField(
                         key="api_key",
                         label="API Key",
                         description="Your OpenAI API key (stored securely)",

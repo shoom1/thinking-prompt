@@ -8,11 +8,11 @@ import asyncio
 
 from thinking_prompt import (
     AppInfo,
-    CheckboxItem,
-    ChecklistItem,
-    DropdownItem,
-    RadioItem,
-    TextItem,
+    CheckboxField,
+    ChecklistField,
+    DropdownField,
+    RadioField,
+    TextField,
     ThinkingPromptSession,
 )
 
@@ -51,13 +51,13 @@ async def main() -> None:
             session.add_response(f"checklist_dialog -> {tools}")
         elif command == "settings":
             result = await session.show_settings_dialog("Settings", [
-                DropdownItem(key="model", label="Model", options=["small", "medium", "large"],
+                DropdownField(key="model", label="Model", options=["small", "medium", "large"],
                              default="medium"),
-                CheckboxItem(key="stream", label="Stream output", default=True),
-                TextItem(key="name", label="Name", default=""),
-                ChecklistItem(key="tools", label="Tools", options=["search", "code"],
+                CheckboxField(key="stream", label="Stream output", default=True),
+                TextField(key="name", label="Name", default=""),
+                ChecklistField(key="tools", label="Tools", options=["search", "code"],
                               default=("search",)),
-                RadioItem(key="mode", label="Mode", options=["fast", "careful"], default="fast"),
+                RadioField(key="mode", label="Mode", options=["fast", "careful"], default="fast"),
             ])
             session.add_response(f"show_settings_dialog -> {result}")
         elif command == "box":

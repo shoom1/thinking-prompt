@@ -15,29 +15,29 @@ from prompt_toolkit.layout.screen import Screen, WritePosition
 from prompt_toolkit.output import DummyOutput
 from prompt_toolkit.utils import get_cwidth
 
-from thinking_prompt.settings_dialog import (
-    CheckboxControl,
-    CheckboxItem,
-    ChecklistItem,
-    DropdownControl,
-    DropdownItem,
-    InlineSelectControl,
-    InlineSelectItem,
-    OptionsControl,
-    SettingsDialog,
-    TextControl,
-    TextItem,
+from thinking_prompt.fields import (
+    CheckboxFieldControl,
+    CheckboxField,
+    ChecklistField,
+    DropdownFieldControl,
+    DropdownField,
+    SelectFieldControl,
+    SelectField,
+    OptionsFieldControl,
+    TextFieldControl,
+    TextField,
     _RowValue,
     _ValueColumn,
 )
+from thinking_prompt.settings_dialog import SettingsDialog
 
 
 class TestSettingsItems:
     """Tests for settings item types."""
 
     def test_inline_select_item_creation(self):
-        """InlineSelectItem stores key, label, options, and default."""
-        item = InlineSelectItem(
+        """SelectField stores key, label, options, and default."""
+        item = SelectField(
             key="model",
             label="Model",
             options=["gpt-4", "gpt-3.5"],
@@ -49,8 +49,8 @@ class TestSettingsItems:
         assert item.default == "gpt-4"
 
     def test_inline_select_item_with_description(self):
-        """InlineSelectItem can have a description."""
-        item = InlineSelectItem(
+        """SelectField can have a description."""
+        item = SelectField(
             key="model",
             label="Model",
             description="Select the AI model to use",
@@ -60,8 +60,8 @@ class TestSettingsItems:
         assert item.description == "Select the AI model to use"
 
     def test_checkbox_item_creation(self):
-        """CheckboxItem stores key, label, and default bool."""
-        item = CheckboxItem(
+        """CheckboxField stores key, label, and default bool."""
+        item = CheckboxField(
             key="stream",
             label="Stream Output",
             default=True,
@@ -71,13 +71,13 @@ class TestSettingsItems:
         assert item.default is True
 
     def test_checkbox_item_default_false(self):
-        """CheckboxItem defaults to False."""
-        item = CheckboxItem(key="debug", label="Debug")
+        """CheckboxField defaults to False."""
+        item = CheckboxField(key="debug", label="Debug")
         assert item.default is False
 
     def test_text_item_creation(self):
-        """TextItem stores key, label, default, and password flag."""
-        item = TextItem(
+        """TextField stores key, label, default, and password flag."""
+        item = TextField(
             key="api_key",
             label="API Key",
             default="sk-xxx",
@@ -89,8 +89,8 @@ class TestSettingsItems:
         assert item.password is True
 
     def test_text_item_defaults(self):
-        """TextItem has sensible defaults."""
-        item = TextItem(key="name", label="Name")
+        """TextField has sensible defaults."""
+        item = TextField(key="name", label="Name")
         assert item.default == ""
         assert item.password is False
 
@@ -101,9 +101,9 @@ class TestSettingsDialogState:
     def test_settings_dialog_init_original_values(self):
         """SettingsDialog initializes original values from items."""
         items = [
-            InlineSelectItem(key="model", label="Model", options=["a", "b"], default="a"),
-            CheckboxItem(key="stream", label="Stream", default=True),
-            TextItem(key="name", label="Name", default="test"),
+            SelectField(key="model", label="Model", options=["a", "b"], default="a"),
+            CheckboxField(key="stream", label="Stream", default=True),
+            TextField(key="name", label="Name", default="test"),
         ]
         dialog = SettingsDialog(title="Settings", items=items)
 
@@ -112,7 +112,7 @@ class TestSettingsDialogState:
     def test_settings_dialog_get_changed_values_empty(self):
         """No changes returns empty dict."""
         items = [
-            InlineSelectItem(key="model", label="Model", options=["a", "b"], default="a"),
+            SelectField(key="model", label="Model", options=["a", "b"], default="a"),
         ]
         dialog = SettingsDialog(title="Settings", items=items)
         dialog.build_body()  # Creates the list control
@@ -123,8 +123,8 @@ class TestSettingsDialogState:
     def test_settings_dialog_get_changed_values_with_changes(self):
         """Changed values are returned correctly."""
         items = [
-            InlineSelectItem(key="model", label="Model", options=["a", "b"], default="a"),
-            CheckboxItem(key="stream", label="Stream", default=True),
+            SelectField(key="model", label="Model", options=["a", "b"], default="a"),
+            CheckboxField(key="stream", label="Stream", default=True),
         ]
         dialog = SettingsDialog(title="Settings", items=items)
         dialog.build_body()  # Creates the controls
@@ -168,8 +168,8 @@ class TestSettingsDialogLayout:
     def test_build_body_returns_hsplit(self):
         """build_body returns an HSplit of control containers."""
         items = [
-            InlineSelectItem(key="model", label="Model", options=["a", "b"], default="a"),
-            CheckboxItem(key="stream", label="Stream", default=True),
+            SelectField(key="model", label="Model", options=["a", "b"], default="a"),
+            CheckboxField(key="stream", label="Stream", default=True),
         ]
         dialog = SettingsDialog(title="Settings", items=items)
         body = dialog.build_body()
@@ -178,48 +178,48 @@ class TestSettingsDialogLayout:
         assert isinstance(body, HSplit)
 
     def test_build_body_creates_controls(self):
-        """build_body creates individual SettingControl instances."""
-        from thinking_prompt.settings_dialog import (
-            CheckboxControl, InlineSelectControl, TextControl
+        """build_body creates individual FieldControl instances."""
+        from thinking_prompt.fields import (
+            CheckboxFieldControl, SelectFieldControl, TextFieldControl
         )
 
         items = [
-            InlineSelectItem(key="model", label="Model", options=["a", "b"], default="a"),
-            CheckboxItem(key="stream", label="Stream", default=True),
-            TextItem(key="name", label="Name", default="test"),
+            SelectField(key="model", label="Model", options=["a", "b"], default="a"),
+            CheckboxField(key="stream", label="Stream", default=True),
+            TextField(key="name", label="Name", default="test"),
         ]
         dialog = SettingsDialog(title="Settings", items=items)
         dialog.build_body()
 
         assert len(dialog._controls) == 3
-        assert isinstance(dialog._controls[0], InlineSelectControl)
-        assert isinstance(dialog._controls[1], CheckboxControl)
-        assert isinstance(dialog._controls[2], TextControl)
+        assert isinstance(dialog._controls[0], SelectFieldControl)
+        assert isinstance(dialog._controls[1], CheckboxFieldControl)
+        assert isinstance(dialog._controls[2], TextFieldControl)
 
 
 class TestTextControlPasswordMasking:
     """Edit-mode rendering of password fields must not expose the buffer."""
 
-    def _get_buffer_control(self, control: TextControl) -> BufferControl:
+    def _get_buffer_control(self, control: TextFieldControl) -> BufferControl:
         bc = control._buffer_window.content
         assert isinstance(bc, BufferControl)
         return bc
 
     def test_password_text_item_uses_password_processor_in_edit_mode(self):
-        item = TextItem(key="api_key", label="API Key", password=True)
-        control = TextControl(item)
+        item = TextField(key="api_key", label="API Key", password=True)
+        control = TextFieldControl(item)
 
         bc = self._get_buffer_control(control)
         processors = bc.input_processors or []
         assert any(isinstance(p, PasswordProcessor) for p in processors), (
-            "BufferControl for password=True TextItem must include "
+            "BufferControl for password=True TextField must include "
             "PasswordProcessor; got input_processors="
             f"{processors!r}"
         )
 
     def test_non_password_text_item_has_no_password_processor(self):
-        item = TextItem(key="username", label="Username", password=False)
-        control = TextControl(item)
+        item = TextField(key="username", label="Username", password=False)
+        control = TextFieldControl(item)
 
         bc = self._get_buffer_control(control)
         processors = bc.input_processors or []
@@ -232,54 +232,54 @@ class TestSessionIntegration:
     def test_settings_items_exported(self):
         """Settings item classes are exported from package."""
         from thinking_prompt import (
-            SettingsItem,
-            DropdownItem,
-            InlineSelectItem,
-            CheckboxItem,
-            TextItem,
+            Field,
+            DropdownField,
+            SelectField,
+            CheckboxField,
+            TextField,
             SettingsDialog,
         )
         # Just check they're importable
-        assert SettingsItem is not None
-        assert DropdownItem is not None
-        assert InlineSelectItem is not None
-        assert CheckboxItem is not None
-        assert TextItem is not None
+        assert Field is not None
+        assert DropdownField is not None
+        assert SelectField is not None
+        assert CheckboxField is not None
+        assert TextField is not None
         assert SettingsDialog is not None
 
 
 class TestSettingControl:
-    """Tests for the SettingControl base class."""
+    """Tests for the FieldControl base class."""
 
     def test_setting_control_stores_item_and_value(self):
-        """SettingControl stores item reference and initial value."""
-        from thinking_prompt.settings_dialog import CheckboxControl
+        """FieldControl stores item reference and initial value."""
+        from thinking_prompt.fields import CheckboxFieldControl
 
-        item = CheckboxItem(key="stream", label="Stream", default=True)
-        control = CheckboxControl(item)
+        item = CheckboxField(key="stream", label="Stream", default=True)
+        control = CheckboxFieldControl(item)
 
         assert control.item is item
         assert control.value is True
 
     def test_setting_control_is_not_editing_by_default(self):
-        """SettingControl starts in view mode."""
-        from thinking_prompt.settings_dialog import CheckboxControl
+        """FieldControl starts in view mode."""
+        from thinking_prompt.fields import CheckboxFieldControl
 
-        item = CheckboxItem(key="stream", label="Stream", default=False)
-        control = CheckboxControl(item)
+        item = CheckboxField(key="stream", label="Stream", default=False)
+        control = CheckboxFieldControl(item)
 
         assert control.is_editing is False
 
 
 class TestCheckboxControl:
-    """Tests for CheckboxControl."""
+    """Tests for CheckboxFieldControl."""
 
     def test_checkbox_toggle(self):
         """Checkbox toggles value."""
-        from thinking_prompt.settings_dialog import CheckboxControl
+        from thinking_prompt.fields import CheckboxFieldControl
 
-        item = CheckboxItem(key="stream", label="Stream", default=False)
-        control = CheckboxControl(item)
+        item = CheckboxField(key="stream", label="Stream", default=False)
+        control = CheckboxFieldControl(item)
 
         assert control.value is False
         control.toggle()
@@ -289,10 +289,10 @@ class TestCheckboxControl:
 
     def test_checkbox_renders_label_and_value(self):
         """Checkbox renders label and true/false value."""
-        from thinking_prompt.settings_dialog import CheckboxControl
+        from thinking_prompt.fields import CheckboxFieldControl
 
-        item = CheckboxItem(key="stream", label="Stream Output", default=True)
-        control = CheckboxControl(item)
+        item = CheckboxField(key="stream", label="Stream Output", default=True)
+        control = CheckboxFieldControl(item)
 
         content = control.create_content(width=50, height=1)
         line = content.get_line(0)
@@ -303,14 +303,14 @@ class TestCheckboxControl:
 
 
 class TestInlineSelectControl:
-    """Tests for InlineSelectControl."""
+    """Tests for SelectFieldControl."""
 
     def test_inline_select_cycle_forward(self):
         """InlineSelect cycles through options forward."""
-        from thinking_prompt.settings_dialog import InlineSelectControl
+        from thinking_prompt.fields import SelectFieldControl
 
-        item = InlineSelectItem(key="model", label="Model", options=["a", "b", "c"], default="a")
-        control = InlineSelectControl(item)
+        item = SelectField(key="model", label="Model", options=["a", "b", "c"], default="a")
+        control = SelectFieldControl(item)
 
         assert control.value == "a"
         control.cycle(1)
@@ -322,10 +322,10 @@ class TestInlineSelectControl:
 
     def test_inline_select_cycle_backward(self):
         """InlineSelect cycles through options backward."""
-        from thinking_prompt.settings_dialog import InlineSelectControl
+        from thinking_prompt.fields import SelectFieldControl
 
-        item = InlineSelectItem(key="model", label="Model", options=["a", "b", "c"], default="a")
-        control = InlineSelectControl(item)
+        item = SelectField(key="model", label="Model", options=["a", "b", "c"], default="a")
+        control = SelectFieldControl(item)
 
         control.cycle(-1)
         assert control.value == "a"  # clamped at start
@@ -336,10 +336,10 @@ class TestInlineSelectControl:
         """With no current selection (no default, or a default that isn't
         an option), the first press selects the first option instead of
         skipping over it."""
-        from thinking_prompt.settings_dialog import InlineSelectControl
+        from thinking_prompt.fields import SelectFieldControl
 
-        item = InlineSelectItem(key="m", label="M", options=["a", "b", "c"], default=default)
-        control = InlineSelectControl(item)
+        item = SelectField(key="m", label="M", options=["a", "b", "c"], default=default)
+        control = SelectFieldControl(item)
 
         control.cycle(delta)
         assert control.value == "a"
@@ -347,16 +347,16 @@ class TestInlineSelectControl:
     def test_untouched_select_without_default_is_not_a_change(self):
         """No default means "unset": leaving it alone reports no change."""
         dialog = SettingsDialog(
-            title="S", items=[InlineSelectItem(key="m", label="M", options=["a", "b"])]
+            title="S", items=[SelectField(key="m", label="M", options=["a", "b"])]
         )
         assert dialog._get_changed_values() == {}
 
     def test_inline_select_renders_label_and_value(self):
         """InlineSelect renders label and current option."""
-        from thinking_prompt.settings_dialog import InlineSelectControl
+        from thinking_prompt.fields import SelectFieldControl
 
-        item = InlineSelectItem(key="model", label="Model", options=["gpt-4", "gpt-3.5"], default="gpt-4")
-        control = InlineSelectControl(item)
+        item = SelectField(key="model", label="Model", options=["gpt-4", "gpt-3.5"], default="gpt-4")
+        control = SelectFieldControl(item)
 
         content = control.create_content(width=50, height=1)
         line = content.get_line(0)
@@ -376,10 +376,10 @@ class TestSelectArrows:
     """Select rows draw their arrows with class:select-arrow (select_arrow)."""
 
     def test_inline_select_arrows(self):
-        from thinking_prompt.settings_dialog import InlineSelectControl
+        from thinking_prompt.fields import SelectFieldControl
 
-        item = InlineSelectItem(key="m", label="M", options=["a", "b", "c"], default="b")
-        line = InlineSelectControl(item).create_content(width=40, height=1).get_line(0)
+        item = SelectField(key="m", label="M", options=["a", "b", "c"], default="b")
+        line = SelectFieldControl(item).create_content(width=40, height=1).get_line(0)
 
         assert "".join(t for _, t in line).endswith("◀ b ▶")
         assert "class:select-arrow" in _style_of(line, "◀")
@@ -387,10 +387,10 @@ class TestSelectArrows:
         assert "class:select-arrow" not in _style_of(line, "b")
 
     def test_dropdown_arrow(self):
-        from thinking_prompt.settings_dialog import DropdownControl
+        from thinking_prompt.fields import DropdownFieldControl
 
-        item = DropdownItem(key="m", label="M", options=["a", "b"], default="b")
-        line = DropdownControl(item).create_content(width=40, height=1).get_line(0)
+        item = DropdownField(key="m", label="M", options=["a", "b"], default="b")
+        line = DropdownFieldControl(item).create_content(width=40, height=1).get_line(0)
 
         assert "".join(t for _, t in line).endswith("b ▼")
         assert "class:select-arrow" in _style_of(line, "▼")
@@ -398,14 +398,14 @@ class TestSelectArrows:
 
 
 class TestTextControl:
-    """Tests for TextControl."""
+    """Tests for TextFieldControl."""
 
     def test_text_control_enter_edit_mode(self):
-        """TextControl enters edit mode and populates buffer."""
-        from thinking_prompt.settings_dialog import TextControl
+        """TextFieldControl enters edit mode and populates buffer."""
+        from thinking_prompt.fields import TextFieldControl
 
-        item = TextItem(key="name", label="Name", default="Alice")
-        control = TextControl(item)
+        item = TextField(key="name", label="Name", default="Alice")
+        control = TextFieldControl(item)
 
         assert control.is_editing is False
         control.enter_edit_mode()
@@ -413,11 +413,11 @@ class TestTextControl:
         assert control._buffer.text == "Alice"
 
     def test_text_control_confirm_edit(self):
-        """TextControl confirm saves buffer value."""
-        from thinking_prompt.settings_dialog import TextControl
+        """TextFieldControl confirm saves buffer value."""
+        from thinking_prompt.fields import TextFieldControl
 
-        item = TextItem(key="name", label="Name", default="Alice")
-        control = TextControl(item)
+        item = TextField(key="name", label="Name", default="Alice")
+        control = TextFieldControl(item)
 
         control.enter_edit_mode()
         control._buffer.text = "Bob"
@@ -427,11 +427,11 @@ class TestTextControl:
         assert control.value == "Bob"
 
     def test_text_control_cancel_edit(self):
-        """TextControl cancel restores original value."""
-        from thinking_prompt.settings_dialog import TextControl
+        """TextFieldControl cancel restores original value."""
+        from thinking_prompt.fields import TextFieldControl
 
-        item = TextItem(key="name", label="Name", default="Alice")
-        control = TextControl(item)
+        item = TextField(key="name", label="Name", default="Alice")
+        control = TextFieldControl(item)
 
         control.enter_edit_mode()
         control._buffer.text = "Bob"
@@ -441,11 +441,11 @@ class TestTextControl:
         assert control.value == "Alice"  # restored
 
     def test_text_control_renders_value(self):
-        """TextControl renders label and value in view mode."""
-        from thinking_prompt.settings_dialog import TextControl
+        """TextFieldControl renders label and value in view mode."""
+        from thinking_prompt.fields import TextFieldControl
 
-        item = TextItem(key="name", label="Name", default="Alice")
-        control = TextControl(item)
+        item = TextField(key="name", label="Name", default="Alice")
+        control = TextFieldControl(item)
 
         content = control.create_content(width=50, height=1)
         line = content.get_line(0)
@@ -455,11 +455,11 @@ class TestTextControl:
         assert "Alice" in text
 
     def test_text_control_renders_empty_placeholder(self):
-        """TextControl shows (empty) for empty value."""
-        from thinking_prompt.settings_dialog import TextControl
+        """TextFieldControl shows (empty) for empty value."""
+        from thinking_prompt.fields import TextFieldControl
 
-        item = TextItem(key="name", label="Name", default="")
-        control = TextControl(item)
+        item = TextField(key="name", label="Name", default="")
+        control = TextFieldControl(item)
 
         content = control.create_content(width=50, height=1)
         line = content.get_line(0)
@@ -468,11 +468,11 @@ class TestTextControl:
         assert "(empty)" in text
 
     def test_text_control_renders_password_masked(self):
-        """TextControl masks password values."""
-        from thinking_prompt.settings_dialog import TextControl
+        """TextFieldControl masks password values."""
+        from thinking_prompt.fields import TextFieldControl
 
-        item = TextItem(key="api_key", label="API Key", default="sk-secret", password=True)
-        control = TextControl(item)
+        item = TextField(key="api_key", label="API Key", default="sk-secret", password=True)
+        control = TextFieldControl(item)
 
         content = control.create_content(width=50, height=1)
         line = content.get_line(0)
@@ -482,12 +482,12 @@ class TestTextControl:
         assert "••••••" in text
 
     def test_text_control_container_switches_in_edit_mode(self):
-        """TextControl container returns different content in edit mode."""
-        from thinking_prompt.settings_dialog import TextControl
+        """TextFieldControl container returns different content in edit mode."""
+        from thinking_prompt.fields import TextFieldControl
         from prompt_toolkit.layout import DynamicContainer
 
-        item = TextItem(key="name", label="Name", default="Alice")
-        control = TextControl(item)
+        item = TextField(key="name", label="Name", default="Alice")
+        control = TextFieldControl(item)
 
         container = control.get_container()
         # Should be a DynamicContainer
@@ -507,28 +507,28 @@ class TestSettingsDialogRefactored:
     """Tests for refactored SettingsDialog using individual controls."""
 
     def test_settings_dialog_creates_controls(self):
-        """SettingsDialog creates SettingControl instances."""
-        from thinking_prompt.settings_dialog import (
-            CheckboxControl, InlineSelectControl, TextControl
+        """SettingsDialog creates FieldControl instances."""
+        from thinking_prompt.fields import (
+            CheckboxFieldControl, SelectFieldControl, TextFieldControl
         )
 
         items = [
-            CheckboxItem(key="stream", label="Stream", default=True),
-            InlineSelectItem(key="model", label="Model", options=["a", "b"], default="a"),
-            TextItem(key="name", label="Name", default="test"),
+            CheckboxField(key="stream", label="Stream", default=True),
+            SelectField(key="model", label="Model", options=["a", "b"], default="a"),
+            TextField(key="name", label="Name", default="test"),
         ]
         dialog = SettingsDialog(title="Settings", items=items)
         dialog.build_body()
 
         assert len(dialog._controls) == 3
-        assert isinstance(dialog._controls[0], CheckboxControl)
-        assert isinstance(dialog._controls[1], InlineSelectControl)
-        assert isinstance(dialog._controls[2], TextControl)
+        assert isinstance(dialog._controls[0], CheckboxFieldControl)
+        assert isinstance(dialog._controls[1], SelectFieldControl)
+        assert isinstance(dialog._controls[2], TextFieldControl)
 
     def test_settings_dialog_build_body_returns_hsplit(self):
         """build_body returns HSplit of control containers."""
         items = [
-            CheckboxItem(key="stream", label="Stream", default=True),
+            CheckboxField(key="stream", label="Stream", default=True),
         ]
         dialog = SettingsDialog(title="Settings", items=items)
         body = dialog.build_body()
@@ -631,8 +631,8 @@ def _bindings(kb, key):
     return kb.get_bindings_for_keys((key,))
 
 
-def _inline_dropdown(**item) -> DropdownControl:
-    control = DropdownControl(DropdownItem(**item))
+def _inline_dropdown(**item) -> DropdownFieldControl:
+    control = DropdownFieldControl(DropdownField(**item))
     control.set_inline(True)
     return control
 
@@ -654,19 +654,19 @@ class TestRowStyles:
     @pytest.mark.parametrize(
         "make,value,style",
         [
-            (lambda: CheckboxControl(CheckboxItem(key="c", label="Label", default=True)),
+            (lambda: CheckboxFieldControl(CheckboxField(key="c", label="Label", default=True)),
              "true", "field-value-true"),
-            (lambda: CheckboxControl(CheckboxItem(key="c", label="Label")),
+            (lambda: CheckboxFieldControl(CheckboxField(key="c", label="Label")),
              "false", "field-value-false"),
-            (lambda: InlineSelectControl(InlineSelectItem(key="s", label="Label", options=["a", "b"], default="a")),
+            (lambda: SelectFieldControl(SelectField(key="s", label="Label", options=["a", "b"], default="a")),
              "a", "field-value"),
             (lambda: _inline_dropdown(key="d", label="Label", options=["a", "b"], default="a"),
              "a", "field-value"),
-            (lambda: DropdownControl(DropdownItem(key="d", label="Label", options=["a", "b"], default="a")),
+            (lambda: DropdownFieldControl(DropdownField(key="d", label="Label", options=["a", "b"], default="a")),
              "a", "field-value"),
-            (lambda: TextControl(TextItem(key="t", label="Label", default="bob")),
+            (lambda: TextFieldControl(TextField(key="t", label="Label", default="bob")),
              "bob", "field-value"),
-            (lambda: TextControl(TextItem(key="t", label="Label")),
+            (lambda: TextFieldControl(TextField(key="t", label="Label")),
              "(empty)", "field-desc"),
         ],
         ids=["checked", "unchecked", "select", "inline-dropdown", "dropdown", "text", "empty-text"],
@@ -680,21 +680,21 @@ class TestRowStyles:
 
     @pytest.mark.parametrize("selected", [False, True], ids=["idle", "selected"])
     def test_a_description(self, selected):
-        control = CheckboxControl(CheckboxItem(key="c", label="Label", description="Says more"))
+        control = CheckboxFieldControl(CheckboxField(key="c", label="Label", description="Says more"))
         suffix = "-selected" if selected else ""
         assert _line(control, selected, row=1) == [("", "  "), (f"class:field-desc{suffix}", "Says more")]
 
     @pytest.mark.parametrize("selected", [False, True], ids=["idle", "selected"])
     def test_a_lists_label_and_description(self, selected):
-        control = OptionsControl(
-            ChecklistItem(key="t", label="Label", description="Says more", options=["a"])
+        control = OptionsFieldControl(
+            ChecklistField(key="t", label="Label", description="Says more", options=["a"])
         )
         suffix = "-selected" if selected else ""
         assert _line(control, selected) == [("", "  "), (f"class:field-label{suffix}", "Label")]
         assert _line(control, selected, row=1) == [("", "  "), (f"class:field-desc{suffix}", "Says more")]
 
     async def test_a_description_stays_under_the_edit_field(self):
-        control = TextControl(TextItem(key="t", label="Name", description="Says more", default="bob"))
+        control = TextFieldControl(TextField(key="t", label="Name", description="Says more", default="bob"))
         control.enter_edit_mode()
         row, description = _drawn(control.get_container(), 30, height=2)
         assert _field(row)
@@ -704,7 +704,7 @@ class TestRowStyles:
     @pytest.mark.parametrize(
         "make",
         [
-            lambda: InlineSelectControl(InlineSelectItem(key="s", label="S", options=["a", "b", "c"], default="b")),
+            lambda: SelectFieldControl(SelectField(key="s", label="S", options=["a", "b", "c"], default="b")),
             lambda: _inline_dropdown(key="d", label="D", options=["a", "b", "c"], default="b"),
         ],
         ids=["select", "inline-dropdown"],
@@ -723,16 +723,16 @@ class TestSettingsRows:
     """Settings controls are dialog rows: the ❯ marker, and inline/box modes."""
 
     def test_the_highlighted_row_uses_the_marker(self):
-        from thinking_prompt.settings_dialog import CheckboxControl
+        from thinking_prompt.fields import CheckboxFieldControl
 
-        control = CheckboxControl(CheckboxItem(key="s", label="Stream"))
+        control = CheckboxFieldControl(CheckboxField(key="s", label="Stream"))
         (row,) = control._build_setting_row(40, _RowValue("true", "", 4), True)
         assert row[0] == ("class:field-indicator", "❯ ")
 
     def test_inline_dropdown_is_a_selector_without_a_popup(self):
-        from thinking_prompt.settings_dialog import DropdownControl
+        from thinking_prompt.fields import DropdownFieldControl
 
-        control = DropdownControl(DropdownItem(key="m", label="Model", options=["a", "b", "c"], default="b"))
+        control = DropdownFieldControl(DropdownField(key="m", label="Model", options=["a", "b", "c"], default="b"))
         control.set_inline(True)
         text = "".join(t for _, t in control.create_content(40, 1).get_line(0))
         assert text.endswith("◀ b ▶")
@@ -744,9 +744,9 @@ class TestSettingsRows:
         assert not any(b.filter() for b in _bindings(kb, Keys.ControlM))  # no popup
 
     def test_box_dropdown_is_unchanged(self):
-        from thinking_prompt.settings_dialog import DropdownControl
+        from thinking_prompt.fields import DropdownFieldControl
 
-        control = DropdownControl(DropdownItem(key="m", label="Model", options=["a", "b"], default="b"))
+        control = DropdownFieldControl(DropdownField(key="m", label="Model", options=["a", "b"], default="b"))
         text = "".join(t for _, t in control.create_content(40, 1).get_line(0))
         assert text.endswith("b ▼")
         assert control.hints == frozenset()
@@ -754,7 +754,7 @@ class TestSettingsRows:
     def test_inline_body_has_no_popups_and_leaves_arrows_to_the_dialog(self):
         dialog = SettingsDialog(
             "S",
-            [DropdownItem(key="m", label="M", options=["a", "b"]), CheckboxItem(key="c", label="C")],
+            [DropdownField(key="m", label="M", options=["a", "b"]), CheckboxField(key="c", label="C")],
             placement="inline",
         )
         dialog._placement = "inline"  # as show_dialog() resolves it
@@ -764,13 +764,13 @@ class TestSettingsRows:
         assert _bindings(body.key_bindings, Keys.ControlS) != []
 
     def test_box_body_walks_settings_with_arrows(self):
-        dialog = SettingsDialog("S", [CheckboxItem(key="a", label="A"), CheckboxItem(key="b", label="B")])
+        dialog = SettingsDialog("S", [CheckboxField(key="a", label="A"), CheckboxField(key="b", label="B")])
         body = dialog.build_body()
         assert _bindings(body.key_bindings, Keys.Down) != []
         assert len(dialog._stops()) == 2
 
     def test_is_editing_follows_the_controls(self):
-        dialog = SettingsDialog("S", [TextItem(key="t", label="T")])
+        dialog = SettingsDialog("S", [TextField(key="t", label="T")])
         assert dialog._is_editing() is False
         dialog._controls[0].enter_edit_mode()
         assert dialog._is_editing() is True
@@ -786,31 +786,31 @@ class TestOptionItems:
     """Check lists and radio lists in the settings form, one option per line."""
 
     def test_checklist_value_is_the_checked_options_in_option_order(self):
-        from thinking_prompt.settings_dialog import ChecklistItem, OptionsControl
+        from thinking_prompt.fields import ChecklistField, OptionsFieldControl
 
-        control = OptionsControl(ChecklistItem(key="t", label="Tools", options=["a", "b", "c"], default=("c", "a")))
+        control = OptionsFieldControl(ChecklistField(key="t", label="Tools", options=["a", "b", "c"], default=("c", "a")))
         assert control.value == ["a", "c"]
 
     def test_radio_value(self):
-        from thinking_prompt.settings_dialog import OptionsControl, RadioItem
+        from thinking_prompt.fields import OptionsFieldControl, RadioField
 
-        assert OptionsControl(RadioItem(key="m", label="Mode", options=["x", "y"], default="y")).value == "y"
-        assert OptionsControl(RadioItem(key="m", label="Mode", options=["x", "y"])).value is None
+        assert OptionsFieldControl(RadioField(key="m", label="Mode", options=["x", "y"], default="y")).value == "y"
+        assert OptionsFieldControl(RadioField(key="m", label="Mode", options=["x", "y"])).value is None
 
     def test_one_stop_per_option_and_the_label_takes_no_focus(self):
-        from thinking_prompt.settings_dialog import ChecklistItem, OptionsControl
+        from thinking_prompt.fields import ChecklistField, OptionsFieldControl
 
-        control = OptionsControl(ChecklistItem(key="t", label="Tools", options=["a", "b"]))
+        control = OptionsFieldControl(ChecklistField(key="t", label="Tools", options=["a", "b"]))
         assert len(control.get_stops()) == 2
         assert not control.is_focusable()
         assert control.row_count == 3
 
     def test_change_detection(self):
-        from thinking_prompt.settings_dialog import ChecklistItem, RadioItem
+        from thinking_prompt.fields import ChecklistField, RadioField
 
         dialog = SettingsDialog("S", [
-            ChecklistItem(key="t", label="T", options=["a", "b"], default=("b",)),
-            RadioItem(key="m", label="M", options=["x", "y"]),
+            ChecklistField(key="t", label="T", options=["a", "b"], default=("b",)),
+            RadioField(key="m", label="M", options=["x", "y"]),
         ])
         assert dialog._get_changed_values() == {}
         tools, mode = dialog._controls
@@ -819,47 +819,47 @@ class TestOptionItems:
         assert dialog._get_changed_values() == {"t": ["a", "b"], "m": "x"}
 
     def test_box_cursor_stops_on_each_option(self):
-        from thinking_prompt.settings_dialog import ChecklistItem
+        from thinking_prompt.fields import ChecklistField
 
         dialog = SettingsDialog("S", [
-            CheckboxItem(key="c", label="C"),
-            ChecklistItem(key="t", label="T", options=["a", "b"]),
+            CheckboxField(key="c", label="C"),
+            ChecklistField(key="t", label="T", options=["a", "b"]),
         ])
         assert len(dialog._stops()) == 3
 
     def test_exported(self):
-        from thinking_prompt import ChecklistItem, RadioItem
+        from thinking_prompt import ChecklistField, RadioField
 
-        assert ChecklistItem and RadioItem
+        assert ChecklistField and RadioField
 
 
 @pytest.mark.parametrize(
     "make,widest",
     [
-        (lambda: CheckboxControl(CheckboxItem(key="a", label="A")), len("false")),
+        (lambda: CheckboxFieldControl(CheckboxField(key="a", label="A")), len("false")),
         (
-            lambda: InlineSelectControl(
-                InlineSelectItem(key="a", label="A", options=["S", "Medium", "XL"])
+            lambda: SelectFieldControl(
+                SelectField(key="a", label="A", options=["S", "Medium", "XL"])
             ),
             len("◀ Medium ▶"),
         ),
         (
-            lambda: DropdownControl(DropdownItem(key="a", label="A", options=["x"], width=20)),
+            lambda: DropdownFieldControl(DropdownField(key="a", label="A", options=["x"], width=20)),
             20 + len(" ▼"),
         ),
         (
-            lambda: InlineSelectControl(
-                InlineSelectItem(key="a", label="A", options=["S", "M"], default="Not an option")
+            lambda: SelectFieldControl(
+                SelectField(key="a", label="A", options=["S", "M"], default="Not an option")
             ),
             len("◀ Not an option ▶"),
         ),
-        (lambda: TextControl(TextItem(key="a", label="A", edit_width=12)), 12),
-        (lambda: TextControl(TextItem(key="a", label="A", edit_width=5)), len("(empty)")),
+        (lambda: TextFieldControl(TextField(key="a", label="A", edit_width=12)), 12),
+        (lambda: TextFieldControl(TextField(key="a", label="A", edit_width=5)), len("(empty)")),
         (
-            lambda: TextControl(TextItem(key="a", label="A", default="a long default", edit_width=5)),
+            lambda: TextFieldControl(TextField(key="a", label="A", default="a long default", edit_width=5)),
             len("a long default"),
         ),
-        (lambda: OptionsControl(ChecklistItem(key="a", label="A", options=["x"])), 0),
+        (lambda: OptionsFieldControl(ChecklistField(key="a", label="A", options=["x"])), 0),
     ],
 )
 def test_widest_value(make, widest):
@@ -869,7 +869,7 @@ def test_widest_value(make, widest):
 
 
 def test_an_inline_dropdowns_widest_value_is_its_widest_option():
-    control = DropdownControl(DropdownItem(key="a", label="A", options=["x", "Longest"], width=20))
+    control = DropdownFieldControl(DropdownField(key="a", label="A", options=["x", "Longest"], width=20))
     control.set_inline(True)
     assert control.widest_value() == len("◀ Longest ▶")
 
@@ -908,13 +908,13 @@ def _field(cells: list[tuple[str, str]]) -> list[int]:
 
 # (make the control, its label, its value at a column, how the row ends at the right edge)
 ROWS = [
-    (lambda: CheckboxControl(CheckboxItem(key="c", label="Stream", default=True)),
+    (lambda: CheckboxFieldControl(CheckboxField(key="c", label="Stream", default=True)),
      "Stream", "true", "true"),
-    (lambda: InlineSelectControl(InlineSelectItem(key="s", label="Size", options=["a", "b", "c"], default="b")),
+    (lambda: SelectFieldControl(SelectField(key="s", label="Size", options=["a", "b", "c"], default="b")),
      "Size", "◀ b ▶", "◀ b ▶"),
-    (lambda: DropdownControl(DropdownItem(key="d", label="Model", options=["gpt", "o1"], default="o1")),
+    (lambda: DropdownFieldControl(DropdownField(key="d", label="Model", options=["gpt", "o1"], default="o1")),
      "Model", "o1".ljust(15) + " ▼", "o1 ▼"),
-    (lambda: TextControl(TextItem(key="t", label="Name", default="bob")),
+    (lambda: TextFieldControl(TextField(key="t", label="Name", default="bob")),
      "Name", "bob".ljust(15), "bob"),
 ]
 ROW_IDS = ["checkbox", "select", "dropdown", "text"]
@@ -934,12 +934,12 @@ class TestValueColumn:
         assert row.endswith(at_right)
 
     def test_a_long_label_is_cut_before_the_column(self):
-        row = _row(CheckboxControl(CheckboxItem(key="c", label="A very long label indeed")), 10)
+        row = _row(CheckboxFieldControl(CheckboxField(key="c", label="A very long label indeed")), 10)
         assert row[:10] == "  A very… "
         assert row[10:] == "false"
 
     def test_a_narrow_row_puts_the_value_at_the_right_edge(self):
-        row = _row(CheckboxControl(CheckboxItem(key="c", label="Streaming output")), 30, width=20)
+        row = _row(CheckboxFieldControl(CheckboxField(key="c", label="Streaming output")), 30, width=20)
         assert row.endswith("false") and len(row) == 19
         assert "…" in row
 
@@ -948,18 +948,18 @@ class TestValueColumn:
         its value, and a text value takes its edit_width."""
 
         def mark(value: str) -> int:
-            item = DropdownItem(key="d", label="Model", options=["日本語モデル", "beta"], default=value)
-            row = _row(DropdownControl(item), 20)
+            item = DropdownField(key="d", label="Model", options=["日本語モデル", "beta"], default=value)
+            row = _row(DropdownFieldControl(item), 20)
             return get_cwidth(row[:row.index("▼")])
 
         assert mark("日本語モデル") == mark("beta") == 20 + 15 + 1
-        text = _row(TextControl(TextItem(key="t", label="Name", default="名前です")), 20)
+        text = _row(TextFieldControl(TextField(key="t", label="Name", default="名前です")), 20)
         assert get_cwidth(text) == 20 + 15
 
     def test_a_value_reaching_the_rows_last_column_falls_back_too(self):
         """Values end where "right" ends them, a column short of the row's
         right edge: a value fits at its column if it ends there."""
-        control = CheckboxControl(CheckboxItem(key="c", label="Stream"))
+        control = CheckboxFieldControl(CheckboxField(key="c", label="Stream"))
         assert _row(control, 14, width=20)[14:] == "false"
         row = _row(control, 15, width=20)
         assert row.endswith("false") and len(row) == 19
@@ -968,8 +968,8 @@ class TestValueColumn:
     def _menu_open(width: int, **kwargs) -> list[str]:
         """A box form's dropdown, its menu open, drawn ``width`` columns wide."""
         items = [
-            DropdownItem(key="d", label="Model", options=["alpha", "beta"], default="beta"),
-            *(CheckboxItem(key=k, label=k) for k in ("a", "b", "c")),
+            DropdownField(key="d", label="Model", options=["alpha", "beta"], default="beta"),
+            *(CheckboxField(key=k, label=k) for k in ("a", "b", "c")),
         ]
         dialog = SettingsDialog("S", items, **kwargs)
         body = dialog.build_body()
@@ -991,8 +991,8 @@ class TestValueColumn:
     @staticmethod
     def _wide_menu_open(width: int, label: str, **kwargs) -> list[str]:
         items = [
-            DropdownItem(key="d", label=label, options=["alpha", "beta"], default="beta"),
-            *(CheckboxItem(key=k, label=k) for k in ("a", "b", "c")),
+            DropdownField(key="d", label=label, options=["alpha", "beta"], default="beta"),
+            *(CheckboxField(key=k, label=k) for k in ("a", "b", "c")),
         ]
         dialog = SettingsDialog("S", items, **kwargs)
         body = dialog.build_body()
@@ -1019,7 +1019,7 @@ class TestValueColumn:
         assert rows[1].index("┌") == rows[0].index("▼") - 1 - field
 
     async def test_the_text_field_starts_at_the_column_while_editing(self):
-        control = TextControl(TextItem(key="t", label="Name", default="bob"))
+        control = TextFieldControl(TextField(key="t", label="Name", default="bob"))
         control.set_value_column(_ValueColumn(20))
         control.enter_edit_mode()
         (row,) = _drawn(control.get_container(), 60)
@@ -1027,7 +1027,7 @@ class TestValueColumn:
         assert _text(row)[20:23] == "bob"
 
     async def test_while_editing_a_long_label_is_cut_before_the_field(self):
-        control = TextControl(TextItem(key="t", label="A rather long label", default="bob"))
+        control = TextFieldControl(TextField(key="t", label="A rather long label", default="bob"))
         control.set_value_column(_ValueColumn(12))
         control.enter_edit_mode()
         (row,) = _drawn(control.get_container(), 60)
@@ -1036,7 +1036,7 @@ class TestValueColumn:
     async def test_a_narrow_row_keeps_the_text_field_where_the_value_was(self):
         """Too narrow for the column, the field ends at the row's right edge,
         as the value did, and the label is cut before it as it was."""
-        control = TextControl(TextItem(key="t", label="A rather long label", default="bob"))
+        control = TextFieldControl(TextField(key="t", label="A rather long label", default="bob"))
         shown = _row(control, 30, width=36)
         control.enter_edit_mode()
         (row,) = _drawn(control.get_container(), 36)
@@ -1044,22 +1044,22 @@ class TestValueColumn:
         assert _text(row)[2:23] == shown[2:23] == "A rather long la… bob"
 
     async def test_without_a_column_the_text_field_is_at_the_right_edge(self):
-        control = TextControl(TextItem(key="t", label="Name"))
+        control = TextFieldControl(TextField(key="t", label="Name"))
         control.enter_edit_mode()
         (row,) = _drawn(control.get_container(), 40)
         assert _field(row) == list(range(39 - 15, 39))
 
 
-def _dropdown(label: str = "Model for summaries", default: str = "o1") -> DropdownControl:
-    return DropdownControl(DropdownItem(key="d", label=label, options=["gpt-4o", "o1"], default=default))
+def _dropdown(label: str = "Model for summaries", default: str = "o1") -> DropdownFieldControl:
+    return DropdownFieldControl(DropdownField(key="d", label=label, options=["gpt-4o", "o1"], default=default))
 
 
 def _selector(label: str = "Model name", options=("a", "gpt-4o-mini", "z"), default="gpt-4o-mini"):
-    return InlineSelectControl(InlineSelectItem(key="s", label=label, options=list(options), default=default))
+    return SelectFieldControl(SelectField(key="s", label=label, options=list(options), default=default))
 
 
-def _text_setting(label: str = "Display name", default: str = "bob") -> TextControl:
-    return TextControl(TextItem(key="t", label=label, default=default))
+def _text_setting(label: str = "Display name", default: str = "bob") -> TextFieldControl:
+    return TextFieldControl(TextField(key="t", label=label, default=default))
 
 
 class TestRowsShortOfWidth:
@@ -1069,26 +1069,26 @@ class TestRowsShortOfWidth:
 
     # Checkbox: no padding, no decoration.
     def test_checkbox_in_full_at_the_column(self):
-        control = CheckboxControl(CheckboxItem(key="c", label="Stream responses", default=True))
+        control = CheckboxFieldControl(CheckboxField(key="c", label="Stream responses", default=True))
         assert _row(control, 20, width=30) == "  Stream responses  true"
 
     def test_checkbox_at_the_right_edge_with_a_cut_label(self):
-        control = CheckboxControl(CheckboxItem(key="c", label="Stream responses", default=True))
+        control = CheckboxFieldControl(CheckboxField(key="c", label="Stream responses", default=True))
         assert _row(control, 20, width=20) == "  Stream resp… true"
         assert _row(control, None, width=20) == "  Stream resp… true"
 
     def test_checkbox_with_a_3_column_label_cuts_the_value(self):
-        control = CheckboxControl(CheckboxItem(key="c", label="Stream responses", default=True))
+        control = CheckboxFieldControl(CheckboxField(key="c", label="Stream responses", default=True))
         assert _row(control, None, width=8) == "  St… …"
 
     def test_a_label_of_3_columns_or_fewer_is_never_cut(self):
         for label in ("Abc", "Go", "A"):
-            control = CheckboxControl(CheckboxItem(key="c", label=label, default=True))
+            control = CheckboxFieldControl(CheckboxField(key="c", label=label, default=True))
             assert _row(control, None, width=8).startswith(f"  {label} ")
             assert _row(control, 6, width=8).startswith(f"  {label} ")
 
     def test_a_floor_row_is_clipped_without_raising(self):
-        control = CheckboxControl(CheckboxItem(key="c", label="Stream responses", default=True))
+        control = CheckboxFieldControl(CheckboxField(key="c", label="Stream responses", default=True))
         for width in (0, 1, 3, 5):
             _row(control, None, width=width)
             _row(control, 10, width=width)
@@ -1164,7 +1164,7 @@ class TestRowsShortOfWidth:
 
     # Terminal columns, not characters.
     def test_a_wide_label_is_cut_by_columns(self):
-        control = CheckboxControl(CheckboxItem(key="c", label="設定モデル名前", default=True))
+        control = CheckboxFieldControl(CheckboxField(key="c", label="設定モデル名前", default=True))
         row = _row(control, None, width=14)
         assert row == "  設定…  true"
         assert get_cwidth(row) == 13
@@ -1230,7 +1230,7 @@ class TestRowsShortOfWidth:
     @pytest.mark.parametrize("password", [False, True])
     @pytest.mark.parametrize("default", ["alexander", "alexander the great"])
     async def test_a_long_value_keeps_the_minimum_in_a_narrow_row(self, column, password, default):
-        control = TextControl(TextItem(key="t", label="Display name", default=default, password=password))
+        control = TextFieldControl(TextField(key="t", label="Display name", default=default, password=password))
         control.set_value_column(_fixed(column))
         control.enter_edit_mode()
         (row,) = _drawn(control.get_container(), 14)
@@ -1238,8 +1238,8 @@ class TestRowsShortOfWidth:
 
     @pytest.mark.parametrize("password", [False, True])
     async def test_a_long_value_gets_exactly_edit_width_in_a_wide_row(self, password):
-        control = TextControl(
-            TextItem(key="t", label="Name", default="a value of nineteen", password=password)
+        control = TextFieldControl(
+            TextField(key="t", label="Name", default="a value of nineteen", password=password)
         )
         control.set_value_column(_ValueColumn(10))
         control.enter_edit_mode()
@@ -1247,7 +1247,7 @@ class TestRowsShortOfWidth:
         assert _field(row) == list(range(10, 25))
 
     async def test_a_small_edit_width_is_its_own_minimum(self):
-        control = TextControl(TextItem(key="t", label="Display name", default="bob", edit_width=5))
+        control = TextFieldControl(TextField(key="t", label="Display name", default="bob", edit_width=5))
         control.set_value_column(None)
         control.enter_edit_mode()
         (row,) = _drawn(control.get_container(), 12)
@@ -1264,33 +1264,33 @@ class TestAlignValues:
 
     def test_labels_start_values_after_the_longest_label(self):
         items = [
-            CheckboxItem(key="a", label="Stream"),
-            TextItem(key="b", label="API key"),
-            ChecklistItem(key="c", label="A much longer check list label", options=["x"]),
+            CheckboxField(key="a", label="Stream"),
+            TextField(key="b", label="API key"),
+            ChecklistField(key="c", label="A much longer check list label", options=["x"]),
         ]
         assert self._column(items).at(60) == 2 + len("API key") + 2
 
     def test_labels_are_measured_in_terminal_columns(self):
-        items = [CheckboxItem(key="a", label="設定"), CheckboxItem(key="b", label="abc")]
+        items = [CheckboxField(key="a", label="設定"), CheckboxField(key="b", label="abc")]
         assert self._column(items).at(60) == 2 + 4 + 2
 
     def test_right_and_a_column(self):
-        items = [CheckboxItem(key="a", label="Stream", description="Show tokens as they arrive")]
+        items = [CheckboxField(key="a", label="Stream", description="Show tokens as they arrive")]
         assert self._column(items, align_values="right") is None
         column = self._column(items, align_values=24)
         assert (column.at(60), column.at(20)) == (24, 24)  # a set column doesn't move
 
     def test_values_clear_the_longest_description(self):
         items = [
-            CheckboxItem(key="a", label="Stream", description="Show tokens as they arrive"),
-            TextItem(key="b", label="API key", edit_width=10),
+            CheckboxField(key="a", label="Stream", description="Show tokens as they arrive"),
+            TextField(key="b", label="API key", edit_width=10),
         ]
         assert self._column(items).at(80) == 2 + len("Show tokens as they arrive") + 2
 
     def test_a_description_too_long_for_the_values_runs_under_them(self):
         items = [
-            CheckboxItem(key="a", label="Stream", description="x" * 50),
-            TextItem(key="b", label="API key", edit_width=20),
+            CheckboxField(key="a", label="Stream", description="x" * 50),
+            TextField(key="b", label="API key", edit_width=20),
         ]
         column = self._column(items)
         # As far right as the widest value (the 20-column field) still fits
@@ -1301,7 +1301,7 @@ class TestAlignValues:
 
     def test_an_inline_dropdown_is_measured_as_the_selector_it_shows(self):
         items = [
-            DropdownItem(key="m", label="Model", description="d" * 60, options=["a", "b"], width=30),
+            DropdownField(key="m", label="Model", description="d" * 60, options=["a", "b"], width=30),
         ]
         # Inline, the value is "◀ a ▶"; in a box, a 30-column menu field and " ▼".
         assert self._column(items, shown="inline").at(80) == 2 + 60 + 2
@@ -1309,13 +1309,13 @@ class TestAlignValues:
 
     def test_list_labels_and_descriptions_dont_move_the_values(self):
         items = [
-            CheckboxItem(key="a", label="Stream"),
-            ChecklistItem(key="c", label="Tools", description="y" * 40, options=["x"]),
+            CheckboxField(key="a", label="Stream"),
+            ChecklistField(key="c", label="Tools", description="y" * 40, options=["x"]),
         ]
         assert self._column(items).at(80) == 2 + len("Stream") + 2
 
     def test_a_form_of_lists_only_needs_no_column(self):
-        dialog = SettingsDialog("S", [ChecklistItem(key="c", label="Tools", options=["x", "y"])])
+        dialog = SettingsDialog("S", [ChecklistField(key="c", label="Tools", options=["x", "y"])])
         dialog.build_body()
 
     @pytest.mark.parametrize("bad", [3, 0, -1, "left", True, 4.5])

@@ -23,13 +23,13 @@ from prompt_toolkit.output import DummyOutput
 
 from thinking_prompt import (
     ButtonConfig,
-    CheckboxItem,
-    ChecklistItem,
+    CheckboxField,
+    ChecklistField,
     Dialog,
-    DropdownItem,
-    InlineSelectItem,
-    RadioItem,
-    TextItem,
+    DropdownField,
+    SelectField,
+    RadioField,
+    TextField,
     ThinkingPromptSession,
 )
 
@@ -630,7 +630,7 @@ class TestCtrlDInDialog:
         async def handler(text: str) -> None:
             results.append(
                 await session.show_settings_dialog(
-                    "Settings", [TextItem(key="name", label="Name", default="abc")]
+                    "Settings", [TextField(key="name", label="Name", default="abc")]
                 )
             )
 
@@ -1003,7 +1003,7 @@ class TestBoxOverItsRoom:
         assert "Ctrl+C: cancel" in frame[status], frame
 
     async def test_a_settings_form_leaves_the_status_bar_whole(self):
-        items = [CheckboxItem(key=f"s{i}", label=f"Setting {i}") for i in range(4)]
+        items = [CheckboxField(key=f"s{i}", label=f"Setting {i}") for i in range(4)]
         frame, prompt, status = await self._open_at_top(
             lambda s: s.show_settings_dialog("Settings", items, placement="box"), rows=30
         )
@@ -1024,7 +1024,7 @@ class TestBoxOverItsRoom:
         """Two lines more of prompt leave a tall form fewer rows than the
         terminal less 4: it takes the rows it gets, under the prompt."""
         items = [
-            CheckboxItem(key=f"s{i}", label=f"Setting {i}", description=f"About {i}") for i in range(11)
+            CheckboxField(key=f"s{i}", label=f"Setting {i}", description=f"About {i}") for i in range(11)
         ]
         frame, _, status = await self._open_at_top(
             lambda s: s.show_settings_dialog("Settings", items, placement="box"),
@@ -1045,7 +1045,7 @@ class TestBoxInASqueezedRoom:
 
     @staticmethod
     def _form() -> list[Any]:
-        return [CheckboxItem(key=f"s{i}", label=f"Setting {i}") for i in range(11)]
+        return [CheckboxField(key=f"s{i}", label=f"Setting {i}") for i in range(11)]
 
     async def _frame_with(
         self, make_dialog: Callable[[ThinkingPromptSession], Any], *, thought_lines: int = 0, **terminal: Any
@@ -1145,7 +1145,7 @@ class TestBoxMaxHeight:
         assert on_frame(frame, "This removes") and on_frame(frame, "Delete") and on_frame(frame, "Cancel"), frame
 
     async def test_a_settings_form_follows_the_cursor_within_its_max_height(self):
-        items = [CheckboxItem(key=f"s{i}", label=f"Setting {i:02}") for i in range(20)]
+        items = [CheckboxField(key=f"s{i}", label=f"Setting {i:02}") for i in range(20)]
         results: list[Any] = []
 
         async def handler(text: str) -> None:
@@ -1384,7 +1384,7 @@ class TestInlineMaxHeight:
         await self._message("just a line", 24, check)
 
     async def test_a_settings_form_follows_the_cursor_within_its_max_height(self):
-        items = [CheckboxItem(key=f"s{i}", label=f"Setting {i:02}") for i in range(20)]
+        items = [CheckboxField(key=f"s{i}", label=f"Setting {i:02}") for i in range(20)]
         results: list[Any] = []
 
         async def handler(text: str) -> None:
@@ -1901,8 +1901,8 @@ class TestInlineSettings:
 
     async def test_values_sit_after_their_labels_in_a_wide_terminal(self):
         items = [
-            CheckboxItem(key="stream", label="Stream", default=True),
-            TextItem(key="name", label="Name", default="bob"),
+            CheckboxField(key="stream", label="Stream", default=True),
+            TextField(key="name", label="Name", default="bob"),
         ]
         frame = await first_dialog_frame(
             lambda s: s.show_settings_dialog("Settings", items, placement="inline"),
@@ -1916,12 +1916,12 @@ class TestInlineSettings:
     @pytest.mark.parametrize("placement", ["inline", "box"])
     async def test_descriptions_end_before_the_values(self, placement):
         items = [
-            DropdownItem(
+            DropdownField(
                 key="theme", label="Theme", description="Application color scheme",
                 options=["Light", "System"], default="System", width=20,
             ),
-            TextItem(key="name", label="Username", description="Your display name", default="Guest", edit_width=20),
-            CheckboxItem(
+            TextField(key="name", label="Username", description="Your display name", default="Guest", edit_width=20),
+            CheckboxField(
                 key="notify", label="Enable Notifications", description="Show desktop notifications", default=True,
             ),
         ]
@@ -1939,9 +1939,9 @@ class TestInlineSettings:
     @pytest.mark.parametrize("align", ["labels", "right"])
     async def test_a_narrow_terminal_cuts_labels_and_keeps_every_value(self, align):
         items = [
-            CheckboxItem(key="stream", label="Stream responses", default=True),
-            DropdownItem(key="model", label="Model for summaries", options=["gpt-4o", "o1"], default="o1"),
-            TextItem(key="name", label="Display name", default="bob"),
+            CheckboxField(key="stream", label="Stream responses", default=True),
+            DropdownField(key="model", label="Model for summaries", options=["gpt-4o", "o1"], default="o1"),
+            TextField(key="name", label="Display name", default="bob"),
         ]
         frame = await first_dialog_frame(
             lambda s: s.show_settings_dialog("Settings", items, placement="inline", align_values=align),
@@ -1960,9 +1960,9 @@ class TestInlineSettings:
     @staticmethod
     def _items() -> list[Any]:
         return [
-            InlineSelectItem(key="model", label="Model", options=["a", "b", "c"], default="a"),
-            CheckboxItem(key="stream", label="Stream", default=False),
-            TextItem(key="name", label="Name", default=""),
+            SelectField(key="model", label="Model", options=["a", "b", "c"], default="a"),
+            CheckboxField(key="stream", label="Stream", default=False),
+            TextField(key="name", label="Name", default=""),
         ]
 
     @staticmethod
@@ -2087,8 +2087,8 @@ class TestInlineSettings:
     async def test_box_settings_tab_from_the_last_check_list_option_reaches_the_buttons(self):
         results: list[Any] = []
         items = [
-            CheckboxItem(key="stream", label="Stream", default=False),
-            ChecklistItem(key="tools", label="Tools", options=["search", "code"], default=("search",)),
+            CheckboxField(key="stream", label="Stream", default=False),
+            ChecklistField(key="tools", label="Tools", options=["search", "code"], default=("search",)),
         ]
 
         async def handler(text: str) -> None:
@@ -2108,8 +2108,8 @@ class TestInlineSettings:
     async def test_check_and_radio_lists_one_option_per_line(self):
         results: list[Any] = []
         items = [
-            ChecklistItem(key="tools", label="Tools", options=["search", "code"], default=("search",)),
-            RadioItem(key="mode", label="Mode", options=["fast", "careful"], default="fast"),
+            ChecklistField(key="tools", label="Tools", options=["search", "code"], default=("search",)),
+            RadioField(key="mode", label="Mode", options=["fast", "careful"], default="fast"),
         ]
 
         async def handler(text: str) -> None:
@@ -2137,8 +2137,8 @@ class TestSettingsInANarrowBox:
 
     async def test_editing_text_keeps_the_form_and_the_field_where_the_value_was(self):
         items = [
-            TextItem(key="name", label="Name", default="bob"),
-            CheckboxItem(key="stream", label="Stream"),
+            TextField(key="name", label="Name", default="bob"),
+            CheckboxField(key="stream", label="Stream"),
         ]
         results: list[Any] = []
 
@@ -2176,9 +2176,9 @@ class TestBoxTooSmall:
     notice in its place; the dialog stays open, with its keys."""
 
     ITEMS = [
-        CheckboxItem(key="s", label="Stream responses", default=True),
-        DropdownItem(key="m", label="Model for summaries", options=["gpt-4o", "o1"], default="o1"),
-        TextItem(key="n", label="Display name", default="bob"),
+        CheckboxField(key="s", label="Stream responses", default=True),
+        DropdownField(key="m", label="Model for summaries", options=["gpt-4o", "o1"], default="o1"),
+        TextField(key="n", label="Display name", default="bob"),
     ]
 
     @staticmethod
@@ -2360,13 +2360,13 @@ class TestBoxDropdownMenu:
     @staticmethod
     def _items() -> list[Any]:
         return [
-            CheckboxItem(key="a", label="Stream"),
-            CheckboxItem(key="b", label="Verbose"),
-            DropdownItem(key="d", label="Model", options=["alpha", "beta", "gamma"], default="beta"),
-            CheckboxItem(key="c", label="Cache"),
-            CheckboxItem(key="e", label="Echo"),
-            CheckboxItem(key="f", label="Fast"),
-            CheckboxItem(key="g", label="Debug"),
+            CheckboxField(key="a", label="Stream"),
+            CheckboxField(key="b", label="Verbose"),
+            DropdownField(key="d", label="Model", options=["alpha", "beta", "gamma"], default="beta"),
+            CheckboxField(key="c", label="Cache"),
+            CheckboxField(key="e", label="Echo"),
+            CheckboxField(key="f", label="Fast"),
+            CheckboxField(key="g", label="Debug"),
         ]
 
     @pytest.mark.parametrize("align", ["labels", "right"])
@@ -2405,10 +2405,10 @@ class TestBoxDropdownMenu:
     async def test_a_menu_with_more_options_than_fit_scrolls_and_picks_the_right_one(self):
         options = [f"opt{i}" for i in range(10)]
         items = [
-            CheckboxItem(key="a", label="Stream"),
-            CheckboxItem(key="b", label="Verbose"),
-            DropdownItem(key="d", label="Model", options=options, default="opt0", height=10),
-            CheckboxItem(key="c", label="Cache"),
+            CheckboxField(key="a", label="Stream"),
+            CheckboxField(key="b", label="Verbose"),
+            DropdownField(key="d", label="Model", options=options, default="opt0", height=10),
+            CheckboxField(key="c", label="Cache"),
         ]
         results: list[Any] = []
 
@@ -2439,7 +2439,7 @@ class TestBoxDropdownMenu:
 
 class TestBoxMenuFloatsOnClose:
     async def test_closing_a_dialog_with_its_menu_open_leaves_no_stale_float(self):
-        items = [DropdownItem(key="d", label="Model", options=["alpha", "beta"], default="beta")]
+        items = [DropdownField(key="d", label="Model", options=["alpha", "beta"], default="beta")]
         closed: list[bool] = []
 
         async def handler(text: str) -> None:

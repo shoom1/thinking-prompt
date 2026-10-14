@@ -24,12 +24,12 @@ from prompt_toolkit.document import Document
 from thinking_prompt import ThinkingPromptSession, AppInfo, Spinner, __version__
 from thinking_prompt.settings_dialog import (
     SettingsDialog,
-    DropdownItem,
-    InlineSelectItem,
-    TextItem,
-    CheckboxItem,
-    ChecklistItem,
-    RadioItem,
+    DropdownField,
+    SelectField,
+    TextField,
+    CheckboxField,
+    ChecklistField,
+    RadioField,
 )
 
 # Check if rich is available for fancy welcome
@@ -352,7 +352,7 @@ async def main():
 
         if cmd == "settings":
             settings_items = [
-                DropdownItem(
+                DropdownField(
                     key="theme",
                     label="Theme",
                     description="Application color scheme",
@@ -360,20 +360,20 @@ async def main():
                     default="System",
                     width=20,
                 ),
-                InlineSelectItem(
+                SelectField(
                     key="font_size",
                     label="Font Size",
                     options=["Small", "Medium", "Large", "Extra Large"],
                     default="Medium",
                 ),
-                TextItem(
+                TextField(
                     key="username",
                     label="Username",
                     description="Your display name",
                     default="Guest",
                     edit_width=20,
                 ),
-                TextItem(
+                TextField(
                     key="api_key",
                     label="API Key",
                     description="Your secret API key",
@@ -381,24 +381,24 @@ async def main():
                     password=True,
                     edit_width=20,
                 ),
-                CheckboxItem(
+                CheckboxField(
                     key="notifications",
                     label="Enable Notifications",
                     description="Show desktop notifications",
                     default=True,
                 ),
-                CheckboxItem(
+                CheckboxField(
                     key="auto_save",
                     label="Auto Save",
                     default=False,
                 ),
-                RadioItem(
+                RadioField(
                     key="style",
                     label="Response Style",
                     options=["Concise", "Detailed"],
                     default="Concise",
                 ),
-                ChecklistItem(
+                ChecklistField(
                     key="tools",
                     label="Tools",
                     options=["Web search", "Code execution", "File access"],
@@ -417,7 +417,7 @@ async def main():
                 # Keep secrets out of the rendered diff, even in demos.
                 password_keys = {
                     item.key for item in settings_items
-                    if isinstance(item, TextItem) and item.password
+                    if isinstance(item, TextField) and item.password
                 }
                 changes = [
                     f"- **{k}**: {'***' if k in password_keys and v else v}"

@@ -23,7 +23,7 @@ from typing import (
 
 if TYPE_CHECKING:
     from .dialog import Dialog, DialogManager
-    from .settings_dialog import SettingsItem
+    from .fields import Field
     from .thinking_box import ThinkingBox
     from .types import ContentCallback, ContentFormat, InputHandler, Overflow
 
@@ -1517,7 +1517,7 @@ class ThinkingPromptSession:
     async def show_settings_dialog(
         self,
         title: str,
-        items: list[SettingsItem],
+        items: list[Field],
         can_cancel: bool = True,
         *,
         width: int | None = 60,
@@ -1530,7 +1530,7 @@ class ThinkingPromptSession:
 
         Args:
             title: Dialog title.
-            items: List of SettingsItem objects defining the form.
+            items: List of Field objects defining the form.
             can_cancel: If True (default), shows Save/Cancel buttons.
                        If False, shows only Done button.
             width: Dialog width control (box only):
@@ -1553,14 +1553,14 @@ class ThinkingPromptSession:
             An empty dict {} means no values were changed.
 
         Example:
-            from thinking_prompt import DropdownItem, CheckboxItem
+            from thinking_prompt import DropdownField, CheckboxField
 
             result = await session.show_settings_dialog(
                 title="Settings",
                 items=[
-                    DropdownItem(key="model", label="Model",
+                    DropdownField(key="model", label="Model",
                                 options=["gpt-4", "gpt-3.5"], default="gpt-4"),
-                    CheckboxItem(key="stream", label="Stream Output", default=True),
+                    CheckboxField(key="stream", label="Stream Output", default=True),
                 ],
             )
             if result is not None:
