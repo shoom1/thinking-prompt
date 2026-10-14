@@ -125,12 +125,6 @@ class TestBoxPresenter:
         assert isinstance(root, FloatContainer)
         assert not isinstance(root.content, FloatContainer)
 
-    @pytest.mark.parametrize("top,expected", [(None, (None, None)), (2, (2, None)), (-1, (None, 1))])
-    def test_open_positions_the_float_by_top(self, top, expected):
-        presenter = self._presenter()
-        presenter.open(Dialog("T", "B", [ButtonConfig("OK")], top=top))
-        assert (presenter._float.top, presenter._float.bottom) == expected
-
     def test_a_width_never_makes_the_box_narrower_than_its_buttons(self):
         """Two 12-column buttons, a column between them, and the frame."""
         view = build_box(Dialog("T", "B", [ButtonConfig("Delete"), ButtonConfig("Cancel")], width=14))

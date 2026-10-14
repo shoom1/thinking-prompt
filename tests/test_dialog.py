@@ -507,7 +507,7 @@ class TestDialog:
         assert (d.title, d.body) == ("", "")
         assert d.get_buttons() == []
         assert (d.escape_result, d.escapable) == (None, True)
-        assert (d.width, d.top, d.max_height) == (None, None, None)
+        assert (d.width, d.max_height) == (None, None)
 
     def test_positional_title_body_buttons(self):
         buttons = [ButtonConfig("Yes", result=True)]
@@ -520,18 +520,23 @@ class TestDialog:
             width = 70
             escape_result = "dismissed"
 
-        d = Wide(title="T", top=2)
-        assert (d.title, d.top) == ("T", 2)
+        d = Wide(title="T", max_height=2)
+        assert (d.title, d.max_height) == ("T", 2)
         assert (d.width, d.escape_result) == (70, "dismissed")
 
     def test_explicit_none_overrides_a_class_default(self):
         class Wide(Dialog):
             width = 70
-            top = 3
+            max_height = 3
             escape_result = "dismissed"
 
-        d = Wide(width=None, top=None, escape_result=None)
-        assert (d.width, d.top, d.escape_result) == (None, None, None)
+        d = Wide(width=None, max_height=None, escape_result=None)
+        assert (d.width, d.max_height, d.escape_result) == (None, None, None)
+
+    def test_top_is_gone(self):
+        """A box sits where an inline dialog would; there's no position to set."""
+        with pytest.raises(TypeError, match="top"):
+            Dialog("T", top=2)
 
     def test_subclass_attributes_and_super_init_arguments(self):
         class Confirm(Dialog):

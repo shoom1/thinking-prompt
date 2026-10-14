@@ -195,16 +195,14 @@ class _BoxOrNotice(Container):
 
 
 class _BoxFloat(Float):
-    """The box's float: centered over the drawn area, or, outside full
-    screen, anchored to the window that holds its reserved rows.
+    """The box's float: anchored to the window that holds its reserved
+    rows, where an inline dialog would be, or centered over the drawn area.
 
-    ``room`` gives that window when it is in the layout now and was drawn
-    with every row it asked for (None in full screen, where it isn't, and
-    its cursor position would fall back to (0, 0); None too when squeezed
-    short, where the box would flip or shrink: it centers then). Asked on
-    each draw, since full screen can switch with a dialog open. The anchor is the window's top-left, so with ``ycursor``
-    and ``allow_cover_cursor`` the box's top border lands on its first row.
-    An explicit top or bottom keeps its offset in both modes.
+    ``room`` gives that window while the box sits over it (None when it
+    isn't drawn, or got fewer rows than the box's smallest size: the box
+    centers then). Asked on each draw. The anchor is the window's top-left,
+    so with ``ycursor`` and ``allow_cover_cursor`` the box's top border
+    lands on its first row.
     """
 
     def __init__(self, room: Callable[[], Window | None], **kwargs: Any) -> None:
@@ -214,7 +212,7 @@ class _BoxFloat(Float):
     # Float assigns these in __init__; here they are worked out when read.
     @property
     def attach_to_window(self) -> Window | None:
-        return self._room() if self._anchored() else None
+        return self._room()
 
     @attach_to_window.setter
     def attach_to_window(self, value: Any) -> None:
@@ -222,14 +220,11 @@ class _BoxFloat(Float):
 
     @property
     def ycursor(self) -> bool:
-        return self._anchored() and self._room() is not None
+        return self._room() is not None
 
     @ycursor.setter
     def ycursor(self, value: bool) -> None:
         pass
-
-    def _anchored(self) -> bool:
-        return self.top is None and self.bottom is None
 
 
 class BoxPresenter:
@@ -238,15 +233,13 @@ class BoxPresenter:
     def __init__(self, session: ThinkingPromptSession) -> None:
         self._session = session
         self.view: BoxView | None = None
-        # The open dialog's widget, no taller than rows(). The float takes
-        # its content's height: given a height of its own, FloatContainer
-        # would no longer trim it to the rows left under top= (or above
-        # a negative one), cutting off the title or the buttons.
+        # The open dialog's widget, no taller than _cap(): the float takes
+        # its content's height.
         self._capped: Container = Window()
         self._title = ""
         self._escapable = True
         self._float = _BoxFloat(
-            self._session._box_room,
+            self._room_window,
             content=ConditionalContainer(
                 content=DynamicContainer(lambda: self._capped),
                 filter=Condition(lambda: self.view is not None),
@@ -269,22 +262,8 @@ class BoxPresenter:
         self._installed = True
 
     def open(self, dialog: Dialog) -> BoxView:
-        """Build ``dialog`` and float it according to its ``top``."""
+        """Build ``dialog`` and float it over its reserved rows (_BoxFloat)."""
         view = build_box(dialog)
-
-        if dialog.top is None:
-            # No top or bottom: over the room, or centered (see _BoxFloat)
-            self._float.top = None
-            self._float.bottom = None
-        elif dialog.top >= 0:
-            # Offset from top
-            self._float.top = dialog.top
-            self._float.bottom = None
-        else:
-            # Negative = offset from bottom
-            self._float.top = None
-            self._float.bottom = abs(dialog.top)
-
         self.view = view
         self._title = dialog.title
         self._escapable = dialog.escapable
@@ -383,6 +362,32 @@ class BoxPresenter:
 
     def _cap(self, width: int) -> int:
         """The open dialog's rows in the app's terminal: rows(), as the
-        session reserves them. (``width``, the float's, is the dialog's own.)"""
+        session reserves them, or fewer, the rows its room got when the rest
+        of the layout took some (a thinking box, a longer prompt): what
+        doesn't fit scrolls. (``width``, the float's, is the dialog's own.)"""
         size = get_app().output.get_size()
-        return self.rows(size.columns, size.rows)
+        rows = self.rows(size.columns, size.rows)
+        room = self._room()
+        return rows if room is None else min(rows, room[1])
+
+    def _room(self) -> tuple[Window, int] | None:
+        """The window holding the box's reserved rows and the rows it got in
+        this render, if they are at least the box's smallest height (the
+        box sits over them); else None, and the box centers."""
+        room = self._session._box_room()
+        if room is None or self.view is None:
+            return None
+        size = get_app().output.get_size()
+        return room if room[1] >= self._least_rows(size.columns, size.rows) else None
+
+    def _room_window(self) -> Window | None:
+        room = self._room()
+        return None if room is None else room[0]
+
+    def _least_rows(self, width: int, max_rows: int) -> int:
+        """The fewest rows the open dialog can show in: its frame, buttons
+        and one body row, or the notice drawn in its place."""
+        notice = self._notice(width, max_rows)
+        if notice is not None:
+            return min(self._notice_rows(notice, width), max_rows)
+        return self._smallest(width, max_rows)[1]

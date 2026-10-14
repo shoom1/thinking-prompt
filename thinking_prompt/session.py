@@ -1346,34 +1346,33 @@ class ThinkingPromptSession:
 
     def _inline_dialog_content(self) -> AnyContainer:
         """What the layout's inline-dialog slot shows: the open inline dialog,
-        room for an open box dialog outside full screen, or nothing.
+        rows for an open box dialog to float over, or nothing.
 
-        Outside full screen the app gets only the rows its layout asks for,
-        plus those free below the cursor, and a box dialog floats over the
-        layout without asking for any: with the prompt at the bottom of the
-        terminal, it was clipped to the prompt's few rows.
+        A box dialog floats over the layout without asking for rows: outside
+        full screen, with the prompt at the bottom of the terminal, it was
+        clipped to the prompt's few rows. Rows here put it where an inline
+        dialog would be, in and out of full screen, sharing the terminal
+        with the rest of the layout the way an inline dialog does.
         """
         manager = self._dialog_manager
         if manager is None:
             return self._no_inline_dialog
         if manager.inline_view is not None:
             return manager.inline_view.container
-        if self._is_fullscreen:
-            return self._no_inline_dialog  # full screen has every row already
         return self._box_dialog_room
 
-    def _box_room(self) -> Window | None:
-        """The window holding a box dialog's reserved rows, if it is in the
-        layout now and was drawn in this render with every row it asked for
-        (the box floats over it), else None. A room squeezed short would flip
-        the box over the thinking box, or squeeze it, so the box centers."""
+    def _box_room(self) -> tuple[Window, int] | None:
+        """The window holding a box dialog's reserved rows and the rows it
+        got, if it is in the layout now and was drawn in this render, else
+        None. The rest of the layout (a thinking box, a longer prompt, the
+        transcript in full screen) can leave it fewer than it asked for."""
         room = self._box_dialog_room
         if self._inline_dialog_content() is not room:
             return None
         drawn = self._room_control.drawn
         if drawn is None or drawn[0] != self.app.render_counter:
             return None
-        return room if drawn[1] >= self._box_dialog_rows().preferred else None
+        return room, drawn[1]
 
     def _box_dialog_rows(self) -> Dimension:
         """The box dialog's rows, to reserve. Flexible down to none, so a
@@ -1622,7 +1621,6 @@ class ThinkingPromptSession:
         can_cancel: bool = True,
         *,
         width: int | None = 60,
-        top: int | None = None,
         max_height: int | None = None,
         align_values: Literal["labels", "right"] | int = "labels",
         placement: Placement | None = None,
@@ -1640,12 +1638,6 @@ class ThinkingPromptSession:
                    - positive int: preferred width (default 60), never
                      narrower than the buttons
                    - -1: maximum width (stretch to fill)
-            top: Vertical position:
-                   - None: outside full screen, under the prompt over
-                     the rows reserved for it (centered if those are
-                     squeezed); centered in full screen (default)
-                   - 0 or positive: offset from top
-                   - negative: offset from bottom (e.g., -1 = 1 row from bottom)
             max_height: The most rows the dialog takes; settings beyond it
                     scroll with the cursor. None (default): the terminal's
                     rows less the prompt's.
@@ -1677,7 +1669,7 @@ class ThinkingPromptSession:
         """
         from .settings_dialog import SettingsDialog
         dialog = SettingsDialog(
-            title, items, can_cancel, width=width, top=top, max_height=max_height,
+            title, items, can_cancel, width=width, max_height=max_height,
             align_values=align_values, placement=placement,
         )
         return cast(
