@@ -57,7 +57,7 @@ from ._text import format_exception_detail
 from .dialog_box import BoxPresenter
 from .dialog_inline import InlinePresenter, InlineView
 from .dialog_scroll import ScrollRegion, focusable_windows
-from .fields import AlignValues, Field, _Form
+from .fields import AlignValues, Field, _check_align_values, _Form
 from .rows import OptionGroup, RowNavigator
 from .types import Placement, check_placement
 
@@ -138,7 +138,8 @@ class Dialog:
             TextArea, closed with Escape).
         fields: Form fields shown under the body: TextField, CheckboxField,
             SelectField, DropdownField, ChecklistField, RadioField. Their
-            keys must be unique; ``values`` holds what they're set to.
+            keys must be unique; ``values`` holds what they're set to. Read
+            when the dialog is created: setting it afterwards changes nothing.
         align_values: Where field values start: "labels" (default: two
             columns after the longest label or description), "right" (the
             row's right edge) or a column number (longer labels cut with "…").
@@ -233,7 +234,8 @@ class Dialog:
         if self.max_height is not None and self.max_height < 1:
             raise ValueError(f"max_height must be at least 1, got {self.max_height!r}")
         # One control per field, holding its value from now on (values).
-        self._form = _Form(self.fields, self.align_values)
+        _check_align_values(self.align_values)
+        self._form = _Form(self.fields)
 
         self._result_future: asyncio.Future | None = None
         self._manager: DialogManager | None = None
@@ -271,12 +273,21 @@ class Dialog:
         start (a radio list's picked option); None for neither.
         """
         body = to_container(self.build_body()) if self._has_body() else None
-        fields = self._form.container(self._placement)
+        fields = self._form.container(self._placement, self.align_values)
         body_stops = focusable_windows(body) if body is not None else []
         start = body_stops[0] if body_stops else self._form.start()
         if fields is None:
             return body, start
-        return (fields if body is None else HSplit([body, fields])), start
+        if self._placement == "inline":
+            return (fields if body is None else HSplit([body, fields])), start
+        # A box: Tab walks the body's windows and the fields as groups.
+        tabs = self._form.tab_bindings(
+            lambda: focusable_windows(body) if body is not None else []
+        )
+        if body is None:
+            fields.key_bindings = merge_key_bindings([fields.key_bindings or KeyBindings(), tabs])
+            return fields, start
+        return HSplit([body, fields], key_bindings=tabs), start
 
     def _screen_floats(self) -> list[Float]:
         """Floats the fields need over the whole screen while the dialog is

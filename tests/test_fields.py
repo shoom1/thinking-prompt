@@ -209,3 +209,29 @@ class TestDialogFields:
             assert layout.has_focus(tools._group.rows[0].window)
             _press(content.key_bindings, Keys.BackTab, app)     # the first field stays
             assert layout.has_focus(tools._group.rows[0].window)
+
+    def test_tab_crosses_from_a_body_into_the_fields_and_back(self):
+        area = TextArea()
+        d = Dialog("T", area, fields=[RadioField("m", "Mode", options=["x", "y", "z"], default="z")])
+        content, start = _shown(d, "box")
+        mode = d._form.controls[0]
+        app = Application(
+            layout=Layout(HSplit([content, Button("OK")]), focused_element=start),
+            input=DummyInput(),
+            output=DummyOutput(),
+        )
+        layout = app.layout
+        with set_app(app):
+            assert layout.has_focus(area.window)
+            _press(content.key_bindings, Keys.Tab, app)        # the picked option, not the first
+            assert layout.has_focus(mode._group.rows[2].window)
+            _press(content.key_bindings, Keys.BackTab, app)     # back to the body
+            assert layout.has_focus(area.window)
+            _press(content.key_bindings, Keys.BackTab, app)     # the first group stays
+            assert layout.has_focus(area.window)
+
+    def test_align_values_is_read_when_shown(self):
+        d = Dialog("T", fields=[CheckboxField("a", "A")])
+        d.align_values = "right"
+        _shown(d)
+        assert d._form.controls[0]._value_column is None

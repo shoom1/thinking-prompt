@@ -16,7 +16,7 @@ from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.data_structures import Point
 from prompt_toolkit.filters import Condition, FilterOrBool
 from prompt_toolkit.formatted_text import FormattedText
-from prompt_toolkit.key_binding import KeyBindings, merge_key_bindings
+from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.key_binding.key_bindings import KeyBindingsBase
 from prompt_toolkit.layout import (
     BufferControl,
@@ -1036,9 +1036,7 @@ class _Form:
     """A dialog's fields (Dialog.fields): one control each, holding its value
     from the dialog's creation on."""
 
-    def __init__(self, fields: Sequence[Field], align_values: AlignValues) -> None:
-        _check_align_values(align_values)
-        self._align_values = align_values
+    def __init__(self, fields: Sequence[Field]) -> None:
         self.controls: list[FieldControl] = [_control_for(f) for f in fields]
         keys: set[str] = set()
         for control in self.controls:
@@ -1068,9 +1066,9 @@ class _Form:
         entered = self._enterable()
         return entered[0].start_stop() if entered else None
 
-    def container(self, placement: Placement) -> HSplit | None:
-        """The fields one under another, laid out for ``placement``, with
-        their keys; None without fields."""
+    def container(self, placement: Placement, align_values: AlignValues) -> HSplit | None:
+        """The fields one under another, laid out for ``placement`` with
+        values at ``align_values``, with their keys; None without fields."""
         if not self.controls:
             return None
         self._placement = placement
@@ -1079,7 +1077,7 @@ class _Form:
             if isinstance(control, DropdownFieldControl):
                 control.set_inline(inline)
         # After set_inline: an inline dropdown's value is a selector.
-        column = self._value_column()
+        column = self._value_column(align_values)
         for control in self.controls:
             control.set_value_column(column)
         # An empty window_too_small: no "Window too small" flash while the
@@ -1101,20 +1099,12 @@ class _Form:
         """The fields the cursor can enter (a list with no options can't)."""
         return [control for control in self.controls if control.get_stops()]
 
-    @staticmethod
-    def _field_at(layout: Layout, fields: list[FieldControl]) -> int | None:
-        """Which of ``fields`` has the cursor, if any."""
-        for i, control in enumerate(fields):
-            if any(layout.has_focus(stop) for stop in control.get_stops()):
-                return i
-        return None
-
-    def _value_column(self) -> _ValueColumn | None:
+    def _value_column(self, align_values: AlignValues) -> _ValueColumn | None:
         """Where values start (align_values); None: the row's right edge."""
-        if self._align_values == "right":
+        if align_values == "right":
             return None
-        if self._align_values != "labels":
-            return _ValueColumn(int(self._align_values))
+        if align_values != "labels":
+            return _ValueColumn(int(align_values))
         # Check and radio lists have their label, and description, on rows
         # with no value. A description starts where labels do (under the
         # marker's columns).
@@ -1130,32 +1120,48 @@ class _Form:
         )
 
     def _key_bindings(self) -> KeyBindingsBase | None:
-        """In a box, ↑↓ move a row at a time and Tab / Shift+Tab a field at a
-        time, Tab going on to the buttons after the last field. Inline: none,
-        the dialog's own cursor walks fields and actions alike."""
+        """In a box, ↑↓ move a row at a time. Inline: none, the dialog's own
+        cursor walks fields and actions alike."""
         if self._placement == "inline":
             return None
+        return RowNavigator(self.stops, is_editing=self.is_editing).key_bindings()
+
+    def tab_bindings(self, before: Callable[[], list[Container]]) -> KeyBindings:
+        """A box's Tab / Shift+Tab: a group at a time, in order. Each
+        focusable window ``before()`` returns (the body above the fields) is
+        a group, and each field is one, entered at its start (a radio list's
+        picked option). Tab goes on to the buttons after the last group;
+        Shift+Tab stays at the first (no wrap to the buttons)."""
         idle = Condition(lambda: not self.is_editing())
         kb = KeyBindings()
 
+        def groups() -> list[tuple[list[Container], Container]]:
+            found: list[tuple[list[Container], Container]] = [([w], w) for w in before()]
+            found.extend((c.get_stops(), c.start_stop()) for c in self._enterable())
+            return found
+
+        def current(layout: Layout, found: list[tuple[list[Container], Container]]) -> int | None:
+            for i, (stops, _) in enumerate(found):
+                if any(layout.has_focus(stop) for stop in stops):
+                    return i
+            return None
+
         @kb.add("tab", filter=idle)
-        def _next_field(event: Any) -> None:
-            fields = self._enterable()
-            index = self._field_at(event.app.layout, fields)
-            if index is not None and index < len(fields) - 1:
-                event.app.layout.focus(fields[index + 1].start_stop())
+        def _next_group(event: Any) -> None:
+            found = groups()
+            index = current(event.app.layout, found)
+            if index is not None and index < len(found) - 1:
+                event.app.layout.focus(found[index + 1][1])
             else:
-                # After the last field: on to the buttons (no wrap).
-                event.app.layout.focus(self.stops()[-1])
+                # After the last group: on to the buttons (no wrap).
+                event.app.layout.focus(self.stops()[-1] if self.stops() else found[-1][1])
                 event.app.layout.focus_next()
 
         @kb.add("s-tab", filter=idle)
-        def _previous_field(event: Any) -> None:
-            fields = self._enterable()
-            index = self._field_at(event.app.layout, fields)
+        def _previous_group(event: Any) -> None:
+            found = groups()
+            index = current(event.app.layout, found)
             if index is not None:
-                # At the first field: its start (no wrap to the buttons).
-                event.app.layout.focus(fields[max(0, index - 1)].start_stop())
+                event.app.layout.focus(found[max(0, index - 1)][1])
 
-        navigator = RowNavigator(self.stops, is_editing=self.is_editing)
-        return merge_key_bindings([navigator.key_bindings(), kb])
+        return kb

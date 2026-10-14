@@ -2643,3 +2643,35 @@ class TestDialogFields:
                 assert dialog.values == {"on": True}
 
             await run_with(session, handler, script)
+
+    async def test_tab_enters_a_radio_list_at_its_pick_and_shift_tab_goes_back(self):
+        area = TextArea(multiline=False)
+        dialog = Dialog(
+            "T",
+            area,
+            fields=[RadioField("m", "Mode", options=["x", "y", "z"], default="z")],
+            placement="box",
+        )
+        dialog.buttons = [
+            ButtonConfig("OK", handler=lambda: dialog.set_result((area.text, dialog.values))),
+        ]
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.show_dialog(dialog))
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                inp.send_text("hi" + TAB)
+                # The cursor (❯) is on the picked option, not the first.
+                await wait_until(
+                    lambda: any("❯" in ln and "(•) z" in ln for ln in screen_lines(session))
+                )
+                inp.send_text(SHIFT_TAB + "!")
+                inp.send_text(TAB + TAB + ENTER)
+                await wait_until(lambda: results == [("hi!", {"m": "z"})])
+
+            await run_with(session, handler, script)
