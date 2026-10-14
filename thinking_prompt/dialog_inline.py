@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Callable
 
 from prompt_toolkit.application.current import get_app
 from prompt_toolkit.formatted_text import FormattedText
-from prompt_toolkit.layout import Container, HSplit, VSplit, Window, to_container
+from prompt_toolkit.layout import Container, HSplit, VSplit, Window
 from prompt_toolkit.layout.controls import FormattedTextControl, UIContent
 from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.utils import get_cwidth
@@ -131,7 +131,7 @@ def build_inline(dialog: Dialog) -> InlineView:
         ActionRow(number, cfg.text, dialog._click_handler(cfg), cfg.style, number_width)
         for number, cfg in enumerate(configs, start=1)
     ]
-    body = to_container(dialog.build_body()) if dialog._has_body() else None
+    body, start = dialog._content()
     has_stops = body is not None and bool(focusable_windows(body))
 
     def stops() -> list[Container]:
@@ -182,10 +182,16 @@ def build_inline(dialog: Dialog) -> InlineView:
     navigator = RowNavigator(stops, is_editing=dialog._is_editing, tab=True, actions=actions)
     content = HSplit(rows, key_bindings=navigator.key_bindings())
 
-    # Initial cursor: a ButtonConfig(focused=True) action, else the first stop.
+    # Initial cursor: a ButtonConfig(focused=True) action, else where the
+    # body's cursor starts, else the first stop.
     focused = next((a for a, cfg in zip(actions, configs) if cfg.focused), None)
     first = stops()
-    focus = focused.window if focused is not None else (first[0] if first else None)
+    if focused is not None:
+        focus: Container | None = focused.window
+    elif start is not None:
+        focus = start
+    else:
+        focus = first[0] if first else None
 
     # A one-column left margin.
     return InlineView(VSplit([Window(width=1), content]), focus, actions, hint, text)

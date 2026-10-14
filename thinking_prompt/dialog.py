@@ -49,14 +49,15 @@ from typing import (
 from prompt_toolkit.filters import Condition
 from prompt_toolkit.formatted_text import AnyFormattedText
 from prompt_toolkit.key_binding import KeyBindings, merge_key_bindings
-from prompt_toolkit.layout import AnyContainer, Float, HSplit
+from prompt_toolkit.layout import AnyContainer, Container, Float, HSplit, to_container
 from prompt_toolkit.layout.containers import is_container
 from prompt_toolkit.widgets import Label, RadioList
 
 from ._text import format_exception_detail
 from .dialog_box import BoxPresenter
 from .dialog_inline import InlinePresenter, InlineView
-from .dialog_scroll import ScrollRegion
+from .dialog_scroll import ScrollRegion, focusable_windows
+from .fields import AlignValues, Field, _Form
 from .rows import OptionGroup, RowNavigator
 from .types import Placement, check_placement
 
@@ -133,8 +134,14 @@ class Dialog:
         body: Text (str, HTML, ANSI, FormattedText), shown in a Label, or
             any prompt_toolkit container.
         buttons: ButtonConfigs (default: none). A dialog needs something to
-            focus: at least one button, or a focusable body (e.g. a TextArea,
-            closed with Escape).
+            focus: at least one button, fields, or a focusable body (e.g. a
+            TextArea, closed with Escape).
+        fields: Form fields shown under the body: TextField, CheckboxField,
+            SelectField, DropdownField, ChecklistField, RadioField. Their
+            keys must be unique; ``values`` holds what they're set to.
+        align_values: Where field values start: "labels" (default: two
+            columns after the longest label or description), "right" (the
+            row's right edge) or a column number (longer labels cut with "…").
         escape_result: What Escape and cancel() return (default None).
         escapable: If False, Escape does nothing (default True).
         width: None/0 = auto, >0 = preferred width (never narrower than
@@ -162,13 +169,7 @@ class Dialog:
         # Subclassed
         class LoginDialog(Dialog):
             title = "Login"
-
-            def __init__(self):
-                super().__init__()
-                self.username = TextArea(multiline=False)
-
-            def build_body(self):
-                return HSplit([Label("Username:"), self.username])
+            fields = [TextField("user", "Username")]
 
             def get_buttons(self):
                 return [
@@ -177,13 +178,17 @@ class Dialog:
                 ]
 
             def on_login(self):
-                if self.username.text:  # stays open while empty
-                    self.set_result({"user": self.username.text})
+                if self.values["user"]:  # stays open while empty
+                    self.set_result(self.values)
     """
 
     title: str = ""
     body: AnyFormattedText | AnyContainer = ""
     buttons: Sequence[ButtonConfig] = ()
+    # Form fields, under the body (see thinking_prompt.fields).
+    fields: Sequence[Field] = ()
+    # Where field values start: "labels", "right" or a column.
+    align_values: AlignValues = "labels"
     escape_result: Any = None
     escapable: bool = True
     width: int | None = None
@@ -204,6 +209,8 @@ class Dialog:
         width: int | None | _NotPassed = _NOT_PASSED,
         max_height: int | None | _NotPassed = _NOT_PASSED,
         placement: Placement | None | _NotPassed = _NOT_PASSED,
+        fields: Sequence[Field] | _NotPassed = _NOT_PASSED,
+        align_values: AlignValues | _NotPassed = _NOT_PASSED,
     ) -> None:
         if not isinstance(placement, _NotPassed):
             check_placement(placement, optional=True)
@@ -217,12 +224,16 @@ class Dialog:
             "width": width,
             "max_height": max_height,
             "placement": placement,
+            "fields": fields,
+            "align_values": align_values,
         }
         for name, value in passed.items():
             if not isinstance(value, _NotPassed):
                 setattr(self, name, value)
         if self.max_height is not None and self.max_height < 1:
             raise ValueError(f"max_height must be at least 1, got {self.max_height!r}")
+        # One control per field, holding its value from now on (values).
+        self._form = _Form(self.fields, self.align_values)
 
         self._result_future: asyncio.Future | None = None
         self._manager: DialogManager | None = None
@@ -235,21 +246,42 @@ class Dialog:
         Build the dialog body.
 
         Default: ``body`` itself if it's a container, otherwise ``body``
-        shown as text in a Label. Override for custom content.
+        shown as text in a Label. Override for custom content. The fields,
+        if any, are shown under it.
         """
         body = self.body
         if is_container(body):
             return body
         return Label(text=cast("AnyFormattedText", body))
 
-    def _screen_floats(self) -> list[Float]:
-        """
-        Floats the body needs over the whole screen while the dialog is
-        open as a box (a dropdown's menu, say), not just over the body.
+    @property
+    def values(self) -> dict[str, Any]:
+        """Each field's current value by key, in field order ({} without
+        fields): what the fields hold now, before, while or after the dialog
+        is shown. Read it from a button handler to return it."""
+        return self._form.values
 
-        Default: none. Called once, after ``build_body``.
+    def _content(self) -> tuple[Container | None, Container | None]:
+        """What a presenter shows between the title and the buttons, and
+        where the cursor starts in it when no button asks for it.
+
+        The content: the body (unless it's an empty text body), then the
+        fields laid out for the placement; None for neither. The start: the
+        first thing in the body that takes focus, else the first field's
+        start (a radio list's picked option); None for neither.
         """
-        return []
+        body = to_container(self.build_body()) if self._has_body() else None
+        fields = self._form.container(self._placement)
+        body_stops = focusable_windows(body) if body is not None else []
+        start = body_stops[0] if body_stops else self._form.start()
+        if fields is None:
+            return body, start
+        return (fields if body is None else HSplit([body, fields])), start
+
+    def _screen_floats(self) -> list[Float]:
+        """Floats the fields need over the whole screen while the dialog is
+        open as a box (a dropdown's menu). Called once, after _content()."""
+        return self._form.floats()
 
     def get_buttons(self) -> list[ButtonConfig]:
         """
@@ -287,9 +319,9 @@ class Dialog:
         return type(self).build_body is not Dialog.build_body or self.body != ""
 
     def _is_editing(self) -> bool:
-        """True while a row of the body is being edited (e.g. a settings
-        text field): the inline cursor stays put meanwhile."""
-        return False
+        """True while a field is being edited (a text field, an open menu):
+        the cursor stays put meanwhile."""
+        return self._form.is_editing()
 
     def _button_configs(self) -> list[ButtonConfig]:
         """get_buttons(), checked: every item must be a ButtonConfig.

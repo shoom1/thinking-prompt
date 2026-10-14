@@ -8,7 +8,7 @@ text in place (in a box, opens a dropdown's menu), Escape ends an edit.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Generic, Literal, TypeVar, Union
 
@@ -16,7 +16,8 @@ from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.data_structures import Point
 from prompt_toolkit.filters import Condition, FilterOrBool
 from prompt_toolkit.formatted_text import FormattedText
-from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.key_binding import KeyBindings, merge_key_bindings
+from prompt_toolkit.key_binding.key_bindings import KeyBindingsBase
 from prompt_toolkit.layout import (
     BufferControl,
     ConditionalContainer,
@@ -24,6 +25,7 @@ from prompt_toolkit.layout import (
     DynamicContainer,
     Float,
     HSplit,
+    Layout,
     Window,
 )
 from prompt_toolkit.layout.controls import FormattedTextControl, UIContent, UIControl
@@ -34,7 +36,8 @@ from prompt_toolkit.layout.screen import Screen, WritePosition
 from prompt_toolkit.utils import get_cwidth
 from prompt_toolkit.widgets import Frame
 
-from .rows import MARKER, NO_MARKER, OptionGroup, RowControl, has_focus
+from .rows import MARKER, NO_MARKER, OptionGroup, RowControl, RowNavigator, has_focus
+from .types import Placement
 
 
 @dataclass(frozen=True)
@@ -421,6 +424,10 @@ class FieldControl(RowControl, ABC, Generic[T]):
     def get_stops(self) -> list[Container]:
         """Where the cursor stops in this setting: one place per row the user acts on."""
         return [self.get_container()]
+
+    def start_stop(self) -> Container:
+        """Where the cursor lands entering this field: its first stop."""
+        return self.get_stops()[0]
 
     def _check_focus(self) -> bool:
         """Whether the setting's row has focus (it's drawn highlighted)."""
@@ -989,6 +996,14 @@ class OptionsFieldControl(FieldControl[Any]):
     def get_stops(self) -> list[Container]:
         return [row.window for row in self._group.rows]
 
+    def start_stop(self) -> Container:
+        """A radio list's picked option, else the first option."""
+        picked = None if self._group.multiple else self._group.picked
+        for row in self._group.rows:
+            if row.option == picked:
+                return row.window
+        return self._group.rows[0].window
+
     def create_content(self, width: int, height: int) -> UIContent:
         """The label row (and description), highlighted while an option has focus."""
         selected = any(has_focus(row.window) for row in self._group.rows)
@@ -997,3 +1012,150 @@ class OptionsFieldControl(FieldControl[Any]):
         if self._item.description:
             lines.append(_description(self._item.description, selected))
         return _content(lines)
+
+
+def _control_for(field: Field) -> FieldControl:
+    """The control that shows ``field``."""
+    if isinstance(field, (ChecklistField, RadioField)):
+        return OptionsFieldControl(field)
+    if isinstance(field, CheckboxField):
+        return CheckboxFieldControl(field)
+    if isinstance(field, DropdownField):
+        return DropdownFieldControl(field)
+    if isinstance(field, SelectField):
+        return SelectFieldControl(field)
+    if isinstance(field, TextField):
+        return TextFieldControl(field)
+    raise TypeError(
+        "Dialog fields must be TextField, CheckboxField, SelectField, "
+        f"DropdownField, ChecklistField or RadioField; got {type(field).__name__}"
+    )
+
+
+class _Form:
+    """A dialog's fields (Dialog.fields): one control each, holding its value
+    from the dialog's creation on."""
+
+    def __init__(self, fields: Sequence[Field], align_values: AlignValues) -> None:
+        _check_align_values(align_values)
+        self._align_values = align_values
+        self.controls: list[FieldControl] = [_control_for(f) for f in fields]
+        keys: set[str] = set()
+        for control in self.controls:
+            key = control.item.key
+            if key in keys:
+                raise ValueError(f"Dialog fields need unique keys; {key!r} is used twice")
+            keys.add(key)
+        # The placement the fields were last laid out for (container()).
+        self._placement: Placement = "box"
+
+    @property
+    def values(self) -> dict[str, Any]:
+        """Each field's current value by key, in field order."""
+        return {control.item.key: control.value for control in self.controls}
+
+    def is_editing(self) -> bool:
+        """Whether a field is being edited (a text field, an open menu)."""
+        return any(control.is_editing for control in self.controls)
+
+    def stops(self) -> list[Container]:
+        """Every cursor stop in the fields, top to bottom."""
+        return [stop for control in self.controls for stop in control.get_stops()]
+
+    def start(self) -> Container | None:
+        """Where the cursor starts in the fields: the first field's start (a
+        radio list's picked option); None with no stops."""
+        entered = self._enterable()
+        return entered[0].start_stop() if entered else None
+
+    def container(self, placement: Placement) -> HSplit | None:
+        """The fields one under another, laid out for ``placement``, with
+        their keys; None without fields."""
+        if not self.controls:
+            return None
+        self._placement = placement
+        inline = placement == "inline"
+        for control in self.controls:
+            if isinstance(control, DropdownFieldControl):
+                control.set_inline(inline)
+        # After set_inline: an inline dropdown's value is a selector.
+        column = self._value_column()
+        for control in self.controls:
+            control.set_value_column(column)
+        # An empty window_too_small: no "Window too small" flash while the
+        # layout settles.
+        return HSplit(
+            [control.get_container() for control in self.controls],
+            key_bindings=self._key_bindings(),
+            window_too_small=Window(),
+        )
+
+    def floats(self) -> list[Float]:
+        """A box's dropdown menus, to float over the whole screen, not the
+        form, so each is sized by the room the terminal has around its row."""
+        if self._placement == "inline":
+            return []
+        return [c.get_float() for c in self.controls if isinstance(c, DropdownFieldControl)]
+
+    def _enterable(self) -> list[FieldControl]:
+        """The fields the cursor can enter (a list with no options can't)."""
+        return [control for control in self.controls if control.get_stops()]
+
+    @staticmethod
+    def _field_at(layout: Layout, fields: list[FieldControl]) -> int | None:
+        """Which of ``fields`` has the cursor, if any."""
+        for i, control in enumerate(fields):
+            if any(layout.has_focus(stop) for stop in control.get_stops()):
+                return i
+        return None
+
+    def _value_column(self) -> _ValueColumn | None:
+        """Where values start (align_values); None: the row's right edge."""
+        if self._align_values == "right":
+            return None
+        if self._align_values != "labels":
+            return _ValueColumn(int(self._align_values))
+        # Check and radio lists have their label, and description, on rows
+        # with no value. A description starts where labels do (under the
+        # marker's columns).
+        rows = [c for c in self.controls if not isinstance(c, OptionsFieldControl)]
+
+        def after(texts: Iterable[str]) -> int:
+            return get_cwidth(MARKER) + max((get_cwidth(t) for t in texts), default=0) + 2
+
+        return _ValueColumn(
+            after(c.item.label for c in rows),
+            after(c.item.description for c in rows),
+            max((c.widest_value() for c in rows), default=0),
+        )
+
+    def _key_bindings(self) -> KeyBindingsBase | None:
+        """In a box, ↑↓ move a row at a time and Tab / Shift+Tab a field at a
+        time, Tab going on to the buttons after the last field. Inline: none,
+        the dialog's own cursor walks fields and actions alike."""
+        if self._placement == "inline":
+            return None
+        idle = Condition(lambda: not self.is_editing())
+        kb = KeyBindings()
+
+        @kb.add("tab", filter=idle)
+        def _next_field(event: Any) -> None:
+            fields = self._enterable()
+            index = self._field_at(event.app.layout, fields)
+            if index is not None and index < len(fields) - 1:
+                event.app.layout.focus(fields[index + 1].start_stop())
+            else:
+                # After the last field: on to the buttons (no wrap).
+                event.app.layout.focus(self.stops()[-1])
+                event.app.layout.focus_next()
+
+        @kb.add("s-tab", filter=idle)
+        def _previous_field(event: Any) -> None:
+            fields = self._enterable()
+            index = self._field_at(event.app.layout, fields)
+            if index is not None:
+                # At the first field: its start (no wrap to the buttons).
+                event.app.layout.focus(fields[max(0, index - 1)].start_stop())
+
+        navigator = RowNavigator(self.stops, is_editing=self.is_editing)
+        return merge_key_bindings([navigator.key_bindings(), kb])

@@ -115,7 +115,7 @@ class TestSettingsDialogState:
             SelectField(key="model", label="Model", options=["a", "b"], default="a"),
         ]
         dialog = SettingsDialog(title="Settings", items=items)
-        dialog.build_body()  # Creates the list control
+        dialog._content()  # Creates the list control
 
         changed = dialog._get_changed_values()
         assert changed == {}
@@ -127,10 +127,10 @@ class TestSettingsDialogState:
             CheckboxField(key="stream", label="Stream", default=True),
         ]
         dialog = SettingsDialog(title="Settings", items=items)
-        dialog.build_body()  # Creates the controls
+        dialog._content()  # Creates the controls
 
         # Simulate user changing dropdown via control
-        dialog._controls[0].value = "b"
+        dialog._form.controls[0].value = "b"
 
         changed = dialog._get_changed_values()
         assert changed == {"model": "b"}
@@ -172,7 +172,7 @@ class TestSettingsDialogLayout:
             CheckboxField(key="stream", label="Stream", default=True),
         ]
         dialog = SettingsDialog(title="Settings", items=items)
-        body = dialog.build_body()
+        body, _ = dialog._content()
 
         # Should be an HSplit of control containers
         assert isinstance(body, HSplit)
@@ -189,12 +189,12 @@ class TestSettingsDialogLayout:
             TextField(key="name", label="Name", default="test"),
         ]
         dialog = SettingsDialog(title="Settings", items=items)
-        dialog.build_body()
+        dialog._content()
 
-        assert len(dialog._controls) == 3
-        assert isinstance(dialog._controls[0], SelectFieldControl)
-        assert isinstance(dialog._controls[1], CheckboxFieldControl)
-        assert isinstance(dialog._controls[2], TextFieldControl)
+        assert len(dialog._form.controls) == 3
+        assert isinstance(dialog._form.controls[0], SelectFieldControl)
+        assert isinstance(dialog._form.controls[1], CheckboxFieldControl)
+        assert isinstance(dialog._form.controls[2], TextFieldControl)
 
 
 class TestTextControlPasswordMasking:
@@ -518,12 +518,12 @@ class TestSettingsDialogRefactored:
             TextField(key="name", label="Name", default="test"),
         ]
         dialog = SettingsDialog(title="Settings", items=items)
-        dialog.build_body()
+        dialog._content()
 
-        assert len(dialog._controls) == 3
-        assert isinstance(dialog._controls[0], CheckboxFieldControl)
-        assert isinstance(dialog._controls[1], SelectFieldControl)
-        assert isinstance(dialog._controls[2], TextFieldControl)
+        assert len(dialog._form.controls) == 3
+        assert isinstance(dialog._form.controls[0], CheckboxFieldControl)
+        assert isinstance(dialog._form.controls[1], SelectFieldControl)
+        assert isinstance(dialog._form.controls[2], TextFieldControl)
 
     def test_settings_dialog_build_body_returns_hsplit(self):
         """build_body returns HSplit of control containers."""
@@ -531,7 +531,7 @@ class TestSettingsDialogRefactored:
             CheckboxField(key="stream", label="Stream", default=True),
         ]
         dialog = SettingsDialog(title="Settings", items=items)
-        body = dialog.build_body()
+        body, _ = dialog._content()
 
         assert isinstance(body, HSplit)
 
@@ -588,7 +588,7 @@ class TestSettingsDialogOptions:
         await session.show_settings_dialog("S", [], False, width=40, max_height=15, align_values=24)
 
         (dialog,) = shown
-        assert dialog._align_values == 24
+        assert dialog.align_values == 24
         assert (dialog.title, dialog.width, dialog.max_height) == ("S", 40, 15)
         assert dialog.escapable is False
 
@@ -758,21 +758,21 @@ class TestSettingsRows:
             placement="inline",
         )
         dialog._placement = "inline"  # as show_dialog() resolves it
-        body = dialog.build_body()
+        body, _ = dialog._content()
         assert isinstance(body, HSplit)  # no FloatContainer for dropdown menus
         assert _bindings(body.key_bindings, Keys.Down) == []
         assert _bindings(body.key_bindings, Keys.ControlS) != []
 
     def test_box_body_walks_settings_with_arrows(self):
         dialog = SettingsDialog("S", [CheckboxField(key="a", label="A"), CheckboxField(key="b", label="B")])
-        body = dialog.build_body()
+        body, _ = dialog._content()
         assert _bindings(body.key_bindings, Keys.Down) != []
-        assert len(dialog._stops()) == 2
+        assert len(dialog._form.stops()) == 2
 
     def test_is_editing_follows_the_controls(self):
         dialog = SettingsDialog("S", [TextField(key="t", label="T")])
         assert dialog._is_editing() is False
-        dialog._controls[0].enter_edit_mode()
+        dialog._form.controls[0].enter_edit_mode()
         assert dialog._is_editing() is True
 
     def test_placement_goes_to_the_dialog(self):
@@ -813,7 +813,7 @@ class TestOptionItems:
             RadioField(key="m", label="M", options=["x", "y"]),
         ])
         assert dialog._get_changed_values() == {}
-        tools, mode = dialog._controls
+        tools, mode = dialog._form.controls
         tools._group.choose("a")
         mode._group.choose("x")
         assert dialog._get_changed_values() == {"t": ["a", "b"], "m": "x"}
@@ -825,7 +825,7 @@ class TestOptionItems:
             CheckboxField(key="c", label="C"),
             ChecklistField(key="t", label="T", options=["a", "b"]),
         ])
-        assert len(dialog._stops()) == 3
+        assert len(dialog._form.stops()) == 3
 
     def test_exported(self):
         from thinking_prompt import ChecklistField, RadioField
@@ -972,8 +972,8 @@ class TestValueColumn:
             *(CheckboxField(key=k, label=k) for k in ("a", "b", "c")),
         ]
         dialog = SettingsDialog("S", items, **kwargs)
-        body = dialog.build_body()
-        dialog._controls[0].enter_edit_mode()
+        body, _ = dialog._content()
+        dialog._form.controls[0].enter_edit_mode()
         # As a box has them: the menu floats over the whole screen.
         screen = FloatContainer(content=body, floats=dialog._screen_floats())
         return [_text(row) for row in _drawn(screen, width, 4)]
@@ -995,8 +995,8 @@ class TestValueColumn:
             *(CheckboxField(key=k, label=k) for k in ("a", "b", "c")),
         ]
         dialog = SettingsDialog("S", items, **kwargs)
-        body = dialog.build_body()
-        dialog._controls[0].enter_edit_mode()
+        body, _ = dialog._content()
+        dialog._form.controls[0].enter_edit_mode()
         # As a box has them: the menu floats over the whole screen.
         screen = FloatContainer(content=body, floats=dialog._screen_floats())
         return [_text(row) for row in _drawn(screen, width, 4)]
@@ -1259,8 +1259,8 @@ class TestAlignValues:
     def _column(items, shown="box", **kwargs):
         dialog = SettingsDialog("S", items, **kwargs)
         dialog._placement = shown  # as show_dialog() resolves it
-        dialog.build_body()
-        return dialog._controls[0]._value_column
+        dialog._content()
+        return dialog._form.controls[0]._value_column
 
     def test_labels_start_values_after_the_longest_label(self):
         items = [
@@ -1316,7 +1316,7 @@ class TestAlignValues:
 
     def test_a_form_of_lists_only_needs_no_column(self):
         dialog = SettingsDialog("S", [ChecklistField(key="c", label="Tools", options=["x", "y"])])
-        dialog.build_body()
+        dialog._content()
 
     @pytest.mark.parametrize("bad", [3, 0, -1, "left", True, 4.5])
     def test_align_values_is_checked(self, bad):
@@ -1324,4 +1324,4 @@ class TestAlignValues:
             SettingsDialog("S", [], align_values=bad)
 
     def test_the_smallest_column(self):
-        assert SettingsDialog("S", [], align_values=4)._align_values == 4
+        assert SettingsDialog("S", [], align_values=4).align_values == 4

@@ -20,6 +20,7 @@ from prompt_toolkit.data_structures import Size
 from prompt_toolkit.input import PipeInput, create_pipe_input
 from prompt_toolkit.layout import BufferControl
 from prompt_toolkit.output import DummyOutput
+from prompt_toolkit.widgets import TextArea
 
 from thinking_prompt import (
     ButtonConfig,
@@ -639,7 +640,7 @@ class TestCtrlDInDialog:
             def editing() -> bool:
                 dm = session._dialog_manager
                 dialog = dm._current_dialog if dm else None
-                return dialog is not None and dialog._controls[0].is_editing
+                return dialog is not None and dialog._form.controls[0].is_editing
 
             async def script(run: asyncio.Task[None]) -> None:
                 inp.send_text("go" + ENTER)
@@ -2533,5 +2534,112 @@ class TestRepaintWhileRunning:
                 assert repainted.index("entry 29\n") < repainted.index("after\n")
                 # The UI is redrawn once a job, not once an entry.
                 assert session.app.render_counter - renders < 10
+
+            await run_with(session, handler, script)
+
+
+class TestDialogFields:
+    """Fields on any Dialog, driven through a running session."""
+
+    async def test_a_dialog_shown_twice_keeps_its_values_and_one_menu_float(self):
+        dialog = Dialog(
+            "T",
+            fields=[DropdownField("d", "Model", options=["alpha", "beta"], default="alpha")],
+            width=40,
+            placement="box",
+        )
+        dialog.buttons = [ButtonConfig("OK", handler=lambda: dialog.set_result(dialog.values))]
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.show_dialog(dialog))
+
+        with piped_session(rows=30) as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                inp.send_text(ENTER)                 # open the menu
+                await wait_until(lambda: on_screen(session, "│beta"))
+                inp.send_text(DOWN + ENTER)          # beta
+                await wait_until(lambda: not on_screen(session, "│beta"))
+                inp.send_text(TAB + ENTER)           # OK
+                await wait_until(lambda: results == [{"d": "beta"}])
+                assert len(session.app.layout.container.floats) == 1
+                inp.send_text("again" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                assert on_screen(session, "beta")    # still beta
+                inp.send_text(TAB + ENTER)
+                await wait_until(lambda: results == [{"d": "beta"}, {"d": "beta"}])
+                assert len(session.app.layout.container.floats) == 1
+
+            await run_with(session, handler, script)
+
+    async def test_a_text_area_above_the_fields_keeps_its_keys(self):
+        area = TextArea(multiline=False)
+        dialog = Dialog("T", area, fields=[CheckboxField("on", "On")], placement="box")
+        dialog.buttons = [
+            ButtonConfig("OK", handler=lambda: dialog.set_result((area.text, dialog.values))),
+        ]
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.show_dialog(dialog))
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                inp.send_text("hi")                  # into the text area, where the cursor starts
+                inp.send_text(TAB + " ")             # into the field: check it
+                inp.send_text(TAB + ENTER)           # past the last field: OK
+                await wait_until(lambda: results == [("hi", {"on": True})])
+
+            await run_with(session, handler, script)
+
+    async def test_a_list_with_no_options_is_skipped(self):
+        dialog = Dialog(
+            "T",
+            fields=[
+                SelectField("s", "Size", options=["a", "b"]),
+                RadioField("r", "Mode", options=[]),
+                CheckboxField("c", "Cache"),
+            ],
+            placement="box",
+        )
+        dialog.buttons = [ButtonConfig("OK", handler=lambda: dialog.set_result(dialog.values))]
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.show_dialog(dialog))
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                inp.send_text(DOWN + " ")            # past the empty list: check Cache
+                inp.send_text(TAB + ENTER)           # OK
+                await wait_until(lambda: results == [{"s": None, "r": None, "c": True}])
+
+            await run_with(session, handler, script)
+
+    async def test_fields_without_buttons_escape_with_none_keeping_the_edits(self):
+        dialog = Dialog("T", fields=[CheckboxField("on", "On")], placement="inline")
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.show_dialog(dialog))
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                assert on_screen(session, "❯ On")
+                inp.send_text(" " + ESCAPE)
+                await wait_until(lambda: results == [None])
+                assert dialog.values == {"on": True}
 
             await run_with(session, handler, script)
