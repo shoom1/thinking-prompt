@@ -11,7 +11,7 @@ from thinking_prompt.display import (
     _markdown_to_ansi as markdown_to_ansi,
     _highlight_code as highlight_code,
 )
-from tests.helpers import echoed, make_display
+from tests.helpers import echoed, keep_console, make_display
 
 
 class TestIsRichRenderable:
@@ -209,14 +209,14 @@ def default_style() -> Style:
 
 @pytest.fixture
 def display(default_style: Style) -> Display:
-    """Create a Display instance in prompt mode (not fullscreen)."""
-    return Display(get_style=lambda: default_style, is_fullscreen=lambda: False)
+    """Create a Display instance."""
+    return Display(get_style=lambda: default_style)
 
 
 @pytest.fixture
-def fullscreen_display(default_style: Style) -> Display:
-    """Create a Display instance in fullscreen mode."""
-    return Display(get_style=lambda: default_style, is_fullscreen=lambda: True)
+def kept_display(default_style: Style) -> Display:
+    """A Display that keeps what it prints in ``kept`` instead of printing it."""
+    return keep_console(Display(get_style=lambda: default_style))
 
 
 class TestDisplayInit:
@@ -231,30 +231,13 @@ class TestDisplayInit:
         """Should start with empty history."""
         assert display.history.is_empty
 
-    def test_default_not_fullscreen(self, default_style: Style):
-        """Default is_fullscreen should return False."""
-        display = Display(get_style=lambda: default_style)
-        assert not display._is_fullscreen()
-
-    def test_custom_fullscreen_callback(self, default_style: Style):
-        """Should use custom is_fullscreen callback."""
-        display = Display(get_style=lambda: default_style, is_fullscreen=lambda: True)
-        assert display._is_fullscreen()
-
 
 class TestDisplayHistory:
-    """Test Display history property and changes."""
+    """Test Display history property."""
 
     def test_history_property(self, display: Display):
         """Should expose history via property."""
         assert display.history is display._history
-
-    def test_set_on_change_callback(self, display: Display):
-        """Should set change callback on history."""
-        called = []
-        display.set_on_change(lambda: called.append(1))
-        display.history.append("", "test")
-        assert len(called) == 1
 
 
 class TestDisplayUserInput:
@@ -276,11 +259,10 @@ class TestDisplayUserInput:
         assert "class:history.user-prefix" in styles
         assert "class:history.user-message" in styles
 
-    def test_caches_in_fullscreen(self, fullscreen_display: Display):
-        """Should cache output in fullscreen mode."""
-        fullscreen_display.user_input(">>> ", "hello")
-        assert len(fullscreen_display._pending_output) == 1
-        assert isinstance(fullscreen_display._pending_output[0], FormattedText)
+    def test_prints_formatted_text(self, kept_display: Display):
+        kept_display.user_input(">>> ", "hello")
+        assert len(kept_display.kept) == 1
+        assert isinstance(kept_display.kept[0], FormattedText)
 
 
 class TestDisplayThinking:
@@ -313,10 +295,9 @@ class TestDisplayThinking:
         display.thinking("Processing...", add_to_history=False)
         assert display.history.is_empty
 
-    def test_caches_in_fullscreen(self, fullscreen_display: Display):
-        """Should cache output in fullscreen mode."""
-        fullscreen_display.thinking("Processing...")
-        assert len(fullscreen_display._pending_output) == 1
+    def test_prints_once(self, kept_display: Display):
+        kept_display.thinking("Processing...")
+        assert len(kept_display.kept) == 1
 
 
 class TestDisplayResponse:
@@ -393,19 +374,17 @@ class TestDisplayMarkdownAndCode:
         display.code("x = 1", "python")
         assert not display.history.is_empty
 
-    def test_markdown_caches_in_fullscreen(self, fullscreen_display: Display):
-        """Markdown should cache in fullscreen mode."""
+    def test_markdown_prints_ansi(self, kept_display: Display):
         from prompt_toolkit.formatted_text import ANSI
-        fullscreen_display.markdown("# Title")
-        assert len(fullscreen_display._pending_output) == 1
-        assert isinstance(fullscreen_display._pending_output[0], ANSI)
+        kept_display.markdown("# Title")
+        assert len(kept_display.kept) == 1
+        assert isinstance(kept_display.kept[0], ANSI)
 
-    def test_code_caches_in_fullscreen(self, fullscreen_display: Display):
-        """Code should cache in fullscreen mode."""
+    def test_code_prints_ansi(self, kept_display: Display):
         from prompt_toolkit.formatted_text import ANSI
-        fullscreen_display.code("x = 1")
-        assert len(fullscreen_display._pending_output) == 1
-        assert isinstance(fullscreen_display._pending_output[0], ANSI)
+        kept_display.code("x = 1")
+        assert len(kept_display.kept) == 1
+        assert isinstance(kept_display.kept[0], ANSI)
 
 
 class TestDisplayWelcome:
@@ -445,12 +424,11 @@ class TestDisplayFormatted:
         formatted = display.history.get_formatted_text()
         assert len(formatted) > 0
 
-    def test_caches_in_fullscreen(self, fullscreen_display: Display):
-        """FormattedText should cache in fullscreen mode."""
+    def test_prints_formatted_text(self, kept_display: Display):
         ft = FormattedText([("bold", "Hello")])
-        fullscreen_display.formatted(ft)
-        assert len(fullscreen_display._pending_output) == 1
-        assert isinstance(fullscreen_display._pending_output[0], FormattedText)
+        kept_display.formatted(ft)
+        assert len(kept_display.kept) == 1
+        assert isinstance(kept_display.kept[0], FormattedText)
 
 
 class TestDisplayRaw:
@@ -469,16 +447,16 @@ class TestDisplayRaw:
         styles = [s for s, _ in formatted]
         assert "class:custom" in styles
 
-    def test_caches_raw_in_fullscreen(self, fullscreen_display: Display):
-        """Raw without style should cache as ANSI."""
+    def test_raw_prints_ansi(self, kept_display: Display):
+        """Raw without style prints as ANSI."""
         from prompt_toolkit.formatted_text import ANSI
-        fullscreen_display.raw("Content")
-        assert isinstance(fullscreen_display._pending_output[0], ANSI)
+        kept_display.raw("Content")
+        assert isinstance(kept_display.kept[0], ANSI)
 
-    def test_caches_formatted_in_fullscreen_with_style(self, fullscreen_display: Display):
-        """Raw with style should cache as FormattedText."""
-        fullscreen_display.raw("Content", style_class="class:custom")
-        assert isinstance(fullscreen_display._pending_output[0], FormattedText)
+    def test_raw_with_style_prints_formatted_text(self, kept_display: Display):
+        """Raw with style prints as FormattedText."""
+        kept_display.raw("Content", style_class="class:custom")
+        assert isinstance(kept_display.kept[0], FormattedText)
 
 
 class TestDisplayClear:
@@ -490,31 +468,6 @@ class TestDisplayClear:
         assert not display.history.is_empty
         display.clear()
         assert display.history.is_empty
-
-
-class TestDisplayFlushPending:
-    """Test Display.flush_pending method."""
-
-    def test_clears_pending_output(self, fullscreen_display: Display):
-        """Should clear pending output after flush."""
-        fullscreen_display.response("Hello")
-        assert len(fullscreen_display._pending_output) == 1
-        fullscreen_display.flush_pending()
-        assert len(fullscreen_display._pending_output) == 0
-
-    def test_handles_empty_pending(self, fullscreen_display: Display):
-        """Should handle empty pending list gracefully."""
-        fullscreen_display.flush_pending()  # Should not raise
-        assert len(fullscreen_display._pending_output) == 0
-
-    def test_preserves_order(self, fullscreen_display: Display):
-        """Should flush in correct order."""
-        fullscreen_display.response("First")
-        fullscreen_display.response("Second")
-        # Just verify pending has correct count before flush
-        assert len(fullscreen_display._pending_output) == 2
-        fullscreen_display.flush_pending()
-        assert len(fullscreen_display._pending_output) == 0
 
 
 # =============================================================================
@@ -564,12 +517,11 @@ class TestDisplayThinkingAnsi:
         text = "".join(t for _, t in formatted)
         assert "Line 9" in text
 
-    def test_ansi_caches_in_fullscreen(self, fullscreen_display: Display):
-        """ANSI thinking should cache ANSI output in fullscreen mode."""
+    def test_ansi_prints_ansi(self, kept_display: Display):
         from prompt_toolkit.formatted_text import ANSI
-        fullscreen_display.thinking("\033[32mtext\033[0m", content_format="ansi")
-        assert len(fullscreen_display._pending_output) == 1
-        assert isinstance(fullscreen_display._pending_output[0], ANSI)
+        kept_display.thinking("\033[32mtext\033[0m", content_format="ansi")
+        assert len(kept_display.kept) == 1
+        assert isinstance(kept_display.kept[0], ANSI)
 
     def test_plain_format_unchanged(self, display: Display):
         """Plain format should work the same as before."""
@@ -693,10 +645,9 @@ class TestTranscriptWiring:
 
         def echoed(styles: ThinkingPromptStyles) -> str:
             style = styles.to_style()
-            d = Display(get_style=lambda: style, is_fullscreen=lambda: True,
-                        thinking_styles=styles)
+            d = keep_console(Display(get_style=lambda: style, thinking_styles=styles))
             d.code("def hello():\n    return 'world'", "python")
-            return d._pending_output[0].value
+            return d.kept[0].value
 
         assert echoed(ThinkingPromptStyles.dark()) != echoed(ThinkingPromptStyles.light())
 
@@ -719,20 +670,17 @@ def _texts(contents) -> list[str]:
 
 class TestThinkingEchoRepaintParity:
     """The console echo of a finished thinking box and its repaint (after
-    set_theme(repaint=True)) must print the same text. Fullscreen mode
-    caches console output, which makes both observable."""
+    set_theme(repaint=True)) must print the same text."""
 
     @staticmethod
     def _printed(display: Display) -> list[str]:
-        out = _texts(display._pending_output)
-        display.drop_pending()
-        return out
+        return _texts(display.kept)
 
     @pytest.mark.parametrize("fmt", ["plain", "ansi"])
-    def test_content_that_fits_is_not_marked_truncated(self, fullscreen_display, fmt):
-        fullscreen_display.thinking("a\nb\n", truncate_lines=2, content_format=fmt)
-        echoed = self._printed(fullscreen_display)
-        repainted = _texts(fullscreen_display.transcript())
+    def test_content_that_fits_is_not_marked_truncated(self, kept_display, fmt):
+        kept_display.thinking("a\nb\n", truncate_lines=2, content_format=fmt)
+        echoed = self._printed(kept_display)
+        repainted = _texts(kept_display.transcript())
 
         assert echoed == ["a\nb\n"]
         assert repainted == echoed
@@ -743,17 +691,17 @@ class TestThinkingEchoTail:
 
     _printed = staticmethod(TestThinkingEchoRepaintParity._printed)
 
-    def test_tail_echo_keeps_last_lines(self, fullscreen_display):
+    def test_tail_echo_keeps_last_lines(self, kept_display):
         content = "".join(f"line {i}\n" for i in range(10))
-        fullscreen_display.thinking(content, truncate_lines=3, overflow="tail")
-        assert self._printed(fullscreen_display) == ["...\nline 7\nline 8\nline 9\n"]
+        kept_display.thinking(content, truncate_lines=3, overflow="tail")
+        assert self._printed(kept_display) == ["...\nline 7\nline 8\nline 9\n"]
 
     @pytest.mark.parametrize("fmt", ["plain", "ansi"])
-    def test_tail_repaint_matches_echo(self, fullscreen_display, fmt):
+    def test_tail_repaint_matches_echo(self, kept_display, fmt):
         content = "".join(f"line {i}\n" for i in range(10))
-        fullscreen_display.thinking(
+        kept_display.thinking(
             content, truncate_lines=3, content_format=fmt, overflow="tail"
         )
-        echoed = self._printed(fullscreen_display)
-        assert _texts(fullscreen_display.transcript()) == echoed
+        echoed = self._printed(kept_display)
+        assert _texts(kept_display.transcript()) == echoed
         assert echoed == ["...\nline 7\nline 8\nline 9\n"]

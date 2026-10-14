@@ -13,7 +13,7 @@ from prompt_toolkit.keys import Keys
 
 from thinking_prompt import ThinkingBox, ThinkingPromptSession, ThinkingPromptStyles
 from thinking_prompt.frames import FrameScheduler
-from tests.helpers import history_texts, make_display, make_manager
+from tests.helpers import echoed, history_texts, keep_console, make_display, make_manager
 
 NO_CONTENT = "shows a content callback's text"
 
@@ -22,10 +22,10 @@ def _session() -> ThinkingPromptSession:
     return ThinkingPromptSession(thinking_title="Pondering")
 
 
-def _fullscreen_session() -> ThinkingPromptSession:
-    """A session whose Display caches console output in _pending_output."""
+def _kept_session() -> ThinkingPromptSession:
+    """A session whose Display keeps what it prints (see keep_console)."""
     session = _session()
-    session._is_fullscreen = True
+    keep_console(session._display)
     return session
 
 
@@ -333,31 +333,31 @@ class TestFinishArguments:
     """add_to_history and echo_to_console reach the echo, on every way out."""
 
     def test_finish_keeps_the_text_out_of_history_and_console_when_told_to(self):
-        session = _fullscreen_session()
+        session = _kept_session()
         box = session.start_thinking()
         box.append("x\n")
         box.finish(add_to_history=False, echo_to_console=False)
         assert _history(session) == []
-        assert session._display._pending_output == []
+        assert echoed(session._display) == []
 
     def test_finish_defaults_put_the_text_in_history_and_console(self):
         """Positive control: the checks above can tell echoed from not."""
-        session = _fullscreen_session()
+        session = _kept_session()
         box = session.start_thinking()
         box.append("x\n")
         box.finish(echo_to_console=True)
         assert _history(session) == ["x\n\n"]
-        assert session._display._pending_output != []
+        assert echoed(session._display) != []
 
     async def test_thinking_exit_passes_the_arguments_on(self):
-        session = _fullscreen_session()
+        session = _kept_session()
         async with session.thinking(add_to_history=False, echo_to_console=False) as box:
             box.append("x\n")
         assert _history(session) == []
-        assert session._display._pending_output == []
+        assert echoed(session._display) == []
 
     async def test_thinking_exit_with_an_error_passes_the_arguments_on(self):
-        session = _fullscreen_session()
+        session = _kept_session()
         with pytest.raises(RuntimeError):
             async with session.thinking(
                 add_to_history=False, echo_to_console=False
@@ -365,12 +365,12 @@ class TestFinishArguments:
                 box.append("x\n")
                 raise RuntimeError("boom")
         assert _history(session) == []
-        assert session._display._pending_output == []
+        assert echoed(session._display) == []
 
     async def test_thinking_exit_echoes_when_asked_to(self):
         """Positive control for the two tests above."""
-        session = _fullscreen_session()
+        session = _kept_session()
         async with session.thinking(add_to_history=True, echo_to_console=True) as box:
             box.append("x\n")
         assert _history(session) == ["x\n\n"]
-        assert session._display._pending_output != []
+        assert echoed(session._display) != []

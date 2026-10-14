@@ -15,7 +15,7 @@ class AppInfo:
     The banner printed when the session starts: the app's name and version,
     or your own welcome message. Without an AppInfo there is no banner.
 
-    Behavior (full screen, keys, the thinking header) is set on
+    Behavior (keys, the thinking header) is set on
     ThinkingPromptSession itself.
 
     Example:

@@ -13,6 +13,8 @@ import pytest
 from thinking_prompt import ThinkingPromptSession, AppInfo
 from thinking_prompt import ThinkingBox
 
+from tests.helpers import echoed, keep_console
+
 
 def _make_session(**kwargs):
     """Create a minimal ThinkingPromptSession with test defaults."""
@@ -321,17 +323,15 @@ class TestSessionOverflow:
 
     @staticmethod
     def _session():
-        # Fullscreen caches console output instead of printing it, which
-        # makes the finish echo observable.
+        # Keeping console output instead of printing it makes the finish
+        # echo observable.
         s = ThinkingPromptSession()
-        s._is_fullscreen = True
+        keep_console(s._display)
         return s
 
     @staticmethod
     def _echoed(s) -> list[str]:
-        from prompt_toolkit.formatted_text import fragment_list_to_text, to_formatted_text
-
-        return [fragment_list_to_text(to_formatted_text(c)) for c in s._display._pending_output]
+        return echoed(s._display)
 
     @staticmethod
     def _lines(n: int) -> str:

@@ -9,7 +9,6 @@ A prompt_toolkit extension that adds a "thinking box" above the prompt for displ
 - **Thinking Box**: A collapsible area above the prompt that shows processing/thinking content
 - **Multiple Thinking Boxes**: Run multiple independent boxes concurrently with ordering and per-box lifecycle control
 - **Real-time Streaming**: Content updates in real-time as your callback returns new content
-- **Fullscreen Mode**: Optional fullscreen mode with chat history (disabled by default)
 - **Animated Header**: Configurable animated indicator showing thinking is in progress
 - **Rich Output**: Support for markdown rendering and syntax-highlighted code blocks
 - **Rich/ANSI in Thinking Box**: Use Rich markup for styled, in-place-updating content inside the thinking box
@@ -72,13 +71,11 @@ if __name__ == "__main__":
 
 | Key | Action |
 |-----|--------|
-| Ctrl+T | Expand/collapse all thinking boxes (while one is open, in prompt mode) |
-| Ctrl+E | Toggle fullscreen mode (with `enable_fullscreen=True`) |
+| Ctrl+T | Expand/collapse all thinking boxes (while one is open) |
 | Ctrl+C | Cancel current operation or exit |
 | Ctrl+D | Exit application (empty input line only) |
 
-Rebind the first two with `expand_key=` and `fullscreen_key=` (see
-[Session Options](#session-options)).
+Rebind Ctrl+T with `expand_key=` (see [Session Options](#session-options)).
 
 ## API Reference
 
@@ -98,8 +95,8 @@ session = ThinkingPromptSession(
 )
 ```
 
-Every argument after `message` is keyword-only. Full screen, keys and the
-thinking header are under [Session Options](#session-options).
+Every argument after `message` is keyword-only. Keys and the thinking
+header are under [Session Options](#session-options).
 
 ### Thinking API
 
@@ -155,8 +152,7 @@ dropped, so `box.text` stays what `finish()` returned; the first one logs a
 warning to the `thinking_prompt` logger.
 
 Ctrl+T expands or collapses all open boxes together, and boxes start
-collapsed again once the last one finishes. In full screen every box is
-shown expanded.
+collapsed again once the last one finishes.
 
 ### Redraws
 
@@ -177,8 +173,7 @@ idle prompt costs no CPU:
   window re-wraps the UI's full-width rows and a shorter one pushes its top
   into scrollback, so the old frame can't be erased row by row. Shell
   output from before the session, anything printed outside it (plain
-  `print()`) and entries `history_limit` dropped don't come back. In
-  fullscreen the repaint waits for fullscreen exit.
+  `print()`) and entries `history_limit` dropped don't come back.
 
 ### Long Content
 
@@ -373,10 +368,9 @@ to take keyboard focus: at least one button, or a focusable body (e.g. a
 only; never narrower than the buttons), `max_height`.
 
 **Where a box sits.** Under the prompt, above the status bar: where an inline
-dialog would be, in and out of full screen. When the rest of the screen takes
-rows (a thinking box, a longer prompt, the transcript in full screen), the box
-shares them as an inline dialog does: it takes the rows it gets and scrolls
-the rest. Only when those are fewer than its title, one row and its buttons
+dialog would be. When the rest of the screen takes rows (a thinking box, a
+longer prompt), the box shares them as an inline dialog does: it takes the
+rows it gets and scrolls the rest. Only when those are fewer than its title, one row and its buttons
 need is it centered over the screen.
 
 **Long content scrolls.** A dialog is never taller than the terminal (less
@@ -549,9 +543,7 @@ result = await session.show_settings_dialog(
 from thinking_prompt import Spinner, ThinkingPromptSession
 
 session = ThinkingPromptSession(
-    # Full screen and keys
-    enable_fullscreen=False,     # Let fullscreen_key show the transcript full screen
-    fullscreen_key="c-e",        # Ctrl+E toggles full screen
+    # Keys
     expand_key="c-t",            # Ctrl+T expands/collapses thinking boxes
 
     # Thinking boxes
@@ -564,6 +556,12 @@ session = ThinkingPromptSession(
 
 A `Spinner` is its frames and the seconds each is shown:
 `Spinner(("◐", "◓", "◑", "◒"), interval=0.15)`. One frame makes a static mark.
+
+**Upgrading from 0.3:** full screen (Ctrl+E with
+`AppInfo(fullscreen_enabled=True)`) was removed: drop `fullscreen_enabled=`
+and `fullscreen_key=`. `switch_to_fullscreen()`, `switch_to_prompt()` and
+`is_fullscreen` are gone too. Ctrl+T shows thinking boxes in full, and the
+terminal's own scrollback holds the transcript.
 
 ### AppInfo
 

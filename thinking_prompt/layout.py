@@ -3,7 +3,6 @@ Layout creation for ThinkingPromptSession.
 
 Provides functions to create the UI layout components:
 - Thinking box (collapsible/expandable)
-- History window (for fullscreen mode)
 - Status bar
 - Main layout composition
 """
@@ -14,7 +13,6 @@ from typing import TYPE_CHECKING, Callable, Literal
 
 from prompt_toolkit.application.current import get_app
 from prompt_toolkit.buffer import Buffer
-from prompt_toolkit.data_structures import Point
 from prompt_toolkit.filters import Condition
 from prompt_toolkit.formatted_text import AnyFormattedText, FormattedText
 from prompt_toolkit.layout import (
@@ -29,9 +27,8 @@ from prompt_toolkit.layout import (
     VSplit,
     Window,
 )
-from prompt_toolkit.layout.containers import ConditionalContainer, ScrollOffsets
+from prompt_toolkit.layout.containers import ConditionalContainer
 from prompt_toolkit.layout.dimension import Dimension as D
-from prompt_toolkit.layout.margins import ScrollbarMargin
 from prompt_toolkit.layout.menus import CompletionsMenu
 from prompt_toolkit.layout.processors import (
     HighlightIncrementalSearchProcessor,
@@ -41,7 +38,6 @@ from prompt_toolkit.layout.processors import (
 from .spinner import Spinner
 
 if TYPE_CHECKING:
-    from .history import FormattedTextHistory
     from .manager import ThinkingBoxManager
 
 # Seconds past a frame's tick that a header asks to be redrawn at, so timer
@@ -50,7 +46,6 @@ _TICK_SLACK = 0.005
 
 __all__ = [
     "ThinkingHeader",
-    "create_history_window",
     "create_layout",
     "create_status_bar",
     "create_thinking_area",
@@ -169,75 +164,6 @@ def create_thinking_area(manager: ThinkingBoxManager) -> DynamicContainer:
     return DynamicContainer(lambda: manager.get_container())
 
 
-def create_history_window(
-    history: FormattedTextHistory,
-    is_visible: Condition,
-    style: str = "",
-) -> ConditionalContainer:
-    """
-    Create the history window.
-
-    The history:
-    - Is visible based on the is_visible filter
-    - Shows scrollable history of formatted text
-    - Looks like normal console output
-    - Takes up remaining space above thinking box
-    - Auto-scrolls to show newest content
-    - Supports mouse scrolling to view earlier messages
-
-    Args:
-        history: The FormattedTextHistory instance.
-        is_visible: Filter controlling visibility.
-        style: Style for the history window.
-
-    Returns:
-        A ConditionalContainer with the history.
-    """
-    # Track content revision to detect new content. len(history) saturates
-    # once history_limit trimming kicks in (oldest entries are popped as new
-    # ones are appended), which would freeze auto-scroll forever; revision
-    # is monotonic and keeps growing past that point.
-    last_history_revision = [0]  # Use list for mutable closure
-
-    def get_history_text() -> FormattedText:
-        return history.get_formatted_text()
-
-    def get_cursor_position() -> Point | None:
-        """Return cursor position at end only when new content is added."""
-        current_revision = history.revision
-        if current_revision > last_history_revision[0]:
-            # New content added - scroll to bottom
-            last_history_revision[0] = current_revision
-            text = history.get_formatted_text()
-            line_count = sum(fragment[1].count('\n') for fragment in text)
-            return Point(x=0, y=max(0, line_count - 1))
-        # No new content - return None to preserve scroll position
-        return None
-
-    # Control with dynamic content - focusable for mouse scroll support
-    control = FormattedTextControl(
-        text=get_history_text,
-        focusable=True,  # Enable mouse interaction
-        show_cursor=False,
-        get_cursor_position=get_cursor_position,
-    )
-
-    # Window that takes remaining space - minimal styling to look like console
-    history_window = Window(
-        content=control,
-        style=style,
-        wrap_lines=True,
-        scroll_offsets=ScrollOffsets(top=2, bottom=2),
-        right_margins=[ScrollbarMargin(display_arrows=True)],
-        allow_scroll_beyond_bottom=True,
-    )
-
-    return ConditionalContainer(
-        content=history_window,
-        filter=is_visible,
-    )
-
-
 def create_status_bar(
     get_status_text: Callable[[], AnyFormattedText],
     is_enabled: Callable[[], bool],
@@ -280,8 +206,6 @@ def create_layout(
     default_buffer: Buffer,
     message: Callable[[], AnyFormattedText],
     max_thinking_height: int,
-    history: FormattedTextHistory,
-    is_fullscreen: Callable[[], bool],
     get_status_text: Callable[[], AnyFormattedText],
     is_status_bar_enabled: Callable[[], bool],
     thinking_manager: ThinkingBoxManager | None = None,
@@ -289,14 +213,12 @@ def create_layout(
     inline_dialog: AnyContainer | None = None,
 ) -> Layout:
     """
-    Create the layout with chat history, thinking box, and input.
+    Create the layout with thinking boxes, input and status bar.
 
     Args:
         default_buffer: The main input buffer.
         message: Callable that returns the prompt message.
         max_thinking_height: Maximum height for collapsed thinking box.
-        history: The FormattedTextHistory instance.
-        is_fullscreen: Callable that returns fullscreen state.
         get_status_text: Callable that returns status bar text.
         is_status_bar_enabled: Callable that returns status bar visibility.
         thinking_manager: ThinkingBoxManager instance for managing thinking boxes.
@@ -307,9 +229,6 @@ def create_layout(
     Returns:
         The complete Layout.
     """
-    # Conditions
-    is_fullscreen_cond = Condition(is_fullscreen)
-
     # Input processors
     input_processors = [
         HighlightIncrementalSearchProcessor(),
@@ -373,13 +292,6 @@ def create_layout(
         separator_bottom,
     ])
 
-    # Chat history (visible in full-screen mode) - looks like normal console
-    history_window = create_history_window(
-        history=history,
-        is_visible=is_fullscreen_cond,
-        style="class:history",
-    )
-
     # Thinking area (visible when thinking)
     if thinking_manager is None:
         raise ValueError("thinking_manager is required")
@@ -393,7 +305,6 @@ def create_layout(
 
     # Build the main layout
     main_layout = HSplit([
-        history_window,        # Only visible in full-screen
         thinking_area,         # Only visible when thinking
         input_with_separators, # Always visible
         *([inline_dialog] if inline_dialog is not None else []),  # Inline dialogs
