@@ -4,11 +4,15 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
+from prompt_toolkit.application import Application
+from prompt_toolkit.application.current import set_app
+from prompt_toolkit.input import DummyInput
 from prompt_toolkit.keys import Keys
-from prompt_toolkit.layout import BufferControl, FloatContainer, HSplit, Window
+from prompt_toolkit.layout import BufferControl, FloatContainer, HSplit, Layout, Window
 from prompt_toolkit.layout.mouse_handlers import MouseHandlers
 from prompt_toolkit.layout.processors import PasswordProcessor
 from prompt_toolkit.layout.screen import Screen, WritePosition
+from prompt_toolkit.output import DummyOutput
 from prompt_toolkit.utils import get_cwidth
 
 from thinking_prompt.settings_dialog import (
@@ -197,8 +201,6 @@ class TestTextControlPasswordMasking:
     """Edit-mode rendering of password fields must not expose the buffer."""
 
     def _get_buffer_control(self, control: TextControl) -> BufferControl:
-        control._build_edit_container()
-        assert control._buffer_window is not None
         bc = control._buffer_window.content
         assert isinstance(bc, BufferControl)
         return bc
@@ -271,21 +273,6 @@ class TestSettingControl:
 
 class TestCheckboxControl:
     """Tests for CheckboxControl."""
-
-    def test_checkbox_control_tracks_focus(self):
-        """CheckboxControl updates _has_focus based on actual focus."""
-        from thinking_prompt.settings_dialog import CheckboxControl
-
-        item = CheckboxItem(key="stream", label="Stream", default=False)
-        control = CheckboxControl(item)
-
-        # Simulate gaining focus
-        control.set_has_focus(True)
-        assert control._has_focus is True
-
-        # Simulate losing focus
-        control.set_has_focus(False)
-        assert control._has_focus is False
 
     def test_checkbox_toggle(self):
         """Checkbox toggles value."""
@@ -642,6 +629,94 @@ class TestSettingsDialogOptions:
 
 def _bindings(kb, key):
     return kb.get_bindings_for_keys((key,))
+
+
+def _inline_dropdown(**item) -> DropdownControl:
+    control = DropdownControl(DropdownItem(**item))
+    control.set_inline(True)
+    return control
+
+
+def _line(control, selected: bool, row: int = 0):
+    """``control``'s ``row`` as drawn while its first cursor stop has
+    focus (``selected``), or with no app running."""
+    if not selected:
+        return control.create_content(40, 2).get_line(row)
+    layout = Layout(control.get_container(), focused_element=control.get_stops()[0])
+    with set_app(Application(layout=layout, input=DummyInput(), output=DummyOutput())):
+        return control.create_content(40, 2).get_line(row)
+
+
+class TestRowStyles:
+    """A setting's label, value and description take their -selected
+    styles while the setting has focus."""
+
+    @pytest.mark.parametrize(
+        "make,value,style",
+        [
+            (lambda: CheckboxControl(CheckboxItem(key="c", label="Label", default=True)),
+             "true", "setting-value-true"),
+            (lambda: CheckboxControl(CheckboxItem(key="c", label="Label")),
+             "false", "setting-value-false"),
+            (lambda: InlineSelectControl(InlineSelectItem(key="s", label="Label", options=["a", "b"], default="a")),
+             "a", "setting-value"),
+            (lambda: _inline_dropdown(key="d", label="Label", options=["a", "b"], default="a"),
+             "a", "setting-value"),
+            (lambda: DropdownControl(DropdownItem(key="d", label="Label", options=["a", "b"], default="a")),
+             "a", "setting-value"),
+            (lambda: TextControl(TextItem(key="t", label="Label", default="bob")),
+             "bob", "setting-value"),
+            (lambda: TextControl(TextItem(key="t", label="Label")),
+             "(empty)", "setting-desc"),
+        ],
+        ids=["checked", "unchecked", "select", "inline-dropdown", "dropdown", "text", "empty-text"],
+    )
+    @pytest.mark.parametrize("selected", [False, True], ids=["idle", "selected"])
+    def test_label_and_value(self, make, value, style, selected):
+        line = _line(make(), selected)
+        suffix = "-selected" if selected else ""
+        assert f"class:setting-label{suffix}" in _style_of(line, "Label")
+        assert f"class:{style}{suffix}" in _style_of(line, value)
+
+    @pytest.mark.parametrize("selected", [False, True], ids=["idle", "selected"])
+    def test_a_description(self, selected):
+        control = CheckboxControl(CheckboxItem(key="c", label="Label", description="Says more"))
+        suffix = "-selected" if selected else ""
+        assert _line(control, selected, row=1) == [("", "  "), (f"class:setting-desc{suffix}", "Says more")]
+
+    @pytest.mark.parametrize("selected", [False, True], ids=["idle", "selected"])
+    def test_a_lists_label_and_description(self, selected):
+        control = OptionsControl(
+            ChecklistItem(key="t", label="Label", description="Says more", options=["a"])
+        )
+        suffix = "-selected" if selected else ""
+        assert _line(control, selected) == [("", "  "), (f"class:setting-label{suffix}", "Label")]
+        assert _line(control, selected, row=1) == [("", "  "), (f"class:setting-desc{suffix}", "Says more")]
+
+    async def test_a_description_stays_under_the_edit_field(self):
+        control = TextControl(TextItem(key="t", label="Name", description="Says more", default="bob"))
+        control.enter_edit_mode()
+        row, description = _drawn(control.get_container(), 30, height=2)
+        assert _field(row)
+        assert _text(description).rstrip() == "  Says more"
+        assert all("class:setting-desc-selected" in style for _, style in description[2:11])
+
+    @pytest.mark.parametrize(
+        "make",
+        [
+            lambda: InlineSelectControl(InlineSelectItem(key="s", label="S", options=["a", "b", "c"], default="b")),
+            lambda: _inline_dropdown(key="d", label="D", options=["a", "b", "c"], default="b"),
+        ],
+        ids=["select", "inline-dropdown"],
+    )
+    @pytest.mark.parametrize(
+        "key,value", [(Keys.Left, "a"), (Keys.Right, "c"), (" ", "c")], ids=["left", "right", "space"]
+    )
+    def test_selector_keys_step_through_the_options(self, make, key, value):
+        control = make()
+        (binding,) = [b for b in _bindings(control.get_key_bindings(), key) if b.filter()]
+        binding.handler(MagicMock())
+        assert control.value == value
 
 
 class TestSettingsRows:
