@@ -114,8 +114,8 @@ class TestBuildBox:
         assert any(isinstance(c, ScrollRegion) for c in walk(to_container(view.widget)))
 
     def test_a_lone_choice_list_scrolls_in_a_region(self):
-        """A choice list's pick is its one stop, but its other options are
-        dialog rows too: the list scrolls in a region."""
+        """Each of a choice list's options is a stop: the list scrolls in a
+        region, as a check list does."""
         view = build_box(Dialog(
             "T", "Pick:", [ButtonConfig("OK")], fields=[ChoiceField("c", "", options=["a", "b"])]
         ))
@@ -126,10 +126,10 @@ class TestBuildBox:
         lambda: TextField("f", "Name"),
         lambda: SelectField("f", "Size", options=["s", "m"]),
         lambda: ChecklistField("f", "", options=["a"]),
-    ], ids=["checkbox", "text", "select", "one-option checklist"])
-    def test_text_and_one_one_row_field_is_not_in_a_region(self, make):
-        """One stop and no other dialog rows: squeezed, so the text above it
-        shows from its start."""
+        lambda: ChoiceField("f", "", options=["a"]),
+    ], ids=["checkbox", "text", "select", "one-option checklist", "one-option choice list"])
+    def test_text_and_a_one_stop_field_are_not_in_a_region(self, make):
+        """One stop: squeezed, so the text above it shows from its start."""
         view = build_box(Dialog("T", "Pick:", [ButtonConfig("OK")], fields=[make()]))
         assert not any(isinstance(c, ScrollRegion) for c in walk(to_container(view.widget)))
 

@@ -24,12 +24,10 @@ from prompt_toolkit.layout import (
     to_container,
 )
 from prompt_toolkit.layout.dimension import Dimension
-from prompt_toolkit.layout.layout import walk
 from prompt_toolkit.widgets import Button, Frame, Label
 from prompt_toolkit.widgets import Dialog as _DialogWidget
 
-from .dialog_scroll import AtMost, ScrollRegion, cursor_at_top, dialog_cap, focusable_windows
-from .rows import RowControl
+from .dialog_scroll import AtMost, ScrollRegion, dialog_cap, focusable_windows
 
 if TYPE_CHECKING:
     from prompt_toolkit.layout.mouse_handlers import MouseHandlers
@@ -74,10 +72,10 @@ class BoxView:
 def build_box(dialog: Dialog) -> BoxView:
     """Build prompt_toolkit's Dialog widget for ``dialog``.
 
-    When the dialog is capped (BoxPresenter._cap), a body with one stop is
-    squeezed, so the text above it shows from its start. Any other body sits
-    in a ScrollRegion: it scrolls with the cursor (form fields, a check list,
-    a choice list), or by keys for a text body.
+    When the dialog is capped (BoxPresenter._cap), a body that is one window
+    taking the cursor (a radio list, a text field) is squeezed and scrolls
+    itself. Any other body sits in a ScrollRegion: it scrolls with the
+    cursor (form fields, a check list), or by keys for a text body.
     """
     content, start = dialog._content()
     if content is None:
@@ -86,16 +84,18 @@ def build_box(dialog: Dialog) -> BoxView:
     stops = focusable_windows(content)
     body: Container = content
     text_region: ScrollRegion | None = None
-    # One stop stays out of a region, squeezed: the text above it then shows
-    # from its start. A choice list is the exception: its pick is one stop,
-    # but the other options are dialog rows too, and they scroll in a region.
-    rows = [w for w in walk(content) if isinstance(w, Window) and isinstance(w.content, RowControl)]
-    if len(stops) != 1 or len(rows) > 1:
-        # Back at the first stop, the region scrolls to its top: rows above
-        # that stop (a check list's text) show again.
-        body = ScrollRegion(
-            content, lambda: cursor_at_top(focusable_windows(content)), scrollbar=True
-        )
+    # A body whose stops are one window stays out of a region: there, a
+    # focused window taller than the region fills it, and the text above
+    # it (a dropdown's question) never shows.
+    if len(stops) != 1:
+
+        def at_first_stop() -> bool:
+            # Back at the first stop, the region scrolls to its top: rows
+            # above that stop (a check list's text) show again.
+            first = focusable_windows(content)[:1]
+            return bool(first) and get_app().layout.has_focus(first[0])
+
+        body = ScrollRegion(content, at_first_stop, scrollbar=True)
         # Nothing in it takes focus (a text body): it scrolls by keys.
         text_region = body if not stops else None
 

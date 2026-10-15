@@ -107,6 +107,24 @@ class TestOptionRows:
         (row,) = OptionGroup(["a"], multiple=False).rows
         assert row.create_content(60, 1).show_cursor is False
 
+    def test_without_marks_the_pick_is_bold(self):
+        group = OptionGroup(["fast", "careful"], multiple=False, selected=["fast"], indent=2, marks=False)
+        fast, careful = group.rows
+        assert (_text(fast), _text(careful)) == ("    fast", "    careful")
+        assert _styles(fast)[-1] == "class:dialog-choice-selected"
+        assert _styles(careful)[-1] == "class:field-label"
+        assert fast.preferred_width(80) == 2 + 2 + len("fast")
+
+    def test_enter_runs_on_enter_after_picking_and_space_does_not(self):
+        group = OptionGroup(["a", "b"], multiple=False, selected=["a"])
+        seen: list[str | None] = []
+        group.on_enter = lambda: seen.append(group.picked)
+        a, b = group.rows
+        _binding(a.get_key_bindings(), " ").handler(MagicMock())
+        assert seen == []
+        _binding(b.get_key_bindings(), Keys.ControlM).handler(MagicMock())
+        assert seen == ["b"]
+
 
 class TestRowNavigator:
     def test_moves_between_stops_and_stops_at_the_ends(self):

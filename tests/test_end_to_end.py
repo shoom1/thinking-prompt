@@ -2764,8 +2764,8 @@ TO_OK = {"box": TAB, "inline": DOWN}
 
 
 class TestChoiceFieldInAForm:
-    """A ChoiceField among other fields: one stop at rest; Enter starts
-    picking, ↑↓ move the pick, Enter keeps it and Escape puts it back."""
+    """A ChoiceField among other fields works like a radio list: ↑↓ walk its
+    options, Space or Enter picks one, and walking past changes nothing."""
 
     @pytest.mark.parametrize("placement", ["box", "inline"])
     async def test_walking_past_keeps_the_pick(self, placement):
@@ -2780,13 +2780,13 @@ class TestChoiceFieldInAForm:
             async def script(run: asyncio.Task[None]) -> None:
                 inp.send_text("go" + ENTER)
                 await wait_until(lambda: dialog_rendered(session))
-                inp.send_text(DOWN + DOWN + TO_OK[placement] + ENTER)   # A, Answers, B, OK
+                inp.send_text(DOWN * 4 + TO_OK[placement] + ENTER)   # x, y, z, B, then OK
                 await wait_until(lambda: results == [{"a": False, "c": "y", "b": False}])
 
             await run_with(session, handler, script)
 
     @pytest.mark.parametrize("placement", ["box", "inline"])
-    async def test_enter_down_enter_changes_the_pick(self, placement):
+    async def test_enter_picks_and_the_cursor_stays(self, placement):
         dialog = _choice_form(placement)
         results: list[Any] = []
 
@@ -2798,41 +2798,19 @@ class TestChoiceFieldInAForm:
             async def script(run: asyncio.Task[None]) -> None:
                 inp.send_text("go" + ENTER)
                 await wait_until(lambda: dialog_rendered(session))
-                inp.send_text(DOWN + ENTER)            # Answers: start picking
-                await wait_until(lambda: dialog._is_editing())
-                inp.send_text(DOWN)                    # z
+                inp.send_text(DOWN * 3)                # z
                 await wait_until(lambda: on_screen(session, "❯   z"))
-                inp.send_text(ENTER)                   # keep it
-                await wait_until(lambda: on_screen(session, "❯ Answers"))
-                inp.send_text(DOWN + TO_OK[placement] + ENTER)
-                await wait_until(lambda: results == [{"a": False, "c": "z", "b": False}])
-
-            await run_with(session, handler, script)
-
-    @pytest.mark.parametrize("placement", ["box", "inline"])
-    async def test_escape_puts_the_old_pick_back_and_keeps_the_dialog(self, placement):
-        dialog = _choice_form(placement)
-        results: list[Any] = []
-
-        async def handler(text: str) -> None:
-            results.append(await session.show_dialog(dialog))
-
-        with piped_session() as (session, inp):
-
-            async def script(run: asyncio.Task[None]) -> None:
-                inp.send_text("go" + ENTER)
-                await wait_until(lambda: dialog_rendered(session))
-                inp.send_text(DOWN + ENTER + DOWN)
-                await wait_until(lambda: on_screen(session, "❯   z"))
-                inp.send_text(ESCAPE)
-                await wait_until(lambda: not dialog._is_editing())
+                inp.send_text(ENTER)                   # picks z
+                await wait_until(lambda: dialog.values["c"] == "z")
+                inp.send_text(UP + ENTER)              # still on z: up to y, picks y
+                await wait_until(lambda: dialog.values["c"] == "y")
                 assert dialog_open(session)
-                inp.send_text(DOWN + TO_OK[placement] + ENTER)
+                inp.send_text(DOWN * 2 + TO_OK[placement] + ENTER)   # z, B, then OK
                 await wait_until(lambda: results == [{"a": False, "c": "y", "b": False}])
 
             await run_with(session, handler, script)
 
-    async def test_tab_while_picking_is_ignored_in_a_box(self):
+    async def test_space_picks_too(self):
         dialog = _choice_form("box")
         results: list[Any] = []
 
@@ -2844,40 +2822,10 @@ class TestChoiceFieldInAForm:
             async def script(run: asyncio.Task[None]) -> None:
                 inp.send_text("go" + ENTER)
                 await wait_until(lambda: dialog_rendered(session))
-                inp.send_text(DOWN + ENTER + DOWN)
-                await wait_until(lambda: on_screen(session, "❯   z"))
-                inp.send_text(TAB)                     # ignored while picking
-                inp.send_text(ENTER)                   # keep z
-                await wait_until(lambda: not dialog._is_editing())
-                inp.send_text(TAB + TAB + ENTER)       # B, then OK
-                await wait_until(lambda: results == [{"a": False, "c": "z", "b": False}])
-
-            await run_with(session, handler, script)
-
-    async def test_a_dialog_closed_mid_pick_reopens_at_rest_with_the_old_pick(self):
-        dialog = _choice_form("box")
-        results: list[Any] = []
-
-        async def handler(text: str) -> None:
-            results.append(await session.show_dialog(dialog))
-
-        with piped_session() as (session, inp):
-
-            async def script(run: asyncio.Task[None]) -> None:
-                inp.send_text("go" + ENTER)
-                await wait_until(lambda: dialog_rendered(session))
-                inp.send_text(DOWN + ENTER + DOWN)
-                await wait_until(lambda: on_screen(session, "❯   z"))
-                dialog.cancel()                        # closed mid-pick
-                await wait_until(lambda: results == [None])
-                inp.send_text("again" + ENTER)
-                await wait_until(lambda: dialog_rendered(session))
-                assert not dialog._is_editing()
-                assert dialog.values["c"] == "y"
-                inp.send_text(DOWN + ENTER + UP + ENTER)   # x this time
-                await wait_until(lambda: not dialog._is_editing() and dialog.values["c"] == "x")
-                inp.send_text(DOWN + TAB + ENTER)
-                await wait_until(lambda: results == [None, {"a": False, "c": "x", "b": False}])
+                inp.send_text(DOWN + " ")              # x
+                await wait_until(lambda: dialog.values["c"] == "x")
+                inp.send_text(DOWN * 3 + TAB + ENTER)  # y, z, B, then OK
+                await wait_until(lambda: results == [{"a": False, "c": "x", "b": False}])
 
             await run_with(session, handler, script)
 
@@ -2898,11 +2846,11 @@ def _choice_alone(placement: str, options: list[str] | None = None, text: str = 
 
 
 class TestChoiceFieldAlone:
-    """A ChoiceField alone in its dialog: ↑↓ move the pick at once and Enter
-    presses the first button, like prompt_toolkit's choice()."""
+    """A ChoiceField alone in its dialog: ↑↓ walk the options, and Enter
+    picks the one under the cursor and presses the first button."""
 
     @pytest.mark.parametrize("placement", ["box", "inline"])
-    async def test_arrows_pick_and_enter_presses_ok(self, placement):
+    async def test_enter_picks_the_option_under_the_cursor_and_presses_ok(self, placement):
         dialog = _choice_alone(placement)
         results: list[Any] = []
 
@@ -2922,6 +2870,25 @@ class TestChoiceFieldAlone:
 
             await run_with(session, handler, script)
 
+    async def test_walking_doesnt_change_the_pick(self):
+        dialog = _choice_alone("box")
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.show_dialog(dialog))
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                inp.send_text(DOWN + DOWN)             # z, not picked
+                await wait_until(lambda: on_screen(session, "❯ z"))
+                inp.send_text(TAB + ENTER)             # OK
+                await wait_until(lambda: results == ["x"])
+
+            await run_with(session, handler, script)
+
     async def test_tab_tab_enter_presses_cancel(self):
         dialog = _choice_alone("box")
         results: list[Any] = []
@@ -2934,12 +2901,14 @@ class TestChoiceFieldAlone:
             async def script(run: asyncio.Task[None]) -> None:
                 inp.send_text("go" + ENTER)
                 await wait_until(lambda: dialog_rendered(session))
-                inp.send_text(TAB + TAB + ENTER)       # pick, OK, Cancel
+                inp.send_text(TAB + TAB + ENTER)       # the list, OK, Cancel
                 await wait_until(lambda: results == [None])
 
             await run_with(session, handler, script)
 
-    async def test_shift_tab_from_ok_comes_back_to_the_pick(self):
+    async def test_shift_tab_from_ok_comes_back_to_the_list(self):
+        """prompt_toolkit's Shift+Tab from a button lands on the list's last
+        option, as for a radio list."""
         dialog = _choice_alone("box")
         results: list[Any] = []
 
@@ -2951,13 +2920,11 @@ class TestChoiceFieldAlone:
             async def script(run: asyncio.Task[None]) -> None:
                 inp.send_text("go" + ENTER)
                 await wait_until(lambda: dialog_rendered(session))
-                inp.send_text(DOWN + DOWN)             # z
-                await wait_until(lambda: on_screen(session, "❯ z"))
                 inp.send_text(TAB)                     # OK
-                await wait_until(lambda: not on_screen(session, "❯ z"))
-                inp.send_text(SHIFT_TAB)               # back to the pick, not the last row
+                await wait_until(lambda: not on_screen(session, "❯ x"))
+                inp.send_text(SHIFT_TAB)               # the last option
                 await wait_until(lambda: on_screen(session, "❯ z"))
-                inp.send_text(UP + ENTER)              # y, then OK
+                inp.send_text(UP + ENTER)              # y, picked; then OK
                 await wait_until(lambda: results == ["y"])
 
             await run_with(session, handler, script)
@@ -2974,10 +2941,10 @@ class TestChoiceFieldAlone:
             async def script(run: asyncio.Task[None]) -> None:
                 inp.send_text("go" + ENTER)
                 await wait_until(lambda: dialog_rendered(session))
-                inp.send_text(DOWN + DOWN + DOWN)      # z, then on to 1. OK
+                inp.send_text(DOWN * 3)                # y, z, then on to 1. OK
                 await wait_until(lambda: cursor_row(session) == "❯ 1. OK")
                 inp.send_text(ENTER)
-                await wait_until(lambda: results == ["z"])
+                await wait_until(lambda: results == ["x"])   # walked past: still x
 
             await run_with(session, handler, script)
 
@@ -3003,5 +2970,27 @@ class TestChoiceFieldAlone:
                 assert on_screen(session, "Which one?"), screen_lines(session)
                 inp.send_text(ENTER)
                 await wait_until(lambda: results == ["option 00"])
+
+            await run_with(session, handler, script)
+
+    @pytest.mark.parametrize("placement", ["box", "inline"])
+    async def test_with_no_buttons_enter_closes_with_the_pick(self, placement):
+        dialog = Dialog(
+            "Theme", "Pick:", fields=[ChoiceField("c", "", options=["x", "y", "z"])], placement=placement
+        )
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.show_dialog(dialog))
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                inp.send_text(DOWN)
+                await wait_until(lambda: on_screen(session, "❯ y"))
+                inp.send_text(ENTER)
+                await wait_until(lambda: results == ["y"])
 
             await run_with(session, handler, script)

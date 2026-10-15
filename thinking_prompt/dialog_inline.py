@@ -13,20 +13,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Callable
 
+from prompt_toolkit.application.current import get_app
 from prompt_toolkit.formatted_text import FormattedText
 from prompt_toolkit.layout import Container, HSplit, VSplit, Window
 from prompt_toolkit.layout.controls import FormattedTextControl, UIContent
 from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.utils import get_cwidth
 
-from .dialog_scroll import (
-    AtMost,
-    ScrollRegion,
-    cursor_at_top,
-    dialog_cap,
-    focusable_windows,
-    terminal_rows,
-)
+from .dialog_scroll import AtMost, ScrollRegion, dialog_cap, focusable_windows, terminal_rows
 from .rows import ActionRow, RowControl, RowNavigator
 
 if TYPE_CHECKING:
@@ -144,6 +138,10 @@ def build_inline(dialog: Dialog) -> InlineView:
         body_stops = focusable_windows(body) if body is not None else []
         return [*body_stops, *(action.window for action in actions)]
 
+    def at_first_stop() -> bool:
+        first = stops()[:1]
+        return bool(first) and get_app().layout.has_focus(first[0])
+
     # A body with cursor stops scrolls with the actions; one without (text)
     # scrolls in a region of its own, above them.
     text = ScrollRegion(body) if body is not None and not has_stops else None
@@ -153,7 +151,7 @@ def build_inline(dialog: Dialog) -> InlineView:
         if actions:
             scrolled.append(_blank_row())
     scrolled.extend(action.window for action in actions)
-    region = ScrollRegion(HSplit(scrolled), lambda: cursor_at_top(stops())) if scrolled else None
+    region = ScrollRegion(HSplit(scrolled), at_first_stop) if scrolled else None
 
     sizes = _Sizes(dialog.max_height, region, text)
     rows: list[Container] = []

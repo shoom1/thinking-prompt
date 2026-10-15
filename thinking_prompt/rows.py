@@ -44,12 +44,6 @@ class RowControl(UIControl):
         """Keys this row adds to an inline dialog's hint line."""
         return frozenset()
 
-    @property
-    def at_top(self) -> bool:
-        """Whether the cursor on this row is as high as it goes in its
-        field (cursor_at_top): a scroll region shows the rows above again."""
-        return True
-
     def is_focusable(self) -> bool:
         return True
 
@@ -99,7 +93,8 @@ class ActionRow(RowControl):
 
 class OptionGroup:
     """The state of a check list (any number checked) or a radio list
-    (at most one picked), with one OptionRow per option."""
+    (at most one picked), with one OptionRow per option. Without ``marks``
+    (a choice list) the rows show no [x] or (•): the pick is drawn bold."""
 
     def __init__(
         self,
@@ -108,11 +103,16 @@ class OptionGroup:
         multiple: bool,
         selected: Sequence[str] = (),
         indent: int = 0,
+        marks: bool = True,
     ) -> None:
         self.options = list(options)
         self.multiple = multiple
+        self.marks = marks
         self._selected: set[str] = set()
         self.select(selected)
+        # Run after Enter picks an option (a choice list alone in its dialog
+        # accepts the dialog); None: Enter just picks.
+        self.on_enter: Callable[[], None] | None = None
         self.rows = [OptionRow(self, option, indent) for option in self.options]
 
     @property
@@ -144,9 +144,11 @@ class OptionGroup:
 
 
 class OptionRow(RowControl):
-    """One option of an OptionGroup: ``[x] search`` or ``(•) fast``.
+    """One option of an OptionGroup: ``[x] search``, ``(•) fast``, or
+    without marks just ``fast``.
 
-    Space or Enter toggles it (check list) or picks it (radio list).
+    Space or Enter toggles it (check list) or picks it (radio list); Enter
+    then runs the group's on_enter, if any.
     """
 
     def __init__(self, group: OptionGroup, option: str, indent: int = 0) -> None:
@@ -157,9 +159,14 @@ class OptionRow(RowControl):
         self._key_bindings = KeyBindings()
 
         @self._key_bindings.add("space")
-        @self._key_bindings.add("enter")
         def _choose(event: KeyPressEvent) -> None:
             self.group.choose(self.option)
+
+        @self._key_bindings.add("enter")
+        def _enter(event: KeyPressEvent) -> None:
+            self.group.choose(self.option)
+            if self.group.on_enter is not None:
+                self.group.on_enter()
 
     @property
     def hints(self) -> frozenset[str]:
@@ -167,24 +174,28 @@ class OptionRow(RowControl):
 
     def preferred_width(self, max_available_width: int) -> int:
         """The columns the row takes uncut: the marker, the indent, the mark
-        and the option."""
-        return get_cwidth(MARKER) + self.indent + len("[x]") + 1 + get_cwidth(self.option)
+        (if any) and the option."""
+        mark = len("[x]") + 1 if self.group.marks else 0
+        return get_cwidth(MARKER) + self.indent + mark + get_cwidth(self.option)
 
     def create_content(self, width: int, height: int) -> UIContent:
         selected = has_focus(self.window)
         marked = self.group.is_selected(self.option)
-        mark = (
-            ("[x]" if marked else "[ ]")
-            if self.group.multiple
-            else ("(•)" if marked else "( )")
-        )
         label_style = "class:field-label-selected" if selected else "class:field-label"
         line: StyleAndTextTuples = [
             ("class:field-indicator" if selected else "", MARKER if selected else NO_MARKER),
             ("", " " * self.indent),
-            ("class:checkbox-mark", mark),
-            (label_style, f" {self.option}"),
         ]
+        if not self.group.marks:
+            # The pick in bold, as prompt_toolkit's choice() shows it.
+            line.append(("class:dialog-choice-selected" if marked else label_style, self.option))
+        else:
+            mark = (
+                ("[x]" if marked else "[ ]")
+                if self.group.multiple
+                else ("(•)" if marked else "( )")
+            )
+            line += [("class:checkbox-mark", mark), (label_style, f" {self.option}")]
         return UIContent(get_line=lambda i: line, line_count=1, show_cursor=False)
 
     def get_key_bindings(self) -> KeyBindings:

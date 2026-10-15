@@ -275,9 +275,9 @@ class Dialog:
         _check_align_values(self.align_values)
         body = to_container(self.build_body()) if self._has_body() else None
         body_stops = focusable_windows(body) if body is not None else []
-        # A ChoiceField with nothing else to focus is always picking, and
-        # Enter presses the first button.
-        self._form.set_alone(not body_stops, self._press_first_button)
+        # A ChoiceField with nothing else to focus: Enter on an option picks
+        # it and accepts the dialog.
+        self._form.set_alone(not body_stops, self._accept_choice)
         fields = self._form.container(self._placement, self.align_values)
         start = body_stops[0] if body_stops else self._form.start()
         if fields is None:
@@ -354,13 +354,17 @@ class Dialog:
                 )
         return configs
 
-    def _press_first_button(self) -> None:
-        """Click the first button, as Enter on it would; nothing without
-        buttons. Read when pressed: buttons can be set after the dialog
+    def _accept_choice(self) -> None:
+        """Enter on a lone choice list, after it picks: click the first
+        button, as Enter on it would; with no buttons, close with the pick.
+        The buttons are read when pressed: they can be set after the dialog
         is laid out."""
         configs = self._button_configs()
         if configs:
             self._click_handler(configs[0])()
+        else:
+            (pick,) = self.values.values()
+            self.set_result(pick)
 
     def _click_handler(self, cfg: ButtonConfig) -> Callable[[], None]:
         """What clicking ``cfg`` does: run its handler, or close with its result.
@@ -456,9 +460,9 @@ def _dropdown_dialog(
 ) -> Dialog:
     """Pick one option; Cancel and Escape return None.
 
-    Box: a choice list field with OK / Cancel: ↑↓ move the pick and Enter
-    (or OK) returns it. Inline: one numbered action per option. Either way
-    the cursor starts on ``default`` (the first option if it isn't one).
+    Box: a choice list field with OK / Cancel: Enter on an option (or OK)
+    returns it. Inline: one numbered action per option. Either way the
+    cursor starts on ``default`` (the first option if it isn't one).
     """
     if not options:
         raise ValueError("dropdown_dialog() needs at least one option")
@@ -471,8 +475,7 @@ def _dropdown_dialog(
             max_height=max_height,
         )
 
-    # Alone in the dialog, the choice list is always picking: the cursor is
-    # the pick, and Enter presses OK.
+    # Alone in the dialog, Enter on an option picks it and presses OK.
     dialog = Dialog(
         title,
         text,

@@ -17,8 +17,6 @@ from prompt_toolkit.layout.layout import walk
 from prompt_toolkit.layout.mouse_handlers import MouseHandlers
 from prompt_toolkit.layout.screen import Screen, WritePosition
 
-from .rows import RowControl
-
 # Rows a dialog leaves free: the prompt, its two separators and the status bar.
 TERMINAL_BUFFER_ROWS = 4
 
@@ -46,19 +44,6 @@ def focusable_windows(container: Container) -> list[Container]:
         c for c in walk(container, skip_hidden=True)
         if isinstance(c, Window) and c.content.is_focusable()
     ]
-
-
-def cursor_at_top(stops: list[Container]) -> bool:
-    """Whether the cursor is on the first of ``stops`` (top to bottom) and
-    as high as it goes there (RowControl.at_top: a choice list's one stop
-    is its pick). A ScrollRegion goes back to its top then, so the rows
-    above the first stop show again."""
-    if not stops or not get_app().layout.has_focus(stops[0]):
-        return False
-    first = stops[0]
-    if isinstance(first, Window) and isinstance(first.content, RowControl):
-        return first.content.at_top
-    return True
 
 
 class AtMost(Container):
