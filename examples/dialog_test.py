@@ -109,7 +109,7 @@ async def main():
             return
 
         if text == "theme":
-            # Dropdown dialog (radio list selection)
+            # Dropdown dialog (a choice list in a box)
             result = await session.dropdown_dialog(
                 title="Select Theme",
                 text="Choose a color theme:",

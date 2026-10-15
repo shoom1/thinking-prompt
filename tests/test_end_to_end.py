@@ -889,9 +889,9 @@ class TestDialogsEndToEnd:
             async def script(run: asyncio.Task[None]) -> None:
                 inp.send_text("go" + ENTER)
                 await wait_until(lambda: dialog_open(session))
-                inp.send_text(DOWN)  # "Dark", before the dialog's first render
+                inp.send_text(DOWN + " ")  # pick "Dark", before the dialog's first render
                 await wait_until(lambda: dialog_rendered(session), timeout=3)
-                inp.send_text(ENTER)  # OK
+                inp.send_text(TAB + ENTER)  # OK
                 await wait_until(lambda: results == ["Dark"], timeout=3)
 
             await run_with(session, handler, script)
@@ -1285,6 +1285,7 @@ class TestBoxLongLists:
                 assert not on_screen(session, "^^")  # one scrollbar
                 inp.send_text(DOWN * 29)
                 await wait_until(lambda: on_screen(session, "option 29"))
+                assert not on_screen(session, "Which one?")  # scrolled off
                 inp.send_text(UP * 29)
                 await wait_until(lambda: on_screen(session, "❯ option 00"))
                 assert on_screen(session, "Which one?"), screen_lines(session)
@@ -2901,7 +2902,7 @@ class TestChoiceFieldAlone:
             async def script(run: asyncio.Task[None]) -> None:
                 inp.send_text("go" + ENTER)
                 await wait_until(lambda: dialog_rendered(session))
-                inp.send_text(TAB + TAB + ENTER)       # the list, OK, Cancel
+                inp.send_text(TAB + TAB + ENTER)       # OK, Cancel, then press it
                 await wait_until(lambda: results == [None])
 
             await run_with(session, handler, script)
@@ -2945,31 +2946,6 @@ class TestChoiceFieldAlone:
                 await wait_until(lambda: cursor_row(session) == "❯ 1. OK")
                 inp.send_text(ENTER)
                 await wait_until(lambda: results == ["x"])   # walked past: still x
-
-            await run_with(session, handler, script)
-
-    async def test_a_long_list_shows_its_question_back_at_the_top(self):
-        options = [f"option {i:02}" for i in range(30)]
-        dialog = _choice_alone("box", options, text="Which one?")
-        results: list[Any] = []
-
-        async def handler(text: str) -> None:
-            results.append(await session.show_dialog(dialog))
-
-        with piped_session(rows=24) as (session, inp):
-
-            async def script(run: asyncio.Task[None]) -> None:
-                inp.send_text("go" + ENTER)
-                await wait_until(lambda: dialog_rendered(session))
-                assert on_screen(session, "Which one?"), screen_lines(session)
-                inp.send_text(DOWN * 29)
-                await wait_until(lambda: on_screen(session, "❯ option 29"))
-                assert not on_screen(session, "Which one?")   # scrolled off
-                inp.send_text(UP * 29)
-                await wait_until(lambda: on_screen(session, "❯ option 00"))
-                assert on_screen(session, "Which one?"), screen_lines(session)
-                inp.send_text(ENTER)
-                await wait_until(lambda: results == ["option 00"])
 
             await run_with(session, handler, script)
 

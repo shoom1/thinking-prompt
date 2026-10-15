@@ -460,9 +460,10 @@ def _dropdown_dialog(
 ) -> Dialog:
     """Pick one option; Cancel and Escape return None.
 
-    Box: a choice list field with OK / Cancel: Enter on an option (or OK)
-    returns it. Inline: one numbered action per option. Either way the
-    cursor starts on ``default`` (the first option if it isn't one).
+    Box: a choice list field with OK / Cancel: Enter on an option returns
+    it, and OK returns the pick. Inline: one numbered action per option.
+    Either way the cursor starts on ``default`` (the first option if it
+    isn't one).
     """
     if not options:
         raise ValueError("dropdown_dialog() needs at least one option")

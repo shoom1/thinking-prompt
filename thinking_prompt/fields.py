@@ -1042,7 +1042,7 @@ class OptionsFieldControl(FieldControl[Any]):
 
     @property
     def value(self) -> Any:
-        """The checked options (check list) or the picked one (radio list)."""
+        """The checked options (check list) or the picked one (radio or choice list)."""
         return self._group.checked if self._group.multiple else self._group.picked
 
     @value.setter
