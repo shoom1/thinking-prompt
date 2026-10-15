@@ -26,7 +26,7 @@ from thinking_prompt.dialog import (
     _message_dialog,
     _yes_no_dialog,
 )
-from thinking_prompt.fields import RadioField
+from thinking_prompt.fields import ChoiceField
 
 _STILL_OPEN = object()  # _click() result when the click didn't close the dialog
 
@@ -266,13 +266,14 @@ class TestBuiltinDialogs:
         content, _ = inline._content()
         assert content.key_bindings is None
 
-    def test_box_dropdown_is_a_radio_list_starting_on_the_default(self):
+    def test_box_dropdown_is_a_choice_list_starting_on_the_default(self):
         d = _dropdown_dialog("Theme", "Select:", ["Light", "Dark", "System"], default="Dark")
         d._placement = "box"
         _, start = d._content()
         (control,) = d._form.controls
-        assert isinstance(control.item, RadioField) and control.item.label == ""
-        assert start is control._group.rows[1].window
+        assert isinstance(control.item, ChoiceField) and control.item.label == ""
+        assert control.picking
+        assert start is control._rows[1].window
 
     @pytest.mark.parametrize("default", [None, "Blue"])
     def test_box_dropdown_without_a_valid_default_starts_on_the_first_option(self, default):
@@ -280,7 +281,7 @@ class TestBuiltinDialogs:
         d._placement = "box"
         _, start = d._content()
         (control,) = d._form.controls
-        assert start is control._group.rows[0].window
+        assert start is control._rows[0].window
         assert d.values == {control.item.key: "Light"}
 
 

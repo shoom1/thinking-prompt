@@ -57,7 +57,7 @@ from ._text import format_exception_detail
 from .dialog_box import BoxPresenter
 from .dialog_inline import InlinePresenter, InlineView
 from .dialog_scroll import ScrollRegion, focusable_windows
-from .fields import AlignValues, ChecklistField, Field, RadioField, _check_align_values, _Form
+from .fields import AlignValues, ChecklistField, ChoiceField, Field, _check_align_values, _Form
 from .types import Placement, check_placement
 
 if TYPE_CHECKING:
@@ -456,9 +456,9 @@ def _dropdown_dialog(
 ) -> Dialog:
     """Pick one option; Cancel and Escape return None.
 
-    Box: a radio list field with OK / Cancel; Tab goes from the list to OK.
-    Inline: one numbered action per option. Either way the cursor starts on
-    ``default``.
+    Box: a choice list field with OK / Cancel: ↑↓ move the pick and Enter
+    (or OK) returns it. Inline: one numbered action per option. Either way
+    the cursor starts on ``default`` (the first option if it isn't one).
     """
     if not options:
         raise ValueError("dropdown_dialog() needs at least one option")
@@ -471,13 +471,12 @@ def _dropdown_dialog(
             max_height=max_height,
         )
 
-    # One option picked: the default, or the first when there's none (or
-    # it isn't an option). The cursor starts on it.
-    picked = default if default in options else options[0]
+    # Alone in the dialog, the choice list is always picking: the cursor is
+    # the pick, and Enter presses OK.
     dialog = Dialog(
         title,
         text,
-        fields=[RadioField("choice", "", options=list(options), default=picked)],
+        fields=[ChoiceField("choice", "", options=list(options), default=default)],
         placement="box",
         max_height=max_height,
     )

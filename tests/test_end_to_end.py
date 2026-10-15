@@ -847,7 +847,7 @@ class TestDialogsEndToEnd:
             async def script(run: asyncio.Task[None]) -> None:
                 inp.send_text("go" + ENTER)
                 await wait_until(lambda: dialog_rendered(session))
-                inp.send_text(DOWN + ENTER + TAB + ENTER)  # select "Dark", then OK
+                inp.send_text(DOWN + ENTER)  # "Dark": Enter presses OK
                 await wait_until(lambda: results == ["Dark"])
 
             await run_with(session, handler, script)
@@ -865,8 +865,8 @@ class TestDialogsEndToEnd:
             async def script(run: asyncio.Task[None]) -> None:
                 inp.send_text("go" + ENTER)
                 await wait_until(lambda: dialog_rendered(session))
-                assert on_screen(session, "❯ (•) Dark"), screen_lines(session)
-                inp.send_text(DOWN + ENTER + TAB + ENTER)  # the one after "Dark", then OK
+                assert on_screen(session, "❯ Dark"), screen_lines(session)
+                inp.send_text(DOWN + ENTER)  # the one after "Dark"; Enter presses OK
                 await wait_until(lambda: results == ["System"])
 
             await run_with(session, handler, script)
@@ -889,9 +889,9 @@ class TestDialogsEndToEnd:
             async def script(run: asyncio.Task[None]) -> None:
                 inp.send_text("go" + ENTER)
                 await wait_until(lambda: dialog_open(session))
-                inp.send_text(DOWN + ENTER)  # before the dialog's first render
+                inp.send_text(DOWN)  # "Dark", before the dialog's first render
                 await wait_until(lambda: dialog_rendered(session), timeout=3)
-                inp.send_text(TAB + ENTER)  # OK
+                inp.send_text(ENTER)  # OK
                 await wait_until(lambda: results == ["Dark"], timeout=3)
 
             await run_with(session, handler, script)
@@ -1241,7 +1241,7 @@ class TestBoxTextScrolling:
         await self._run("\n".join(f"line {i:02}" for i in range(3)), keys)
 
     async def test_arrows_still_move_through_a_long_list(self):
-        """A body with cursor stops keeps its own ↑↓: here a radio list taller than the cap."""
+        """A body with cursor stops keeps its own ↑↓: here a choice list taller than the cap."""
         options = [f"option {i:02}" for i in range(40)]
         results: list[Any] = []
 
@@ -1255,7 +1255,7 @@ class TestBoxTextScrolling:
             async def script(run: asyncio.Task[None]) -> None:
                 inp.send_text("go" + ENTER)
                 await wait_until(lambda: dialog_rendered(session))
-                inp.send_text(DOWN * 3 + ENTER + TAB + ENTER)  # option 03, then OK
+                inp.send_text(DOWN * 3 + ENTER)  # option 03; Enter presses OK
                 await wait_until(lambda: results == ["option 03"])
 
             await run_with(session, handler, script)
@@ -1266,7 +1266,7 @@ class TestBoxLongLists:
     the text above the list shows whenever the cursor is at the top."""
 
     async def test_a_long_dropdown_shows_its_question_at_the_top(self):
-        """A radio list's question scrolls with its options, like a check
+        """A choice list's question scrolls with its options, like a check
         list's: it shows at the top and again back at the first option."""
         options = [f"option {i:02}" for i in range(30)]
         results: list[Any] = []
@@ -1286,9 +1286,9 @@ class TestBoxLongLists:
                 inp.send_text(DOWN * 29)
                 await wait_until(lambda: on_screen(session, "option 29"))
                 inp.send_text(UP * 29)
-                await wait_until(lambda: on_screen(session, "❯ (•) option 00"))
+                await wait_until(lambda: on_screen(session, "❯ option 00"))
                 assert on_screen(session, "Which one?"), screen_lines(session)
-                inp.send_text(DOWN * 3 + ENTER + TAB + ENTER)  # option 03, then OK
+                inp.send_text(DOWN * 3 + ENTER)  # option 03; Enter presses OK
                 await wait_until(lambda: results == ["option 03"])
 
             await run_with(session, handler, script)
