@@ -49,15 +49,15 @@ from typing import (
 from prompt_toolkit.filters import Condition
 from prompt_toolkit.formatted_text import AnyFormattedText
 from prompt_toolkit.key_binding import KeyBindings, merge_key_bindings
-from prompt_toolkit.layout import AnyContainer, Float, HSplit
+from prompt_toolkit.layout import AnyContainer, Container, Float, HSplit, to_container
 from prompt_toolkit.layout.containers import is_container
-from prompt_toolkit.widgets import Label, RadioList
+from prompt_toolkit.widgets import Label
 
 from ._text import format_exception_detail
 from .dialog_box import BoxPresenter
 from .dialog_inline import InlinePresenter, InlineView
-from .dialog_scroll import ScrollRegion
-from .rows import OptionGroup, RowNavigator
+from .dialog_scroll import ScrollRegion, focusable_windows
+from .fields import AlignValues, ChecklistField, Field, RadioField, _check_align_values, _Form
 from .types import Placement, check_placement
 
 if TYPE_CHECKING:
@@ -133,8 +133,15 @@ class Dialog:
         body: Text (str, HTML, ANSI, FormattedText), shown in a Label, or
             any prompt_toolkit container.
         buttons: ButtonConfigs (default: none). A dialog needs something to
-            focus: at least one button, or a focusable body (e.g. a TextArea,
-            closed with Escape).
+            focus: at least one button, fields, or a focusable body (e.g. a
+            TextArea, closed with Escape).
+        fields: Form fields shown under the body: TextField, CheckboxField,
+            SelectField, DropdownField, ChecklistField, RadioField. Their
+            keys must be unique; ``values`` holds what they're set to. Read
+            when the dialog is created: setting it afterwards changes nothing.
+        align_values: Where field values start: "labels" (default: two
+            columns after the longest label or description), "right" (the
+            row's right edge) or a column number (longer labels cut with "…").
         escape_result: What Escape and cancel() return (default None).
         escapable: If False, Escape does nothing (default True).
         width: None/0 = auto, >0 = preferred width (never narrower than
@@ -162,13 +169,7 @@ class Dialog:
         # Subclassed
         class LoginDialog(Dialog):
             title = "Login"
-
-            def __init__(self):
-                super().__init__()
-                self.username = TextArea(multiline=False)
-
-            def build_body(self):
-                return HSplit([Label("Username:"), self.username])
+            fields = [TextField("user", "Username")]
 
             def get_buttons(self):
                 return [
@@ -177,13 +178,17 @@ class Dialog:
                 ]
 
             def on_login(self):
-                if self.username.text:  # stays open while empty
-                    self.set_result({"user": self.username.text})
+                if self.values["user"]:  # stays open while empty
+                    self.set_result(self.values)
     """
 
     title: str = ""
     body: AnyFormattedText | AnyContainer = ""
     buttons: Sequence[ButtonConfig] = ()
+    # Form fields, under the body (see thinking_prompt.fields).
+    fields: Sequence[Field] = ()
+    # Where field values start: "labels", "right" or a column.
+    align_values: AlignValues = "labels"
     escape_result: Any = None
     escapable: bool = True
     width: int | None = None
@@ -204,6 +209,8 @@ class Dialog:
         width: int | None | _NotPassed = _NOT_PASSED,
         max_height: int | None | _NotPassed = _NOT_PASSED,
         placement: Placement | None | _NotPassed = _NOT_PASSED,
+        fields: Sequence[Field] | _NotPassed = _NOT_PASSED,
+        align_values: AlignValues | _NotPassed = _NOT_PASSED,
     ) -> None:
         if not isinstance(placement, _NotPassed):
             check_placement(placement, optional=True)
@@ -217,17 +224,22 @@ class Dialog:
             "width": width,
             "max_height": max_height,
             "placement": placement,
+            "fields": fields,
+            "align_values": align_values,
         }
         for name, value in passed.items():
             if not isinstance(value, _NotPassed):
                 setattr(self, name, value)
         if self.max_height is not None and self.max_height < 1:
             raise ValueError(f"max_height must be at least 1, got {self.max_height!r}")
+        # One control per field, holding its value from now on (values).
+        _check_align_values(self.align_values)
+        self._form = _Form(self.fields)
 
         self._result_future: asyncio.Future | None = None
         self._manager: DialogManager | None = None
         # The placement this dialog is (or was last) shown with, resolved by
-        # DialogManager; build_body() may read it (the settings dialog does).
+        # DialogManager; _content() lays the fields out for it.
         self._placement: Placement = "box"
 
     def build_body(self) -> AnyContainer:
@@ -235,21 +247,52 @@ class Dialog:
         Build the dialog body.
 
         Default: ``body`` itself if it's a container, otherwise ``body``
-        shown as text in a Label. Override for custom content.
+        shown as text in a Label. Override for custom content. The fields,
+        if any, are shown under it.
         """
         body = self.body
         if is_container(body):
             return body
         return Label(text=cast("AnyFormattedText", body))
 
-    def _screen_floats(self) -> list[Float]:
-        """
-        Floats the body needs over the whole screen while the dialog is
-        open as a box (a dropdown's menu, say), not just over the body.
+    @property
+    def values(self) -> dict[str, Any]:
+        """Each field's current value by key, in field order ({} without
+        fields): what the fields hold now, before, while or after the dialog
+        is shown. Read it from a button handler to return it."""
+        return self._form.values
 
-        Default: none. Called once, after ``build_body``.
+    def _content(self) -> tuple[Container | None, Container | None]:
+        """What a presenter shows between the title and the buttons, and
+        where the cursor starts in it when no button asks for it.
+
+        The content: the body (unless it's an empty text body), then the
+        fields laid out for the placement; None for neither. The start: the
+        first thing in the body that takes focus, else the first field's
+        start (a radio list's picked option); None for neither.
         """
-        return []
+        _check_align_values(self.align_values)
+        body = to_container(self.build_body()) if self._has_body() else None
+        fields = self._form.container(self._placement, self.align_values)
+        body_stops = focusable_windows(body) if body is not None else []
+        start = body_stops[0] if body_stops else self._form.start()
+        if fields is None:
+            return body, start
+        if self._placement == "inline":
+            return (fields if body is None else HSplit([body, fields])), start
+        # A box: Tab walks the body's windows and the fields as groups.
+        tabs = self._form.tab_bindings(
+            lambda: focusable_windows(body) if body is not None else []
+        )
+        if body is None:
+            fields.key_bindings = merge_key_bindings([fields.key_bindings or KeyBindings(), tabs])
+            return fields, start
+        return HSplit([body, fields], key_bindings=tabs), start
+
+    def _screen_floats(self) -> list[Float]:
+        """Floats the fields need over the whole screen while the dialog is
+        open as a box (a dropdown's menu). Called once, after _content()."""
+        return self._form.floats()
 
     def get_buttons(self) -> list[ButtonConfig]:
         """
@@ -287,9 +330,9 @@ class Dialog:
         return type(self).build_body is not Dialog.build_body or self.body != ""
 
     def _is_editing(self) -> bool:
-        """True while a row of the body is being edited (e.g. a settings
-        text field): the inline cursor stays put meanwhile."""
-        return False
+        """True while a field is being edited (a text field, an open menu):
+        the cursor stays put meanwhile."""
+        return self._form.is_editing()
 
     def _button_configs(self) -> list[ButtonConfig]:
         """get_buttons(), checked: every item must be a ButtonConfig.
@@ -401,8 +444,9 @@ def _dropdown_dialog(
 ) -> Dialog:
     """Pick one option; Cancel and Escape return None.
 
-    Box: a radio list with OK / Cancel. Inline: one numbered action per
-    option. Either way the cursor starts on ``default``.
+    Box: a radio list field with OK / Cancel; Tab goes from the list to OK.
+    Inline: one numbered action per option. Either way the cursor starts on
+    ``default``.
     """
     if not options:
         raise ValueError("dropdown_dialog() needs at least one option")
@@ -415,16 +459,19 @@ def _dropdown_dialog(
             max_height=max_height,
         )
 
-    # default= also puts the cursor there (setting current_value afterwards
-    # left it on the first option); one that isn't an option picks the first.
-    radio: RadioList[str] = RadioList(values=[(opt, opt) for opt in options], default=default)
-
+    # One option picked: the default, or the first when there's none (or
+    # it isn't an option). The cursor starts on it.
+    picked = default if default in options else options[0]
     dialog = Dialog(
-        title, HSplit([Label(text=text), radio]), placement="box", max_height=max_height
+        title,
+        text,
+        fields=[RadioField("choice", "", options=list(options), default=picked)],
+        placement="box",
+        max_height=max_height,
     )
     # Buttons set after construction: OK's handler needs the dialog itself.
     dialog.buttons = [
-        ButtonConfig("OK", handler=lambda: dialog.set_result(radio.current_value)),
+        ButtonConfig("OK", handler=lambda: dialog.set_result(dialog.values["choice"])),
         ButtonConfig("Cancel"),
     ]
     return dialog
@@ -442,18 +489,16 @@ def _checklist_dialog(
     (in option order), Cancel and Escape None."""
     if not options:
         raise ValueError("checklist_dialog() needs at least one option")
-    group = OptionGroup(options, multiple=True, selected=defaults)
-    rows = [row.window for row in group.rows]
-    # A box dialog's buttons take Tab, so the rows get their own ↑↓; inline,
-    # the dialog's cursor walks the rows and the actions alike.
-    navigation = RowNavigator(lambda: rows).key_bindings() if placement == "box" else None
-    option_list = HSplit(rows, key_bindings=navigation)
-    body = HSplit([Label(text=text), option_list]) if text else option_list
-
-    dialog = Dialog(title, body, placement=placement, max_height=max_height)
+    dialog = Dialog(
+        title,
+        text,
+        fields=[ChecklistField("checked", "", options=list(options), default=tuple(defaults))],
+        placement=placement,
+        max_height=max_height,
+    )
     # Buttons set after construction: OK's handler needs the dialog itself.
     dialog.buttons = [
-        ButtonConfig("OK", handler=lambda: dialog.set_result(group.checked)),
+        ButtonConfig("OK", handler=lambda: dialog.set_result(dialog.values["checked"])),
         ButtonConfig("Cancel"),
     ]
     return dialog
@@ -462,7 +507,7 @@ def _checklist_dialog(
 def _nothing_to_focus(dialog: Dialog) -> str:
     return (
         f"Dialog {dialog.title!r} has nothing to focus: give it a "
-        "button (buttons=[ButtonConfig(...)]) or a focusable body."
+        "button (buttons=[ButtonConfig(...)]), fields, or a focusable body."
     )
 
 
@@ -648,8 +693,10 @@ class DialogManager:
             target: AnyContainer | None
             if placement == "box":
                 box = self._box.open(dialog)
-                # A ButtonConfig(focused=True) button, else the first
-                # focusable element of the dialog.
+                # A ButtonConfig(focused=True) button, else where the body's
+                # cursor starts (its first focusable window, else the first
+                # field; a radio list's picked option), else the widget's
+                # first focusable element (a button).
                 target = box.initial_focus or box.widget
             else:
                 target = self._inline.open(dialog).focus
@@ -661,6 +708,10 @@ class DialogManager:
                 self._session.app.layout.focus(target)
             except ValueError as exc:
                 raise ValueError(_nothing_to_focus(dialog)) from exc
+            # Keys typed before the first render find the dialog's key
+            # bindings (set on containers, not controls) through the parent
+            # links, which prompt_toolkit only refreshes when it redraws.
+            self._session.app.layout.update_parents_relations()
             self._session.app.invalidate()
 
             # Wait for result. If the app exits first, nobody can answer the

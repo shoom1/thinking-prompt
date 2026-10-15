@@ -1,6 +1,8 @@
 """Tests for theme tokens, factories, and resolution."""
 from __future__ import annotations
 
+import dataclasses
+
 from thinking_prompt.styles import ThinkingPromptStyles
 
 
@@ -69,7 +71,7 @@ class TestTokensResolveAtRender:
     def test_mutating_token_restyles_derived_elements(self):
         s = ThinkingPromptStyles.light()
         s.color_accent = "#123456"
-        assert _rules(s)["setting-indicator"] == "fg:#123456"
+        assert _rules(s)["field-indicator"] == "fg:#123456"
 
     def test_explicit_override_survives_replace(self):
         import dataclasses
@@ -122,9 +124,9 @@ class TestThemeFactories:
             (d["completion-menu.completion"], d["completion-menu.completion.current"]),
             (d["completion-menu.meta.completion"], d["completion-menu.meta.completion.current"]),
             (d["button"], d["button.focused"]),
-            (d["setting-label"], d["setting-label-selected"]),
-            (d["setting-value"], d["setting-value-selected"]),
-            (d["setting-desc"], d["setting-desc-selected"]),
+            (d["field-label"], d["field-label-selected"]),
+            (d["field-value"], d["field-value-selected"]),
+            (d["field-desc"], d["field-desc-selected"]),
             (d["radio-list"], d["radio-selected"]),
             (d["checkbox-list"], d["checkbox-selected"]),
             (d["dialog-choice"], d["dialog-choice-selected"]),
@@ -268,3 +270,14 @@ class TestDialogRowStyles:
 
     def test_checkbox_mark_is_back(self):
         assert ThinkingPromptStyles(checkbox_mark="bold").to_style_dict()["checkbox-mark"] == "bold"
+
+
+def test_form_fields_have_field_styles():
+    """The settings styles were renamed for form fields: no setting_* field
+    or setting-* class is left."""
+    names = {f.name for f in dataclasses.fields(ThinkingPromptStyles)}
+    assert {"field_indicator", "field_label", "field_value_true_selected", "field_desc_selected"} <= names
+    assert not any(name.startswith("setting_") for name in names)
+    rules = ThinkingPromptStyles.dark().to_style_dict()
+    assert {"field-label", "field-dropdown", "field-dropdown-selected"} <= set(rules)
+    assert not any(name.startswith("setting-") for name in rules)

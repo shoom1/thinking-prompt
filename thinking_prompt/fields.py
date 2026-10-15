@@ -1,10 +1,9 @@
 """
-Settings dialog for ThinkingPromptSession.
+Form fields for dialogs (Dialog.fields): the Field classes that describe
+them and the row controls that draw and edit them.
 
-Provides a form-based dialog for configuring multiple settings at once.
-Navigation: Up/Down move between settings (and, in an inline dialog, on to
-the Save/Cancel rows), Tab/Shift-Tab too. Left/Right or Space change values,
-Enter edits text in place. Ctrl+S saves, Escape cancels.
+Up/Down move between rows, Left/Right or Space change a value, Enter edits
+text in place (in a box, opens a dropdown's menu), Escape ends an edit.
 """
 from __future__ import annotations
 
@@ -17,7 +16,7 @@ from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.data_structures import Point
 from prompt_toolkit.filters import Condition, FilterOrBool
 from prompt_toolkit.formatted_text import FormattedText
-from prompt_toolkit.key_binding import KeyBindings, merge_key_bindings
+from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.key_binding.key_bindings import KeyBindingsBase
 from prompt_toolkit.layout import (
     BufferControl,
@@ -26,6 +25,7 @@ from prompt_toolkit.layout import (
     DynamicContainer,
     Float,
     HSplit,
+    Layout,
     Window,
 )
 from prompt_toolkit.layout.controls import FormattedTextControl, UIContent, UIControl
@@ -36,70 +36,80 @@ from prompt_toolkit.layout.screen import Screen, WritePosition
 from prompt_toolkit.utils import get_cwidth
 from prompt_toolkit.widgets import Frame
 
-from .dialog import ButtonConfig, Dialog
 from .rows import MARKER, NO_MARKER, OptionGroup, RowControl, RowNavigator, has_focus
 from .types import Placement
 
 
-@dataclass
-class SettingsItem(ABC):
-    """Base class for all settings items."""
-    key: str              # Unique identifier, used as dict key in result
-    label: str            # Display label
-    description: str = "" # Optional description shown below label
+@dataclass(frozen=True)
+class Field(ABC):
+    """A dialog's form field (Dialog.fields). Frozen: a list of fields can be
+    shared by many dialogs (a class attribute), each keeping its own values.
+
+    Attributes:
+        key: The field's key in Dialog.values; unique within its dialog.
+        label: Shown on the field's row. A check or radio list with no
+            label and no description shows just its options.
+        description: Shown under the label (optional).
+        default: The field's starting value.
+    """
+    key: str
+    label: str
+    description: str = ""
     default: Any = None
 
 
-@dataclass
-class InlineSelectItem(SettingsItem):
-    """Inline select that cycles through options with Left/Right keys."""
+@dataclass(frozen=True)
+class SelectField(Field):
+    """One of ``options``, stepped through in place with ←/→ (``◀ medium ▶``)."""
     options: list[str] = field(default_factory=list)
     default: Any = None
 
 
-@dataclass
-class DropdownItem(SettingsItem):
-    """Dropdown select with edit mode showing a scrollable list."""
+@dataclass(frozen=True)
+class DropdownField(Field):
+    """One of ``options``. In a box, Enter opens a menu of them; inline, it's
+    a ←/→ selector. ``height``: the menu's rows; ``width``: its columns
+    (None: the widest option's, at most ``max_width``)."""
     options: list[str] = field(default_factory=list)
     default: Any = None
-    height: int = 4  # Number of visible items in dropdown
-    width: int | None = 15  # Fixed width, or None for auto
-    max_width: int | None = None  # Max width when auto-sizing
+    height: int = 4
+    width: int | None = 15
+    max_width: int | None = None
 
 
-@dataclass
-class CheckboxItem(SettingsItem):
-    """Boolean toggle."""
+@dataclass(frozen=True)
+class CheckboxField(Field):
+    """True or false, toggled with Space, Enter or ←/→."""
     default: bool = False
 
 
-@dataclass
-class TextItem(SettingsItem):
-    """Free text input."""
+@dataclass(frozen=True)
+class TextField(Field):
+    """Free text, edited in place with Enter; ``password`` shows it as dots.
+    ``edit_width``: the edit field's columns."""
     default: str = ""
     password: bool = False
-    edit_width: int = 15  # Width of text input field in edit mode
+    edit_width: int = 15
 
 
-@dataclass
-class ChecklistItem(SettingsItem):
+@dataclass(frozen=True)
+class ChecklistField(Field):
     """Any number of options, one per line; the value is the checked ones, in option order."""
     options: list[str] = field(default_factory=list)
     default: Sequence[str] = ()
 
 
-@dataclass
-class RadioItem(SettingsItem):
+@dataclass(frozen=True)
+class RadioField(Field):
     """One of several options, one per line; with no default nothing is picked."""
     options: list[str] = field(default_factory=list)
     default: str | None = None
 
 
-T = TypeVar("T", bound=SettingsItem)
+T = TypeVar("T", bound=Field)
 
-# Where settings values start: "labels" (two columns after the longest
-# label, or description, see SettingsDialog), "right" (the row's right
-# edge) or a column, the marker included.
+# Where field values start: "labels" (two columns after the longest label or
+# description), "right" (the row's right edge) or a column, the marker included.
 AlignValues = Union[Literal["labels", "right"], int]
 
 # The smallest value column: the marker, one label character and a space.
@@ -315,8 +325,8 @@ def _add_selector_keys(kb: KeyBindings, cycle: Callable[[int], None], when: Filt
 
 
 def _description(description: str, selected: bool) -> FormattedText:
-    """A setting's description row, under its label."""
-    style = "class:setting-desc-selected" if selected else "class:setting-desc"
+    """A field's description row, under its label."""
+    style = "class:field-desc-selected" if selected else "class:field-desc"
     return FormattedText([("", "  "), (style, description)])
 
 
@@ -329,10 +339,10 @@ def _content(lines: list[FormattedText], menu_position: Point | None = None) -> 
     return UIContent(get_line=get_line, line_count=len(lines), menu_position=menu_position)
 
 
-class SettingControl(RowControl, ABC, Generic[T]):
-    """Base class for setting controls with view/edit modes.
+class FieldControl(RowControl, ABC, Generic[T]):
+    """Base class for field controls with view/edit modes.
 
-    Generic over the concrete SettingsItem subclass so subclasses get
+    Generic over the concrete Field subclass so subclasses get
     typed access to their item-specific fields (e.g. options, width).
     """
 
@@ -342,18 +352,18 @@ class SettingControl(RowControl, ABC, Generic[T]):
         self._editing = False
         # Where the value starts (set_value_column); None: the right edge.
         self._value_column: _ValueColumn | None = None
-        # The setting's row, and its description (a text setting shows its
+        # The field's row, and its description (a text field shows its
         # edit row in its place while editing).
         self._window = Window(self, height=2 if item.description else 1)
 
     @property
     def item(self) -> T:
-        """The settings item this control represents."""
+        """The Field this control shows."""
         return self._item
 
     @property
     def value(self) -> Any:
-        """Current value of the setting."""
+        """Current value of the field."""
         return self._value
 
     @value.setter
@@ -378,6 +388,12 @@ class SettingControl(RowControl, ABC, Generic[T]):
         """Cancel and exit edit mode. Override in subclasses."""
         self._editing = False
 
+    def abandon_edit(self) -> None:
+        """End an edit left open (the dialog closed mid-edit): the value
+        goes back as cancel_edit() would leave it, but focus stays where it
+        is. Override where cancelling restores a value."""
+        self._editing = False
+
     def set_value_column(self, column: _ValueColumn | None) -> None:
         """Start the value at ``column`` of the row (counted with the marker,
         and depending on the row's width); None puts it at the row's right
@@ -390,11 +406,25 @@ class SettingControl(RowControl, ABC, Generic[T]):
         return None if self._value_column is None else self._value_column.at(width)
 
     def widest_value(self) -> int:
-        """The most columns this setting's value takes in full
+        """The most columns this field's value takes in full
         (_RowValue.columns): showing any of its options, or what it shows
-        now (a text setting's value can outgrow it as it's edited); 0 with
-        no value on the setting's row."""
+        now (a text field's value can outgrow it as it's edited); 0 with
+        no value on the field's row."""
         return 0
+
+    def preferred_width(self, max_available_width: int) -> int:
+        """The columns this field's rows take uncut, so an auto-width box is
+        wide enough for them: the marker, the label, the gap and the widest
+        value (from the value column when one is set, which counts the
+        marker, the longest label and the gap), the row's last column (see
+        _layout_row) and, wider still, the description row."""
+        widest = self.widest_value()
+        if self._value_column is None:
+            row = get_cwidth(MARKER) + get_cwidth(self._item.label) + 2 + widest
+        else:
+            row = self._value_column.least + widest + 1
+        description = self._item.description
+        return max(row, 2 + get_cwidth(description) if description else 0)
 
     @abstractmethod
     def create_content(self, width: int, height: int) -> UIContent:
@@ -402,37 +432,41 @@ class SettingControl(RowControl, ABC, Generic[T]):
         pass
 
     def get_container(self) -> Container:
-        """The container this setting is drawn in (for use in layouts): its row."""
+        """The container this field is drawn in (for use in layouts): its row."""
         return self._window
 
     @property
     def row_count(self) -> int:
-        """Rows this setting takes: 1, or 2 with a description."""
+        """Rows this field takes: 1, or 2 with a description."""
         return 2 if self._item.description else 1
 
     def get_stops(self) -> list[Container]:
-        """Where the cursor stops in this setting: one place per row the user acts on."""
+        """Where the cursor stops in this field: one place per row the user acts on."""
         return [self.get_container()]
 
+    def start_stop(self) -> Container:
+        """Where the cursor lands entering this field: its first stop."""
+        return self.get_stops()[0]
+
     def _check_focus(self) -> bool:
-        """Whether the setting's row has focus (it's drawn highlighted)."""
+        """Whether the field's row has focus (it's drawn highlighted)."""
         return has_focus(self._window)
 
-    def _build_setting_row(
+    def _build_row(
         self,
         width: int,
         value: _RowValue,
         is_selected: bool,
     ) -> list[FormattedText]:
-        """Build the standard setting row with optional description.
+        """Build the standard field row with optional description.
 
         ``value`` is laid out by _layout_row at the value column
         (set_value_column), or at the row's right edge with none. Returns a
         list of FormattedText lines (1 or 2 depending on description).
         """
         indicator = MARKER if is_selected else NO_MARKER
-        indicator_style = "class:setting-indicator" if is_selected else ""
-        label_style = "class:setting-label-selected" if is_selected else "class:setting-label"
+        indicator_style = "class:field-indicator" if is_selected else ""
+        label_style = "class:field-label-selected" if is_selected else "class:field-label"
 
         layout = _layout_row(width, self._item.label, self._column(width), value)
         padding = max(1, layout.column - get_cwidth(indicator) - get_cwidth(layout.label))
@@ -450,7 +484,7 @@ class SettingControl(RowControl, ABC, Generic[T]):
         return lines
 
 
-class CheckboxControl(SettingControl[CheckboxItem]):
+class CheckboxFieldControl(FieldControl[CheckboxField]):
     """Checkbox control that toggles on Space/Enter."""
 
     @property
@@ -469,12 +503,12 @@ class CheckboxControl(SettingControl[CheckboxItem]):
         is_selected = self._check_focus()
         if self._value:
             value_text = "true"
-            value_style = "class:setting-value-true-selected" if is_selected else "class:setting-value-true"
+            value_style = "class:field-value-true-selected" if is_selected else "class:field-value-true"
         else:
             value_text = "false"
-            value_style = "class:setting-value-false-selected" if is_selected else "class:setting-value-false"
+            value_style = "class:field-value-false-selected" if is_selected else "class:field-value-false"
         value = _RowValue(value_text, value_style, get_cwidth(value_text))
-        return _content(self._build_setting_row(width, value, is_selected))
+        return _content(self._build_row(width, value, is_selected))
 
     def get_key_bindings(self) -> KeyBindings:
         """Key bindings for checkbox."""
@@ -490,7 +524,7 @@ class CheckboxControl(SettingControl[CheckboxItem]):
         return kb
 
 
-class InlineSelectControl(SettingControl[InlineSelectItem]):
+class SelectFieldControl(FieldControl[SelectField]):
     """Inline select control that cycles through options with Left/Right keys."""
 
     @property
@@ -507,9 +541,9 @@ class InlineSelectControl(SettingControl[InlineSelectItem]):
     def create_content(self, width: int, height: int) -> UIContent:
         """Render the inline select row with left/right arrows."""
         is_selected = self._check_focus()
-        value_style = "class:setting-value-selected" if is_selected else "class:setting-value"
+        value_style = "class:field-value-selected" if is_selected else "class:field-value"
         value = _selector_value(self._item.options, self._value, value_style)
-        return _content(self._build_setting_row(width, value, is_selected))
+        return _content(self._build_row(width, value, is_selected))
 
     def get_key_bindings(self) -> KeyBindings:
         kb = KeyBindings()
@@ -517,10 +551,10 @@ class InlineSelectControl(SettingControl[InlineSelectItem]):
         return kb
 
 
-class DropdownControl(SettingControl[DropdownItem]):
+class DropdownFieldControl(FieldControl[DropdownField]):
     """Dropdown control with floating menu in edit mode."""
 
-    def __init__(self, item: DropdownItem) -> None:
+    def __init__(self, item: DropdownField) -> None:
         super().__init__(item)
         self._original_value: Any = item.default
         self._selected_index = 0  # Index in dropdown list during edit
@@ -533,7 +567,7 @@ class DropdownControl(SettingControl[DropdownItem]):
             _DropdownMenuControl(self),
             width=self._get_dropdown_width(),
             height=Dimension(min=1, preferred=self._preferred_menu_rows()),
-            style="class:setting-dropdown",
+            style="class:field-dropdown",
         )
         # Inline dialogs show a dropdown as a ←/→ selector, with no popup menu.
         self._inline = False
@@ -572,12 +606,12 @@ class DropdownControl(SettingControl[DropdownItem]):
         return max(1, min(len(self._item.options), self._item.height))
 
     def _get_dropdown_width(self) -> int:
-        """Calculate dropdown width based on settings."""
+        """Calculate dropdown width based on the field."""
         item = self._item
         if item.width is not None:
             return item.width
         # Auto-size based on longest option
-        max_opt = max((len(opt) for opt in item.options), default=10)
+        max_opt = max((get_cwidth(opt) for opt in item.options), default=10)
         width = max_opt + 4  # Add padding for indicator
         if item.max_width is not None:
             width = min(width, item.max_width)
@@ -606,10 +640,13 @@ class DropdownControl(SettingControl[DropdownItem]):
             self._app_ref.layout.focus(self._window)
             self._app_ref.invalidate()
 
-    def cancel_edit(self) -> None:
-        """Cancel edit - restore original value."""
+    def abandon_edit(self) -> None:
         self._value = self._original_value
         self._editing = False
+
+    def cancel_edit(self) -> None:
+        """Cancel edit - restore original value."""
+        self.abandon_edit()
         if self._app_ref:
             self._app_ref.layout.focus(self._window)
             self._app_ref.invalidate()
@@ -623,14 +660,14 @@ class DropdownControl(SettingControl[DropdownItem]):
     def create_content(self, width: int, height: int) -> UIContent:
         """Render the dropdown row with down arrow indicator."""
         is_selected = self._check_focus()
-        value_style = "class:setting-value-selected" if is_selected else "class:setting-value"
+        value_style = "class:field-value-selected" if is_selected else "class:field-value"
 
         if self._inline:
             value = _selector_value(self._item.options, self._value, value_style)
         else:
             value = self._menu_value(str(self._value) if self._value else "", value_style)
 
-        lines = self._build_setting_row(width, value, is_selected)
+        lines = self._build_row(width, value, is_selected)
         # The menu opens under the value, where this row draws it (get_float).
         # prompt_toolkit's menu position counts characters into the line, not
         # terminal columns: those drawn ahead of it.
@@ -642,7 +679,7 @@ class DropdownControl(SettingControl[DropdownItem]):
         """Return the Float for the dropdown menu (to be added at dialog level)."""
         framed_menu = Frame(
             body=self._menu_window,
-            style="class:setting-dropdown-border",
+            style="class:field-dropdown-border",
         )
 
         # Directly under its row, at the value: the menu position the row gives
@@ -694,7 +731,7 @@ class DropdownControl(SettingControl[DropdownItem]):
 class _DropdownMenuControl(UIControl):
     """Internal UIControl for rendering floating dropdown menu."""
 
-    def __init__(self, dropdown: DropdownControl) -> None:
+    def __init__(self, dropdown: DropdownFieldControl) -> None:
         self._dropdown = dropdown
 
     def create_content(self, width: int, height: int) -> UIContent:
@@ -722,8 +759,9 @@ class _DropdownMenuControl(UIControl):
         lines = []
         for row, i in enumerate(range(offset, min(count, offset + height))):
             opt = options[i]
-            style = "class:setting-dropdown-selected" if i == selected else "class:setting-dropdown-item"
-            text = opt[:text_width] if len(opt) > text_width else opt.ljust(text_width)
+            style = "class:field-dropdown-selected" if i == selected else "class:field-dropdown-item"
+            # Cut and padded in terminal columns: a wide character takes two.
+            text = _justify(_cut(opt, text_width), text_width, True)
             fragments = [(style, text)]
             if scrolls:
                 on_thumb = thumb_top <= row < thumb_top + thumb
@@ -736,10 +774,10 @@ class _DropdownMenuControl(UIControl):
         return False  # Menu is not focusable, control handles keys
 
 
-class TextControl(SettingControl[TextItem]):
+class TextFieldControl(FieldControl[TextField]):
     """Text input control with view/edit modes."""
 
-    def __init__(self, item: TextItem) -> None:
+    def __init__(self, item: TextField) -> None:
         super().__init__(item)
         self._original_value: str = item.default
         self._buffer = Buffer(multiline=False)
@@ -766,22 +804,30 @@ class TextControl(SettingControl[TextItem]):
         self._app_ref = app
         if app:
             app.layout.focus(self._buffer_window)
+            # The row swapped for the edit row: keys find the dialog's
+            # bindings through parent links, which only a redraw refreshes.
+            app.layout.update_parents_relations()
 
     def confirm_edit(self) -> None:
         """Confirm edit - save buffer to value."""
         self._value = self._buffer.text
         self._editing = False
-        # Restore focus to the setting's row
+        # Restore focus to the field's row
         if self._app_ref:
             self._app_ref.layout.focus(self._window)
+            self._app_ref.layout.update_parents_relations()
+
+    def abandon_edit(self) -> None:
+        self._value = self._original_value
+        self._editing = False
 
     def cancel_edit(self) -> None:
         """Cancel edit - restore original value."""
-        self._value = self._original_value
-        self._editing = False
-        # Restore focus to the setting's row
+        self.abandon_edit()
+        # Restore focus to the field's row
         if self._app_ref:
             self._app_ref.layout.focus(self._window)
+            self._app_ref.layout.update_parents_relations()
 
     def create_content(self, width: int, height: int) -> UIContent:
         """Render the text row in view mode."""
@@ -791,10 +837,10 @@ class TextControl(SettingControl[TextItem]):
 
         is_selected = self._check_focus()
         if not self._value:
-            value_style = "class:setting-desc-selected" if is_selected else "class:setting-desc"
+            value_style = "class:field-desc-selected" if is_selected else "class:field-desc"
         else:
-            value_style = "class:setting-value-selected" if is_selected else "class:setting-value"
-        return _content(self._build_setting_row(width, self._row_value(value_style), is_selected))
+            value_style = "class:field-value-selected" if is_selected else "class:field-value"
+        return _content(self._build_row(width, self._row_value(value_style), is_selected))
 
     def _shown_value(self) -> str:
         """The value as its row shows it."""
@@ -821,7 +867,7 @@ class TextControl(SettingControl[TextItem]):
         return self._container
 
     def _get_current_container(self) -> Container:
-        """The edit row while editing, else the setting's row."""
+        """The edit row while editing, else the field's row."""
         return self._edit_container if self._editing else self._window
 
     def _edit_key_bindings(self) -> KeyBindings:
@@ -861,14 +907,14 @@ class TextControl(SettingControl[TextItem]):
 
 
 class _EditRow(Container):
-    """A text setting's row while its value is edited: the label, cut with
+    """A text field's row while its value is edited: the label, cut with
     "…" to fit, then the input field where the row draws the value
     (_layout_row), at the width it gives. Laid out from the row's width at
     each redraw, so a row too narrow for the column keeps the field, as it
     keeps the value. The field keeps min(8, edit_width) columns: the label
     is cut further to keep them."""
 
-    def __init__(self, control: TextControl, field: Window) -> None:
+    def __init__(self, control: TextFieldControl, field: Window) -> None:
         self._control = control
         self._field = field
         self._label = Window(_MarkedLabel(control.item))
@@ -879,11 +925,15 @@ class _EditRow(Container):
             child.reset()
 
     def preferred_width(self, max_available_width: int) -> Dimension:
-        item = self._control.item
-        column = self._control._column(max_available_width)
-        if column is None:
-            column = get_cwidth(MARKER) + get_cwidth(item.label) + 2
-        return Dimension(min=0, preferred=column + item.edit_width)
+        # The view row's rule (FieldControl.preferred_width), so the box
+        # keeps its width as the edit starts.
+        control = self._control
+        item = control.item
+        if control._value_column is None:
+            width = get_cwidth(MARKER) + get_cwidth(item.label) + 2 + item.edit_width
+        else:
+            width = control._value_column.least + item.edit_width + 1
+        return Dimension(min=0, preferred=width)
 
     def preferred_height(self, width: int, max_available_height: int) -> Dimension:
         return Dimension.exact(1)
@@ -928,33 +978,45 @@ class _EditRow(Container):
 
 
 class _MarkedLabel(UIControl):
-    """A highlighted setting's label after the marker, cut with "…" to keep
+    """A highlighted field's label after the marker, cut with "…" to keep
     a blank column at the end of the width it's drawn in."""
 
-    def __init__(self, item: SettingsItem) -> None:
+    def __init__(self, item: Field) -> None:
         self._item = item
 
     def create_content(self, width: int, height: int) -> UIContent:
         label = _cut(self._item.label, width - get_cwidth(MARKER) - 1)
         line = FormattedText([
-            ("class:setting-indicator", MARKER),
-            ("class:setting-label-selected", label),
+            ("class:field-indicator", MARKER),
+            ("class:field-label-selected", label),
         ])
         return UIContent(get_line=lambda i: line, line_count=1)
 
 
-class OptionsControl(SettingControl[Any]):
-    """A check list or radio list setting: its label row, then one OptionRow
+class OptionsFieldControl(FieldControl[Any]):
+    """A check list or radio list field: its label row, then one OptionRow
     per option. The options are the cursor stops; the label takes no focus."""
 
-    def __init__(self, item: ChecklistItem | RadioItem) -> None:
+    def __init__(self, item: ChecklistField | RadioField) -> None:
         super().__init__(item)
-        if isinstance(item, ChecklistItem):
-            self._group = OptionGroup(item.options, multiple=True, selected=list(item.default), indent=2)
+        # With no label and no description, just the options, not indented:
+        # a dialog's text stands in for the label (checklist_dialog).
+        self._labelled = bool(item.label or item.description)
+        indent = 2 if self._labelled else 0
+        if isinstance(item, ChecklistField):
+            self._group = OptionGroup(item.options, multiple=True, selected=list(item.default), indent=indent)
         else:
             picked = [item.default] if item.default is not None else []
-            self._group = OptionGroup(item.options, multiple=False, selected=picked, indent=2)
-        self._container = HSplit([self._window, *(row.window for row in self._group.rows)])
+            self._group = OptionGroup(item.options, multiple=False, selected=picked, indent=indent)
+        rows = [row.window for row in self._group.rows]
+        self._container = HSplit([self._window, *rows] if self._labelled else rows)
+
+    def preferred_width(self, max_available_width: int) -> int:
+        """The label row's columns (and its description's); the option rows
+        say their own."""
+        description = self._item.description
+        label = get_cwidth(NO_MARKER) + get_cwidth(self._item.label)
+        return max(label, 2 + get_cwidth(description) if description else 0)
 
     @property
     def value(self) -> Any:
@@ -970,7 +1032,8 @@ class OptionsControl(SettingControl[Any]):
 
     @property
     def row_count(self) -> int:
-        return super().row_count + len(self._group.rows)
+        label_rows = super().row_count if self._labelled else 0
+        return label_rows + len(self._group.rows)
 
     def is_focusable(self) -> bool:
         return False  # the label row; the option rows take focus
@@ -981,75 +1044,121 @@ class OptionsControl(SettingControl[Any]):
     def get_stops(self) -> list[Container]:
         return [row.window for row in self._group.rows]
 
+    def start_stop(self) -> Container:
+        """A radio list's picked option, else the first option."""
+        picked = None if self._group.multiple else self._group.picked
+        for row in self._group.rows:
+            if row.option == picked:
+                return row.window
+        return self._group.rows[0].window
+
     def create_content(self, width: int, height: int) -> UIContent:
         """The label row (and description), highlighted while an option has focus."""
         selected = any(has_focus(row.window) for row in self._group.rows)
-        label_style = "class:setting-label-selected" if selected else "class:setting-label"
+        label_style = "class:field-label-selected" if selected else "class:field-label"
         lines = [FormattedText([("", NO_MARKER), (label_style, self._item.label)])]
         if self._item.description:
             lines.append(_description(self._item.description, selected))
         return _content(lines)
 
 
-class SettingsDialog(Dialog):
-    """
-    A settings dialog using individual controls per setting type.
+def _control_for(field: Field) -> FieldControl:
+    """The control that shows ``field``."""
+    if isinstance(field, (ChecklistField, RadioField)):
+        return OptionsFieldControl(field)
+    if isinstance(field, CheckboxField):
+        return CheckboxFieldControl(field)
+    if isinstance(field, DropdownField):
+        return DropdownFieldControl(field)
+    if isinstance(field, SelectField):
+        return SelectFieldControl(field)
+    if isinstance(field, TextField):
+        return TextFieldControl(field)
+    raise TypeError(
+        "Dialog fields must be TextField, CheckboxField, SelectField, "
+        f"DropdownField, ChecklistField or RadioField; got {type(field).__name__}"
+    )
 
-    Navigation:
-    - Up/Down: move between settings; inline, on to the Save/Cancel rows
-    - Tab/Shift-Tab: through the settings, then (box) to the buttons
-    - Left/Right or Space: change value (selectors, checkboxes)
-    - Enter: edit text in place (box dropdowns: open the menu)
-    - Ctrl+S: save and close
-    - Escape: cancel edit or close dialog
 
-    Values start two columns after the longest label or description by
-    default (align_values="labels"), though a description too long to leave
-    room for the widest value runs on under the values; "right" puts them
-    at the row's right edge, and a number at that column, cutting longer
-    labels with "…".
+class _Form:
+    """A dialog's fields (Dialog.fields): one control each, holding its value
+    from the dialog's creation on."""
 
-    Returns a dictionary of changed values when closed, or None if cancelled.
-    """
+    def __init__(self, fields: Sequence[Field]) -> None:
+        self.controls: list[FieldControl] = [_control_for(f) for f in fields]
+        keys: set[str] = set()
+        for control in self.controls:
+            key = control.item.key
+            if key in keys:
+                raise ValueError(f"Dialog fields need unique keys; {key!r} is used twice")
+            keys.add(key)
+        # The placement the fields were last laid out for (container()).
+        self._placement: Placement = "box"
 
-    def __init__(
-        self,
-        title: str,
-        items: list[SettingsItem],
-        can_cancel: bool = True,
-        *,
-        width: int | None = 60,
-        max_height: int | None = None,
-        align_values: AlignValues = "labels",
-        placement: Placement | None = None,
-    ) -> None:
-        _check_align_values(align_values)
-        # escapable: with can_cancel=False there is no cancel concept, so
-        # Escape is disabled (the Done button is the only way out).
-        # escape_result stays the default None, so nothing but a dict or None
-        # can come back from show_settings_dialog().
-        super().__init__(
-            title, width=width, max_height=max_height, escapable=can_cancel, placement=placement
-        )
-        self._can_cancel = can_cancel
-        self._align_values = align_values
+    @property
+    def values(self) -> dict[str, Any]:
+        """Each field's current value by key, in field order."""
+        return {control.item.key: control.value for control in self.controls}
 
-        # Create controls
-        self._controls: list[SettingControl] = [self._create_control(item) for item in items]
+    def is_editing(self) -> bool:
+        """Whether a field is being edited (a text field, an open menu)."""
+        return any(control.is_editing for control in self.controls)
 
-        # Original values for change detection, as each control reports them.
-        self._original_values: dict[str, Any] = {c.item.key: c.value for c in self._controls}
+    def stops(self) -> list[Container]:
+        """Every cursor stop in the fields, top to bottom."""
+        return [stop for control in self.controls for stop in control.get_stops()]
 
-    def _value_column(self) -> _ValueColumn | None:
-        """Where values start (see align_values); None: the row's right edge."""
-        if self._align_values == "right":
+    def start(self) -> Container | None:
+        """Where the cursor starts in the fields: the first field's start (a
+        radio list's picked option); None with no stops."""
+        entered = self._enterable()
+        return entered[0].start_stop() if entered else None
+
+    def container(self, placement: Placement, align_values: AlignValues) -> HSplit | None:
+        """The fields one under another, laid out for ``placement`` with
+        values at ``align_values``, with their keys; None without fields."""
+        if not self.controls:
             return None
-        if self._align_values != "labels":
-            return _ValueColumn(int(self._align_values))
+        self._placement = placement
+        inline = placement == "inline"
+        for control in self.controls:
+            if control.is_editing:
+                control.abandon_edit()   # a dialog closed mid-edit
+            if isinstance(control, DropdownFieldControl):
+                control.set_inline(inline)
+        # After set_inline: an inline dropdown's value is a selector.
+        column = self._value_column(align_values)
+        for control in self.controls:
+            control.set_value_column(column)
+        # An empty window_too_small: no "Window too small" flash while the
+        # layout settles.
+        return HSplit(
+            [control.get_container() for control in self.controls],
+            key_bindings=self._key_bindings(),
+            window_too_small=Window(),
+        )
+
+    def floats(self) -> list[Float]:
+        """A box's dropdown menus, to float over the whole screen, not the
+        form, so each is sized by the room the terminal has around its row."""
+        if self._placement == "inline":
+            return []
+        return [c.get_float() for c in self.controls if isinstance(c, DropdownFieldControl)]
+
+    def _enterable(self) -> list[FieldControl]:
+        """The fields the cursor can enter (a list with no options can't)."""
+        return [control for control in self.controls if control.get_stops()]
+
+    def _value_column(self, align_values: AlignValues) -> _ValueColumn | None:
+        """Where values start (align_values); None: the row's right edge."""
+        if align_values == "right":
+            return None
+        if align_values != "labels":
+            return _ValueColumn(int(align_values))
         # Check and radio lists have their label, and description, on rows
         # with no value. A description starts where labels do (under the
         # marker's columns).
-        rows = [c for c in self._controls if not isinstance(c, OptionsControl)]
+        rows = [c for c in self.controls if not isinstance(c, OptionsFieldControl)]
 
         def after(texts: Iterable[str]) -> int:
             return get_cwidth(MARKER) + max((get_cwidth(t) for t in texts), default=0) + 2
@@ -1060,108 +1169,57 @@ class SettingsDialog(Dialog):
             max((c.widest_value() for c in rows), default=0),
         )
 
-    def _create_control(self, item: SettingsItem) -> SettingControl:
-        """Create the appropriate control for a settings item."""
-        if isinstance(item, (ChecklistItem, RadioItem)):
-            return OptionsControl(item)
-        elif isinstance(item, CheckboxItem):
-            return CheckboxControl(item)
-        elif isinstance(item, DropdownItem):
-            return DropdownControl(item)
-        elif isinstance(item, InlineSelectItem):
-            return InlineSelectControl(item)
-        elif isinstance(item, TextItem):
-            return TextControl(item)
-        else:
-            raise ValueError(f"Unknown settings item type: {type(item)}")
+    def _key_bindings(self) -> KeyBindingsBase | None:
+        """In a box, ↑↓ move a row at a time. Inline: none, the dialog's own
+        cursor walks fields and actions alike."""
+        if self._placement == "inline":
+            return None
+        return RowNavigator(self.stops, is_editing=self.is_editing).key_bindings()
 
-    def _stops(self) -> list[Container]:
-        """Every cursor stop in the form, top to bottom."""
-        return [stop for control in self._controls for stop in control.get_stops()]
-
-    def _is_editing(self) -> bool:
-        """Whether a setting is in edit mode."""
-        return any(c.is_editing for c in self._controls)
-
-    def _settings_key_bindings(self) -> KeyBindingsBase:
-        """Ctrl+S saves. In a box, ↑↓ walk the settings, and so do Tab /
-        Shift+Tab, Tab going on to the buttons after the last setting.
-        Inline, the dialog's own cursor walks settings and actions alike."""
-        idle = Condition(lambda: not self._is_editing())
+    def tab_bindings(self, before: Callable[[], list[Container]]) -> KeyBindings:
+        """A box's Tab / Shift+Tab: a group at a time, in order. Each
+        focusable window ``before()`` returns (the body above the fields) is
+        a group, and each field is one, entered at its start (a radio list's
+        picked option). Tab goes on to the buttons after the last group;
+        Shift+Tab stays at the first (no wrap to the buttons)."""
+        editing = Condition(self.is_editing)
+        idle = ~editing
         kb = KeyBindings()
 
-        @kb.add("c-s", filter=idle)
-        def _save(event: Any) -> None:
-            self._on_save()
+        # The cursor stays in an edit: the key is spent here, before the
+        # dialog widget's Tab (focus_next / focus_previous) can move it.
+        @kb.add("tab", filter=editing)
+        @kb.add("s-tab", filter=editing)
+        def _stay(event: Any) -> None:
+            pass
 
-        if self._placement == "inline":
-            return kb
+        def groups() -> list[tuple[list[Container], Container]]:
+            found: list[tuple[list[Container], Container]] = [([w], w) for w in before()]
+            found.extend((c.get_stops(), c.start_stop()) for c in self._enterable())
+            return found
 
-        navigator = RowNavigator(self._stops, is_editing=self._is_editing)
+        def current(layout: Layout, found: list[tuple[list[Container], Container]]) -> int | None:
+            for i, (stops, _) in enumerate(found):
+                if any(layout.has_focus(stop) for stop in stops):
+                    return i
+            return None
 
         @kb.add("tab", filter=idle)
-        def _tab_next(event: Any) -> None:
-            stops = self._stops()
-            index = navigator.index(event.app.layout)
-            if index is not None and index < len(stops) - 1:
-                event.app.layout.focus(stops[index + 1])
+        def _next_group(event: Any) -> None:
+            found = groups()
+            index = current(event.app.layout, found)
+            if index is not None and index < len(found) - 1:
+                event.app.layout.focus(found[index + 1][1])
             else:
-                # After the last setting: on to the buttons (no wrap back)
+                # After the last group: on to the buttons (no wrap).
+                event.app.layout.focus(self.stops()[-1] if self.stops() else found[-1][1])
                 event.app.layout.focus_next()
 
         @kb.add("s-tab", filter=idle)
-        def _tab_prev(event: Any) -> None:
-            # At the first setting: stays put (no wrap to the buttons)
-            navigator.move(event.app.layout, -1)
+        def _previous_group(event: Any) -> None:
+            found = groups()
+            index = current(event.app.layout, found)
+            if index is not None and index > 0:
+                event.app.layout.focus(found[index - 1][1])
 
-        return merge_key_bindings([navigator.key_bindings(), kb])
-
-    def _get_changed_values(self) -> dict[str, Any]:
-        """Return only values that differ from original."""
-        changed = {}
-        for control in self._controls:
-            key = control.item.key
-            if control.value != self._original_values.get(key):
-                changed[key] = control.value
-        return changed
-
-    def _on_save(self) -> None:
-        """Handle save - return changed values."""
-        self.set_result(self._get_changed_values())
-
-    def build_body(self) -> Container:
-        """The settings, one control each, in an HSplit with their key bindings."""
-        if not self._controls:
-            return Window(height=1)
-
-        inline = self._placement == "inline"
-        for control in self._controls:
-            if isinstance(control, DropdownControl):
-                control.set_inline(inline)
-        # After set_inline: an inline dropdown's value is a selector.
-        column = self._value_column()
-        for control in self._controls:
-            control.set_value_column(column)
-
-        # Use empty window_too_small to suppress brief "Window too small" message during layout
-        return HSplit(
-            [control.get_container() for control in self._controls],
-            key_bindings=self._settings_key_bindings(),
-            window_too_small=Window(),
-        )
-
-    def _screen_floats(self) -> list[Float]:
-        """A box's dropdown menus float over the whole screen, not the form,
-        so each is sized by the room the terminal has around its row."""
-        if self._placement == "inline":
-            return []
-        return [c.get_float() for c in self._controls if isinstance(c, DropdownControl)]
-
-    def get_buttons(self) -> list[ButtonConfig]:
-        """Return dialog buttons."""
-        if self._can_cancel:
-            return [
-                ButtonConfig("Save", handler=self._on_save),
-                ButtonConfig("Cancel", handler=self.cancel),
-            ]
-        return [ButtonConfig("Done", handler=self._on_save)]
+        return kb

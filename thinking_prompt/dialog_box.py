@@ -24,7 +24,7 @@ from prompt_toolkit.layout import (
     to_container,
 )
 from prompt_toolkit.layout.dimension import Dimension
-from prompt_toolkit.widgets import Button, Frame
+from prompt_toolkit.widgets import Button, Frame, Label
 from prompt_toolkit.widgets import Dialog as _DialogWidget
 
 from .dialog_scroll import AtMost, ScrollRegion, dialog_cap, focusable_windows
@@ -48,6 +48,7 @@ class BoxView:
         max_height: The dialog's max_height (None: the terminal's).
         text_region: The body's region when nothing in the body takes focus (a text body): it scrolls by keys.
         floats: Floats the body needs over the whole screen (Dialog._screen_floats), drawn over the box.
+        start: Where the body's cursor starts when no button asks for focus (a radio list's picked option).
     """
 
     widget: _DialogWidget
@@ -56,11 +57,16 @@ class BoxView:
     max_height: int | None = None
     text_region: ScrollRegion | None = None
     floats: list[Float] = field(default_factory=list)
+    start: Container | None = None
 
     @property
-    def initial_focus(self) -> Window | None:
-        """The window to focus when the dialog opens, if a button asked for it."""
-        return self.focused_button.window if self.focused_button else None
+    def initial_focus(self) -> Container | None:
+        """What to focus when the dialog opens: a ButtonConfig(focused=True)
+        button, else where the body's cursor starts; None: the widget's first
+        focusable window (a button)."""
+        if self.focused_button is not None:
+            return self.focused_button.window
+        return self.start
 
 
 def build_box(dialog: Dialog) -> BoxView:
@@ -69,9 +75,12 @@ def build_box(dialog: Dialog) -> BoxView:
     When the dialog is capped (BoxPresenter._cap), a body that is one window
     taking the cursor (a radio list, a text field) is squeezed and scrolls
     itself. Any other body sits in a ScrollRegion: it scrolls with the
-    cursor (settings rows, a check list), or by keys for a text body.
+    cursor (form fields, a check list), or by keys for a text body.
     """
-    content = to_container(dialog.build_body())
+    content, start = dialog._content()
+    if content is None:
+        # No fields and an empty text body: one blank row, as ever.
+        content = to_container(Label(text=""))
     stops = focusable_windows(content)
     body: Container = content
     text_region: ScrollRegion | None = None
@@ -110,7 +119,13 @@ def build_box(dialog: Dialog) -> BoxView:
         with_background=False,  # Use styled dialog, no light overlay
     )
     return BoxView(
-        widget, buttons, focused, dialog.max_height, text_region, dialog._screen_floats()
+        widget=widget,
+        buttons=buttons,
+        focused_button=focused,
+        max_height=dialog.max_height,
+        text_region=text_region,
+        floats=dialog._screen_floats(),
+        start=start,
     )
 
 

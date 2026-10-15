@@ -2,8 +2,8 @@
 Dialog rows: focusable one-line controls that one cursor walks.
 
 Inline dialogs are made of rows: numbered actions (ActionRow), check and
-radio options (OptionRow) and the settings dialog's controls. Box dialogs use
-the same rows for check lists and settings forms. RowNavigator moves the
+radio options (OptionRow) and the form fields' controls. Box dialogs use
+the same rows for check lists and form fields. RowNavigator moves the
 cursor between them.
 """
 from __future__ import annotations
@@ -16,6 +16,7 @@ from prompt_toolkit.formatted_text import StyleAndTextTuples
 from prompt_toolkit.key_binding import KeyBindings, KeyPressEvent
 from prompt_toolkit.layout import Container, Layout, Window
 from prompt_toolkit.layout.controls import UIContent, UIControl
+from prompt_toolkit.utils import get_cwidth
 
 # Drawn in front of the row under the cursor (as in prompt_toolkit's choice()).
 MARKER = "❯ "
@@ -158,6 +159,11 @@ class OptionRow(RowControl):
     def hints(self) -> frozenset[str]:
         return frozenset({"Space toggle"})
 
+    def preferred_width(self, max_available_width: int) -> int:
+        """The columns the row takes uncut: the marker, the indent, the mark
+        and the option."""
+        return get_cwidth(MARKER) + self.indent + len("[x]") + 1 + get_cwidth(self.option)
+
     def create_content(self, width: int, height: int) -> UIContent:
         selected = has_focus(self.window)
         marked = self.group.is_selected(self.option)
@@ -166,9 +172,9 @@ class OptionRow(RowControl):
             if self.group.multiple
             else ("(•)" if marked else "( )")
         )
-        label_style = "class:setting-label-selected" if selected else "class:setting-label"
+        label_style = "class:field-label-selected" if selected else "class:field-label"
         line: StyleAndTextTuples = [
-            ("class:setting-indicator" if selected else "", MARKER if selected else NO_MARKER),
+            ("class:field-indicator" if selected else "", MARKER if selected else NO_MARKER),
             ("", " " * self.indent),
             ("class:checkbox-mark", mark),
             (label_style, f" {self.option}"),

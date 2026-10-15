@@ -12,44 +12,21 @@ Run with: conda run -n thinking_prompt python examples/dialog_test.py
 
 import asyncio
 
-from prompt_toolkit.layout import HSplit, VSplit, Window, D
-from prompt_toolkit.layout.controls import FormattedTextControl
-from prompt_toolkit.widgets import Label, TextArea
-
 from thinking_prompt import (
     ThinkingPromptSession,
     AppInfo,
     ButtonConfig,
     Dialog,
+    TextField,
 )
 
 
 class LoginDialog(Dialog):
-    """Example custom dialog with text input fields."""
+    """Example custom dialog with a form field."""
 
     title = "Login"
     escape_result = None  # Escape returns None (cancel)
-
-    def __init__(self):
-        super().__init__()
-        # Single input for simplicity (demonstrates custom dialog)
-        self.username_input = TextArea(
-            multiline=False,
-            focusable=True,
-            scrollbar=False,
-            wrap_lines=False,
-        )
-
-    def build_body(self):
-        # Simple single-row layout
-        return VSplit([
-            Window(
-                content=FormattedTextControl("Username: "),
-                width=10,
-                dont_extend_width=True,
-            ),
-            self.username_input,
-        ])
+    fields = [TextField("username", "Username")]
 
     def get_buttons(self):
         return [
@@ -58,7 +35,7 @@ class LoginDialog(Dialog):
         ]
 
     def on_login(self):
-        username = self.username_input.text.strip()
+        username = self.values["username"].strip()
         if not username:
             return  # Validation failed, don't close
         self.set_result({"username": username})

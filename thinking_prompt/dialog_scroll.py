@@ -2,8 +2,8 @@
 Scrolling for dialogs, box and inline.
 
 AtMost caps how tall a container gets. ScrollRegion scrolls what doesn't
-fit: it follows the cursor while a window inside it has focus (settings
-rows, lists, actions), and otherwise scrolls by keys (a text body).
+fit: it follows the cursor while a window inside it has focus (form
+fields, lists, actions), and otherwise scrolls by keys (a text body).
 """
 from __future__ import annotations
 

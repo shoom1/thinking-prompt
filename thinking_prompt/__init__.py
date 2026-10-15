@@ -38,19 +38,18 @@ from .dialog import (
     ButtonConfig,
     Dialog,
 )
+from .fields import (
+    CheckboxField,
+    ChecklistField,
+    DropdownField,
+    Field,
+    RadioField,
+    SelectField,
+    TextField,
+)
 from .layout import ThinkingHeader
 from .rich_utils import _renderable_to_ansi as rich_to_ansi
 from .session import ThinkingPromptSession
-from .settings_dialog import (
-    CheckboxItem,
-    ChecklistItem,
-    DropdownItem,
-    InlineSelectItem,
-    RadioItem,
-    SettingsDialog,
-    SettingsItem,
-    TextItem,
-)
 from .spinner import Spinner
 from .streaming import StreamingContent
 from .styles import (
@@ -92,15 +91,14 @@ __all__ = [
     # Dialog
     "Dialog",
     "ButtonConfig",
-    # Settings Dialog
-    "SettingsItem",
-    "DropdownItem",
-    "InlineSelectItem",
-    "CheckboxItem",
-    "TextItem",
-    "ChecklistItem",
-    "RadioItem",
-    "SettingsDialog",
+    # Form fields
+    "Field",
+    "TextField",
+    "CheckboxField",
+    "SelectField",
+    "DropdownField",
+    "ChecklistField",
+    "RadioField",
     # Layout
     "ThinkingHeader",
     "Spinner",
