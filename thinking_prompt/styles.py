@@ -143,7 +143,7 @@ class ThinkingPromptStyles:
     dialog_button: str = ""  # Defaults to color_text on color_bg_button
     dialog_button_focused: str = ""  # Defaults to color_text_bright on color_accent_button bold
     dialog_choice: str = ""  # Inline action rows. Defaults to color_text
-    dialog_choice_selected: str = ""  # Highlighted action row. Defaults to color_accent bold
+    dialog_choice_selected: str = ""  # Highlighted action row, and a ChoiceField's pick. Defaults to color_accent bold
     dialog_hint: str = ""  # Inline dialog key hint. Defaults to color_text_muted italic
 
     # ==========================================================================
