@@ -2880,3 +2880,111 @@ class TestChoiceFieldInAForm:
                 await wait_until(lambda: results == [None, {"a": False, "c": "x", "b": False}])
 
             await run_with(session, handler, script)
+
+
+def _choice_alone(placement: str, options: list[str] | None = None, text: str = "Pick:") -> Dialog:
+    """A ChoiceField alone under a text body; OK returns its pick."""
+    dialog = Dialog(
+        "Theme",
+        text,
+        fields=[ChoiceField("c", "", options=options or ["x", "y", "z"])],
+        placement=placement,
+    )
+    dialog.buttons = [
+        ButtonConfig("OK", handler=lambda: dialog.set_result(dialog.values["c"])),
+        ButtonConfig("Cancel"),
+    ]
+    return dialog
+
+
+class TestChoiceFieldAlone:
+    """A ChoiceField alone in its dialog: ↑↓ move the pick at once and Enter
+    presses the first button, like prompt_toolkit's choice()."""
+
+    @pytest.mark.parametrize("placement", ["box", "inline"])
+    async def test_arrows_pick_and_enter_presses_ok(self, placement):
+        dialog = _choice_alone(placement)
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.show_dialog(dialog))
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                assert on_screen(session, "❯ x"), screen_lines(session)
+                inp.send_text(DOWN)
+                await wait_until(lambda: on_screen(session, "❯ y"))
+                inp.send_text(ENTER)
+                await wait_until(lambda: results == ["y"])
+
+            await run_with(session, handler, script)
+
+    async def test_shift_tab_from_ok_comes_back_to_the_pick(self):
+        dialog = _choice_alone("box")
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.show_dialog(dialog))
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                inp.send_text(DOWN + DOWN)             # z
+                await wait_until(lambda: on_screen(session, "❯ z"))
+                inp.send_text(TAB)                     # OK
+                await wait_until(lambda: not on_screen(session, "❯ z"))
+                inp.send_text(SHIFT_TAB)               # back to the pick, not the last row
+                await wait_until(lambda: on_screen(session, "❯ z"))
+                inp.send_text(UP + ENTER)              # y, then OK
+                await wait_until(lambda: results == ["y"])
+
+            await run_with(session, handler, script)
+
+    async def test_inline_down_past_the_last_option_reaches_the_actions(self):
+        dialog = _choice_alone("inline")
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.show_dialog(dialog))
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                inp.send_text(DOWN + DOWN + DOWN)      # z, then on to 1. OK
+                await wait_until(lambda: cursor_row(session) == "❯ 1. OK")
+                inp.send_text(ENTER)
+                await wait_until(lambda: results == ["z"])
+
+            await run_with(session, handler, script)
+
+    async def test_a_long_list_shows_its_question_back_at_the_top(self):
+        options = [f"option {i:02}" for i in range(30)]
+        dialog = _choice_alone("box", options, text="Which one?")
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.show_dialog(dialog))
+
+        with piped_session(rows=24) as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                assert on_screen(session, "Which one?"), screen_lines(session)
+                inp.send_text(DOWN * 29)
+                await wait_until(lambda: on_screen(session, "❯ option 29"))
+                assert not on_screen(session, "Which one?")   # scrolled off
+                inp.send_text(UP * 29)
+                await wait_until(lambda: on_screen(session, "❯ option 00"))
+                assert on_screen(session, "Which one?"), screen_lines(session)
+                inp.send_text(ENTER)
+                await wait_until(lambda: results == ["option 00"])
+
+            await run_with(session, handler, script)

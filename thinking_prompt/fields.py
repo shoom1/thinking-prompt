@@ -1088,6 +1088,11 @@ class _ChoiceRow(RowControl):
         self.index = index
         self.window = Window(self, height=1, dont_extend_height=True)
 
+    @property
+    def at_top(self) -> bool:
+        """The pick is the field's one stop: at the top on the first option only."""
+        return self.index == 0
+
     def is_focusable(self) -> bool:
         return self.choice.current_stop() is self.window
 
@@ -1331,6 +1336,15 @@ class _Form:
         radio list's picked option); None with no stops."""
         entered = self._enterable()
         return entered[0].start_stop() if entered else None
+
+    def set_alone(self, nothing_else: bool, press: Callable[[], None]) -> None:
+        """A ChoiceField that's the only field, with ``nothing_else`` in the
+        dialog taking focus, is alone: always picking, Enter runs ``press``.
+        Any other ChoiceField is one field among others."""
+        alone = nothing_else and len(self.controls) == 1
+        for control in self.controls:
+            if isinstance(control, ChoiceFieldControl):
+                control.set_alone(press if alone else None)
 
     def container(self, placement: Placement, align_values: AlignValues) -> HSplit | None:
         """The fields one under another, laid out for ``placement`` with

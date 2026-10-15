@@ -44,6 +44,12 @@ class RowControl(UIControl):
         """Keys this row adds to an inline dialog's hint line."""
         return frozenset()
 
+    @property
+    def at_top(self) -> bool:
+        """Whether the cursor on this row is as high as it goes in its
+        field (cursor_at_top): a scroll region shows the rows above again."""
+        return True
+
     def is_focusable(self) -> bool:
         return True
 

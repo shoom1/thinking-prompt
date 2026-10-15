@@ -274,8 +274,11 @@ class Dialog:
         """
         _check_align_values(self.align_values)
         body = to_container(self.build_body()) if self._has_body() else None
-        fields = self._form.container(self._placement, self.align_values)
         body_stops = focusable_windows(body) if body is not None else []
+        # A ChoiceField with nothing else to focus is always picking, and
+        # Enter presses the first button.
+        self._form.set_alone(not body_stops, self._press_first_button)
+        fields = self._form.container(self._placement, self.align_values)
         start = body_stops[0] if body_stops else self._form.start()
         if fields is None:
             return body, start
@@ -350,6 +353,14 @@ class Dialog:
                     "handler=...) instead of (label, handler)."
                 )
         return configs
+
+    def _press_first_button(self) -> None:
+        """Click the first button, as Enter on it would; nothing without
+        buttons. Read when pressed: buttons can be set after the dialog
+        is laid out."""
+        configs = self._button_configs()
+        if configs:
+            self._click_handler(configs[0])()
 
     def _click_handler(self, cfg: ButtonConfig) -> Callable[[], None]:
         """What clicking ``cfg`` does: run its handler, or close with its result.

@@ -15,6 +15,7 @@ from prompt_toolkit.widgets import Button, Label, RadioList
 from thinking_prompt.dialog import ButtonConfig, Dialog
 from thinking_prompt.dialog_box import BoxPresenter, build_box
 from thinking_prompt.dialog_scroll import TERMINAL_BUFFER_ROWS, ScrollRegion
+from thinking_prompt.fields import ChoiceField
 from thinking_prompt.rows import OptionGroup
 
 
@@ -104,6 +105,14 @@ class TestBuildBox:
     def test_a_body_with_several_stops_scrolls_in_a_region(self):
         group = OptionGroup(["a", "b"], multiple=True)
         view = build_box(Dialog("T", HSplit([r.window for r in group.rows]), [ButtonConfig("OK")]))
+        assert any(isinstance(c, ScrollRegion) for c in walk(to_container(view.widget)))
+
+    def test_a_single_dialog_row_scrolls_in_a_region(self):
+        """One stop that's a dialog row (a choice list's pick) is a row
+        tall: its list scrolls in a region, as a list of many stops does."""
+        view = build_box(Dialog(
+            "T", "Pick:", [ButtonConfig("OK")], fields=[ChoiceField("c", "", options=["a", "b"])]
+        ))
         assert any(isinstance(c, ScrollRegion) for c in walk(to_container(view.widget)))
 
     def test_the_view_keeps_the_max_height(self):

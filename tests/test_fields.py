@@ -1,6 +1,7 @@
 """Form fields: the Field classes, their controls, and fields on a Dialog."""
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import importlib
 from types import SimpleNamespace
@@ -34,7 +35,7 @@ from thinking_prompt import (
 )
 from thinking_prompt.dialog import _checklist_dialog
 from thinking_prompt.dialog_box import build_box
-from thinking_prompt.dialog_scroll import focusable_windows
+from thinking_prompt.dialog_scroll import cursor_at_top, focusable_windows
 from thinking_prompt.fields import (
     CheckboxFieldControl,
     ChoiceFieldControl,
@@ -1723,3 +1724,83 @@ class TestChoiceField:
         control.set_alone(lambda: None)
         assert control.get_stops() == [control._rows[1].window]
         assert not control.is_focusable()
+
+
+class TestChoiceFieldAlone:
+    """A ChoiceField with nothing else in its dialog to focus is always
+    picking, and Enter presses the dialog's first button."""
+
+    @staticmethod
+    def _enter(dialog):
+        """Press Enter on the dialog's only field: the dialog's result, or
+        None if it stays open."""
+        loop = asyncio.new_event_loop()
+        try:
+            dialog._result_future = loop.create_future()
+            (control,) = dialog._form.controls
+            _press(control.keys, Keys.Enter, None)
+            future = dialog._result_future
+            return future.result() if future.done() else None
+        finally:
+            loop.close()
+
+    def test_the_only_field_under_a_text_body_is_alone(self):
+        d = Dialog("T", "Pick:", fields=[ChoiceField("c", "", options=["x", "y"], default="y")])
+        _, start = _shown(d)
+        (control,) = d._form.controls
+        assert control.picking and not d._is_editing()
+        assert start is control._rows[1].window
+
+    def test_with_another_field_it_is_not_alone(self):
+        d = Dialog("T", fields=[ChoiceField("c", "C", options=["x"]), CheckboxField("b", "B")])
+        _shown(d)
+        assert not d._form.controls[0].picking
+
+    def test_two_choice_fields_are_neither_alone(self):
+        d = Dialog("T", fields=[ChoiceField("a", "A", options=["x"]), ChoiceField("b", "B", options=["y"])])
+        _shown(d)
+        assert [c.picking for c in d._form.controls] == [False, False]
+
+    def test_with_a_body_that_takes_focus_it_is_not_alone(self):
+        d = Dialog("T", TextArea(), fields=[ChoiceField("c", "C", options=["x"])])
+        _shown(d)
+        (control,) = d._form.controls
+        assert not control.picking
+        assert control.get_stops() == [control._window]
+
+    def test_enter_presses_the_first_button(self):
+        d = Dialog("T", "Pick:", fields=[ChoiceField("c", "", options=["x", "y"], default="y")])
+        d.buttons = [
+            ButtonConfig("OK", handler=lambda: d.set_result(d.values["c"])),
+            ButtonConfig("Cancel"),
+        ]
+        _shown(d)
+        assert self._enter(d) == "y"
+
+    def test_buttons_set_later_are_the_ones_pressed(self):
+        d = Dialog("T", "Pick:", fields=[ChoiceField("c", "", options=["x"])])
+        _shown(d)
+        d.buttons = [ButtonConfig("Go", result="went"), ButtonConfig("Stop", result="stopped")]
+        assert self._enter(d) == "went"
+
+    def test_with_no_buttons_enter_does_nothing(self):
+        d = Dialog("T", "Pick:", fields=[ChoiceField("c", "", options=["x"])])
+        _shown(d)
+        assert self._enter(d) is None
+
+    def test_the_cursor_is_at_the_top_only_on_the_first_option(self):
+        d = Dialog("T", "Pick:", fields=[ChoiceField("c", "", options=["x", "y"], default="y")])
+        content, start = _shown(d)
+        (control,) = d._form.controls
+        app = Application(layout=Layout(content, focused_element=start), input=DummyInput(), output=DummyOutput())
+        with set_app(app):
+            assert not cursor_at_top(focusable_windows(content))
+            _press(control.keys, Keys.Up, app)
+            assert cursor_at_top(focusable_windows(content))
+
+    def test_any_other_first_stop_is_at_the_top_while_focused(self):
+        area = TextArea()
+        app = Application(layout=Layout(area), input=DummyInput(), output=DummyOutput())
+        with set_app(app):
+            assert cursor_at_top([area.window])
+            assert not cursor_at_top([])
