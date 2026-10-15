@@ -3,7 +3,8 @@ Form fields for dialogs (Dialog.fields): the Field classes that describe
 them and the row controls that draw and edit them.
 
 Up/Down move between rows, Left/Right or Space change a value, Enter edits
-text in place (in a box, opens a dropdown's menu), Escape ends an edit.
+text in place (in a box, opens a dropdown's menu; in a choice list, starts
+picking), Escape ends an edit.
 """
 from __future__ import annotations
 
@@ -104,6 +105,22 @@ class RadioField(Field):
     """One of several options, one per line; with no default nothing is picked."""
     options: list[str] = field(default_factory=list)
     default: str | None = None
+
+
+@dataclass(frozen=True)
+class ChoiceField(Field):
+    """One of ``options``, one per line, like prompt_toolkit's choice(): the
+    pick is shown in bold, with ❯ while the cursor is on it, not a radio
+    mark. It starts on ``default`` (the first option if that isn't one).
+    In a form, Enter starts picking, ↑↓ move the pick and Enter keeps it
+    (Escape puts it back). As a dialog's only field it is always picking:
+    ↑↓ move the pick and Enter presses the dialog's first button."""
+    options: list[str] = field(default_factory=list)
+    default: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.options:
+            raise ValueError(f"ChoiceField {self.key!r} needs at least one option")
 
 
 T = TypeVar("T", bound=Field)
@@ -1062,8 +1079,209 @@ class OptionsFieldControl(FieldControl[Any]):
         return _content(lines)
 
 
+class _ChoiceRow(RowControl):
+    """One option of a ChoiceField. It takes focus only while it's the
+    field's one cursor stop (ChoiceFieldControl.current_stop)."""
+
+    def __init__(self, choice: ChoiceFieldControl, index: int) -> None:
+        self.choice = choice
+        self.index = index
+        self.window = Window(self, height=1, dont_extend_height=True)
+
+    def is_focusable(self) -> bool:
+        return self.choice.current_stop() is self.window
+
+    def preferred_width(self, max_available_width: int) -> int:
+        """The columns the row takes uncut: the marker, the indent and the option."""
+        option = self.choice.item.options[self.index]
+        return get_cwidth(MARKER) + self.choice.indent + get_cwidth(option)
+
+    def create_content(self, width: int, height: int) -> UIContent:
+        """The option, bold if it's the pick, after ❯ while it has focus."""
+        focused = has_focus(self.window)
+        picked = self.index == self.choice.index
+        line = FormattedText([
+            ("class:field-indicator" if focused else "", MARKER if focused else NO_MARKER),
+            ("", " " * self.choice.indent),
+            (
+                "class:dialog-choice-selected" if picked else "class:field-label",
+                self.choice.item.options[self.index],
+            ),
+        ])
+        # The marker shows the cursor row: no terminal cursor drawn over it.
+        return UIContent(get_line=lambda i: line, line_count=1, show_cursor=False)
+
+    def get_key_bindings(self) -> KeyBindings:
+        return self.choice.keys
+
+
+class ChoiceFieldControl(FieldControl[ChoiceField]):
+    """A ChoiceField: its label row (with a label or a description), then
+    one _ChoiceRow per option. One window takes the cursor at a time
+    (current_stop): the label row at rest (with no label row, the pick),
+    the pick while picking. Alone in its dialog (set_alone) it is always
+    picking."""
+
+    def __init__(self, item: ChoiceField) -> None:
+        super().__init__(item)
+        options = item.options
+        # The pick's index.
+        self.index = options.index(item.default) if item.default in options else 0
+        self._original_index = self.index
+        self._app_ref: Any = None
+        # Alone in its dialog: what Enter does (press the first button).
+        self._press: Callable[[], None] | None = None
+        # With no label and no description, just the options, not indented:
+        # a dialog's text stands in for the label (dropdown_dialog).
+        self._labelled = bool(item.label or item.description)
+        self.indent = 2 if self._labelled else 0
+        self.keys = self._key_bindings()
+        self._rows = [_ChoiceRow(self, i) for i in range(len(options))]
+        windows = [row.window for row in self._rows]
+        self._container = HSplit([self._window, *windows] if self._labelled else windows)
+
+    @property
+    def value(self) -> str:
+        """The picked option."""
+        return self._item.options[self.index]
+
+    @value.setter
+    def value(self, val: Any) -> None:
+        if val in self._item.options:
+            self.index = self._item.options.index(val)
+
+    @property
+    def picking(self) -> bool:
+        """Whether ↑↓ move the pick: while picking in a form, always alone."""
+        return self._editing or self._press is not None
+
+    def set_alone(self, press: Callable[[], None] | None) -> None:
+        """Alone in its dialog (the only field, nothing else to focus), with
+        ``press`` for Enter: always picking. None: one field among others."""
+        self._press = press
+
+    def current_stop(self) -> Window:
+        """The one window that takes the cursor now: the label row at rest
+        (the pick, with no label row), the pick while picking."""
+        if self._labelled and not self.picking:
+            return self._window
+        return self._rows[self.index].window
+
+    def is_focusable(self) -> bool:
+        return self.current_stop() is self._window
+
+    def get_container(self) -> Container:
+        return self._container
+
+    def get_stops(self) -> list[Container]:
+        return [self.current_stop()]
+
+    @property
+    def row_count(self) -> int:
+        label_rows = super().row_count if self._labelled else 0
+        return label_rows + len(self._rows)
+
+    def preferred_width(self, max_available_width: int) -> int:
+        """The label row's columns (and its description's); the option rows
+        say their own."""
+        description = self._item.description
+        label = get_cwidth(MARKER) + get_cwidth(self._item.label)
+        return max(label, 2 + get_cwidth(description) if description else 0)
+
+    def create_content(self, width: int, height: int) -> UIContent:
+        """The label row (and description): ❯ while it's the cursor stop,
+        highlighted while any of the field has focus."""
+        focused = self._check_focus()
+        selected = focused or any(has_focus(row.window) for row in self._rows)
+        label_style = "class:field-label-selected" if selected else "class:field-label"
+        lines = [FormattedText([
+            ("class:field-indicator" if focused else "", MARKER if focused else NO_MARKER),
+            (label_style, self._item.label),
+        ])]
+        if self._item.description:
+            lines.append(_description(self._item.description, selected))
+        return _content(lines)
+
+    def enter_edit_mode(self, app: Any = None) -> None:
+        """Start picking: the cursor goes to the pick."""
+        self._original_index = self.index
+        self._editing = True
+        self._app_ref = app
+        self._focus_stop()
+
+    def confirm_edit(self) -> None:
+        """Keep the pick: the cursor goes back to the field's stop."""
+        self._editing = False
+        self._focus_stop()
+
+    def abandon_edit(self) -> None:
+        self.index = self._original_index
+        self._editing = False
+
+    def cancel_edit(self) -> None:
+        """Put the old pick back: the cursor goes back to the field's stop."""
+        self.abandon_edit()
+        self._focus_stop()
+
+    def move(self, delta: int, app: Any = None) -> None:
+        """Move the pick ``delta`` options, clamped to the ends; the cursor follows."""
+        last = len(self._item.options) - 1
+        self.index = max(0, min(last, self.index + delta))
+        if app:
+            app.layout.focus(self.current_stop())
+
+    def _focus_stop(self) -> None:
+        if self._app_ref:
+            self._app_ref.layout.focus(self.current_stop())
+
+    def get_key_bindings(self) -> KeyBindings:
+        return self.keys
+
+    def _key_bindings(self) -> KeyBindings:
+        """The label row's and the option rows' keys. At rest Enter starts
+        picking. While picking ↑↓ move the pick, Enter keeps it and Escape
+        puts it back. Alone, ↑↓ stop short of the ends (where the dialog's
+        cursor takes them) and Enter presses the first button."""
+        kb = KeyBindings()
+        last = len(self._item.options) - 1
+        at_rest = Condition(lambda: not self.picking)
+        editing = Condition(lambda: self._editing)
+        alone = Condition(lambda: self._press is not None)
+        up = Condition(lambda: self._editing or (self._press is not None and self.index > 0))
+        down = Condition(lambda: self._editing or (self._press is not None and self.index < last))
+
+        @kb.add("enter", filter=at_rest)
+        def _start(event: Any) -> None:
+            self.enter_edit_mode(event.app)
+
+        @kb.add("up", filter=up)
+        def _up(event: Any) -> None:
+            self.move(-1, event.app)
+
+        @kb.add("down", filter=down)
+        def _down(event: Any) -> None:
+            self.move(1, event.app)
+
+        @kb.add("enter", filter=editing)
+        def _keep(event: Any) -> None:
+            self.confirm_edit()
+
+        @kb.add("escape", filter=editing)
+        def _cancel(event: Any) -> None:
+            self.cancel_edit()
+
+        @kb.add("enter", filter=alone)
+        def _press_button(event: Any) -> None:
+            if self._press is not None:
+                self._press()
+
+        return kb
+
+
 def _control_for(field: Field) -> FieldControl:
     """The control that shows ``field``."""
+    if isinstance(field, ChoiceField):
+        return ChoiceFieldControl(field)
     if isinstance(field, (ChecklistField, RadioField)):
         return OptionsFieldControl(field)
     if isinstance(field, CheckboxField):
@@ -1076,7 +1294,7 @@ def _control_for(field: Field) -> FieldControl:
         return TextFieldControl(field)
     raise TypeError(
         "Dialog fields must be TextField, CheckboxField, SelectField, "
-        f"DropdownField, ChecklistField or RadioField; got {type(field).__name__}"
+        f"DropdownField, ChecklistField, RadioField or ChoiceField; got {type(field).__name__}"
     )
 
 
@@ -1155,10 +1373,12 @@ class _Form:
             return None
         if align_values != "labels":
             return _ValueColumn(int(align_values))
-        # Check and radio lists have their label, and description, on rows
-        # with no value. A description starts where labels do (under the
-        # marker's columns).
-        rows = [c for c in self.controls if not isinstance(c, OptionsFieldControl)]
+        # Check, radio and choice lists have their label, and description,
+        # on rows with no value. A description starts where labels do (under
+        # the marker's columns).
+        rows = [
+            c for c in self.controls if not isinstance(c, (OptionsFieldControl, ChoiceFieldControl))
+        ]
 
         def after(texts: Iterable[str]) -> int:
             return get_cwidth(MARKER) + max((get_cwidth(t) for t in texts), default=0) + 2

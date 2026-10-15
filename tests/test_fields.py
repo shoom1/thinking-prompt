@@ -24,6 +24,7 @@ from thinking_prompt import (
     ButtonConfig,
     CheckboxField,
     ChecklistField,
+    ChoiceField,
     Dialog,
     DropdownField,
     Field,
@@ -36,6 +37,7 @@ from thinking_prompt.dialog_box import build_box
 from thinking_prompt.dialog_scroll import focusable_windows
 from thinking_prompt.fields import (
     CheckboxFieldControl,
+    ChoiceFieldControl,
     DropdownFieldControl,
     OptionsFieldControl,
     SelectFieldControl,
@@ -46,7 +48,10 @@ from thinking_prompt.fields import (
     _ValueColumn,
 )
 
-FIELD_NAMES = ("Field", "TextField", "CheckboxField", "SelectField", "DropdownField", "ChecklistField", "RadioField")
+FIELD_NAMES = (
+    "Field", "TextField", "CheckboxField", "SelectField", "DropdownField", "ChecklistField",
+    "RadioField", "ChoiceField",
+)
 
 
 class TestFieldClasses:
@@ -57,6 +62,7 @@ class TestFieldClasses:
         lambda: DropdownField("k", "L", options=["a"]),
         lambda: ChecklistField("k", "L", options=["a"]),
         lambda: RadioField("k", "L", options=["a"]),
+        lambda: ChoiceField("k", "L", options=["a"]),
     ])
     def test_fields_are_frozen(self, make):
         field = make()
@@ -74,6 +80,7 @@ class TestFieldClasses:
         assert ChecklistField("k", "L").default == ()
         assert RadioField("k", "L").default is None
         assert SelectField("k", "L").default is None
+        assert ChoiceField("k", "L", options=["a"]).default is None
 
     def test_exported_instead_of_the_settings_items(self):
         for name in FIELD_NAMES:
@@ -1399,6 +1406,13 @@ class TestAlignValues:
         ]
         assert self._column(items).at(80) == 2 + len("Stream") + 2
 
+    def test_a_choice_fields_label_and_description_dont_move_the_values(self):
+        items = [
+            CheckboxField(key="a", label="Stream"),
+            ChoiceField(key="c", label="A much longer choice label", description="y" * 40, options=["x"]),
+        ]
+        assert self._column(items).at(80) == 2 + len("Stream") + 2
+
     def test_a_form_of_lists_only_needs_no_column(self):
         dialog = Dialog("S", fields=[ChecklistField(key="c", label="Tools", options=["x", "y"])])
         dialog._content()
@@ -1492,6 +1506,12 @@ class TestAutoWidth:
         d._placement = "box"
         assert to_container(build_box(d).widget).preferred_width(200).preferred >= 2 + 3 + 1 + len(option)
 
+    def test_an_auto_width_box_fits_a_long_choice(self):
+        option = "Stream responses from the model as they arrive"
+        d = Dialog("T", "Pick:", [ButtonConfig("OK")], fields=[ChoiceField("c", "", options=[option, "b"])])
+        d._placement = "box"
+        assert to_container(build_box(d).widget).preferred_width(200).preferred >= 2 + len(option)
+
 
 class TestUnlabelledLists:
     def test_no_label_or_description_is_just_the_options_not_indented(self):
@@ -1505,3 +1525,201 @@ class TestUnlabelledLists:
         control = OptionsFieldControl(ChecklistField("t", "", description="d", options=["a"]))
         assert control.row_count == 3
         assert control._group.rows[0].indent == 2
+
+
+def _active(kb, key) -> list:
+    """The bindings ``kb`` has for ``key`` whose filters hold now."""
+    return [b for b in kb.get_bindings_for_keys((key,)) if b.filter()]
+
+
+def _choice(label: str = "Answers", default: str | None = "y", **kwargs) -> ChoiceFieldControl:
+    return ChoiceFieldControl(ChoiceField("c", label, options=["x", "y", "z"], default=default, **kwargs))
+
+
+def _choice_app(control: ChoiceFieldControl) -> Application:
+    """An app showing ``control`` alone, the cursor on its stop."""
+    return Application(
+        layout=Layout(HSplit([control.get_container()]), focused_element=control.current_stop()),
+        input=DummyInput(),
+        output=DummyOutput(),
+    )
+
+
+class TestChoiceField:
+    def test_needs_options(self):
+        with pytest.raises(ValueError, match="'c' needs at least one option"):
+            ChoiceField("c", "C")
+
+    @pytest.mark.parametrize("default,value", [("y", "y"), ("nope", "x"), (None, "x")])
+    def test_the_pick_is_the_default_else_the_first_option(self, default, value):
+        assert _choice(default=default).value == value
+
+    def test_setting_the_value_ignores_what_isnt_an_option(self):
+        control = _choice()
+        control.value = "z"
+        assert control.value == "z"
+        control.value = "nope"
+        assert control.value == "z"
+
+    def test_its_value_in_a_dialog(self):
+        d = Dialog("T", fields=[ChoiceField("c", "C", options=["x", "y"])])
+        assert d.values == {"c": "x"}
+
+    def test_labelled_its_label_row_then_its_options_indented(self):
+        control = _choice()
+        assert control.get_container().children == [control._window, *(r.window for r in control._rows)]
+        assert control.row_count == 4
+        assert control.indent == 2
+
+    def test_unlabelled_just_its_options_and_its_stop_at_rest_is_the_pick(self):
+        control = _choice(label="")
+        assert control.get_container().children == [r.window for r in control._rows]
+        assert control.row_count == 3
+        assert control.indent == 0
+        assert control.get_stops() == [control._rows[1].window]
+
+    def test_only_the_current_stop_takes_focus(self):
+        control = _choice()
+        assert control.get_stops() == [control._window]
+        assert control.is_focusable()
+        assert [r.is_focusable() for r in control._rows] == [False, False, False]
+        control.enter_edit_mode()
+        assert control.get_stops() == [control._rows[1].window]
+        assert not control.is_focusable()
+        assert [r.is_focusable() for r in control._rows] == [False, True, False]
+        assert focusable_windows(control.get_container()) == [control._rows[1].window]
+
+    @staticmethod
+    def _lines(control, focus: bool) -> list:
+        """The label row (if any), then each option row, as drawn: with
+        the cursor on the field's stop (``focus``), or with no app."""
+
+        def draw():
+            rows = [control.create_content(40, 1).get_line(0)] if control._labelled else []
+            return rows + [r.create_content(40, 1).get_line(0) for r in control._rows]
+
+        if not focus:
+            return draw()
+        with set_app(_choice_app(control)):
+            return draw()
+
+    def test_at_rest_the_cursor_is_on_the_label_and_the_pick_is_bold(self):
+        assert self._lines(_choice(), focus=True) == [
+            [("class:field-indicator", "❯ "), ("class:field-label-selected", "Answers")],
+            [("", "  "), ("", "  "), ("class:field-label", "x")],
+            [("", "  "), ("", "  "), ("class:dialog-choice-selected", "y")],
+            [("", "  "), ("", "  "), ("class:field-label", "z")],
+        ]
+
+    def test_picking_the_cursor_is_on_the_pick(self):
+        control = _choice()
+        control.enter_edit_mode()
+        assert self._lines(control, focus=True) == [
+            [("", "  "), ("class:field-label-selected", "Answers")],
+            [("", "  "), ("", "  "), ("class:field-label", "x")],
+            [("class:field-indicator", "❯ "), ("", "  "), ("class:dialog-choice-selected", "y")],
+            [("", "  "), ("", "  "), ("class:field-label", "z")],
+        ]
+
+    def test_without_focus_no_cursor_and_the_pick_stays_bold(self):
+        assert self._lines(_choice(), focus=False) == [
+            [("", "  "), ("class:field-label", "Answers")],
+            [("", "  "), ("", "  "), ("class:field-label", "x")],
+            [("", "  "), ("", "  "), ("class:dialog-choice-selected", "y")],
+            [("", "  "), ("", "  "), ("class:field-label", "z")],
+        ]
+
+    def test_a_description_under_the_label(self):
+        control = _choice(description="Says more")
+        with set_app(_choice_app(control)):
+            line = control.create_content(40, 2).get_line(1)
+        assert line == [("", "  "), ("class:field-desc-selected", "Says more")]
+
+    def test_auto_width_counts_the_label_and_each_option_in_columns(self):
+        control = ChoiceFieldControl(ChoiceField("c", "Answers", description="d" * 30, options=["検索", "x"]))
+        assert control.preferred_width(200) == 2 + 30
+        assert [r.preferred_width(200) for r in control._rows] == [2 + 2 + 4, 2 + 2 + 1]
+        bare = ChoiceFieldControl(ChoiceField("c", "", options=["検索"]))
+        assert [r.preferred_width(200) for r in bare._rows] == [2 + 4]
+
+    def test_enter_starts_picking_arrows_move_the_pick_enter_keeps_it(self):
+        control = _choice()
+        app = _choice_app(control)
+        layout = app.layout
+        with set_app(app):
+            assert _active(control.keys, Keys.Down) == []      # at rest ↓ is the form's
+            _press(control.keys, Keys.Enter, app)
+            assert control.is_editing and layout.has_focus(control._rows[1].window)
+            _press(control.keys, Keys.Down, app)
+            assert control.value == "z" and layout.has_focus(control._rows[2].window)
+            _press(control.keys, Keys.Down, app)               # stops at the last option
+            assert control.value == "z"
+            _press(control.keys, Keys.Enter, app)
+            assert not control.is_editing and layout.has_focus(control._window)
+            assert control.value == "z"
+
+    def test_escape_puts_the_old_pick_back(self):
+        control = _choice()
+        app = _choice_app(control)
+        with set_app(app):
+            _press(control.keys, Keys.Enter, app)
+            _press(control.keys, Keys.Up, app)
+            assert control.value == "x"
+            _press(control.keys, Keys.Escape, app)
+            assert control.value == "y" and not control.is_editing
+            assert app.layout.has_focus(control._window)
+
+    def test_unlabelled_enter_still_starts_picking(self):
+        control = _choice(label="")
+        app = _choice_app(control)
+        with set_app(app):
+            _press(control.keys, Keys.Enter, app)
+            assert control.is_editing
+            _press(control.keys, Keys.Up, app)
+            assert control.value == "x" and app.layout.has_focus(control._rows[0].window)
+
+    def test_space_does_nothing(self):
+        control = _choice()
+        assert _active(control.keys, " ") == []
+        control.enter_edit_mode()
+        assert _active(control.keys, " ") == []
+
+    def test_a_dialog_closed_mid_pick_does_not_reopen_picking(self):
+        d = Dialog("T", fields=[ChoiceField("c", "C", options=["x", "y"]), CheckboxField("b", "B")])
+        _shown(d)
+        control = d._form.controls[0]
+        control.enter_edit_mode()
+        control.move(1)
+        assert d._is_editing() and d.values["c"] == "y"
+        d._content()                      # shown again
+        assert not d._is_editing() and d.values["c"] == "x"
+
+    def test_alone_arrows_move_the_pick_short_of_the_ends_and_enter_presses(self):
+        pressed: list = []
+        control = ChoiceFieldControl(ChoiceField("c", "", options=["x", "y"]))
+        control.set_alone(lambda: pressed.append(control.value))
+        app = _choice_app(control)
+        with set_app(app):
+            assert control.picking and not control.is_editing
+            assert control.get_stops() == [control._rows[0].window]
+            assert _active(control.keys, Keys.Up) == []         # the dialog's cursor takes it
+            _press(control.keys, Keys.Down, app)
+            assert control.value == "y" and app.layout.has_focus(control._rows[1].window)
+            assert _active(control.keys, Keys.Down) == []
+            _press(control.keys, Keys.Enter, app)
+            assert pressed == ["y"]
+            assert _active(control.keys, Keys.Escape) == []     # the dialog's: cancel
+
+    def test_one_option_alone_leaves_both_arrows_to_the_dialog(self):
+        pressed: list = []
+        control = ChoiceFieldControl(ChoiceField("c", "", options=["only"]))
+        control.set_alone(lambda: pressed.append(True))
+        assert _active(control.keys, Keys.Up) == [] and _active(control.keys, Keys.Down) == []
+        _press(control.keys, Keys.Enter, None)
+        assert pressed == [True]
+
+    def test_alone_labelled_the_stop_is_the_pick(self):
+        control = _choice()
+        control.set_alone(lambda: None)
+        assert control.get_stops() == [control._rows[1].window]
+        assert not control.is_focusable()

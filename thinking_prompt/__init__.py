@@ -41,6 +41,7 @@ from .dialog import (
 from .fields import (
     CheckboxField,
     ChecklistField,
+    ChoiceField,
     DropdownField,
     Field,
     RadioField,
@@ -99,6 +100,7 @@ __all__ = [
     "DropdownField",
     "ChecklistField",
     "RadioField",
+    "ChoiceField",
     # Layout
     "ThinkingHeader",
     "Spinner",

@@ -136,7 +136,8 @@ class Dialog:
             focus: at least one button, fields, or a focusable body (e.g. a
             TextArea, closed with Escape).
         fields: Form fields shown under the body: TextField, CheckboxField,
-            SelectField, DropdownField, ChecklistField, RadioField. Their
+            SelectField, DropdownField, ChecklistField, RadioField,
+            ChoiceField. Their
             keys must be unique; ``values`` holds what they're set to. Read
             when the dialog is created: setting it afterwards changes nothing.
         align_values: Where field values start: "labels" (default: two
