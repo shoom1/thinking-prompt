@@ -2922,6 +2922,23 @@ class TestChoiceFieldAlone:
 
             await run_with(session, handler, script)
 
+    async def test_tab_tab_enter_presses_cancel(self):
+        dialog = _choice_alone("box")
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.show_dialog(dialog))
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                inp.send_text(TAB + TAB + ENTER)       # pick, OK, Cancel
+                await wait_until(lambda: results == [None])
+
+            await run_with(session, handler, script)
+
     async def test_shift_tab_from_ok_comes_back_to_the_pick(self):
         dialog = _choice_alone("box")
         results: list[Any] = []

@@ -1798,6 +1798,19 @@ class TestChoiceFieldAlone:
             _press(control.keys, Keys.Up, app)
             assert cursor_at_top(focusable_windows(content))
 
+    def test_the_cursor_is_at_the_top_at_rest_whatever_the_pick(self):
+        d = Dialog("T", "Pick:", fields=[
+            ChoiceField("c", "", options=["x", "y"], default="y"),
+            TextField("name", "Name"),
+        ])
+        content, start = _shown(d)
+        control = d._form.controls[0]
+        app = Application(layout=Layout(content, focused_element=start), input=DummyInput(), output=DummyOutput())
+        with set_app(app):
+            assert cursor_at_top(focusable_windows(content))
+            control.enter_edit_mode()
+            assert not cursor_at_top(focusable_windows(content))
+
     def test_any_other_first_stop_is_at_the_top_while_focused(self):
         area = TextArea()
         app = Application(layout=Layout(area), input=DummyInput(), output=DummyOutput())

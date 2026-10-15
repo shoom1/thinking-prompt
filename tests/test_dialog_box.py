@@ -15,7 +15,13 @@ from prompt_toolkit.widgets import Button, Label, RadioList
 from thinking_prompt.dialog import ButtonConfig, Dialog
 from thinking_prompt.dialog_box import BoxPresenter, build_box
 from thinking_prompt.dialog_scroll import TERMINAL_BUFFER_ROWS, ScrollRegion
-from thinking_prompt.fields import ChoiceField
+from thinking_prompt.fields import (
+    CheckboxField,
+    ChecklistField,
+    ChoiceField,
+    SelectField,
+    TextField,
+)
 from thinking_prompt.rows import OptionGroup
 
 
@@ -107,13 +113,25 @@ class TestBuildBox:
         view = build_box(Dialog("T", HSplit([r.window for r in group.rows]), [ButtonConfig("OK")]))
         assert any(isinstance(c, ScrollRegion) for c in walk(to_container(view.widget)))
 
-    def test_a_single_dialog_row_scrolls_in_a_region(self):
-        """One stop that's a dialog row (a choice list's pick) is a row
-        tall: its list scrolls in a region, as a list of many stops does."""
+    def test_a_lone_choice_list_scrolls_in_a_region(self):
+        """A choice list's pick is its one stop, but its other options are
+        dialog rows too: the list scrolls in a region."""
         view = build_box(Dialog(
             "T", "Pick:", [ButtonConfig("OK")], fields=[ChoiceField("c", "", options=["a", "b"])]
         ))
         assert any(isinstance(c, ScrollRegion) for c in walk(to_container(view.widget)))
+
+    @pytest.mark.parametrize("make", [
+        lambda: CheckboxField("f", "Flag"),
+        lambda: TextField("f", "Name"),
+        lambda: SelectField("f", "Size", options=["s", "m"]),
+        lambda: ChecklistField("f", "", options=["a"]),
+    ], ids=["checkbox", "text", "select", "one-option checklist"])
+    def test_text_and_one_one_row_field_is_not_in_a_region(self, make):
+        """One stop and no other dialog rows: squeezed, so the text above it
+        shows from its start."""
+        view = build_box(Dialog("T", "Pick:", [ButtonConfig("OK")], fields=[make()]))
+        assert not any(isinstance(c, ScrollRegion) for c in walk(to_container(view.widget)))
 
     def test_the_view_keeps_the_max_height(self):
         assert build_box(Dialog("T", "B", [ButtonConfig("OK")], max_height=7)).max_height == 7

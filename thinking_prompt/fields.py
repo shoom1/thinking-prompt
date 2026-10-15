@@ -1090,8 +1090,9 @@ class _ChoiceRow(RowControl):
 
     @property
     def at_top(self) -> bool:
-        """The pick is the field's one stop: at the top on the first option only."""
-        return self.index == 0
+        """At rest the field is one stop, so it's at the top; while picking,
+        the pick is at the top on the first option only."""
+        return self.index == 0 or not self.choice.picking
 
     def is_focusable(self) -> bool:
         return self.choice.current_stop() is self.window

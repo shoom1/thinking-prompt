@@ -24,6 +24,7 @@ from prompt_toolkit.layout import (
     to_container,
 )
 from prompt_toolkit.layout.dimension import Dimension
+from prompt_toolkit.layout.layout import walk
 from prompt_toolkit.widgets import Button, Frame, Label
 from prompt_toolkit.widgets import Dialog as _DialogWidget
 
@@ -73,11 +74,10 @@ class BoxView:
 def build_box(dialog: Dialog) -> BoxView:
     """Build prompt_toolkit's Dialog widget for ``dialog``.
 
-    When the dialog is capped (BoxPresenter._cap), a body that is one window
-    taking the cursor and scrolling itself (a TextArea, prompt_toolkit's
-    RadioList) is squeezed. Any other body sits in a ScrollRegion: it
-    scrolls with the cursor (form fields, a check list, a choice list), or
-    by keys for a text body.
+    When the dialog is capped (BoxPresenter._cap), a body with one stop is
+    squeezed, so the text above it shows from its start. Any other body sits
+    in a ScrollRegion: it scrolls with the cursor (form fields, a check list,
+    a choice list), or by keys for a text body.
     """
     content, start = dialog._content()
     if content is None:
@@ -86,13 +86,11 @@ def build_box(dialog: Dialog) -> BoxView:
     stops = focusable_windows(content)
     body: Container = content
     text_region: ScrollRegion | None = None
-    # A body whose one stop is a window that scrolls itself (a TextArea)
-    # stays out of a region: there, a focused window taller than the region
-    # fills it, and the text above it never shows. A dialog row is one row
-    # tall: on its own (a choice list's pick) it sits in a region too.
-    only = stops[0] if len(stops) == 1 else None
-    scrolls_itself = isinstance(only, Window) and not isinstance(only.content, RowControl)
-    if not scrolls_itself:
+    # One stop stays out of a region, squeezed: the text above it then shows
+    # from its start. A choice list is the exception: its pick is one stop,
+    # but the other options are dialog rows too, and they scroll in a region.
+    rows = [w for w in walk(content) if isinstance(w, Window) and isinstance(w.content, RowControl)]
+    if len(stops) != 1 or len(rows) > 1:
         # Back at the first stop, the region scrolls to its top: rows above
         # that stop (a check list's text) show again.
         body = ScrollRegion(
