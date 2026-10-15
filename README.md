@@ -424,10 +424,10 @@ highlighted action, 1–9 run an action directly, Esc closes an escapable
 dialog. Fields are edited in place: ←→ change a selector (dropdowns
 become selectors inline), Space toggles a checkbox, Enter edits a text field.
 
-Check lists and radio lists show one option per line, in both styles:
+Check, radio and choice lists show one option per line, in both styles:
 
 ```python
-from thinking_prompt import ChecklistField, RadioField
+from thinking_prompt import ChecklistField, ChoiceField, RadioField
 
 tools = await session.checklist_dialog(
     "Tools", "Enable any:", ["search", "code", "files"], defaults=["search"],
@@ -436,6 +436,7 @@ tools = await session.checklist_dialog(
 await session.show_dialog(Dialog("Settings", fields=[
     ChecklistField("tools", "Tools", options=["search", "code"]),
     RadioField("mode", "Mode", options=["fast", "careful"], default="fast"),
+    ChoiceField("theme", "Theme", options=["dark", "light"]),
 ], buttons=[ButtonConfig("Done")]))
 ```
 
