@@ -487,7 +487,7 @@ attribute; each dialog keeps its own values. Keys must be unique.
 | `CheckboxField` | `true` / `false` | Space, Enter or ←→ to toggle |
 | `ChecklistField` | One `[x]` option per line; value: the checked ones, in option order | ↑↓ between options, Space/Enter to toggle |
 | `RadioField` | One `(•)` option per line; value: the picked one | ↑↓ between options, Space/Enter to pick |
-| `ChoiceField` | One option per line, the pick in bold, like prompt_toolkit's `choice()`; value: the picked one | Enter to start picking, ↑↓ to move the pick, Enter/Escape to keep/drop it. As a dialog's only field: ↑↓ move the pick at once and Enter presses the first button |
+| `ChoiceField` | One option per line, the pick in bold, like prompt_toolkit's `choice()`; value: the picked one | Enter to start picking, ↑↓ to move the pick, Enter/Escape to keep/drop it. As a dialog's only field (with nothing in the body taking focus): ↑↓ move the pick at once and Enter presses the first button |
 
 Every field takes `key`, `label`, `description` and `default`. A check,
 radio or choice list with no label and no description shows just its options.
@@ -500,7 +500,7 @@ choice list is one stop until Enter starts picking.
 **Aligning values:** values start two columns after the longest label or
 description (`align_values="labels"`, the default), so descriptions don't run
 under them; a description too long to leave room for the widest value still
-does. Check and radio lists, whose labels and descriptions sit on rows of
+does. Check, radio and choice lists, whose labels and descriptions sit on rows of
 their own, don't count. `align_values="right"` puts values at the row's right
 edge, and a number starts them at that column, cutting longer labels with `…`.
 When a row is short of width, its label is cut first (down to 3 columns), then

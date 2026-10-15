@@ -48,8 +48,8 @@ class Field(ABC):
 
     Attributes:
         key: The field's key in Dialog.values; unique within its dialog.
-        label: Shown on the field's row. A check or radio list with no
-            label and no description shows just its options.
+        label: Shown on the field's row. A check, radio or choice list
+            with no label and no description shows just its options.
         description: Shown under the label (optional).
         default: The field's starting value.
     """
@@ -113,8 +113,9 @@ class ChoiceField(Field):
     pick is shown in bold, with ❯ while the cursor is on it, not a radio
     mark. It starts on ``default`` (the first option if that isn't one).
     In a form, Enter starts picking, ↑↓ move the pick and Enter keeps it
-    (Escape puts it back). As a dialog's only field it is always picking:
-    ↑↓ move the pick and Enter presses the dialog's first button."""
+    (Escape puts it back). As a dialog's only field, with nothing in the body
+    taking focus, it is always picking: ↑↓ move the pick and Enter presses
+    the dialog's first button."""
     options: list[str] = field(default_factory=list)
     default: str | None = None
 
@@ -1158,7 +1159,7 @@ class ChoiceFieldControl(FieldControl[ChoiceField]):
 
     @property
     def picking(self) -> bool:
-        """Whether ↑↓ move the pick: while picking in a form, always alone."""
+        """Whether ↑↓ move the pick: while picking in a form, and always when alone."""
         return self._editing or self._press is not None
 
     def set_alone(self, press: Callable[[], None] | None) -> None:

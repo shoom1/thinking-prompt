@@ -137,9 +137,9 @@ class Dialog:
             TextArea, closed with Escape).
         fields: Form fields shown under the body: TextField, CheckboxField,
             SelectField, DropdownField, ChecklistField, RadioField,
-            ChoiceField. Their
-            keys must be unique; ``values`` holds what they're set to. Read
-            when the dialog is created: setting it afterwards changes nothing.
+            ChoiceField. Their keys must be unique; ``values`` holds what
+            they're set to. Read when the dialog is created: setting it
+            afterwards changes nothing.
         align_values: Where field values start: "labels" (default: two
             columns after the longest label or description), "right" (the
             row's right edge) or a column number (longer labels cut with "…").
