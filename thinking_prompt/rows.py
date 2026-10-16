@@ -170,7 +170,9 @@ class OptionRow(RowControl):
 
     @property
     def hints(self) -> frozenset[str]:
-        return frozenset({"Space toggle"})
+        # A radio or choice list's Space picks, as Enter does: "Enter select"
+        # covers it.
+        return frozenset({"Space toggle"}) if self.group.multiple else frozenset()
 
     def preferred_width(self, max_available_width: int) -> int:
         """The columns the row takes uncut: the marker, the indent, the mark
