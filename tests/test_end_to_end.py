@@ -2593,7 +2593,10 @@ class TestDialogFields:
     async def test_tab_with_a_menu_open_keeps_it_open(self):
         dialog = Dialog(
             "T",
-            fields=[DropdownField("d", "Model", options=["alpha", "beta"], default="alpha")],
+            fields=[
+                DropdownField("d", "Model", options=["alpha", "beta"], default="alpha"),
+                CheckboxField("c", "Cache"),
+            ],
             width=40,
             placement="box",
         )
@@ -2610,13 +2613,12 @@ class TestDialogFields:
                 await wait_until(lambda: dialog_rendered(session))
                 inp.send_text(ENTER)                 # open the menu
                 await wait_until(lambda: on_screen(session, "│beta"))
-                inp.send_text(TAB + SHIFT_TAB)
-                await asyncio.sleep(0.1)
-                assert dialog._is_editing() and on_screen(session, "│beta")
-                inp.send_text(DOWN + ENTER)          # beta
-                await wait_until(lambda: not dialog._is_editing())
-                inp.send_text(TAB + ENTER)
-                await wait_until(lambda: results == [{"d": "beta"}])
+                # Spent in the open menu: a Tab or Shift+Tab that got out
+                # would move the cursor, and ↓ or Enter would act elsewhere.
+                inp.send_text(TAB + DOWN)            # beta
+                inp.send_text(SHIFT_TAB + ENTER)     # kept; the menu closes
+                inp.send_text(TAB + TAB + ENTER)     # Cache, then OK
+                await wait_until(lambda: results == [{"d": "beta", "c": False}])
 
             await run_with(session, handler, script)
 
@@ -2643,7 +2645,8 @@ class TestDialogFields:
 
             await run_with(session, handler, script)
 
-    async def test_a_list_with_no_options_is_skipped(self):
+    @pytest.mark.parametrize("key", [DOWN, TAB], ids=["down", "tab"])
+    async def test_a_list_with_no_options_is_skipped(self, key):
         dialog = Dialog(
             "T",
             fields=[
@@ -2664,7 +2667,7 @@ class TestDialogFields:
             async def script(run: asyncio.Task[None]) -> None:
                 inp.send_text("go" + ENTER)
                 await wait_until(lambda: dialog_rendered(session))
-                inp.send_text(DOWN + " ")            # past the empty list: check Cache
+                inp.send_text(key + " ")             # past the empty list: check Cache
                 inp.send_text(TAB + ENTER)           # OK
                 await wait_until(lambda: results == [{"s": None, "r": None, "c": True}])
 

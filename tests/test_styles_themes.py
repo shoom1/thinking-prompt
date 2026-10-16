@@ -63,8 +63,6 @@ class TestTokensResolveAtRender:
     that isn't explicitly overridden."""
 
     def test_replace_token_restyles_derived_elements(self):
-        import dataclasses
-
         s = dataclasses.replace(ThinkingPromptStyles.light(), color_error="#ff00ff")
         assert _rules(s)["history.error"] == "fg:#ff00ff bold"
 
@@ -74,8 +72,6 @@ class TestTokensResolveAtRender:
         assert _rules(s)["field-indicator"] == "fg:#123456"
 
     def test_explicit_override_survives_replace(self):
-        import dataclasses
-
         s = dataclasses.replace(
             ThinkingPromptStyles(thinking_box="fg:red"), color_thinking="#000000"
         )
