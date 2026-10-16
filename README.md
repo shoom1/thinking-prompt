@@ -641,6 +641,7 @@ See the `examples/` directory for complete demos:
 - `dialog_test.py` - Dialog system demo (yes/no, message, choice, dropdown)
 - `settings_dialog_demo.py` - A settings dialog built from Dialog fields, box and inline
 - `demo_showcase.py` - Feature showcase for demos and screenshots; dialogs start inline, `/inline` switches to boxes
+- `demo.tape` - [VHS](https://github.com/charmbracelet/vhs) script that records the demo GIF above from `demo_showcase.py`: `vhs examples/demo.tape`
 - `completer_demo.py` - Slash-command autocompletion (like Claude Code)
 - `demo_themes.py` - Built-in themes and runtime theme switching
 - `inline_dialogs.py` - Dialogs drawn inline under the prompt (and the same ones as boxes)
