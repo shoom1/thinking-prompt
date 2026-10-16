@@ -12,6 +12,7 @@ from thinking_prompt import (
     ButtonConfig,
     CheckboxField,
     ChecklistField,
+    ChoiceField,
     Dialog,
     DropdownField,
     RadioField,
@@ -41,6 +42,7 @@ def settings_dialog(settings: dict, placement: str) -> Dialog:
             TextField("api_key", "API key", default=settings["api_key"], password=True),
             ChecklistField("tools", "Tools", options=["search", "code", "files"], default=tuple(settings["tools"])),
             RadioField("style", "Answers", options=["concise", "detailed"], default=settings["style"]),
+            ChoiceField("theme", "Theme", options=["dark", "light", "system"], default=settings["theme"]),
         ],
         width=60,
         placement=placement,
@@ -69,6 +71,7 @@ async def main():
         "api_key": "",
         "tools": ["search"],
         "style": "concise",
+        "theme": "dark",
     }
 
     @session.on_input

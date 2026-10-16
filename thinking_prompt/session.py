@@ -1407,7 +1407,8 @@ class ThinkingPromptSession:
         max_height: int | None = None,
     ) -> str | None:
         """
-        Show a dialog with a dropdown/radio list selection.
+        Show a dialog to pick one of ``options``: a choice list in a box,
+        numbered rows inline.
 
         Args:
             title: Dialog title.

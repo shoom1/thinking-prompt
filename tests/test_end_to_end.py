@@ -26,6 +26,7 @@ from thinking_prompt import (
     ButtonConfig,
     CheckboxField,
     ChecklistField,
+    ChoiceField,
     Dialog,
     DropdownField,
     RadioField,
@@ -846,7 +847,7 @@ class TestDialogsEndToEnd:
             async def script(run: asyncio.Task[None]) -> None:
                 inp.send_text("go" + ENTER)
                 await wait_until(lambda: dialog_rendered(session))
-                inp.send_text(DOWN + ENTER + TAB + ENTER)  # select "Dark", then OK
+                inp.send_text(DOWN + ENTER)  # "Dark": Enter presses OK
                 await wait_until(lambda: results == ["Dark"])
 
             await run_with(session, handler, script)
@@ -864,8 +865,8 @@ class TestDialogsEndToEnd:
             async def script(run: asyncio.Task[None]) -> None:
                 inp.send_text("go" + ENTER)
                 await wait_until(lambda: dialog_rendered(session))
-                assert on_screen(session, "❯ (•) Dark"), screen_lines(session)
-                inp.send_text(DOWN + ENTER + TAB + ENTER)  # the one after "Dark", then OK
+                assert on_screen(session, "❯ Dark"), screen_lines(session)
+                inp.send_text(DOWN + ENTER)  # the one after "Dark"; Enter presses OK
                 await wait_until(lambda: results == ["System"])
 
             await run_with(session, handler, script)
@@ -888,7 +889,7 @@ class TestDialogsEndToEnd:
             async def script(run: asyncio.Task[None]) -> None:
                 inp.send_text("go" + ENTER)
                 await wait_until(lambda: dialog_open(session))
-                inp.send_text(DOWN + ENTER)  # before the dialog's first render
+                inp.send_text(DOWN + " ")  # pick "Dark", before the dialog's first render
                 await wait_until(lambda: dialog_rendered(session), timeout=3)
                 inp.send_text(TAB + ENTER)  # OK
                 await wait_until(lambda: results == ["Dark"], timeout=3)
@@ -1240,7 +1241,7 @@ class TestBoxTextScrolling:
         await self._run("\n".join(f"line {i:02}" for i in range(3)), keys)
 
     async def test_arrows_still_move_through_a_long_list(self):
-        """A body with cursor stops keeps its own ↑↓: here a radio list taller than the cap."""
+        """A body with cursor stops keeps its own ↑↓: here a choice list taller than the cap."""
         options = [f"option {i:02}" for i in range(40)]
         results: list[Any] = []
 
@@ -1254,7 +1255,7 @@ class TestBoxTextScrolling:
             async def script(run: asyncio.Task[None]) -> None:
                 inp.send_text("go" + ENTER)
                 await wait_until(lambda: dialog_rendered(session))
-                inp.send_text(DOWN * 3 + ENTER + TAB + ENTER)  # option 03, then OK
+                inp.send_text(DOWN * 3 + ENTER)  # option 03; Enter presses OK
                 await wait_until(lambda: results == ["option 03"])
 
             await run_with(session, handler, script)
@@ -1265,7 +1266,7 @@ class TestBoxLongLists:
     the text above the list shows whenever the cursor is at the top."""
 
     async def test_a_long_dropdown_shows_its_question_at_the_top(self):
-        """A radio list's question scrolls with its options, like a check
+        """A choice list's question scrolls with its options, like a check
         list's: it shows at the top and again back at the first option."""
         options = [f"option {i:02}" for i in range(30)]
         results: list[Any] = []
@@ -1284,10 +1285,11 @@ class TestBoxLongLists:
                 assert not on_screen(session, "^^")  # one scrollbar
                 inp.send_text(DOWN * 29)
                 await wait_until(lambda: on_screen(session, "option 29"))
+                assert not on_screen(session, "Which one?")  # scrolled off
                 inp.send_text(UP * 29)
-                await wait_until(lambda: on_screen(session, "❯ (•) option 00"))
+                await wait_until(lambda: on_screen(session, "❯ option 00"))
                 assert on_screen(session, "Which one?"), screen_lines(session)
-                inp.send_text(DOWN * 3 + ENTER + TAB + ENTER)  # option 03, then OK
+                inp.send_text(DOWN * 3 + ENTER)  # option 03; Enter presses OK
                 await wait_until(lambda: results == ["option 03"])
 
             await run_with(session, handler, script)
@@ -2738,5 +2740,233 @@ class TestDialogFields:
                 assert "false" in line
                 inp.send_text(ESCAPE)
                 await wait_until(lambda: closed == [True])
+
+            await run_with(session, handler, script)
+
+
+def _choice_form(placement: str) -> Dialog:
+    """A checkbox, a ChoiceField (picked "y") and a checkbox; OK returns the values."""
+    dialog = Dialog(
+        "T",
+        fields=[
+            CheckboxField("a", "A"),
+            ChoiceField("c", "Answers", options=["x", "y", "z"], default="y"),
+            CheckboxField("b", "B"),
+        ],
+        width=40,
+        placement=placement,
+    )
+    dialog.buttons = [ButtonConfig("OK", handler=lambda: dialog.set_result(dialog.values))]
+    return dialog
+
+
+# From the last field to OK: Tab in a box, ↓ inline (the next stop is the action).
+TO_OK = {"box": TAB, "inline": DOWN}
+
+
+class TestChoiceFieldInAForm:
+    """A ChoiceField among other fields works like a radio list: ↑↓ walk its
+    options, Space or Enter picks one, and walking past changes nothing."""
+
+    @pytest.mark.parametrize("placement", ["box", "inline"])
+    async def test_walking_past_keeps_the_pick(self, placement):
+        dialog = _choice_form(placement)
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.show_dialog(dialog))
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                inp.send_text(DOWN * 4 + TO_OK[placement] + ENTER)   # x, y, z, B, then OK
+                await wait_until(lambda: results == [{"a": False, "c": "y", "b": False}])
+
+            await run_with(session, handler, script)
+
+    @pytest.mark.parametrize("placement", ["box", "inline"])
+    async def test_enter_picks_and_the_cursor_stays(self, placement):
+        dialog = _choice_form(placement)
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.show_dialog(dialog))
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                inp.send_text(DOWN * 3)                # z
+                await wait_until(lambda: on_screen(session, "❯   z"))
+                inp.send_text(ENTER)                   # picks z
+                await wait_until(lambda: dialog.values["c"] == "z")
+                inp.send_text(UP + ENTER)              # still on z: up to y, picks y
+                await wait_until(lambda: dialog.values["c"] == "y")
+                assert dialog_open(session)
+                inp.send_text(DOWN * 2 + TO_OK[placement] + ENTER)   # z, B, then OK
+                await wait_until(lambda: results == [{"a": False, "c": "y", "b": False}])
+
+            await run_with(session, handler, script)
+
+    async def test_space_picks_too(self):
+        dialog = _choice_form("box")
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.show_dialog(dialog))
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                inp.send_text(DOWN + " ")              # x
+                await wait_until(lambda: dialog.values["c"] == "x")
+                inp.send_text(DOWN * 3 + TAB + ENTER)  # y, z, B, then OK
+                await wait_until(lambda: results == [{"a": False, "c": "x", "b": False}])
+
+            await run_with(session, handler, script)
+
+
+def _choice_alone(placement: str, options: list[str] | None = None, text: str = "Pick:") -> Dialog:
+    """A ChoiceField alone under a text body; OK returns its pick."""
+    dialog = Dialog(
+        "Theme",
+        text,
+        fields=[ChoiceField("c", "", options=options or ["x", "y", "z"])],
+        placement=placement,
+    )
+    dialog.buttons = [
+        ButtonConfig("OK", handler=lambda: dialog.set_result(dialog.values["c"])),
+        ButtonConfig("Cancel"),
+    ]
+    return dialog
+
+
+class TestChoiceFieldAlone:
+    """A ChoiceField alone in its dialog: ↑↓ walk the options, and Enter
+    picks the one under the cursor and presses the first button."""
+
+    @pytest.mark.parametrize("placement", ["box", "inline"])
+    async def test_enter_picks_the_option_under_the_cursor_and_presses_ok(self, placement):
+        dialog = _choice_alone(placement)
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.show_dialog(dialog))
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                assert on_screen(session, "❯ x"), screen_lines(session)
+                inp.send_text(DOWN)
+                await wait_until(lambda: on_screen(session, "❯ y"))
+                inp.send_text(ENTER)
+                await wait_until(lambda: results == ["y"])
+
+            await run_with(session, handler, script)
+
+    async def test_walking_doesnt_change_the_pick(self):
+        dialog = _choice_alone("box")
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.show_dialog(dialog))
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                inp.send_text(DOWN + DOWN)             # z, not picked
+                await wait_until(lambda: on_screen(session, "❯ z"))
+                inp.send_text(TAB + ENTER)             # OK
+                await wait_until(lambda: results == ["x"])
+
+            await run_with(session, handler, script)
+
+    async def test_tab_tab_enter_presses_cancel(self):
+        dialog = _choice_alone("box")
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.show_dialog(dialog))
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                inp.send_text(TAB + TAB + ENTER)       # OK, Cancel, then press it
+                await wait_until(lambda: results == [None])
+
+            await run_with(session, handler, script)
+
+    async def test_shift_tab_from_ok_comes_back_to_the_list(self):
+        """prompt_toolkit's Shift+Tab from a button lands on the list's last
+        option, as for a radio list."""
+        dialog = _choice_alone("box")
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.show_dialog(dialog))
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                inp.send_text(TAB)                     # OK
+                await wait_until(lambda: not on_screen(session, "❯ x"))
+                inp.send_text(SHIFT_TAB)               # the last option
+                await wait_until(lambda: on_screen(session, "❯ z"))
+                inp.send_text(UP + ENTER)              # y, picked; then OK
+                await wait_until(lambda: results == ["y"])
+
+            await run_with(session, handler, script)
+
+    async def test_inline_down_past_the_last_option_reaches_the_actions(self):
+        dialog = _choice_alone("inline")
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.show_dialog(dialog))
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                inp.send_text(DOWN * 3)                # y, z, then on to 1. OK
+                await wait_until(lambda: cursor_row(session) == "❯ 1. OK")
+                inp.send_text(ENTER)
+                await wait_until(lambda: results == ["x"])   # walked past: still x
+
+            await run_with(session, handler, script)
+
+    @pytest.mark.parametrize("placement", ["box", "inline"])
+    async def test_with_no_buttons_enter_closes_with_the_pick(self, placement):
+        dialog = Dialog(
+            "Theme", "Pick:", fields=[ChoiceField("c", "", options=["x", "y", "z"])], placement=placement
+        )
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.show_dialog(dialog))
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                inp.send_text(DOWN)
+                await wait_until(lambda: on_screen(session, "❯ y"))
+                inp.send_text(ENTER)
+                await wait_until(lambda: results == ["y"])
 
             await run_with(session, handler, script)

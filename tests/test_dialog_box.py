@@ -15,6 +15,13 @@ from prompt_toolkit.widgets import Button, Label, RadioList
 from thinking_prompt.dialog import ButtonConfig, Dialog
 from thinking_prompt.dialog_box import BoxPresenter, build_box
 from thinking_prompt.dialog_scroll import TERMINAL_BUFFER_ROWS, ScrollRegion
+from thinking_prompt.fields import (
+    CheckboxField,
+    ChecklistField,
+    ChoiceField,
+    SelectField,
+    TextField,
+)
 from thinking_prompt.rows import OptionGroup
 
 
@@ -105,6 +112,26 @@ class TestBuildBox:
         group = OptionGroup(["a", "b"], multiple=True)
         view = build_box(Dialog("T", HSplit([r.window for r in group.rows]), [ButtonConfig("OK")]))
         assert any(isinstance(c, ScrollRegion) for c in walk(to_container(view.widget)))
+
+    def test_a_lone_choice_list_scrolls_in_a_region(self):
+        """Each of a choice list's options is a stop: the list scrolls in a
+        region, as a check list does."""
+        view = build_box(Dialog(
+            "T", "Pick:", [ButtonConfig("OK")], fields=[ChoiceField("c", "", options=["a", "b"])]
+        ))
+        assert any(isinstance(c, ScrollRegion) for c in walk(to_container(view.widget)))
+
+    @pytest.mark.parametrize("make", [
+        lambda: CheckboxField("f", "Flag"),
+        lambda: TextField("f", "Name"),
+        lambda: SelectField("f", "Size", options=["s", "m"]),
+        lambda: ChecklistField("f", "", options=["a"]),
+        lambda: ChoiceField("f", "", options=["a"]),
+    ], ids=["checkbox", "text", "select", "one-option checklist", "one-option choice list"])
+    def test_text_and_a_one_stop_field_are_not_in_a_region(self, make):
+        """One stop: squeezed, so the text above it shows from its start."""
+        view = build_box(Dialog("T", "Pick:", [ButtonConfig("OK")], fields=[make()]))
+        assert not any(isinstance(c, ScrollRegion) for c in walk(to_container(view.widget)))
 
     def test_the_view_keeps_the_max_height(self):
         assert build_box(Dialog("T", "B", [ButtonConfig("OK")], max_height=7)).max_height == 7

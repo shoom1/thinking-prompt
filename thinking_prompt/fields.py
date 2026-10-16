@@ -47,8 +47,8 @@ class Field(ABC):
 
     Attributes:
         key: The field's key in Dialog.values; unique within its dialog.
-        label: Shown on the field's row. A check or radio list with no
-            label and no description shows just its options.
+        label: Shown on the field's row. A check, radio or choice list
+            with no label and no description shows just its options.
         description: Shown under the label (optional).
         default: The field's starting value.
     """
@@ -104,6 +104,22 @@ class RadioField(Field):
     """One of several options, one per line; with no default nothing is picked."""
     options: list[str] = field(default_factory=list)
     default: str | None = None
+
+
+@dataclass(frozen=True)
+class ChoiceField(Field):
+    """One of ``options``, one per line, like prompt_toolkit's choice(): a
+    radio list with no marks, the pick in bold. It starts on ``default``
+    (the first option if that isn't one). ↑↓ move the cursor and Space or
+    Enter picks the option under it. As a dialog's only field, with nothing
+    in the body taking focus, Enter then also presses the dialog's first
+    button (with no buttons, the dialog closes with the pick)."""
+    options: list[str] = field(default_factory=list)
+    default: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.options:
+            raise ValueError(f"ChoiceField {self.key!r} needs at least one option")
 
 
 T = TypeVar("T", bound=Field)
@@ -994,10 +1010,10 @@ class _MarkedLabel(UIControl):
 
 
 class OptionsFieldControl(FieldControl[Any]):
-    """A check list or radio list field: its label row, then one OptionRow
+    """A check, radio or choice list field: its label row, then one OptionRow
     per option. The options are the cursor stops; the label takes no focus."""
 
-    def __init__(self, item: ChecklistField | RadioField) -> None:
+    def __init__(self, item: ChecklistField | RadioField | ChoiceField) -> None:
         super().__init__(item)
         # With no label and no description, just the options, not indented:
         # a dialog's text stands in for the label (checklist_dialog).
@@ -1005,6 +1021,12 @@ class OptionsFieldControl(FieldControl[Any]):
         indent = 2 if self._labelled else 0
         if isinstance(item, ChecklistField):
             self._group = OptionGroup(item.options, multiple=True, selected=list(item.default), indent=indent)
+        elif isinstance(item, ChoiceField):
+            # Always a pick: the default, or the first option.
+            pick = item.default if item.default in item.options else item.options[0]
+            self._group = OptionGroup(
+                item.options, multiple=False, selected=[pick], indent=indent, marks=False
+            )
         else:
             picked = [item.default] if item.default is not None else []
             self._group = OptionGroup(item.options, multiple=False, selected=picked, indent=indent)
@@ -1020,15 +1042,24 @@ class OptionsFieldControl(FieldControl[Any]):
 
     @property
     def value(self) -> Any:
-        """The checked options (check list) or the picked one (radio list)."""
+        """The checked options (check list) or the picked one (radio or choice list)."""
         return self._group.checked if self._group.multiple else self._group.picked
 
     @value.setter
     def value(self, val: Any) -> None:
         if self._group.multiple:
             self._group.select(list(val))
+        elif isinstance(self._item, ChoiceField):
+            # A choice list keeps a pick: anything else is ignored.
+            if val in self._group.options:
+                self._group.select([val])
         else:
             self._group.select([] if val is None else [val])
+
+    def set_alone(self, accept: Callable[[], None] | None) -> None:
+        """A choice list alone in its dialog: Enter, after picking, runs
+        ``accept``. None: Enter just picks."""
+        self._group.on_enter = accept
 
     @property
     def row_count(self) -> int:
@@ -1064,7 +1095,7 @@ class OptionsFieldControl(FieldControl[Any]):
 
 def _control_for(field: Field) -> FieldControl:
     """The control that shows ``field``."""
-    if isinstance(field, (ChecklistField, RadioField)):
+    if isinstance(field, (ChecklistField, RadioField, ChoiceField)):
         return OptionsFieldControl(field)
     if isinstance(field, CheckboxField):
         return CheckboxFieldControl(field)
@@ -1076,7 +1107,7 @@ def _control_for(field: Field) -> FieldControl:
         return TextFieldControl(field)
     raise TypeError(
         "Dialog fields must be TextField, CheckboxField, SelectField, "
-        f"DropdownField, ChecklistField or RadioField; got {type(field).__name__}"
+        f"DropdownField, ChecklistField, RadioField or ChoiceField; got {type(field).__name__}"
     )
 
 
@@ -1113,6 +1144,15 @@ class _Form:
         radio list's picked option); None with no stops."""
         entered = self._enterable()
         return entered[0].start_stop() if entered else None
+
+    def set_alone(self, nothing_else: bool, accept: Callable[[], None]) -> None:
+        """A ChoiceField that's the only field, with ``nothing_else`` in the
+        dialog taking focus, is alone: Enter on an option picks it and runs
+        ``accept``. Any other ChoiceField's Enter just picks."""
+        alone = nothing_else and len(self.controls) == 1
+        for control in self.controls:
+            if isinstance(control, OptionsFieldControl) and isinstance(control.item, ChoiceField):
+                control.set_alone(accept if alone else None)
 
     def container(self, placement: Placement, align_values: AlignValues) -> HSplit | None:
         """The fields one under another, laid out for ``placement`` with
@@ -1155,9 +1195,9 @@ class _Form:
             return None
         if align_values != "labels":
             return _ValueColumn(int(align_values))
-        # Check and radio lists have their label, and description, on rows
-        # with no value. A description starts where labels do (under the
-        # marker's columns).
+        # Check, radio and choice lists have their label, and description,
+        # on rows with no value. A description starts where labels do (under
+        # the marker's columns).
         rows = [c for c in self.controls if not isinstance(c, OptionsFieldControl)]
 
         def after(texts: Iterable[str]) -> int:

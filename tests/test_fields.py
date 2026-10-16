@@ -1,6 +1,7 @@
 """Form fields: the Field classes, their controls, and fields on a Dialog."""
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import importlib
 from types import SimpleNamespace
@@ -24,6 +25,7 @@ from thinking_prompt import (
     ButtonConfig,
     CheckboxField,
     ChecklistField,
+    ChoiceField,
     Dialog,
     DropdownField,
     Field,
@@ -46,7 +48,10 @@ from thinking_prompt.fields import (
     _ValueColumn,
 )
 
-FIELD_NAMES = ("Field", "TextField", "CheckboxField", "SelectField", "DropdownField", "ChecklistField", "RadioField")
+FIELD_NAMES = (
+    "Field", "TextField", "CheckboxField", "SelectField", "DropdownField", "ChecklistField",
+    "RadioField", "ChoiceField",
+)
 
 
 class TestFieldClasses:
@@ -57,6 +62,7 @@ class TestFieldClasses:
         lambda: DropdownField("k", "L", options=["a"]),
         lambda: ChecklistField("k", "L", options=["a"]),
         lambda: RadioField("k", "L", options=["a"]),
+        lambda: ChoiceField("k", "L", options=["a"]),
     ])
     def test_fields_are_frozen(self, make):
         field = make()
@@ -74,6 +80,7 @@ class TestFieldClasses:
         assert ChecklistField("k", "L").default == ()
         assert RadioField("k", "L").default is None
         assert SelectField("k", "L").default is None
+        assert ChoiceField("k", "L", options=["a"]).default is None
 
     def test_exported_instead_of_the_settings_items(self):
         for name in FIELD_NAMES:
@@ -1399,6 +1406,13 @@ class TestAlignValues:
         ]
         assert self._column(items).at(80) == 2 + len("Stream") + 2
 
+    def test_a_choice_fields_label_and_description_dont_move_the_values(self):
+        items = [
+            CheckboxField(key="a", label="Stream"),
+            ChoiceField(key="c", label="A much longer choice label", description="y" * 40, options=["x"]),
+        ]
+        assert self._column(items).at(80) == 2 + len("Stream") + 2
+
     def test_a_form_of_lists_only_needs_no_column(self):
         dialog = Dialog("S", fields=[ChecklistField(key="c", label="Tools", options=["x", "y"])])
         dialog._content()
@@ -1492,6 +1506,12 @@ class TestAutoWidth:
         d._placement = "box"
         assert to_container(build_box(d).widget).preferred_width(200).preferred >= 2 + 3 + 1 + len(option)
 
+    def test_an_auto_width_box_fits_a_long_choice(self):
+        option = "Stream responses from the model as they arrive"
+        d = Dialog("T", "Pick:", [ButtonConfig("OK")], fields=[ChoiceField("c", "", options=[option, "b"])])
+        d._placement = "box"
+        assert to_container(build_box(d).widget).preferred_width(200).preferred >= 2 + len(option)
+
 
 class TestUnlabelledLists:
     def test_no_label_or_description_is_just_the_options_not_indented(self):
@@ -1505,3 +1525,187 @@ class TestUnlabelledLists:
         control = OptionsFieldControl(ChecklistField("t", "", description="d", options=["a"]))
         assert control.row_count == 3
         assert control._group.rows[0].indent == 2
+
+
+def _choice(label: str = "Answers", default: str | None = "y", **kwargs) -> OptionsFieldControl:
+    return OptionsFieldControl(ChoiceField("c", label, options=["x", "y", "z"], default=default, **kwargs))
+
+
+def _app_on(control: OptionsFieldControl, option: int) -> Application:
+    """An app showing ``control`` alone, the cursor on option ``option``."""
+    return Application(
+        layout=Layout(
+            HSplit([control.get_container()]), focused_element=control._group.rows[option].window
+        ),
+        input=DummyInput(),
+        output=DummyOutput(),
+    )
+
+
+class TestChoiceField:
+    """A radio list drawn like prompt_toolkit's choice(): no marks, the pick in bold."""
+
+    def test_needs_options(self):
+        with pytest.raises(ValueError, match="'c' needs at least one option"):
+            ChoiceField("c", "C")
+
+    @pytest.mark.parametrize("default,value", [("y", "y"), ("nope", "x"), (None, "x")])
+    def test_the_pick_is_the_default_else_the_first_option(self, default, value):
+        assert _choice(default=default).value == value
+
+    def test_setting_the_value_ignores_what_isnt_an_option(self):
+        control = _choice()
+        control.value = "z"
+        assert control.value == "z"
+        control.value = "nope"
+        control.value = None
+        assert control.value == "z"
+
+    def test_its_value_in_a_dialog(self):
+        d = Dialog("T", fields=[ChoiceField("c", "C", options=["x", "y"])])
+        assert d.values == {"c": "x"}
+
+    def test_its_options_are_its_stops_as_in_a_radio_list(self):
+        control = _choice()
+        rows = [r.window for r in control._group.rows]
+        assert control.get_container().children == [control._window, *rows]
+        assert control.get_stops() == rows
+        assert not control.is_focusable()
+        assert control.row_count == 4
+        assert control.start_stop() is rows[1]           # the pick
+
+    def test_unlabelled_just_its_options_not_indented(self):
+        control = _choice(label="")
+        rows = control._group.rows
+        assert control.get_container().children == [r.window for r in rows]
+        assert control.row_count == 3
+        assert all(r.indent == 0 for r in rows)
+
+    @staticmethod
+    def _lines(control, cursor: int | None) -> list:
+        """The label row (if any), then each option row, as drawn: with the
+        cursor on option ``cursor``, or with no app."""
+
+        def draw():
+            label = [control.create_content(40, 1).get_line(0)] if control._labelled else []
+            return label + [r.create_content(40, 1).get_line(0) for r in control._group.rows]
+
+        if cursor is None:
+            return draw()
+        with set_app(_app_on(control, cursor)):
+            return draw()
+
+    def test_the_cursor_on_another_option_and_the_pick_in_bold(self):
+        assert self._lines(_choice(), cursor=2) == [
+            [("", "  "), ("class:field-label-selected", "Answers")],
+            [("", "  "), ("", "  "), ("class:field-label", "x")],
+            [("", "  "), ("", "  "), ("class:dialog-choice-selected", "y")],
+            [("class:field-indicator", "❯ "), ("", "  "), ("class:field-label-selected", "z")],
+        ]
+
+    def test_the_cursor_on_the_pick(self):
+        assert self._lines(_choice(), cursor=1)[2] == [
+            ("class:field-indicator", "❯ "), ("", "  "), ("class:dialog-choice-selected", "y"),
+        ]
+
+    def test_without_focus_no_cursor_and_the_pick_stays_bold(self):
+        assert self._lines(_choice(), cursor=None) == [
+            [("", "  "), ("class:field-label", "Answers")],
+            [("", "  "), ("", "  "), ("class:field-label", "x")],
+            [("", "  "), ("", "  "), ("class:dialog-choice-selected", "y")],
+            [("", "  "), ("", "  "), ("class:field-label", "z")],
+        ]
+
+    def test_a_description_under_the_label(self):
+        control = _choice(description="Says more")
+        with set_app(_app_on(control, 0)):
+            line = control.create_content(40, 2).get_line(1)
+        assert line == [("", "  "), ("class:field-desc-selected", "Says more")]
+
+    def test_auto_width_counts_the_label_and_each_option_in_columns(self):
+        control = OptionsFieldControl(ChoiceField("c", "Answers", description="d" * 30, options=["検索", "x"]))
+        assert control.preferred_width(200) == 2 + 30
+        assert [r.preferred_width(200) for r in control._group.rows] == [2 + 2 + 4, 2 + 2 + 1]
+        bare = OptionsFieldControl(ChoiceField("c", "", options=["検索"]))
+        assert [r.preferred_width(200) for r in bare._group.rows] == [2 + 4]
+
+    @pytest.mark.parametrize("key", [" ", Keys.Enter])
+    def test_space_or_enter_picks_the_option_under_the_cursor(self, key):
+        control = _choice()
+        _press(control._group.rows[2].get_key_bindings(), key, None)
+        assert control.value == "z"
+
+
+class TestChoiceFieldAlone:
+    """A ChoiceField with nothing else in its dialog to focus: Enter on an
+    option picks it and presses the dialog's first button (with no buttons,
+    closes the dialog with the pick)."""
+
+    @staticmethod
+    def _key(dialog, key, option: int):
+        """Press ``key`` on option ``option`` of the dialog's first field: the
+        dialog's result, or None if it stays open."""
+        loop = asyncio.new_event_loop()
+        try:
+            dialog._result_future = loop.create_future()
+            row = dialog._form.controls[0]._group.rows[option]
+            _press(row.get_key_bindings(), key, None)
+            future = dialog._result_future
+            return future.result() if future.done() else None
+        finally:
+            loop.close()
+
+    @staticmethod
+    def _with_ok(*fields, body="Pick:") -> Dialog:
+        """A dialog with ``fields`` under ``body``; OK returns its values."""
+        d = Dialog("T", body, fields=list(fields))
+        d.buttons = [ButtonConfig("OK", handler=lambda: d.set_result(d.values)), ButtonConfig("Cancel")]
+        return d
+
+    def test_the_cursor_starts_on_the_pick(self):
+        d = Dialog("T", "Pick:", fields=[ChoiceField("c", "", options=["x", "y"], default="y")])
+        _, start = _shown(d)
+        assert start is d._form.controls[0]._group.rows[1].window
+
+    def test_enter_picks_and_presses_the_first_button(self):
+        d = self._with_ok(ChoiceField("c", "", options=["x", "y"], default="y"))
+        _shown(d)
+        assert self._key(d, Keys.Enter, 0) == {"c": "x"}
+
+    def test_space_just_picks(self):
+        d = self._with_ok(ChoiceField("c", "", options=["x", "y"], default="y"))
+        _shown(d)
+        assert self._key(d, " ", 0) is None
+        assert d.values == {"c": "x"}
+
+    def test_buttons_set_later_are_the_ones_pressed(self):
+        d = Dialog("T", "Pick:", fields=[ChoiceField("c", "", options=["x"])])
+        _shown(d)
+        d.buttons = [ButtonConfig("Go", result="went"), ButtonConfig("Stop", result="stopped")]
+        assert self._key(d, Keys.Enter, 0) == "went"
+
+    def test_with_no_buttons_enter_closes_with_the_pick(self):
+        d = Dialog("T", "Pick:", fields=[ChoiceField("c", "", options=["x", "y"])])
+        _shown(d)
+        assert self._key(d, Keys.Enter, 1) == "y"
+
+    @pytest.mark.parametrize("make", [
+        lambda: TestChoiceFieldAlone._with_ok(
+            ChoiceField("c", "C", options=["x", "y"]), CheckboxField("b", "B")
+        ),
+        lambda: TestChoiceFieldAlone._with_ok(
+            ChoiceField("c", "C", options=["x", "y"]), ChoiceField("d", "D", options=["p"])
+        ),
+        lambda: TestChoiceFieldAlone._with_ok(ChoiceField("c", "C", options=["x", "y"]), body=TextArea()),
+    ], ids=["another field", "another choice list", "a body that takes focus"])
+    def test_not_alone_enter_just_picks(self, make):
+        d = make()
+        _shown(d)
+        assert self._key(d, Keys.Enter, 1) is None
+        assert d.values["c"] == "y"
+
+    def test_a_radio_list_alone_enter_just_picks(self):
+        d = self._with_ok(RadioField("r", "", options=["x", "y"]))
+        _shown(d)
+        assert self._key(d, Keys.Enter, 1) is None
+        assert d.values == {"r": "y"}

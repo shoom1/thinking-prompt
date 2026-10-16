@@ -57,7 +57,7 @@ from ._text import format_exception_detail
 from .dialog_box import BoxPresenter
 from .dialog_inline import InlinePresenter, InlineView
 from .dialog_scroll import ScrollRegion, focusable_windows
-from .fields import AlignValues, ChecklistField, Field, RadioField, _check_align_values, _Form
+from .fields import AlignValues, ChecklistField, ChoiceField, Field, _check_align_values, _Form
 from .types import Placement, check_placement
 
 if TYPE_CHECKING:
@@ -136,9 +136,10 @@ class Dialog:
             focus: at least one button, fields, or a focusable body (e.g. a
             TextArea, closed with Escape).
         fields: Form fields shown under the body: TextField, CheckboxField,
-            SelectField, DropdownField, ChecklistField, RadioField. Their
-            keys must be unique; ``values`` holds what they're set to. Read
-            when the dialog is created: setting it afterwards changes nothing.
+            SelectField, DropdownField, ChecklistField, RadioField,
+            ChoiceField. Their keys must be unique; ``values`` holds what
+            they're set to. Read when the dialog is created: setting it
+            afterwards changes nothing.
         align_values: Where field values start: "labels" (default: two
             columns after the longest label or description), "right" (the
             row's right edge) or a column number (longer labels cut with "…").
@@ -273,8 +274,11 @@ class Dialog:
         """
         _check_align_values(self.align_values)
         body = to_container(self.build_body()) if self._has_body() else None
-        fields = self._form.container(self._placement, self.align_values)
         body_stops = focusable_windows(body) if body is not None else []
+        # A ChoiceField with nothing else to focus: Enter on an option picks
+        # it and accepts the dialog.
+        self._form.set_alone(not body_stops, self._accept_choice)
+        fields = self._form.container(self._placement, self.align_values)
         start = body_stops[0] if body_stops else self._form.start()
         if fields is None:
             return body, start
@@ -349,6 +353,18 @@ class Dialog:
                     "handler=...) instead of (label, handler)."
                 )
         return configs
+
+    def _accept_choice(self) -> None:
+        """Enter on a lone choice list, after it picks: click the first
+        button, as Enter on it would; with no buttons, close with the pick.
+        The buttons are read when pressed: they can be set after the dialog
+        is laid out."""
+        configs = self._button_configs()
+        if configs:
+            self._click_handler(configs[0])()
+        else:
+            (pick,) = self.values.values()
+            self.set_result(pick)
 
     def _click_handler(self, cfg: ButtonConfig) -> Callable[[], None]:
         """What clicking ``cfg`` does: run its handler, or close with its result.
@@ -444,9 +460,10 @@ def _dropdown_dialog(
 ) -> Dialog:
     """Pick one option; Cancel and Escape return None.
 
-    Box: a radio list field with OK / Cancel; Tab goes from the list to OK.
-    Inline: one numbered action per option. Either way the cursor starts on
-    ``default``.
+    Box: a choice list field with OK / Cancel: Enter on an option returns
+    it, and OK returns the pick. Inline: one numbered action per option.
+    Either way the cursor starts on ``default`` (the first option if it
+    isn't one).
     """
     if not options:
         raise ValueError("dropdown_dialog() needs at least one option")
@@ -459,13 +476,11 @@ def _dropdown_dialog(
             max_height=max_height,
         )
 
-    # One option picked: the default, or the first when there's none (or
-    # it isn't an option). The cursor starts on it.
-    picked = default if default in options else options[0]
+    # Alone in the dialog, Enter on an option picks it and presses OK.
     dialog = Dialog(
         title,
         text,
-        fields=[RadioField("choice", "", options=list(options), default=picked)],
+        fields=[ChoiceField("choice", "", options=list(options), default=default)],
         placement="box",
         max_height=max_height,
     )

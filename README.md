@@ -424,10 +424,10 @@ highlighted action, 1–9 run an action directly, Esc closes an escapable
 dialog. Fields are edited in place: ←→ change a selector (dropdowns
 become selectors inline), Space toggles a checkbox, Enter edits a text field.
 
-Check lists and radio lists show one option per line, in both styles:
+Check, radio and choice lists show one option per line, in both styles:
 
 ```python
-from thinking_prompt import ChecklistField, RadioField
+from thinking_prompt import ChecklistField, ChoiceField, RadioField
 
 tools = await session.checklist_dialog(
     "Tools", "Enable any:", ["search", "code", "files"], defaults=["search"],
@@ -436,6 +436,7 @@ tools = await session.checklist_dialog(
 await session.show_dialog(Dialog("Settings", fields=[
     ChecklistField("tools", "Tools", options=["search", "code"]),
     RadioField("mode", "Mode", options=["fast", "careful"], default="fast"),
+    ChoiceField("theme", "Theme", options=["dark", "light"]),
 ], buttons=[ButtonConfig("Done")]))
 ```
 
@@ -487,20 +488,23 @@ attribute; each dialog keeps its own values. Keys must be unique.
 | `CheckboxField` | `true` / `false` | Space, Enter or ←→ to toggle |
 | `ChecklistField` | One `[x]` option per line; value: the checked ones, in option order | ↑↓ between options, Space/Enter to toggle |
 | `RadioField` | One `(•)` option per line; value: the picked one | ↑↓ between options, Space/Enter to pick |
+| `ChoiceField` | A radio list drawn like prompt_toolkit's `choice()`: no marks, the pick in bold; value: the picked one | ↑↓ between options, Space/Enter to pick. As a dialog's only field (with nothing in the body taking focus), Enter also presses the first button, or with no buttons closes the dialog with the pick |
 
-Every field takes `key`, `label`, `description` and `default`. A check or
-radio list with no label and no description shows just its options.
+Every field takes `key`, `label`, `description` and `default`. A check,
+radio or choice list with no label and no description shows just its options.
 
 **Keys:** in a box, ↑↓ move a row at a time and Tab / Shift+Tab a field at a
-time (Tab on to the buttons after the last field; a radio list is entered at
-its picked option). Inline, one cursor walks the rows and the actions.
+time (Tab on to the buttons after the last field; a radio or choice list is
+entered at its picked option). Inline, one cursor walks the rows and the
+actions.
 
 **Aligning values:** values start two columns after the longest label or
 description (`align_values="labels"`, the default), so descriptions don't run
 under them; a description too long to leave room for the widest value still
-does. Check and radio lists, whose labels and descriptions sit on rows of
-their own, don't count. `align_values="right"` puts values at the row's right
-edge, and a number starts them at that column, cutting longer labels with `…`.
+does. Check, radio and choice lists, whose labels and descriptions sit on
+rows of their own, don't count. `align_values="right"` puts values at the row's
+right edge, and a number starts them at that column, cutting longer labels with
+`…`.
 When a row is short of width, its label is cut first (down to 3 columns), then
 a dropdown or text field gives up its padding, and only then is the value
 itself cut with `…`. A box with no `width` is as wide as its fields' rows.
