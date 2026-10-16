@@ -96,9 +96,10 @@ class ScrollRegion(ScrollablePane):
     While a window inside has focus it follows the cursor, as ScrollablePane
     does, with no scroll offsets (squeezed to one row, it shows the cursor
     row itself), and it goes back to its top when the cursor arrives at the
-    first stop (``at_top()``), so rows above that stop show again. With
-    nothing inside focused (a text body) it scrolls by keys: scroll() and
-    page(). With ``scrollbar``, a scrollbar shows while the content overflows.
+    first stop (``at_top()``) or its rows change while there, so rows above
+    that stop show again. With nothing inside focused (a text body) it
+    scrolls by keys: scroll() and page(). With ``scrollbar``, a scrollbar
+    shows while the content overflows.
     """
 
     def __init__(
@@ -153,11 +154,14 @@ class ScrollRegion(ScrollablePane):
         z_index: int | None,
     ) -> None:
         focused = get_app().layout.current_window
-        # Only on arriving at the first stop (or opening on it): while the
-        # cursor stays there, a tall stop such as a text field scrolls with
-        # its own cursor. The pane scrolls down from the top only if the
-        # first stop wouldn't fit.
-        if focused is not self._focused and self._at_top():
+        # On arriving at the first stop (or opening on it), and when the
+        # rows change while there (a resize: rows the pane scrolled off may
+        # fit again). Not on every redraw: while the cursor stays there, a
+        # tall stop such as a text field scrolls with its own cursor. The
+        # pane scrolls down from the top only if the first stop wouldn't fit.
+        arrived = focused is not self._focused
+        resized = write_position.height != self._visible_rows
+        if (arrived or resized) and self._at_top():
             self.vertical_scroll = 0
         self._focused = focused
         self._measure(write_position)

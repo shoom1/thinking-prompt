@@ -121,8 +121,9 @@ class TestBuildInline:
 
 
 class TestScrollingRegion:
-    """Rows and actions scroll within MAX_ROWS; a body without cursor stops
-    (text) is drawn in full above them."""
+    """Cursor stops and actions scroll in one region (within MAX_ROWS
+    without max_height); a body without cursor stops (text) is drawn above
+    it, in a region of its own (TestTextRegion)."""
 
     def test_a_text_body_is_drawn_above_the_scrolling_region(self):
         view = build_inline(_yes_no())
@@ -160,6 +161,23 @@ class TestScrollingRegion:
             layout.focus(group.rows[5].window)
             _render(pane, 4)
             assert pane.vertical_scroll > 0
+
+    def test_regrown_on_the_first_stop_the_region_shows_its_top_again(self):
+        """A shorter terminal scrolls the text above the first stop off;
+        with rows back, it shows again, though the cursor never moved."""
+        group = OptionGroup([f"o{i}" for i in range(6)], multiple=True)
+        body = HSplit([Label("line one\nline two"), *(r.window for r in group.rows)])
+        view = build_inline(Dialog("T", body, [ButtonConfig("OK")]))
+        pane = _region(view)
+        layout = Layout(view.container)
+        with set_app(_app(layout)):
+            layout.focus(group.rows[0].window)
+            _render(pane, 8)
+            _render(pane, 2)  # shrunk: just the first option and the row above
+            assert pane.vertical_scroll > 0
+            screen = _render(pane, 5)  # grown back, though not in full
+        assert pane.vertical_scroll == 0
+        assert _rows(screen, 3) == ["line one", "line two", "❯ [ ] o0"]
 
     async def test_a_tall_first_stop_keeps_the_scroll_while_its_cursor_moves(self):
         """The region goes back to its top when the cursor arrives at the
