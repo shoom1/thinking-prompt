@@ -619,9 +619,11 @@ class TestTranscriptWiring:
         d.rich(Text("boxed"))
         assert d.history.iter_entries()[-1].kind == "ansi"
 
-    def test_set_theme_invalidates_markdown_cache_and_code_theme(self):
+    def test_set_theme_invalidates_markdown_cache_and_code_theme(self, monkeypatch):
         pytest.importorskip("rich")
         from thinking_prompt.styles import ThinkingPromptStyles
+        # The themes differ only in color, which rich leaves out under NO_COLOR.
+        monkeypatch.delenv("NO_COLOR", raising=False)
         d = self._display()
         d.markdown("```python\nx = 1\n```")
         before = list(d.history.get_formatted_text())
