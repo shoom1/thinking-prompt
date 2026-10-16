@@ -2800,6 +2800,26 @@ class TestDialogFields:
 
             await run_with(session, handler, script)
 
+    async def test_without_buttons_tab_from_the_last_field_wraps_to_the_first_at_its_pick(self):
+        dialog = self._radio_and_checkbox(radio_first=True)
+        dialog.buttons = []
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.show_dialog(dialog))
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                inp.send_text(TAB + TAB)               # Cache, then round to Mode, at b
+                inp.send_text(DOWN + " " + ESCAPE)     # c, picked
+                await wait_until(lambda: results == [None])
+                assert dialog.values == {"m": "c", "c": False}
+
+            await run_with(session, handler, script)
+
 
 def _choice_form(placement: str) -> Dialog:
     """A checkbox, a ChoiceField (picked "y") and a checkbox; OK returns the values."""
@@ -2888,12 +2908,14 @@ class TestChoiceFieldInAForm:
             await run_with(session, handler, script)
 
 
-def _choice_alone(placement: str, options: list[str] | None = None, text: str = "Pick:") -> Dialog:
+def _choice_alone(
+    placement: str, options: list[str] | None = None, text: str = "Pick:", default: str | None = None,
+) -> Dialog:
     """A ChoiceField alone under a text body; OK returns its pick."""
     dialog = Dialog(
         "Theme",
         text,
-        fields=[ChoiceField("c", "", options=options or ["x", "y", "z"])],
+        fields=[ChoiceField("c", "", options=options or ["x", "y", "z"], default=default)],
         placement=placement,
     )
     dialog.buttons = [
@@ -2965,7 +2987,7 @@ class TestChoiceFieldAlone:
             await run_with(session, handler, script)
 
     async def test_shift_tab_from_ok_comes_back_to_the_pick(self):
-        dialog = _choice_alone("box")
+        dialog = _choice_alone("box", default="y")
         results: list[Any] = []
 
         async def handler(text: str) -> None:
@@ -2977,11 +2999,11 @@ class TestChoiceFieldAlone:
                 inp.send_text("go" + ENTER)
                 await wait_until(lambda: dialog_rendered(session))
                 inp.send_text(TAB)                     # OK
-                await wait_until(lambda: not on_screen(session, "❯ x"))
+                await wait_until(lambda: not on_screen(session, "❯ y"))
                 inp.send_text(SHIFT_TAB)               # the pick
-                await wait_until(lambda: on_screen(session, "❯ x"))
-                inp.send_text(DOWN + ENTER)            # y, picked; then OK
-                await wait_until(lambda: results == ["y"])
+                await wait_until(lambda: on_screen(session, "❯ y"))
+                inp.send_text(UP + ENTER)              # x, picked; then OK
+                await wait_until(lambda: results == ["x"])
 
             await run_with(session, handler, script)
 

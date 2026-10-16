@@ -199,6 +199,12 @@ class TestDialogFields:
         assert [w.content for w in focusable_windows(content)] == [d._form.controls[0]]
         assert len(content.children) == 1
 
+    def test_a_box_form_squeezed_below_its_rows_draws_blank(self):
+        """While the layout settles, not "Window too small"."""
+        d = Dialog("T", fields=[CheckboxField("a", "A"), CheckboxField("b", "B")])
+        content, _ = _shown(d, "box")
+        assert _text(_drawn(content, 40)[0]).strip() == ""
+
     def test_a_subclass_body_keeps_its_fields(self):
         class Custom(Dialog):
             fields = [CheckboxField("on", "On")]
@@ -627,7 +633,6 @@ class TestTextControl:
     def test_text_control_container_switches_in_edit_mode(self):
         """TextFieldControl container returns different content in edit mode."""
         from prompt_toolkit.layout import DynamicContainer
-
 
         item = TextField(key="name", label="Name", default="Alice")
         control = TextFieldControl(item)

@@ -978,9 +978,10 @@ class _EditRow(Container):
             min_field=min(8, edit_width),
         )
         start = max(0, min(layout.column, width))
-        editor = min(layout.field, width - start)
+        editor_width = min(layout.field, width - start)
         x = write_position.xpos
-        for child, child_width in ((self._label, start), (self._editor, editor), (self._rest, width - start - editor)):
+        children = ((self._label, start), (self._editor, editor_width), (self._rest, width - start - editor_width))
+        for child, child_width in children:
             child.write_to_screen(
                 screen,
                 mouse_handlers,
@@ -1215,8 +1216,9 @@ class _Form:
         """A box's Tab / Shift+Tab: a group at a time, in order. Each
         focusable window ``before()`` returns (the body above the fields) is
         a group, and each field is one, entered at its start (a radio list's
-        picked option). Tab goes on to the buttons after the last group;
-        Shift+Tab stays at the first (no wrap to the buttons)."""
+        picked option). Tab goes on to the buttons after the last group (with
+        none, round to the first group); Shift+Tab stays at the first (no
+        wrap to the buttons)."""
         editing = Condition(self.is_editing)
         idle = ~editing
         kb = KeyBindings()
@@ -1246,9 +1248,11 @@ class _Form:
             if index is not None and index < len(found) - 1:
                 event.app.layout.focus(found[index + 1][1])
             else:
-                # After the last group: on to the buttons (no wrap).
+                # After the last group: on to the buttons, or with none,
+                # round to the first group.
                 event.app.layout.focus(self.stops()[-1] if self.stops() else found[-1][1])
                 event.app.layout.focus_next()
+                self._enter_at_start(event.app.layout)
 
         @kb.add("s-tab", filter=idle)
         def _previous_group(event: Any) -> None:
@@ -1262,25 +1266,28 @@ class _Form:
     def button_tab_bindings(self) -> KeyBindings:
         """A box button's Tab / Shift+Tab: on to the next or previous window,
         as the dialog widget's own keys go (round from the last button to the
-        first field, back from the first button to the last), but a field
-        they land in is entered at its start (a radio list's picked option),
-        as Tab between fields enters it."""
+        first window, the body's or else the first field's; back from the
+        first button to the last field), but a field they land in is entered
+        at its start (a radio list's picked option), as Tab between fields
+        enters it."""
         kb = KeyBindings()
-
-        def enter_at_start(layout: Layout) -> None:
-            for control in self._enterable():
-                if any(layout.has_focus(stop) for stop in control.get_stops()):
-                    layout.focus(control.start_stop())
-                    return
 
         @kb.add("tab")
         def _next(event: Any) -> None:
             event.app.layout.focus_next()
-            enter_at_start(event.app.layout)
+            self._enter_at_start(event.app.layout)
 
         @kb.add("s-tab")
         def _previous(event: Any) -> None:
             event.app.layout.focus_previous()
-            enter_at_start(event.app.layout)
+            self._enter_at_start(event.app.layout)
 
         return kb
+
+    def _enter_at_start(self, layout: Layout) -> None:
+        """With the cursor just moved into a field, move it to the field's
+        start (a radio list's picked option)."""
+        for control in self._enterable():
+            if any(layout.has_focus(stop) for stop in control.get_stops()):
+                layout.focus(control.start_stop())
+                return
