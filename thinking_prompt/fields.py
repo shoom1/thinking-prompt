@@ -76,6 +76,11 @@ class DropdownField(Field):
     width: int | None = 15
     max_width: int | None = None
 
+    def __post_init__(self) -> None:
+        _check_size(self, "height", self.height)
+        _check_size(self, "width", self.width, optional=True)
+        _check_size(self, "max_width", self.max_width, optional=True)
+
 
 @dataclass(frozen=True)
 class CheckboxField(Field):
@@ -90,6 +95,9 @@ class TextField(Field):
     default: str = ""
     password: bool = False
     edit_width: int = 15
+
+    def __post_init__(self) -> None:
+        _check_size(self, "edit_width", self.edit_width)
 
 
 @dataclass(frozen=True)
@@ -120,6 +128,15 @@ class ChoiceField(Field):
     def __post_init__(self) -> None:
         if not self.options:
             raise ValueError(f"ChoiceField {self.key!r} needs at least one option")
+
+
+def _check_size(item: Field, name: str, value: int | None, optional: bool = False) -> None:
+    """A field's size (rows or columns) is at least 1; None too if ``optional``."""
+    if optional and value is None:
+        return
+    if value is None or value < 1:
+        none = " (or None)" if optional else ""
+        raise ValueError(f"{type(item).__name__} {item.key!r}: {name} must be at least 1{none}, got {value!r}")
 
 
 T = TypeVar("T", bound=Field)

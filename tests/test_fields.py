@@ -84,6 +84,33 @@ class TestFieldClasses:
         assert SelectField("k", "L").default is None
         assert ChoiceField("k", "L", options=["a"]).default is None
 
+    @pytest.mark.parametrize("make,message", [
+        (lambda: DropdownField("k", "L", options=["a"], width=-1),
+         r"DropdownField 'k': width must be at least 1 \(or None\), got -1"),
+        (lambda: DropdownField("k", "L", options=["a"], width=0),
+         r"DropdownField 'k': width must be at least 1 \(or None\), got 0"),
+        (lambda: DropdownField("k", "L", options=["a"], width=None, max_width=-1),
+         r"DropdownField 'k': max_width must be at least 1 \(or None\), got -1"),
+        (lambda: DropdownField("k", "L", options=["a"], width=None, max_width=0),
+         r"DropdownField 'k': max_width must be at least 1 \(or None\), got 0"),
+        (lambda: DropdownField("k", "L", options=["a"], height=0),
+         r"DropdownField 'k': height must be at least 1, got 0"),
+        (lambda: TextField("k", "L", edit_width=0),
+         r"TextField 'k': edit_width must be at least 1, got 0"),
+        (lambda: TextField("k", "L", edit_width=-5),
+         r"TextField 'k': edit_width must be at least 1, got -5"),
+    ], ids=["width<0", "width=0", "max_width<0", "max_width=0", "height=0", "edit_width=0", "edit_width<0"])
+    def test_sizes_below_one_are_refused(self, make, message):
+        """Refused when the field is made, not when its menu or edit field
+        is first drawn (a negative width failed inside prompt_toolkit)."""
+        with pytest.raises(ValueError, match=message):
+            make()
+
+    def test_sizes_of_one_are_fine(self):
+        DropdownField("k", "L", options=["a"], width=1, max_width=1, height=1)
+        DropdownField("k", "L", options=["a"], width=None)
+        TextField("k", "L", edit_width=1)
+
     def test_exported_instead_of_the_settings_items(self):
         for name in FIELD_NAMES:
             assert name in thinking_prompt.__all__
