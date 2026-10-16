@@ -49,7 +49,7 @@ from typing import (
 from prompt_toolkit.filters import Condition
 from prompt_toolkit.formatted_text import AnyFormattedText
 from prompt_toolkit.key_binding import KeyBindings, merge_key_bindings
-from prompt_toolkit.layout import AnyContainer, Container, Float, HSplit, to_container
+from prompt_toolkit.layout import AnyContainer, Container, Float, HSplit, Window, to_container
 from prompt_toolkit.layout.containers import is_container
 from prompt_toolkit.widgets import Label
 
@@ -289,13 +289,13 @@ class Dialog:
             lambda: focusable_windows(body) if body is not None else []
         )
         if body is None:
-            fields.key_bindings = merge_key_bindings([fields.key_bindings or KeyBindings(), tabs])
-            return fields, start
+            # Empty, as the fields' own: no "Window too small" flash.
+            return HSplit([fields], key_bindings=tabs, window_too_small=Window()), start
         return HSplit([body, fields], key_bindings=tabs), start
 
     def _screen_floats(self) -> list[Float]:
         """Floats the fields need over the whole screen while the dialog is
-        open as a box (a dropdown's menu). Called once, after _content()."""
+        open as a box: each dropdown's menu."""
         return self._form.floats()
 
     def get_buttons(self) -> list[ButtonConfig]:

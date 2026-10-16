@@ -752,7 +752,8 @@ class _DropdownMenuControl(UIControl):
 
     def create_content(self, width: int, height: int) -> UIContent:
         """Render the options that fit ``height`` rows, scrolled to keep the
-        selected one in view, with a scrollbar when not all of them show."""
+        selected one in view, with a scrollbar when not all of them show (and
+        the menu is wider than one column)."""
         dropdown = self._dropdown
         options = dropdown._item.options
         selected = dropdown._selected_index
@@ -760,7 +761,8 @@ class _DropdownMenuControl(UIControl):
         height = max(1, height)
 
         scrolls = count > height
-        text_width = max(1, width - 1) if scrolls else width
+        scrollbar = scrolls and width > 1
+        text_width = width - 1 if scrollbar else width
         offset = min(dropdown._scroll_offset, max(0, count - height))
         if selected < offset:
             offset = selected
@@ -779,7 +781,7 @@ class _DropdownMenuControl(UIControl):
             # Cut and padded in terminal columns: a wide character takes two.
             text = _justify(_cut(opt, text_width), text_width, True)
             fragments = [(style, text)]
-            if scrolls:
+            if scrollbar:
                 on_thumb = thumb_top <= row < thumb_top + thumb
                 fragments.append(("class:scrollbar.button" if on_thumb else "class:scrollbar.background", " "))
             lines.append(FormattedText(fragments))
@@ -930,9 +932,9 @@ class _EditRow(Container):
     keeps the value. The field keeps min(8, edit_width) columns: the label
     is cut further to keep them."""
 
-    def __init__(self, control: TextFieldControl, field: Window) -> None:
+    def __init__(self, control: TextFieldControl, editor: Window) -> None:
         self._control = control
-        self._field = field
+        self._editor = editor   # the input field's window
         self._label = Window(_MarkedLabel(control.item))
         self._rest = Window()
 
@@ -976,9 +978,10 @@ class _EditRow(Container):
             min_field=min(8, edit_width),
         )
         start = max(0, min(layout.column, width))
-        field = min(layout.field, width - start)
+        editor_width = min(layout.field, width - start)
         x = write_position.xpos
-        for child, child_width in ((self._label, start), (self._field, field), (self._rest, width - start - field)):
+        children = ((self._label, start), (self._editor, editor_width), (self._rest, width - start - editor_width))
+        for child, child_width in children:
             child.write_to_screen(
                 screen,
                 mouse_handlers,
@@ -990,7 +993,7 @@ class _EditRow(Container):
             x += child_width
 
     def get_children(self) -> list[Container]:
-        return [self._label, self._field, self._rest]
+        return [self._label, self._editor, self._rest]
 
 
 class _MarkedLabel(UIControl):
@@ -1123,8 +1126,6 @@ class _Form:
             if key in keys:
                 raise ValueError(f"Dialog fields need unique keys; {key!r} is used twice")
             keys.add(key)
-        # The placement the fields were last laid out for (container()).
-        self._placement: Placement = "box"
 
     @property
     def values(self) -> dict[str, Any]:
@@ -1159,7 +1160,6 @@ class _Form:
         values at ``align_values``, with their keys; None without fields."""
         if not self.controls:
             return None
-        self._placement = placement
         inline = placement == "inline"
         for control in self.controls:
             if control.is_editing:
@@ -1174,15 +1174,13 @@ class _Form:
         # layout settles.
         return HSplit(
             [control.get_container() for control in self.controls],
-            key_bindings=self._key_bindings(),
+            key_bindings=None if inline else self._key_bindings(),
             window_too_small=Window(),
         )
 
     def floats(self) -> list[Float]:
         """A box's dropdown menus, to float over the whole screen, not the
         form, so each is sized by the room the terminal has around its row."""
-        if self._placement == "inline":
-            return []
         return [c.get_float() for c in self.controls if isinstance(c, DropdownFieldControl)]
 
     def _enterable(self) -> list[FieldControl]:
@@ -1209,19 +1207,18 @@ class _Form:
             max((c.widest_value() for c in rows), default=0),
         )
 
-    def _key_bindings(self) -> KeyBindingsBase | None:
-        """In a box, ↑↓ move a row at a time. Inline: none, the dialog's own
-        cursor walks fields and actions alike."""
-        if self._placement == "inline":
-            return None
+    def _key_bindings(self) -> KeyBindingsBase:
+        """In a box, ↑↓ move a row at a time (inline, the dialog's own cursor
+        walks fields and actions alike)."""
         return RowNavigator(self.stops, is_editing=self.is_editing).key_bindings()
 
     def tab_bindings(self, before: Callable[[], list[Container]]) -> KeyBindings:
         """A box's Tab / Shift+Tab: a group at a time, in order. Each
         focusable window ``before()`` returns (the body above the fields) is
         a group, and each field is one, entered at its start (a radio list's
-        picked option). Tab goes on to the buttons after the last group;
-        Shift+Tab stays at the first (no wrap to the buttons)."""
+        picked option). Tab goes on to the buttons after the last group (with
+        none, round to the first group); Shift+Tab stays at the first (no
+        wrap to the buttons)."""
         editing = Condition(self.is_editing)
         idle = ~editing
         kb = KeyBindings()
@@ -1251,9 +1248,11 @@ class _Form:
             if index is not None and index < len(found) - 1:
                 event.app.layout.focus(found[index + 1][1])
             else:
-                # After the last group: on to the buttons (no wrap).
+                # After the last group: on to the buttons, or with none,
+                # round to the first group.
                 event.app.layout.focus(self.stops()[-1] if self.stops() else found[-1][1])
                 event.app.layout.focus_next()
+                self._enter_at_start(event.app.layout)
 
         @kb.add("s-tab", filter=idle)
         def _previous_group(event: Any) -> None:
@@ -1263,3 +1262,32 @@ class _Form:
                 event.app.layout.focus(found[index - 1][1])
 
         return kb
+
+    def button_tab_bindings(self) -> KeyBindings:
+        """A box button's Tab / Shift+Tab: on to the next or previous window,
+        as the dialog widget's own keys go (round from the last button to the
+        first window, the body's or else the first field's; back from the
+        first button to the last field), but a field they land in is entered
+        at its start (a radio list's picked option), as Tab between fields
+        enters it."""
+        kb = KeyBindings()
+
+        @kb.add("tab")
+        def _next(event: Any) -> None:
+            event.app.layout.focus_next()
+            self._enter_at_start(event.app.layout)
+
+        @kb.add("s-tab")
+        def _previous(event: Any) -> None:
+            event.app.layout.focus_previous()
+            self._enter_at_start(event.app.layout)
+
+        return kb
+
+    def _enter_at_start(self, layout: Layout) -> None:
+        """With the cursor just moved into a field, move it to the field's
+        start (a radio list's picked option)."""
+        for control in self._enterable():
+            if any(layout.has_focus(stop) for stop in control.get_stops()):
+                layout.focus(control.start_stop())
+                return

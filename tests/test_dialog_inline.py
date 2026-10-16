@@ -18,6 +18,7 @@ from prompt_toolkit.widgets import Label, TextArea
 
 from thinking_prompt.dialog import ButtonConfig, Dialog
 from thinking_prompt.dialog_inline import MAX_ROWS, build_inline
+from thinking_prompt.fields import RadioField
 from thinking_prompt.rows import OptionGroup
 
 
@@ -85,6 +86,9 @@ class TestBuildInline:
         group = OptionGroup(["a", "b"], multiple=True)
         with_list = Dialog("T", HSplit([r.window for r in group.rows]), [ButtonConfig("OK")])
         assert build_inline(with_list).hint == "↑↓ navigate · Space toggle · Enter select · Esc cancel"
+        radio = Dialog("T", fields=[RadioField("m", "Mode", options=["a", "b"])], placement="inline")
+        radio._placement = "inline"  # as show_dialog() resolves it
+        assert build_inline(radio).hint == "↑↓ navigate · Enter select · Esc cancel"
 
     def test_a_focused_button_starts_the_cursor(self):
         view = build_inline(Dialog("T", "B", [ButtonConfig("A"), ButtonConfig("B", focused=True)]))

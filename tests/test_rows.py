@@ -103,6 +103,14 @@ class TestOptionRows:
         assert "class:checkbox-mark" in _styles(row)
         assert row.hints == {"Space toggle"}
 
+    def test_only_a_check_list_hints_space(self):
+        """A radio or choice list's Space picks, as Enter does: the hint
+        line's "Enter select" covers it."""
+        (radio,) = OptionGroup(["a"], multiple=False).rows
+        (choice,) = OptionGroup(["a"], multiple=False, marks=False).rows
+        assert radio.hints == frozenset()
+        assert choice.hints == frozenset()
+
     def test_hides_the_terminal_cursor(self):
         (row,) = OptionGroup(["a"], multiple=False).rows
         assert row.create_content(60, 1).show_cursor is False

@@ -325,9 +325,10 @@ result = await session.show_dialog(Dialog(
 
 A button either returns a fixed `result` or runs a `handler`, which decides
 what happens: `set_result(...)` or `cancel()` closes the dialog, doing
-nothing keeps it open (e.g. while input is invalid). For a form, give the dialog `fields` and read what they hold with
-`dialog.values`; for other content, pass any prompt_toolkit container as
-`body`, or subclass `Dialog` and override `build_body()` / `get_buttons()`:
+nothing keeps it open (e.g. while input is invalid). For a form, give the
+dialog `fields` and read what they hold with `dialog.values`; for other
+content, pass any prompt_toolkit container as `body`, or subclass `Dialog`
+and override `build_body()` / `get_buttons()`:
 
 ```python
 from thinking_prompt import ButtonConfig, Dialog, TextField
@@ -413,9 +414,12 @@ bar, in the rows a box dialog would take, but laid out as plain rows instead of 
 Choose per session, per dialog, or per call:
 
 ```python
+from thinking_prompt import ButtonConfig, Dialog, ThinkingPromptSession
+
 session = ThinkingPromptSession(dialog_placement="inline")   # default: "box"
 
 ok = await session.yes_no_dialog("Delete?", "3 files", placement="box")   # this call only
+buttons = [ButtonConfig("A", result="a"), ButtonConfig("B", result="b")]
 await session.show_dialog(Dialog("Pick", "Which one?", buttons, placement="inline"))
 ```
 
@@ -427,7 +431,7 @@ become selectors inline), Space toggles a checkbox, Enter edits a text field.
 Check, radio and choice lists show one option per line, in both styles:
 
 ```python
-from thinking_prompt import ChecklistField, ChoiceField, RadioField
+from thinking_prompt import ButtonConfig, ChecklistField, ChoiceField, Dialog, RadioField
 
 tools = await session.checklist_dialog(
     "Tools", "Enable any:", ["search", "code", "files"], defaults=["search"],
@@ -494,9 +498,9 @@ Every field takes `key`, `label`, `description` and `default`. A check,
 radio or choice list with no label and no description shows just its options.
 
 **Keys:** in a box, ↑↓ move a row at a time and Tab / Shift+Tab a field at a
-time (Tab on to the buttons after the last field; a radio or choice list is
-entered at its picked option). Inline, one cursor walks the rows and the
-actions.
+time (Tab on to the buttons after the last field, Shift+Tab from the buttons
+back to it; a radio or choice list is always entered at its picked option).
+Inline, one cursor walks the rows and the actions.
 
 **Aligning values:** values start two columns after the longest label or
 description (`align_values="labels"`, the default), so descriptions don't run
