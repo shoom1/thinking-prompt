@@ -1,12 +1,13 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-fancy-pypi-readme"]
 build-backend = "hatchling.build"
 
 [project]
 name = "thinking-prompt"
 version = "0.3.4"
 description = "A prompt_toolkit extension that adds a thinking box above the prompt"
-readme = "README.md"
+# README.md, with its relative img/ links made absolute (below), so PyPI shows them.
+dynamic = ["readme"]
 license = "MIT"
 requires-python = ">=3.9"
 authors = [
@@ -50,6 +51,18 @@ all = ["rich>=13.0,<16", "pygments>=2.15.0"]
 [project.urls]
 Homepage = "https://github.com/shoom1/thinking-prompt"
 Repository = "https://github.com/shoom1/thinking-prompt"
+
+[tool.hatch.metadata.hooks.fancy-pypi-readme]
+content-type = "text/markdown"
+
+[[tool.hatch.metadata.hooks.fancy-pypi-readme.fragments]]
+path = "README.md"
+
+# PyPI has no img/ folder to resolve a relative link against: point it at
+# the file on main, which holds the latest release.
+[[tool.hatch.metadata.hooks.fancy-pypi-readme.substitutions]]
+pattern = '\]\(img/'
+replacement = '](https://raw.githubusercontent.com/shoom1/thinking-prompt/main/img/'
 
 [tool.hatch.build.targets.wheel]
 packages = ["thinking_prompt"]
