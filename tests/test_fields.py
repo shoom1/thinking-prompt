@@ -233,17 +233,16 @@ class TestDialogFields:
         assert d._is_editing() is True
 
     def test_a_boxs_dropdown_menus_float_over_the_screen(self):
-        d = Dialog("T", fields=[DropdownField("d", "D", options=["a"])])
-        _shown(d, "box")
-        assert len(d._screen_floats()) == 1
-        _shown(d, "inline")
-        assert d._screen_floats() == []
+        d = Dialog("T", fields=[DropdownField("d", "D", options=["a"]), CheckboxField("c", "C")])
+        (menu,) = d._screen_floats()
+        assert menu.attach_to_window is d._form.controls[0]._window
 
     def test_a_box_binds_the_arrows_inline_leaves_them_to_the_dialog(self):
         d = Dialog("T", fields=[CheckboxField("a", "A"), CheckboxField("b", "B")])
         content, _ = _shown(d, "box")
-        assert content.key_bindings.get_bindings_for_keys((Keys.Down,)) != []
-        assert content.key_bindings.get_bindings_for_keys((Keys.ControlS,)) == []
+        fields = content.children[-1]   # under the Tab keys
+        assert fields.key_bindings.get_bindings_for_keys((Keys.Down,)) != []
+        assert _bindings(content.key_bindings, Keys.ControlS) == _bindings(fields.key_bindings, Keys.ControlS) == []
         content, _ = _shown(d, "inline")
         assert content.key_bindings is None
 
@@ -263,7 +262,7 @@ class TestDialogFields:
         layout = app.layout
         with set_app(app):
             assert layout.has_focus(tools._group.rows[0].window)
-            _press(content.key_bindings, Keys.Down, app)        # ↓: the next option
+            _press(content.children[-1].key_bindings, Keys.Down, app)   # ↓: the next option
             assert layout.has_focus(tools._group.rows[1].window)
             _press(content.key_bindings, Keys.Tab, app)         # Tab: the next field, at its pick
             assert layout.has_focus(mode._group.rows[1].window)
@@ -275,7 +274,7 @@ class TestDialogFields:
             assert layout.has_focus(tools._group.rows[0].window)
             _press(content.key_bindings, Keys.BackTab, app)     # the first field stays
             assert layout.has_focus(tools._group.rows[0].window)
-            _press(content.key_bindings, Keys.Down, app)
+            _press(content.children[-1].key_bindings, Keys.Down, app)
             _press(content.key_bindings, Keys.BackTab, app)     # so does its second option
             assert layout.has_focus(tools._group.rows[1].window)
 
@@ -863,7 +862,7 @@ class TestSettingsRows:
     def test_box_body_walks_settings_with_arrows(self):
         dialog = Dialog("S", fields=[CheckboxField(key="a", label="A"), CheckboxField(key="b", label="B")])
         body, _ = dialog._content()
-        assert _bindings(body.key_bindings, Keys.Down) != []
+        assert _bindings(body.children[-1].key_bindings, Keys.Down) != []
         assert len(dialog._form.stops()) == 2
 
     def test_is_editing_follows_the_controls(self):

@@ -932,9 +932,9 @@ class _EditRow(Container):
     keeps the value. The field keeps min(8, edit_width) columns: the label
     is cut further to keep them."""
 
-    def __init__(self, control: TextFieldControl, field: Window) -> None:
+    def __init__(self, control: TextFieldControl, editor: Window) -> None:
         self._control = control
-        self._field = field
+        self._editor = editor   # the input field's window
         self._label = Window(_MarkedLabel(control.item))
         self._rest = Window()
 
@@ -978,9 +978,9 @@ class _EditRow(Container):
             min_field=min(8, edit_width),
         )
         start = max(0, min(layout.column, width))
-        field = min(layout.field, width - start)
+        editor = min(layout.field, width - start)
         x = write_position.xpos
-        for child, child_width in ((self._label, start), (self._field, field), (self._rest, width - start - field)):
+        for child, child_width in ((self._label, start), (self._editor, editor), (self._rest, width - start - editor)):
             child.write_to_screen(
                 screen,
                 mouse_handlers,
@@ -992,7 +992,7 @@ class _EditRow(Container):
             x += child_width
 
     def get_children(self) -> list[Container]:
-        return [self._label, self._field, self._rest]
+        return [self._label, self._editor, self._rest]
 
 
 class _MarkedLabel(UIControl):
@@ -1125,8 +1125,6 @@ class _Form:
             if key in keys:
                 raise ValueError(f"Dialog fields need unique keys; {key!r} is used twice")
             keys.add(key)
-        # The placement the fields were last laid out for (container()).
-        self._placement: Placement = "box"
 
     @property
     def values(self) -> dict[str, Any]:
@@ -1161,7 +1159,6 @@ class _Form:
         values at ``align_values``, with their keys; None without fields."""
         if not self.controls:
             return None
-        self._placement = placement
         inline = placement == "inline"
         for control in self.controls:
             if control.is_editing:
@@ -1176,15 +1173,13 @@ class _Form:
         # layout settles.
         return HSplit(
             [control.get_container() for control in self.controls],
-            key_bindings=self._key_bindings(),
+            key_bindings=None if inline else self._key_bindings(),
             window_too_small=Window(),
         )
 
     def floats(self) -> list[Float]:
         """A box's dropdown menus, to float over the whole screen, not the
         form, so each is sized by the room the terminal has around its row."""
-        if self._placement == "inline":
-            return []
         return [c.get_float() for c in self.controls if isinstance(c, DropdownFieldControl)]
 
     def _enterable(self) -> list[FieldControl]:
@@ -1211,11 +1206,9 @@ class _Form:
             max((c.widest_value() for c in rows), default=0),
         )
 
-    def _key_bindings(self) -> KeyBindingsBase | None:
-        """In a box, ↑↓ move a row at a time. Inline: none, the dialog's own
-        cursor walks fields and actions alike."""
-        if self._placement == "inline":
-            return None
+    def _key_bindings(self) -> KeyBindingsBase:
+        """In a box, ↑↓ move a row at a time (inline, the dialog's own cursor
+        walks fields and actions alike)."""
         return RowNavigator(self.stops, is_editing=self.is_editing).key_bindings()
 
     def tab_bindings(self, before: Callable[[], list[Container]]) -> KeyBindings:

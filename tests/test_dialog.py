@@ -260,7 +260,7 @@ class TestBuiltinDialogs:
         box = _checklist_dialog("T", "", ["a", "b"], placement="box")
         box._placement = "box"
         content, _ = box._content()
-        assert content.key_bindings.get_bindings_for_keys((Keys.Down,)) != []
+        assert content.children[-1].key_bindings.get_bindings_for_keys((Keys.Down,)) != []
         inline = _checklist_dialog("T", "", ["a", "b"], placement="inline")
         inline._placement = "inline"
         content, _ = inline._content()
