@@ -289,6 +289,14 @@ class BoxPresenter:
         layout.container = self._root
         self._installed = True
 
+    @property
+    def root(self) -> FloatContainer:
+        """The float layer install() put over the session's layout, the whole
+        screen: box dialogs float on it, and so do an open dialog's own
+        floats (a dropdown's menu), box or inline."""
+        assert self._root is not None  # install() ran
+        return self._root
+
     def open(self, dialog: Dialog) -> BoxView:
         """Build ``dialog`` and float it over its reserved rows (_BoxFloat)."""
         view = build_box(dialog)
@@ -304,18 +312,16 @@ class BoxPresenter:
         # the box's so they draw over it. Hidden with the box: a notice
         # leaves them no row to attach to.
         if view.floats:
-            assert self._root is not None  # install() ran
             boxed = Condition(lambda: self._notice_in_app() is None)
             for fl in view.floats:
                 fl.content = ConditionalContainer(fl.content, filter=boxed)
-            self._root.floats.extend(view.floats)
+            self.root.floats.extend(view.floats)
         return view
 
     def close(self) -> None:
-        if self.view is not None and self.view.floats:
-            assert self._root is not None
+        if self.view is not None:
             for fl in self.view.floats:
-                self._root.floats.remove(fl)
+                self.root.floats.remove(fl)
         self.view = None
         self._smallest_memo = None
         self._room_memo = None

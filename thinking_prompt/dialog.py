@@ -295,7 +295,7 @@ class Dialog:
 
     def _screen_floats(self) -> list[Float]:
         """Floats the fields need over the whole screen while the dialog is
-        open as a box: each dropdown's menu."""
+        open: each dropdown's menu."""
         return self._form.floats()
 
     def get_buttons(self) -> list[ButtonConfig]:
@@ -714,7 +714,7 @@ class DialogManager:
                 # first focusable element (a button).
                 target = box.initial_focus or box.widget
             else:
-                target = self._inline.open(dialog).focus
+                target = self._inline.open(dialog, self._box.root).focus
 
             self._visible = True
             if target is None:

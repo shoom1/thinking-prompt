@@ -646,12 +646,6 @@ def _bindings(kb, key):
     return [] if kb is None else kb.get_bindings_for_keys((key,))
 
 
-def _inline_dropdown(**item) -> DropdownFieldControl:
-    control = DropdownFieldControl(DropdownField(**item))
-    control.set_inline(True)
-    return control
-
-
 def _line(control, selected: bool, row: int = 0):
     """``control``'s ``row`` as drawn while its first cursor stop has
     focus (``selected``), or with no app running."""
@@ -675,8 +669,6 @@ class TestRowStyles:
              "false", "field-value-false"),
             (lambda: SelectFieldControl(SelectField(key="s", label="Label", options=["a", "b"], default="a")),
              "a", "field-value"),
-            (lambda: _inline_dropdown(key="d", label="Label", options=["a", "b"], default="a"),
-             "a", "field-value"),
             (lambda: DropdownFieldControl(DropdownField(key="d", label="Label", options=["a", "b"], default="a")),
              "a", "field-value"),
             (lambda: TextFieldControl(TextField(key="t", label="Label", default="bob")),
@@ -684,7 +676,7 @@ class TestRowStyles:
             (lambda: TextFieldControl(TextField(key="t", label="Label")),
              "(empty)", "field-desc"),
         ],
-        ids=["checked", "unchecked", "select", "inline-dropdown", "dropdown", "text", "empty-text"],
+        ids=["checked", "unchecked", "select", "dropdown", "text", "empty-text"],
     )
     @pytest.mark.parametrize("selected", [False, True], ids=["idle", "selected"])
     def test_label_and_value(self, make, value, style, selected):
@@ -717,18 +709,10 @@ class TestRowStyles:
         assert all("class:field-desc-selected" in style for _, style in description[2:11])
 
     @pytest.mark.parametrize(
-        "make",
-        [
-            lambda: SelectFieldControl(SelectField(key="s", label="S", options=["a", "b", "c"], default="b")),
-            lambda: _inline_dropdown(key="d", label="D", options=["a", "b", "c"], default="b"),
-        ],
-        ids=["select", "inline-dropdown"],
-    )
-    @pytest.mark.parametrize(
         "key,value", [(Keys.Left, "a"), (Keys.Right, "c"), (" ", "c")], ids=["left", "right", "space"]
     )
-    def test_selector_keys_step_through_the_options(self, make, key, value):
-        control = make()
+    def test_selector_keys_step_through_the_options(self, key, value):
+        control = SelectFieldControl(SelectField(key="s", label="S", options=["a", "b", "c"], default="b"))
         (binding,) = [b for b in _bindings(control.get_key_bindings(), key) if b.filter()]
         binding.handler(MagicMock())
         assert control.value == value
@@ -742,25 +726,20 @@ class TestFieldRows:
         (row,) = control._build_row(40, _RowValue("true", "", 4), True)
         assert row[0] == ("class:field-indicator", "❯ ")
 
-    def test_inline_dropdown_is_a_selector_without_a_popup(self):
-        control = DropdownFieldControl(DropdownField(key="m", label="Model", options=["a", "b", "c"], default="b"))
-        control.set_inline(True)
+    @pytest.mark.parametrize("placement", ["box", "inline"])
+    def test_a_dropdown_is_a_menu_in_both_placements(self, placement):
+        d = Dialog("T", fields=[DropdownField(key="m", label="Model", options=["a", "b", "c"], default="b")])
+        _shown(d, placement)
+        (control,) = d._form.controls
         text = "".join(t for _, t in control.create_content(40, 1).get_line(0))
-        assert text.endswith("◀ b ▶")
-        assert control.hints == {"←→ change"}
-        kb = control.get_key_bindings()
-        (right,) = [b for b in _bindings(kb, Keys.Right) if b.filter()]
-        right.handler(MagicMock())
-        assert control.value == "c"
-        assert not any(b.filter() for b in _bindings(kb, Keys.ControlM))  # no popup
-
-    def test_box_dropdown_is_unchanged(self):
-        control = DropdownFieldControl(DropdownField(key="m", label="Model", options=["a", "b"], default="b"))
-        text = "".join(t for _, t in control.create_content(40, 1).get_line(0))
-        assert text.endswith("b ▼")
+        assert text.split() == ["Model", "b", "▼"]
         assert control.hints == frozenset()
+        kb = control.get_key_bindings()
+        assert any(b.filter() for b in _bindings(kb, Keys.ControlM))  # Enter opens the menu
+        assert _bindings(kb, Keys.Right) == []                          # no ←→ stepping
+        assert len(d._screen_floats()) == 1
 
-    def test_inline_body_has_no_popups_and_leaves_arrows_to_the_dialog(self):
+    def test_inline_body_leaves_arrows_to_the_dialog(self):
         dialog = Dialog(
             "S",
             fields=[DropdownField(key="m", label="M", options=["a", "b"]), CheckboxField(key="c", label="C")],
@@ -768,7 +747,7 @@ class TestFieldRows:
         )
         dialog._placement = "inline"  # as show_dialog() resolves it
         body, _ = dialog._content()
-        assert isinstance(body, HSplit)  # no FloatContainer for dropdown menus
+        assert isinstance(body, HSplit)
         assert _bindings(body.key_bindings, Keys.Down) == []
         assert _bindings(body.key_bindings, Keys.ControlS) == []
 
@@ -857,12 +836,6 @@ def test_widest_value(make, widest):
     """The most columns a setting's value takes in full: showing any of its
     options, or what it shows now."""
     assert make().widest_value() == widest
-
-
-def test_an_inline_dropdowns_widest_value_is_its_widest_option():
-    control = DropdownFieldControl(DropdownField(key="a", label="A", options=["x", "Longest"], width=20))
-    control.set_inline(True)
-    assert control.widest_value() == len("◀ Longest ▶")
 
 
 def _fixed(column: int | None) -> _ValueColumn | None:
@@ -1095,12 +1068,6 @@ class TestRowsShortOfWidth:
         assert _row(_selector(), None, width=20) == "  Mo… ◀ gpt-4o-m… ▶"
         assert _row(_selector(), 14, width=20) == "  Mo… ◀ gpt-4o-m… ▶"
 
-    def test_an_inline_dropdown_gives_way_like_a_selector(self):
-        control = _dropdown(label="Model name", default="o1")
-        control.set_inline(True)
-        assert _row(control, 14, width=24) == "  Model name  ◀ o1  "
-        assert _row(control, None, width=12) == "  Mo… ◀ o1 "
-
     def test_a_missing_arrows_blank_place_gives_way_before_the_option_is_cut(self):
         # Last option: no ▶, so the blank after it shrinks first.
         last = _selector(options=("a", "gpt-4o", "z"), default="z")
@@ -1290,13 +1257,13 @@ class TestAlignValues:
         assert column.at(200) == 2 + 50 + 2
         assert column.at(20) == 2 + len("API key") + 2
 
-    def test_an_inline_dropdown_is_measured_as_the_selector_it_shows(self):
+    @pytest.mark.parametrize("shown", ["box", "inline"])
+    def test_a_dropdown_is_measured_as_its_menu_field_in_both_placements(self, shown):
         items = [
             DropdownField(key="m", label="Model", description="d" * 60, options=["a", "b"], width=30),
         ]
-        # Inline, the value is "◀ a ▶"; in a box, a 30-column menu field and " ▼".
-        assert self._column(items, shown="inline").at(80) == 2 + 60 + 2
-        assert self._column(items, shown="box").at(80) == 80 - 1 - (30 + 2)
+        # A 30-column menu field and " ▼", as far right as it fits.
+        assert self._column(items, shown=shown).at(80) == 80 - 1 - (30 + 2)
 
     def test_list_labels_and_descriptions_dont_move_the_values(self):
         items = [
