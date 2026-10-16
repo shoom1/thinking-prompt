@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any, Callable
 
 from prompt_toolkit.application.current import get_app
 from prompt_toolkit.filters import Condition
+from prompt_toolkit.key_binding import merge_key_bindings
 from prompt_toolkit.layout import (
     ConditionalContainer,
     Container,
@@ -108,6 +109,12 @@ def build_box(dialog: Dialog) -> BoxView:
         if cfg.focused and focused is None:
             focused = button
         buttons.append(button)
+    # Tab / Shift+Tab from a button enter a field at its start (a radio
+    # list's pick), not at its row nearest the buttons. On each button's own
+    # control, so they win over the dialog widget's keys.
+    tabs = dialog._form.button_tab_bindings()
+    for button in buttons:
+        button.control.key_bindings = merge_key_bindings([button.control.key_bindings, tabs])
 
     widget = _DialogWidget(
         title=dialog.title,

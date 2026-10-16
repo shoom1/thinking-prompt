@@ -494,9 +494,9 @@ Every field takes `key`, `label`, `description` and `default`. A check,
 radio or choice list with no label and no description shows just its options.
 
 **Keys:** in a box, ↑↓ move a row at a time and Tab / Shift+Tab a field at a
-time (Tab on to the buttons after the last field; a radio or choice list is
-entered at its picked option). Inline, one cursor walks the rows and the
-actions.
+time (Tab on to the buttons after the last field, Shift+Tab from the buttons
+back to it; a radio or choice list is always entered at its picked option).
+Inline, one cursor walks the rows and the actions.
 
 **Aligning values:** values start two columns after the longest label or
 description (`align_values="labels"`, the default), so descriptions don't run

@@ -1263,3 +1263,29 @@ class _Form:
                 event.app.layout.focus(found[index - 1][1])
 
         return kb
+
+    def button_tab_bindings(self) -> KeyBindings:
+        """A box button's Tab / Shift+Tab: on to the next or previous window,
+        as the dialog widget's own keys go (round from the last button to the
+        first field, back from the first button to the last), but a field
+        they land in is entered at its start (a radio list's picked option),
+        as Tab between fields enters it."""
+        kb = KeyBindings()
+
+        def enter_at_start(layout: Layout) -> None:
+            for control in self._enterable():
+                if any(layout.has_focus(stop) for stop in control.get_stops()):
+                    layout.focus(control.start_stop())
+                    return
+
+        @kb.add("tab")
+        def _next(event: Any) -> None:
+            event.app.layout.focus_next()
+            enter_at_start(event.app.layout)
+
+        @kb.add("s-tab")
+        def _previous(event: Any) -> None:
+            event.app.layout.focus_previous()
+            enter_at_start(event.app.layout)
+
+        return kb

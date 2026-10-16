@@ -2743,6 +2743,60 @@ class TestDialogFields:
 
             await run_with(session, handler, script)
 
+    @staticmethod
+    def _radio_and_checkbox(radio_first: bool) -> Dialog:
+        """A radio list (picked "b" of a-d) and a checkbox, with OK and Cancel."""
+        radio = RadioField("m", "Mode", options=["a", "b", "c", "d"], default="b")
+        check = CheckboxField("c", "Cache")
+        dialog = Dialog(
+            "T", fields=[radio, check] if radio_first else [check, radio], width=40, placement="box",
+        )
+        dialog.buttons = [
+            ButtonConfig("OK", handler=lambda: dialog.set_result(dialog.values)),
+            ButtonConfig("Cancel"),
+        ]
+        return dialog
+
+    async def test_shift_tab_from_the_first_button_enters_the_last_field_at_its_pick(self):
+        dialog = self._radio_and_checkbox(radio_first=False)
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.show_dialog(dialog))
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                inp.send_text(TAB + TAB)               # Mode, then OK
+                inp.send_text(SHIFT_TAB)               # back to Mode, at b
+                inp.send_text(UP + " ")                # a, picked
+                inp.send_text(TAB + ENTER)             # OK
+                await wait_until(lambda: results == [{"c": False, "m": "a"}])
+
+            await run_with(session, handler, script)
+
+    async def test_tab_from_the_last_button_wraps_to_the_first_field_at_its_pick(self):
+        dialog = self._radio_and_checkbox(radio_first=True)
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.show_dialog(dialog))
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                inp.send_text(TAB + TAB + TAB)         # Cache, OK, Cancel
+                inp.send_text(TAB)                     # round to Mode, at b
+                inp.send_text(DOWN + " ")              # c, picked
+                inp.send_text(TAB + TAB + ENTER)       # Cache, then OK
+                await wait_until(lambda: results == [{"m": "c", "c": False}])
+
+            await run_with(session, handler, script)
+
 
 def _choice_form(placement: str) -> Dialog:
     """A checkbox, a ChoiceField (picked "y") and a checkbox; OK returns the values."""
@@ -2907,9 +2961,7 @@ class TestChoiceFieldAlone:
 
             await run_with(session, handler, script)
 
-    async def test_shift_tab_from_ok_comes_back_to_the_list(self):
-        """prompt_toolkit's Shift+Tab from a button lands on the list's last
-        option, as for a radio list."""
+    async def test_shift_tab_from_ok_comes_back_to_the_pick(self):
         dialog = _choice_alone("box")
         results: list[Any] = []
 
@@ -2923,9 +2975,9 @@ class TestChoiceFieldAlone:
                 await wait_until(lambda: dialog_rendered(session))
                 inp.send_text(TAB)                     # OK
                 await wait_until(lambda: not on_screen(session, "❯ x"))
-                inp.send_text(SHIFT_TAB)               # the last option
-                await wait_until(lambda: on_screen(session, "❯ z"))
-                inp.send_text(UP + ENTER)              # y, picked; then OK
+                inp.send_text(SHIFT_TAB)               # the pick
+                await wait_until(lambda: on_screen(session, "❯ x"))
+                inp.send_text(DOWN + ENTER)            # y, picked; then OK
                 await wait_until(lambda: results == ["y"])
 
             await run_with(session, handler, script)
