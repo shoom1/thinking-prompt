@@ -1948,7 +1948,7 @@ class TestInlineSettings:
     async def test_a_narrow_terminal_cuts_labels_and_keeps_every_value(self, align):
         items = [
             CheckboxField(key="stream", label="Stream responses", default=True),
-            SelectField(key="model", label="Model for summaries", options=["gpt-4o", "o1"], default="o1"),
+            DropdownField(key="model", label="Model for summaries", options=["gpt-4o", "o1"], default="o1"),
             TextField(key="name", label="Display name", default="bob"),
         ]
         frame = await first_dialog_frame(
@@ -1957,7 +1957,7 @@ class TestInlineSettings:
         )
         rows = {
             value: next(line.strip().lstrip("❯ ") for line in frame if line.strip().lstrip("❯ ").startswith(label))
-            for label, value in (("Stream", "true"), ("Model", "o1"), ("Dis", "bob"))
+            for label, value in (("Stream", "true"), ("Mo", "o1"), ("Dis", "bob"))
         }
         for value, row in rows.items():
             assert value in row, row
@@ -2054,6 +2054,67 @@ class TestInlineSettings:
                 assert results == [] and dialog_rendered(session)
                 inp.send_text(DOWN + DOWN + ENTER)   # Stream, then 1. Save
                 await wait_until(lambda: results == [{"model": "b", "stream": False}])
+
+            await run_with(session, handler, script)
+
+    @pytest.mark.parametrize("key", [TAB, SHIFT_TAB, "1"], ids=["tab", "shift-tab", "digit"])
+    async def test_keys_with_the_menu_open_stay_in_the_menu(self, key):
+        """Not the dialog's: a Tab, Shift+Tab or digit that got out would move
+        the cursor (a row either way) or run an action, and the keys after
+        it would act elsewhere."""
+        dialog = settings_form(
+            [
+                CheckboxField("cache", "Cache"),
+                DropdownField("model", "Model", options=["a", "b", "c", "d"], default="b"),
+                CheckboxField("stream", "Stream"),
+            ],
+            placement="inline",
+        )
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.show_dialog(dialog))
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                inp.send_text(DOWN + ENTER)          # Model: open the menu
+                await wait_until(lambda: on_screen(session, "│d"))
+                inp.send_text(key)
+                inp.send_text(DOWN + ENTER)          # c
+                inp.send_text(DOWN + DOWN + ENTER)   # Stream, then 1. Save
+                await wait_until(lambda: results == [{"cache": False, "model": "c", "stream": False}])
+
+            await run_with(session, handler, script)
+
+    async def test_a_dialog_that_fails_to_open_leaves_no_menu_behind(self):
+        dialog = self._with_dropdown()
+        failed: list[Exception] = []
+
+        async def handler(text: str) -> None:
+            try:
+                await session.show_dialog(dialog)
+            except ValueError as exc:
+                failed.append(exc)
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                layout = session.app.layout
+                focus = layout.focus
+
+                def refuse_the_dialog(target: Any) -> None:
+                    layout.focus = focus  # type: ignore[method-assign]
+                    raise ValueError("can't focus")
+
+                layout.focus = refuse_the_dialog  # type: ignore[method-assign]
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: failed)
+                row = dialog._form.controls[0]._window
+                assert not any(f.attach_to_window is row for f in layout.container.floats)
+                assert session._dialog_manager.inline_view is None
 
             await run_with(session, handler, script)
 

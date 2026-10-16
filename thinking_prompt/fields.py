@@ -3,7 +3,7 @@ Form fields for dialogs (Dialog.fields): the Field classes that describe
 them and the row controls that draw and edit them.
 
 Up/Down move between rows, Left/Right or Space change a value, Enter edits
-text in place (in a box, opens a dropdown's menu), Escape ends an edit.
+text in place or opens a dropdown's menu, Escape ends an edit.
 """
 from __future__ import annotations
 
@@ -326,20 +326,6 @@ def _widest_selector(options: list[str], value: Any) -> int:
     return max(_selector_value(options, shown, "").columns() for shown in [*options, value])
 
 
-def _add_selector_keys(kb: KeyBindings, cycle: Callable[[int], None]) -> None:
-    """A selector's keys: ←/→ step back and forward through the options,
-    Space forward."""
-
-    @kb.add("left")
-    def _prev(event: Any) -> None:
-        cycle(-1)
-
-    @kb.add("right")
-    @kb.add("space")
-    def _next(event: Any) -> None:
-        cycle(1)
-
-
 def _description(description: str, selected: bool) -> FormattedText:
     """A field's description row, under its label."""
     style = "class:field-desc-selected" if selected else "class:field-desc"
@@ -562,8 +548,18 @@ class SelectFieldControl(FieldControl[SelectField]):
         return _content(self._build_row(width, value, is_selected))
 
     def get_key_bindings(self) -> KeyBindings:
+        """←/→ step back and forward through the options, Space forward."""
         kb = KeyBindings()
-        _add_selector_keys(kb, self.cycle)
+
+        @kb.add("left")
+        def _prev(event: Any) -> None:
+            self.cycle(-1)
+
+        @kb.add("right")
+        @kb.add("space")
+        def _next(event: Any) -> None:
+            self.cycle(1)
+
         return kb
 
 
@@ -671,7 +667,8 @@ class DropdownFieldControl(FieldControl[DropdownField]):
         return _content(lines, Point(x=sum(len(text) for _, text, *_ in ahead), y=0))
 
     def get_float(self) -> Float:
-        """Return the Float for the dropdown menu (to be added at dialog level)."""
+        """The Float for the dropdown menu, for the session's float layer
+        over the whole screen (Dialog._screen_floats)."""
         framed_menu = Frame(
             body=self._menu_window,
             style="class:field-dropdown-border",

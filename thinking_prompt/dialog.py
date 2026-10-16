@@ -616,7 +616,9 @@ class DialogManager:
             region.page(pages)
 
     def _inject_float_container(self) -> None:
-        """Install the box dialogs' float and the Escape binding (one-time)."""
+        """Install the session's float layer (box dialogs, and any open
+        dialog's own floats such as a dropdown's menu) and the Escape
+        binding (one-time)."""
         if self._injected:
             return
 

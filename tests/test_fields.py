@@ -36,6 +36,7 @@ from thinking_prompt import (
 )
 from thinking_prompt.dialog import _checklist_dialog
 from thinking_prompt.dialog_box import build_box
+from thinking_prompt.dialog_inline import build_inline
 from thinking_prompt.dialog_scroll import focusable_windows
 from thinking_prompt.fields import (
     CheckboxFieldControl,
@@ -737,7 +738,9 @@ class TestFieldRows:
         kb = control.get_key_bindings()
         assert any(b.filter() for b in _bindings(kb, Keys.ControlM))  # Enter opens the menu
         assert _bindings(kb, Keys.Right) == []                          # no ←→ stepping
-        assert len(d._screen_floats()) == 1
+        view = build_box(d) if placement == "box" else build_inline(d)
+        (menu,) = view.floats
+        assert menu.attach_to_window is control._window
 
     def test_inline_body_leaves_arrows_to_the_dialog(self):
         dialog = Dialog(
