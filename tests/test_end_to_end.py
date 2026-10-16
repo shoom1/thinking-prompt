@@ -1414,6 +1414,48 @@ class TestInlineMaxHeight:
             await run_with(session, handler, script)
 
 
+class TestDialogRegrown:
+    """A dialog that a shorter terminal scrolled shows the rows above its
+    first stop again when rows come back, though its cursor never moved."""
+
+    @pytest.mark.parametrize("placement,shrunk", [("inline", 7), ("box", 10)])
+    async def test_the_label_above_the_picked_option_shows_again(self, placement: str, shrunk: int):
+        dialog = Dialog(
+            "T",
+            fields=[
+                RadioField("m", "Mode", options=["a", "b", "c", "d"], default="a"),
+                CheckboxField("c", "Cache"),
+                CheckboxField("k", "Keep"),
+            ],
+            placement=placement,
+        )
+        dialog.buttons = [ButtonConfig("OK"), ButtonConfig("Cancel")]
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.show_dialog(dialog))
+
+        with piped_session(rows=30) as (session, inp):
+            session._shrinks._delay = 0.02
+
+            def resize(rows: int) -> None:
+                session.app.output.resize(rows=rows)
+                session.app.invalidate()
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                await wait_until(lambda: on_screen(session, "Mode"))
+                resize(shrunk)
+                await wait_until(lambda: not on_screen(session, "Mode"))
+                resize(14)  # back, though not in full
+                await wait_until(lambda: on_screen(session, "Mode"))
+                inp.send_text(ESCAPE)
+                await wait_until(lambda: results == [None])
+
+            await run_with(session, handler, script)
+
+
 class TestDialogLifetime:
     """A dialog lives only as long as the app that can answer it."""
 
