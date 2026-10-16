@@ -425,8 +425,8 @@ await session.show_dialog(Dialog("Pick", "Which one?", buttons, placement="inlin
 
 One cursor walks every row: ↑↓ move (Tab / Shift+Tab too), Enter runs the
 highlighted action, 1–9 run an action directly, Esc closes an escapable
-dialog. Fields are edited in place: ←→ change a selector (dropdowns
-become selectors inline), Space toggles a checkbox, Enter edits a text field.
+dialog. Fields are edited in place: ←→ change a selector, Enter opens a
+dropdown's menu, Space toggles a checkbox, Enter edits a text field.
 
 Check, radio and choice lists show one option per line, in both styles:
 
@@ -486,7 +486,7 @@ attribute; each dialog keeps its own values. Keys must be unique.
 
 | Field | Shows | Keys |
 |---|---|---|
-| `DropdownField` | The value with `▼`; in a box Enter opens a menu of the options, inline it's a `◀`/`▶` selector | Enter to open, ↑↓ to choose, Enter to keep (inline: ←→) |
+| `DropdownField` | The value with `▼`; Enter opens a menu of the options under it, in a box and inline | Enter (or Space) to open, ↑↓ to choose, Enter to keep, Escape to put the old value back |
 | `SelectField` | A `◀ value ▶` selector | ←→ (or Space) to step through the options |
 | `TextField` | Text, edited in place (`password=True` shows dots) | Enter to edit, Enter/Escape to keep/drop the edit |
 | `CheckboxField` | `true` / `false` | Space, Enter or ←→ to toggle |

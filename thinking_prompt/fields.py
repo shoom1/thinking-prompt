@@ -3,7 +3,7 @@ Form fields for dialogs (Dialog.fields): the Field classes that describe
 them and the row controls that draw and edit them.
 
 Up/Down move between rows, Left/Right or Space change a value, Enter edits
-text in place (in a box, opens a dropdown's menu), Escape ends an edit.
+text in place or opens a dropdown's menu, Escape ends an edit.
 """
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from typing import Any, Generic, Literal, TypeVar, Union
 
 from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.data_structures import Point
-from prompt_toolkit.filters import Condition, FilterOrBool
+from prompt_toolkit.filters import Condition
 from prompt_toolkit.formatted_text import FormattedText
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.key_binding.key_bindings import KeyBindingsBase
@@ -67,14 +67,19 @@ class SelectField(Field):
 
 @dataclass(frozen=True)
 class DropdownField(Field):
-    """One of ``options``. In a box, Enter opens a menu of them; inline, it's
-    a ←/→ selector. ``height``: the menu's rows; ``width``: its columns
-    (None: the widest option's, at most ``max_width``)."""
+    """One of ``options``: Enter (or Space) opens a menu of them under the
+    row, in a box and inline alike. ``height``: the menu's rows; ``width``:
+    its columns (None: the widest option's, at most ``max_width``)."""
     options: list[str] = field(default_factory=list)
     default: Any = None
     height: int = 4
     width: int | None = 15
     max_width: int | None = None
+
+    def __post_init__(self) -> None:
+        _check_size(self, "height", self.height)
+        _check_size(self, "width", self.width, optional=True)
+        _check_size(self, "max_width", self.max_width, optional=True)
 
 
 @dataclass(frozen=True)
@@ -90,6 +95,9 @@ class TextField(Field):
     default: str = ""
     password: bool = False
     edit_width: int = 15
+
+    def __post_init__(self) -> None:
+        _check_size(self, "edit_width", self.edit_width)
 
 
 @dataclass(frozen=True)
@@ -120,6 +128,15 @@ class ChoiceField(Field):
     def __post_init__(self) -> None:
         if not self.options:
             raise ValueError(f"ChoiceField {self.key!r} needs at least one option")
+
+
+def _check_size(item: Field, name: str, value: int | None, optional: bool = False) -> None:
+    """A field's size (rows or columns) is at least 1; None too if ``optional``."""
+    if optional and value is None:
+        return
+    if value is None or value < 1:
+        none = " (or None)" if optional else ""
+        raise ValueError(f"{type(item).__name__} {item.key!r}: {name} must be at least 1{none}, got {value!r}")
 
 
 T = TypeVar("T", bound=Field)
@@ -324,20 +341,6 @@ def _widest_selector(options: list[str], value: Any) -> int:
     """The most columns a ``◀ option ▶`` selector over ``options`` takes,
     showing any of them or ``value`` (a default can be none of them)."""
     return max(_selector_value(options, shown, "").columns() for shown in [*options, value])
-
-
-def _add_selector_keys(kb: KeyBindings, cycle: Callable[[int], None], when: FilterOrBool = True) -> None:
-    """A selector's keys: ←/→ step back and forward through the options,
-    Space forward."""
-
-    @kb.add("left", filter=when)
-    def _prev(event: Any) -> None:
-        cycle(-1)
-
-    @kb.add("right", filter=when)
-    @kb.add("space", filter=when)
-    def _next(event: Any) -> None:
-        cycle(1)
 
 
 def _description(description: str, selected: bool) -> FormattedText:
@@ -562,8 +565,18 @@ class SelectFieldControl(FieldControl[SelectField]):
         return _content(self._build_row(width, value, is_selected))
 
     def get_key_bindings(self) -> KeyBindings:
+        """←/→ step back and forward through the options, Space forward."""
         kb = KeyBindings()
-        _add_selector_keys(kb, self.cycle)
+
+        @kb.add("left")
+        def _prev(event: Any) -> None:
+            self.cycle(-1)
+
+        @kb.add("right")
+        @kb.add("space")
+        def _next(event: Any) -> None:
+            self.cycle(1)
+
         return kb
 
 
@@ -585,20 +598,8 @@ class DropdownFieldControl(FieldControl[DropdownField]):
             height=Dimension(min=1, preferred=self._preferred_menu_rows()),
             style="class:field-dropdown",
         )
-        # Inline dialogs show a dropdown as a ←/→ selector, with no popup menu.
-        self._inline = False
-
-    def set_inline(self, inline: bool) -> None:
-        """Show as a ←/→ selector (inline dialogs) instead of a popup menu."""
-        self._inline = inline
-
-    @property
-    def hints(self) -> frozenset[str]:
-        return frozenset({"←→ change"}) if self._inline else frozenset()
 
     def widest_value(self) -> int:
-        if self._inline:
-            return _widest_selector(self._item.options, self._value)
         shown = [*self._item.options, str(self._value) if self._value else ""]
         return max(self._menu_value(text, "").columns() for text in shown)
 
@@ -612,10 +613,6 @@ class DropdownFieldControl(FieldControl[DropdownField]):
             left=self._value_column is not None,
             after=((style, " "), (f"{style} class:select-arrow", "▼")),
         )
-
-    def cycle(self, delta: int) -> None:
-        """Move through options by delta (+1 or -1), clamped to the ends."""
-        self._value = _cycled(self._item.options, self._value, delta)
 
     def _preferred_menu_rows(self) -> int:
         """Option rows the menu asks for; it gets fewer when there is no room."""
@@ -677,12 +674,7 @@ class DropdownFieldControl(FieldControl[DropdownField]):
         """Render the dropdown row with down arrow indicator."""
         is_selected = self._check_focus()
         value_style = "class:field-value-selected" if is_selected else "class:field-value"
-
-        if self._inline:
-            value = _selector_value(self._item.options, self._value, value_style)
-        else:
-            value = self._menu_value(str(self._value) if self._value else "", value_style)
-
+        value = self._menu_value(str(self._value) if self._value else "", value_style)
         lines = self._build_row(width, value, is_selected)
         # The menu opens under the value, where this row draws it (get_float).
         # prompt_toolkit's menu position counts characters into the line, not
@@ -692,7 +684,8 @@ class DropdownFieldControl(FieldControl[DropdownField]):
         return _content(lines, Point(x=sum(len(text) for _, text, *_ in ahead), y=0))
 
     def get_float(self) -> Float:
-        """Return the Float for the dropdown menu (to be added at dialog level)."""
+        """The Float for the dropdown menu, for the session's float layer
+        over the whole screen (Dialog._screen_floats)."""
         framed_menu = Frame(
             body=self._menu_window,
             style="class:field-dropdown-border",
@@ -712,10 +705,10 @@ class DropdownFieldControl(FieldControl[DropdownField]):
         )
 
     def get_key_bindings(self) -> KeyBindings:
-        """Popup menu keys in a box; ←/→ (and Space) cycle inline."""
+        """The menu's keys: Enter or Space opens it, ↑↓ choose, Enter keeps
+        the choice and Escape puts the old value back."""
         kb = KeyBindings()
-        inline = Condition(lambda: self._inline)
-        popup_closed = Condition(lambda: not self._inline and not self._editing)
+        popup_closed = Condition(lambda: not self._editing)
         editing = Condition(lambda: self._editing)
 
         @kb.add("enter", filter=popup_closed)
@@ -740,7 +733,6 @@ class DropdownFieldControl(FieldControl[DropdownField]):
         def _cancel(event: Any) -> None:
             self.cancel_edit()
 
-        _add_selector_keys(kb, self.cycle, inline)
         return kb
 
 
@@ -1164,9 +1156,6 @@ class _Form:
         for control in self.controls:
             if control.is_editing:
                 control.abandon_edit()   # a dialog closed mid-edit
-            if isinstance(control, DropdownFieldControl):
-                control.set_inline(inline)
-        # After set_inline: an inline dropdown's value is a selector.
         column = self._value_column(align_values)
         for control in self.controls:
             control.set_value_column(column)
@@ -1179,8 +1168,8 @@ class _Form:
         )
 
     def floats(self) -> list[Float]:
-        """A box's dropdown menus, to float over the whole screen, not the
-        form, so each is sized by the room the terminal has around its row."""
+        """The dropdown menus, to float over the whole screen, not the form,
+        so each is sized by the room the terminal has around its row."""
         return [c.get_float() for c in self.controls if isinstance(c, DropdownFieldControl)]
 
     def _enterable(self) -> list[FieldControl]:

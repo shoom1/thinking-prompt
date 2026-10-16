@@ -10,12 +10,12 @@ above them, with PgUp/PgDn.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Callable
 
 from prompt_toolkit.application.current import get_app
 from prompt_toolkit.formatted_text import FormattedText
-from prompt_toolkit.layout import Container, HSplit, VSplit, Window
+from prompt_toolkit.layout import Container, Float, FloatContainer, HSplit, VSplit, Window
 from prompt_toolkit.layout.controls import FormattedTextControl, UIContent
 from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.utils import get_cwidth
@@ -54,6 +54,8 @@ class InlineView:
         hint_text: The hint line's text, worked out at each redraw.
         text_region: The text body's region (a body with no cursor stops),
             which scrolls by keys; None otherwise.
+        floats: Floats the body needs over the whole screen
+            (Dialog._screen_floats): a dropdown's menu.
     """
 
     container: Container
@@ -61,6 +63,7 @@ class InlineView:
     actions: list[ActionRow]
     hint_text: Callable[[], str]
     text_region: ScrollRegion | None = None
+    floats: list[Float] = field(default_factory=list)
 
     @property
     def hint(self) -> str:
@@ -194,7 +197,9 @@ def build_inline(dialog: Dialog) -> InlineView:
         focus = first[0] if first else None
 
     # A one-column left margin.
-    return InlineView(VSplit([Window(width=1), content]), focus, actions, hint, text)
+    return InlineView(
+        VSplit([Window(width=1), content]), focus, actions, hint, text, dialog._screen_floats()
+    )
 
 
 def _blank_row() -> Window:
@@ -252,10 +257,20 @@ class InlinePresenter:
 
     def __init__(self) -> None:
         self.view: InlineView | None = None
+        # Where the open dialog's own floats are (open()).
+        self._root: FloatContainer | None = None
 
-    def open(self, dialog: Dialog) -> InlineView:
+    def open(self, dialog: Dialog, root: FloatContainer) -> InlineView:
+        """Build ``dialog``, its own floats (a dropdown's menu) on ``root``,
+        the session's float layer over the whole screen."""
         self.view = build_inline(dialog)
+        self._root = root
+        root.floats.extend(self.view.floats)
         return self.view
 
     def close(self) -> None:
+        if self.view is not None and self._root is not None:
+            for fl in self.view.floats:
+                self._root.floats.remove(fl)
         self.view = None
+        self._root = None

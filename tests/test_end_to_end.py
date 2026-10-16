@@ -1957,7 +1957,7 @@ class TestInlineSettings:
         )
         rows = {
             value: next(line.strip().lstrip("❯ ") for line in frame if line.strip().lstrip("❯ ").startswith(label))
-            for label, value in (("Stream", "true"), ("Model", "o1"), ("Dis", "bob"))
+            for label, value in (("Stream", "true"), ("Mo", "o1"), ("Dis", "bob"))
         }
         for value, row in rows.items():
             assert value in row, row
@@ -2000,6 +2000,153 @@ class TestInlineSettings:
                 await wait_until(
                     lambda: results == [{"model": "b", "stream": True, "name": "bob"}]
                 )
+
+            await run_with(session, handler, script)
+
+    @staticmethod
+    def _with_dropdown() -> Dialog:
+        """An inline form: a dropdown (b of a-d) and a checkbox; Save returns the values."""
+        return settings_form(
+            [
+                DropdownField("model", "Model", options=["a", "b", "c", "d"], default="b"),
+                CheckboxField("stream", "Stream"),
+            ],
+            placement="inline",
+        )
+
+    async def test_a_dropdown_opens_its_menu_and_enter_keeps_the_choice(self):
+        dialog = self._with_dropdown()
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.show_dialog(dialog))
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                inp.send_text(ENTER)                 # open the menu
+                await wait_until(lambda: on_screen(session, "│d"))
+                inp.send_text(DOWN + ENTER)          # c
+                await wait_until(lambda: not on_screen(session, "│d"))
+                inp.send_text(DOWN + DOWN + ENTER)   # Stream, then 1. Save
+                await wait_until(lambda: results == [{"model": "c", "stream": False}])
+
+            await run_with(session, handler, script)
+
+    async def test_escape_with_the_menu_open_closes_only_the_menu(self):
+        dialog = self._with_dropdown()
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.show_dialog(dialog))
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                inp.send_text(ENTER + DOWN)          # open the menu, on c
+                await wait_until(lambda: on_screen(session, "│d"))
+                inp.send_text(ESCAPE)                # b again; the dialog stays
+                await wait_until(lambda: not on_screen(session, "│d"))
+                assert results == [] and dialog_rendered(session)
+                inp.send_text(DOWN + DOWN + ENTER)   # Stream, then 1. Save
+                await wait_until(lambda: results == [{"model": "b", "stream": False}])
+
+            await run_with(session, handler, script)
+
+    @pytest.mark.parametrize("key", [TAB, SHIFT_TAB, "1"], ids=["tab", "shift-tab", "digit"])
+    async def test_keys_with_the_menu_open_stay_in_the_menu(self, key):
+        """Not the dialog's: a Tab, Shift+Tab or digit that got out would move
+        the cursor (a row either way) or run an action, and the keys after
+        it would act elsewhere."""
+        dialog = settings_form(
+            [
+                CheckboxField("cache", "Cache"),
+                DropdownField("model", "Model", options=["a", "b", "c", "d"], default="b"),
+                CheckboxField("stream", "Stream"),
+            ],
+            placement="inline",
+        )
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.show_dialog(dialog))
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                inp.send_text(DOWN + ENTER)          # Model: open the menu
+                await wait_until(lambda: on_screen(session, "│d"))
+                inp.send_text(key)
+                inp.send_text(DOWN + ENTER)          # c
+                inp.send_text(DOWN + DOWN + ENTER)   # Stream, then 1. Save
+                await wait_until(lambda: results == [{"cache": False, "model": "c", "stream": False}])
+
+            await run_with(session, handler, script)
+
+    async def test_a_dialog_that_fails_to_open_leaves_no_menu_behind(self):
+        dialog = self._with_dropdown()
+        failed: list[Exception] = []
+
+        async def handler(text: str) -> None:
+            try:
+                await session.show_dialog(dialog)
+            except ValueError as exc:
+                failed.append(exc)
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                layout = session.app.layout
+                focus = layout.focus
+
+                def refuse_the_dialog(target: Any) -> None:
+                    layout.focus = focus  # type: ignore[method-assign]
+                    raise ValueError("can't focus")
+
+                layout.focus = refuse_the_dialog  # type: ignore[method-assign]
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: failed)
+                row = dialog._form.controls[0]._window
+                assert not any(f.attach_to_window is row for f in layout.container.floats)
+                assert session._dialog_manager.inline_view is None
+
+            await run_with(session, handler, script)
+
+    async def test_the_menu_goes_with_the_dialog(self):
+        dialog = self._with_dropdown()
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.show_dialog(dialog))
+
+        with piped_session() as (session, inp):
+
+            def menus() -> list[Any]:
+                """The dropdown's menu floats on the session's float layer."""
+                row = dialog._form.controls[0]._window
+                return [f for f in session.app.layout.container.floats if f.attach_to_window is row]
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                inp.send_text(ENTER + DOWN)          # open the menu, on c
+                await wait_until(lambda: on_screen(session, "│d"))
+                assert len(menus()) == 1
+                dialog.cancel()                      # closed with the menu open
+                await wait_until(lambda: results == [None])
+                assert menus() == []
+                inp.send_text("go" + ENTER)          # shown again: b, no menu
+                await wait_until(lambda: dialog_rendered(session))
+                assert not on_screen(session, "│d")
+                assert dialog.values == {"model": "b", "stream": False}
+                inp.send_text(ESCAPE)
+                await wait_until(lambda: results == [None, None])
 
             await run_with(session, handler, script)
 
