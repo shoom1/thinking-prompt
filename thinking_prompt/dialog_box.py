@@ -114,7 +114,8 @@ def build_box(dialog: Dialog) -> BoxView:
     # control, so they win over the dialog widget's keys.
     tabs = dialog._form.button_tab_bindings()
     for button in buttons:
-        button.control.key_bindings = merge_key_bindings([button.control.key_bindings, tabs])
+        own = button.control.key_bindings
+        button.control.key_bindings = tabs if own is None else merge_key_bindings([own, tabs])
 
     widget = _DialogWidget(
         title=dialog.title,
