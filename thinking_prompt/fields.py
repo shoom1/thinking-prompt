@@ -752,7 +752,8 @@ class _DropdownMenuControl(UIControl):
 
     def create_content(self, width: int, height: int) -> UIContent:
         """Render the options that fit ``height`` rows, scrolled to keep the
-        selected one in view, with a scrollbar when not all of them show."""
+        selected one in view, with a scrollbar when not all of them show (and
+        the menu is wider than one column)."""
         dropdown = self._dropdown
         options = dropdown._item.options
         selected = dropdown._selected_index
@@ -760,7 +761,8 @@ class _DropdownMenuControl(UIControl):
         height = max(1, height)
 
         scrolls = count > height
-        text_width = max(1, width - 1) if scrolls else width
+        scrollbar = scrolls and width > 1
+        text_width = width - 1 if scrollbar else width
         offset = min(dropdown._scroll_offset, max(0, count - height))
         if selected < offset:
             offset = selected
@@ -779,7 +781,7 @@ class _DropdownMenuControl(UIControl):
             # Cut and padded in terminal columns: a wide character takes two.
             text = _justify(_cut(opt, text_width), text_width, True)
             fragments = [(style, text)]
-            if scrolls:
+            if scrollbar:
                 on_thumb = thumb_top <= row < thumb_top + thumb
                 fragments.append(("class:scrollbar.button" if on_thumb else "class:scrollbar.background", " "))
             lines.append(FormattedText(fragments))

@@ -1432,17 +1432,26 @@ def test_the_settings_dialog_is_gone():
 class TestDropdownMenuColumns:
     WIDE = "日本語のオプションです"  # 11 characters, 22 columns
 
-    def _menu_rows(self, **field):
+    def _menu_rows(self, width=None, **field):
+        """The menu's width (``width``, else the dropdown's own) and its rows,
+        4 rows tall."""
         control = DropdownFieldControl(DropdownField("k", "Lang", **field))
-        width = control._get_dropdown_width()
+        width = width or control._get_dropdown_width()
         content = _DropdownMenuControl(control).create_content(width, 4)
         return width, [content.get_line(i) for i in range(content.line_count)]
 
-    def test_every_row_fills_the_menu_exactly_with_the_scrollbar_last(self):
-        width, rows = self._menu_rows(options=[self.WIDE, "short", "a", "b", "c", "d"], default="short")
+    @pytest.mark.parametrize("width", [None, 5])
+    def test_every_row_fills_the_menu_exactly_with_the_scrollbar_last(self, width):
+        width, rows = self._menu_rows(width, options=[self.WIDE, "short", "a", "b", "c", "d"], default="short")
         for row in rows:
             assert sum(get_cwidth(text) for _, text, *_ in row) == width
             assert row[-1][0].startswith("class:scrollbar")
+
+    def test_a_one_column_menu_leaves_out_the_scrollbar(self):
+        _, rows = self._menu_rows(1, options=[self.WIDE, "short", "a", "b", "c", "d"], default="short")
+        for row in rows:
+            assert sum(get_cwidth(text) for _, text, *_ in row) == 1
+            assert not any(style.startswith("class:scrollbar") for style, *_ in row)
 
     def test_a_cut_option_ends_in_an_ellipsis(self):
         _, rows = self._menu_rows(options=[self.WIDE, "b"], default="b")
