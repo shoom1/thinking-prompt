@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
-import importlib
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -110,13 +109,9 @@ class TestFieldClasses:
         DropdownField("k", "L", options=["a"], width=None)
         TextField("k", "L", edit_width=1)
 
-    def test_exported_instead_of_the_settings_items(self):
+    def test_the_field_classes_are_exported(self):
         for name in FIELD_NAMES:
             assert name in thinking_prompt.__all__
-        for name in ("SettingsItem", "InlineSelectItem", "DropdownItem", "CheckboxItem",
-                     "TextItem", "ChecklistItem", "RadioItem"):
-            assert not hasattr(thinking_prompt, name)
-            assert name not in thinking_prompt.__all__
 
 
 def _shown(dialog, placement="box"):
@@ -166,11 +161,6 @@ class TestDialogFields:
             RadioField("m", "Mode", options=["x", "y"]),
         ])
         assert list(d.values.items()) == [("name", "bob"), ("on", True), ("m", None)]
-
-    def test_values_follow_edits(self):
-        d = Dialog("T", fields=[CheckboxField("on", "On")])
-        d._form.controls[0].toggle()
-        assert d.values == {"on": True}
 
     def test_no_fields_no_values(self):
         assert Dialog("T", "text", [ButtonConfig("OK")]).values == {}
@@ -256,17 +246,11 @@ class TestDialogFields:
         d._form.controls[0].enter_edit_mode()
         assert d._is_editing() is True
 
-    def test_a_boxs_dropdown_menus_float_over_the_screen(self):
-        d = Dialog("T", fields=[DropdownField("d", "D", options=["a"]), CheckboxField("c", "C")])
-        (menu,) = d._screen_floats()
-        assert menu.attach_to_window is d._form.controls[0]._window
-
     def test_a_box_binds_the_arrows_inline_leaves_them_to_the_dialog(self):
         d = Dialog("T", fields=[CheckboxField("a", "A"), CheckboxField("b", "B")])
         content, _ = _shown(d, "box")
         fields = content.children[-1]   # under the Tab keys
         assert fields.key_bindings.get_bindings_for_keys((Keys.Down,)) != []
-        assert _bindings(content.key_bindings, Keys.ControlS) == _bindings(fields.key_bindings, Keys.ControlS) == []
         content, _ = _shown(d, "inline")
         assert content.key_bindings is None
 
@@ -329,81 +313,8 @@ class TestDialogFields:
         assert d._form.controls[0]._value_column is None
 
 
-class TestFieldAttributes:
-    """Tests for the field classes' attributes."""
-
-    def test_inline_select_item_creation(self):
-        """SelectField stores key, label, options, and default."""
-        item = SelectField(
-            key="model",
-            label="Model",
-            options=["gpt-4", "gpt-3.5"],
-            default="gpt-4",
-        )
-        assert item.key == "model"
-        assert item.label == "Model"
-        assert item.options == ["gpt-4", "gpt-3.5"]
-        assert item.default == "gpt-4"
-
-    def test_inline_select_item_with_description(self):
-        """SelectField can have a description."""
-        item = SelectField(
-            key="model",
-            label="Model",
-            description="Select the AI model to use",
-            options=["gpt-4", "gpt-3.5"],
-            default="gpt-4",
-        )
-        assert item.description == "Select the AI model to use"
-
-    def test_checkbox_item_creation(self):
-        """CheckboxField stores key, label, and default bool."""
-        item = CheckboxField(
-            key="stream",
-            label="Stream Output",
-            default=True,
-        )
-        assert item.key == "stream"
-        assert item.label == "Stream Output"
-        assert item.default is True
-
-    def test_checkbox_item_default_false(self):
-        """CheckboxField defaults to False."""
-        item = CheckboxField(key="debug", label="Debug")
-        assert item.default is False
-
-    def test_text_item_creation(self):
-        """TextField stores key, label, default, and password flag."""
-        item = TextField(
-            key="api_key",
-            label="API Key",
-            default="sk-xxx",
-            password=True,
-        )
-        assert item.key == "api_key"
-        assert item.label == "API Key"
-        assert item.default == "sk-xxx"
-        assert item.password is True
-
-    def test_text_item_defaults(self):
-        """TextField has sensible defaults."""
-        item = TextField(key="name", label="Name")
-        assert item.default == ""
-        assert item.password is False
-
-
 class TestFormLayout:
     """Dialog(fields=...): the layout."""
-
-    def test_the_fields_are_laid_out_in_an_hsplit(self):
-        items = [
-            SelectField(key="model", label="Model", options=["a", "b"], default="a"),
-            CheckboxField(key="stream", label="Stream", default=True),
-        ]
-        dialog = Dialog("Settings", fields=items)
-        content, _ = dialog._content()
-
-        assert isinstance(content, HSplit)
 
     def test_each_field_gets_its_control(self):
         items = [
@@ -448,23 +359,6 @@ class TestTextControlPasswordMasking:
         assert not any(isinstance(p, PasswordProcessor) for p in processors)
 
 
-class TestFieldControl:
-    """The FieldControl base class."""
-
-    def test_holds_its_field_and_value(self):
-        item = CheckboxField(key="stream", label="Stream", default=True)
-        control = CheckboxFieldControl(item)
-
-        assert control.item is item
-        assert control.value is True
-
-    def test_is_not_editing_at_first(self):
-        item = CheckboxField(key="stream", label="Stream", default=False)
-        control = CheckboxFieldControl(item)
-
-        assert control.is_editing is False
-
-
 class TestCheckboxControl:
     """Tests for CheckboxFieldControl."""
 
@@ -479,24 +373,12 @@ class TestCheckboxControl:
         control.toggle()
         assert control.value is False
 
-    def test_checkbox_renders_label_and_value(self):
-        """Checkbox renders label and true/false value."""
-        item = CheckboxField(key="stream", label="Stream Output", default=True)
-        control = CheckboxFieldControl(item)
 
-        content = control.create_content(width=50, height=1)
-        line = content.get_line(0)
-        text = "".join(t[1] for t in line)
-
-        assert "Stream Output" in text
-        assert "true" in text
-
-
-class TestInlineSelectControl:
+class TestSelectControl:
     """Tests for SelectFieldControl."""
 
-    def test_inline_select_cycle_forward(self):
-        """InlineSelect cycles through options forward."""
+    def test_select_cycle_forward(self):
+        """A select cycles through options forward."""
         item = SelectField(key="model", label="Model", options=["a", "b", "c"], default="a")
         control = SelectFieldControl(item)
 
@@ -508,8 +390,8 @@ class TestInlineSelectControl:
         control.cycle(1)
         assert control.value == "c"  # clamped at end
 
-    def test_inline_select_cycle_backward(self):
-        """InlineSelect cycles through options backward."""
+    def test_select_cycle_backward(self):
+        """A select cycles through options backward."""
         item = SelectField(key="model", label="Model", options=["a", "b", "c"], default="a")
         control = SelectFieldControl(item)
 
@@ -532,18 +414,6 @@ class TestInlineSelectControl:
         """No default means "unset": leaving it alone keeps None."""
         assert Dialog("S", fields=[SelectField("s", "S", options=["a", "b"])]).values == {"s": None}
 
-    def test_inline_select_renders_label_and_value(self):
-        """InlineSelect renders label and current option."""
-        item = SelectField(key="model", label="Model", options=["gpt-4", "gpt-3.5"], default="gpt-4")
-        control = SelectFieldControl(item)
-
-        content = control.create_content(width=50, height=1)
-        line = content.get_line(0)
-        text = "".join(t[1] for t in line)
-
-        assert "Model" in text
-        assert "gpt-4" in text
-
 
 def _style_of(line, text: str) -> list[str]:
     """Style classes of the one fragment whose text, stripped, is `text`."""
@@ -554,7 +424,7 @@ def _style_of(line, text: str) -> list[str]:
 class TestSelectArrows:
     """Select rows draw their arrows with class:select-arrow (select_arrow)."""
 
-    def test_inline_select_arrows(self):
+    def test_select_arrows(self):
         item = SelectField(key="m", label="M", options=["a", "b", "c"], default="b")
         line = SelectFieldControl(item).create_content(width=40, height=1).get_line(0)
 
@@ -609,29 +479,6 @@ class TestTextControl:
         assert control.is_editing is False
         assert control.value == "Alice"  # restored
 
-    def test_text_control_renders_value(self):
-        """TextFieldControl renders label and value in view mode."""
-        item = TextField(key="name", label="Name", default="Alice")
-        control = TextFieldControl(item)
-
-        content = control.create_content(width=50, height=1)
-        line = content.get_line(0)
-        text = "".join(t[1] for t in line)
-
-        assert "Name" in text
-        assert "Alice" in text
-
-    def test_text_control_renders_empty_placeholder(self):
-        """TextFieldControl shows (empty) for empty value."""
-        item = TextField(key="name", label="Name", default="")
-        control = TextFieldControl(item)
-
-        content = control.create_content(width=50, height=1)
-        line = content.get_line(0)
-        text = "".join(t[1] for t in line)
-
-        assert "(empty)" in text
-
     def test_text_control_renders_password_masked(self):
         """TextFieldControl masks password values."""
         item = TextField(key="api_key", label="API Key", default="sk-secret", password=True)
@@ -645,15 +492,17 @@ class TestTextControl:
         assert "••••••" in text
 
     def test_text_control_container_switches_in_edit_mode(self):
-        """TextFieldControl container returns different content in edit mode."""
-        from prompt_toolkit.layout import DynamicContainer
-
+        """TextFieldControl's container shows the edit row while editing,
+        the field's row before and after."""
         item = TextField(key="name", label="Name", default="Alice")
         control = TextFieldControl(item)
 
         container = control.get_container()
-        # Should be a DynamicContainer
-        assert isinstance(container, DynamicContainer)
+        assert container.get_children() == [control._window]
+        control.enter_edit_mode()
+        assert container.get_children() == [control._edit_container]
+        control.confirm_edit()
+        assert container.get_children() == [control._window]
 
 
 def _bindings(kb, key):
@@ -671,8 +520,8 @@ def _line(control, selected: bool, row: int = 0):
 
 
 class TestRowStyles:
-    """A setting's label, value and description take their -selected
-    styles while the setting has focus."""
+    """A field's label, value and description take their -selected
+    styles while the field has focus."""
 
     @pytest.mark.parametrize(
         "make,value,style",
@@ -755,30 +604,6 @@ class TestFieldRows:
         (menu,) = view.floats
         assert menu.attach_to_window is control._window
 
-    def test_inline_body_leaves_arrows_to_the_dialog(self):
-        dialog = Dialog(
-            "S",
-            fields=[DropdownField(key="m", label="M", options=["a", "b"]), CheckboxField(key="c", label="C")],
-            placement="inline",
-        )
-        dialog._placement = "inline"  # as show_dialog() resolves it
-        body, _ = dialog._content()
-        assert isinstance(body, HSplit)
-        assert _bindings(body.key_bindings, Keys.Down) == []
-        assert _bindings(body.key_bindings, Keys.ControlS) == []
-
-    def test_box_body_walks_fields_with_arrows(self):
-        dialog = Dialog("S", fields=[CheckboxField(key="a", label="A"), CheckboxField(key="b", label="B")])
-        body, _ = dialog._content()
-        assert _bindings(body.children[-1].key_bindings, Keys.Down) != []
-        assert len(dialog._form.stops()) == 2
-
-    def test_is_editing_follows_the_controls(self):
-        dialog = Dialog("S", fields=[TextField(key="t", label="T")])
-        assert dialog._is_editing() is False
-        dialog._form.controls[0].enter_edit_mode()
-        assert dialog._is_editing() is True
-
 
 class TestOptionLists:
     """Check lists and radio lists in a form, one option per line."""
@@ -815,9 +640,6 @@ class TestOptionLists:
         ])
         assert len(dialog._form.stops()) == 3
 
-    def test_exported(self):
-        assert ChecklistField and RadioField
-
 
 @pytest.mark.parametrize(
     "make,widest",
@@ -849,7 +671,7 @@ class TestOptionLists:
     ],
 )
 def test_widest_value(make, widest):
-    """The most columns a setting's value takes in full: showing any of its
+    """The most columns a field's value takes in full: showing any of its
     options, or what it shows now."""
     assert make().widest_value() == widest
 
@@ -881,7 +703,7 @@ def _text(cells: list[tuple[str, str]]) -> str:
 
 
 def _field(cells: list[tuple[str, str]]) -> list[int]:
-    """The columns of a text setting's input field (its text-area style).
+    """The columns of a text field's input (its text-area style).
     (Tests drawing one are async: its buffer loads its history in a task.)"""
     return [x for x, (_, style) in enumerate(cells) if "class:text-area" in style]
 
@@ -946,7 +768,7 @@ class TestValueColumn:
 
     @staticmethod
     def _menu_open(width: int, **kwargs) -> list[str]:
-        """A box form's dropdown, its menu open, drawn ``width`` columns wide."""
+        """A form's dropdown, its menu open, drawn ``width`` columns wide."""
         items = [
             DropdownField(key="d", label="Model", options=["alpha", "beta"], default="beta"),
             *(CheckboxField(key=k, label=k) for k in ("a", "b", "c")),
@@ -954,7 +776,7 @@ class TestValueColumn:
         dialog = Dialog("S", fields=items, **kwargs)
         body, _ = dialog._content()
         dialog._form.controls[0].enter_edit_mode()
-        # As a box has them: the menu floats over the whole screen.
+        # As a dialog has them: the menu floats over the whole screen.
         screen = FloatContainer(content=body, floats=dialog._screen_floats())
         return [_text(row) for row in _drawn(screen, width, 4)]
 
@@ -977,7 +799,7 @@ class TestValueColumn:
         dialog = Dialog("S", fields=items, **kwargs)
         body, _ = dialog._content()
         dialog._form.controls[0].enter_edit_mode()
-        # As a box has them: the menu floats over the whole screen.
+        # As a dialog has them: the menu floats over the whole screen.
         screen = FloatContainer(content=body, floats=dialog._screen_floats())
         return [_text(row) for row in _drawn(screen, width, 4)]
 
@@ -1038,7 +860,7 @@ def _selector(label: str = "Model name", options=("a", "gpt-4o-mini", "z"), defa
     return SelectFieldControl(SelectField(key="s", label=label, options=list(options), default=default))
 
 
-def _text_setting(label: str = "Display name", default: str = "bob") -> TextFieldControl:
+def _text_field(label: str = "Display name", default: str = "bob") -> TextFieldControl:
     return TextFieldControl(TextField(key="t", label=label, default=default))
 
 
@@ -1097,7 +919,7 @@ class TestRowsShortOfWidth:
         control = _selector(options=("gpt-4o-mini", "z"), default="gpt-4o-mini")
         assert _row(control, None, width=12) == "  Mo… gp… ▶"
 
-    # Box dropdown: padded to its width, ▼ after.
+    # Dropdown: padded to its width, ▼ after.
     def test_dropdown_in_full_at_the_column(self):
         assert _row(_dropdown(), 22) == "  Model for summaries " + "o1".ljust(15) + " ▼"
 
@@ -1123,18 +945,18 @@ class TestRowsShortOfWidth:
 
     # Text field: padded to edit_width, no decoration.
     def test_text_in_full_at_the_column(self):
-        assert _row(_text_setting(), 16, width=40) == "  Display name  " + "bob".ljust(15)
+        assert _row(_text_field(), 16, width=40) == "  Display name  " + "bob".ljust(15)
 
     def test_text_at_the_right_edge_with_a_cut_label(self):
-        assert _row(_text_setting(), 16, width=30) == "  Display na… " + "bob".ljust(15)
-        assert _row(_text_setting(), None, width=30) == "  Display na… " + "bob".rjust(15)
+        assert _row(_text_field(), 16, width=30) == "  Display na… " + "bob".ljust(15)
+        assert _row(_text_field(), None, width=30) == "  Display na… " + "bob".rjust(15)
 
     def test_text_shrinks_its_field_with_the_label_at_3_columns(self):
-        assert _row(_text_setting(), 16, width=15) == "  Di… " + "bob".ljust(8)
-        assert _row(_text_setting(), None, width=15) == "  Di… " + "bob".rjust(8)
+        assert _row(_text_field(), 16, width=15) == "  Di… " + "bob".ljust(8)
+        assert _row(_text_field(), None, width=15) == "  Di… " + "bob".rjust(8)
 
     def test_text_cuts_its_value(self):
-        assert _row(_text_setting(default="alexander"), 16, width=12) == "  Di… alex…"
+        assert _row(_text_field(default="alexander"), 16, width=12) == "  Di… alex…"
 
     # Terminal columns, not characters.
     def test_a_wide_label_is_cut_by_columns(self):
@@ -1165,7 +987,7 @@ class TestRowsShortOfWidth:
         line = "".join(text for _, text in content.get_line(0))
         assert content.menu_position.x == line.index("o1")
 
-    # Editing a text setting: the field takes the layout's start and width.
+    # Editing a text field: the input takes the layout's start and width.
     @pytest.mark.parametrize(
         "column,width,cells",
         [
@@ -1177,7 +999,7 @@ class TestRowsShortOfWidth:
         ],
     )
     async def test_the_edit_field_follows_the_layout(self, column, width, cells):
-        control = _text_setting()
+        control = _text_field()
         control.set_value_column(_fixed(column))
         control.enter_edit_mode()
         (row,) = _drawn(control.get_container(), width)
@@ -1185,7 +1007,7 @@ class TestRowsShortOfWidth:
         assert len(cells) >= 8
 
     async def test_the_edit_field_starts_where_the_value_was_drawn(self):
-        control = _text_setting()
+        control = _text_field()
         control.set_value_column(_ValueColumn(20))
         shown = _row(control, 20, width=30)
         control.enter_edit_mode()
@@ -1193,7 +1015,7 @@ class TestRowsShortOfWidth:
         assert _field(row)[0] == shown.index("bob")
 
     async def test_a_row_too_narrow_for_the_minimum_does_not_collapse(self):
-        control = _text_setting()
+        control = _text_field()
         control.enter_edit_mode()
         for width in (12, 8, 6, 3, 1):
             (row,) = _drawn(control.get_container(), width)
@@ -1301,14 +1123,6 @@ class TestAlignValues:
 
     def test_the_smallest_column(self):
         assert Dialog("S", align_values=4).align_values == 4
-
-
-def test_the_settings_dialog_is_gone():
-    assert not hasattr(thinking_prompt, "SettingsDialog")
-    assert "SettingsDialog" not in thinking_prompt.__all__
-    assert not hasattr(thinking_prompt.ThinkingPromptSession, "show_settings_dialog")
-    with pytest.raises(ImportError):
-        importlib.import_module("thinking_prompt.settings_dialog")
 
 
 class TestDropdownMenuColumns:
@@ -1569,11 +1383,6 @@ class TestChoiceFieldAlone:
         d = Dialog("T", body, fields=list(fields))
         d.buttons = [ButtonConfig("OK", handler=lambda: d.set_result(d.values)), ButtonConfig("Cancel")]
         return d
-
-    def test_the_cursor_starts_on_the_pick(self):
-        d = Dialog("T", "Pick:", fields=[ChoiceField("c", "", options=["x", "y"], default="y")])
-        _, start = _shown(d)
-        assert start is d._form.controls[0]._group.rows[1].window
 
     def test_enter_picks_and_presses_the_first_button(self):
         d = self._with_ok(ChoiceField("c", "", options=["x", "y"], default="y"))

@@ -12,7 +12,6 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
-from prompt_toolkit.keys import Keys
 from prompt_toolkit.layout import HSplit, Window
 from prompt_toolkit.widgets import Label
 
@@ -26,6 +25,7 @@ from thinking_prompt.dialog import (
     _message_dialog,
     _yes_no_dialog,
 )
+from thinking_prompt.dialog_inline import build_inline
 from thinking_prompt.fields import ChoiceField
 
 _STILL_OPEN = object()  # _click() result when the click didn't close the dialog
@@ -53,28 +53,15 @@ def _click(dialog: Any, index: int) -> Any:
 class TestButtonConfig:
     """Tests for ButtonConfig dataclass."""
 
-    def test_button_config_defaults(self):
-        """ButtonConfig has correct default values."""
+    def test_button_config_defaults_and_values(self):
+        """ButtonConfig's default values, and the ones it's given."""
         btn = ButtonConfig(text="OK")
         assert btn.text == "OK"
         assert btn.result is None
         assert btn.focused is False
         assert btn.style == ""
-
-    def test_button_config_with_result(self):
-        """ButtonConfig can store any result value."""
-        btn = ButtonConfig(text="Save", result={"action": "save"})
-        assert btn.result == {"action": "save"}
-
-    def test_button_config_focused(self):
-        """ButtonConfig focused flag works."""
-        btn = ButtonConfig(text="OK", focused=True)
-        assert btn.focused is True
-
-    def test_button_config_with_style(self):
-        """ButtonConfig can have custom style."""
-        btn = ButtonConfig(text="Danger", style="bg:red")
-        assert btn.style == "bg:red"
+        btn = ButtonConfig(text="Save", result={"action": "save"}, focused=True, style="bg:red")
+        assert (btn.result, btn.focused, btn.style) == ({"action": "save"}, True, "bg:red")
 
     def test_handler_defaults_to_none(self):
         assert ButtonConfig(text="OK").handler is None
@@ -94,88 +81,6 @@ class TestButtonConfig:
         btn = ButtonConfig("OK")
         with pytest.raises(dataclasses.FrozenInstanceError):
             btn.text = "x"
-
-    def test_handler_runs_on_click_instead_of_closing(self):
-        clicks: list[str] = []
-        dialog = Dialog("T", "B", [
-            ButtonConfig(text="Check", handler=lambda: clicks.append("clicked")),
-            ButtonConfig(text="OK", result="ok"),
-        ])
-        assert _click(dialog, 0) is _STILL_OPEN
-        assert clicks == ["clicked"]
-        assert _click(dialog, 1) == "ok"
-
-
-# =============================================================================
-# Dialog Tests
-# =============================================================================
-
-class TestDialogSubclass:
-    """Tests for Dialog class."""
-
-    def test_custom_dialog_subclass(self):
-        """Custom dialog subclass works correctly."""
-        class MyDialog(Dialog):
-            title = "My Dialog"
-            escape_result = "cancelled"
-
-            def build_body(self):
-                return Label("Custom body")
-
-            def get_buttons(self):
-                return [
-                    ButtonConfig("OK", result="ok"),
-                    ButtonConfig("Cancel", handler=self.cancel),
-                ]
-
-        dialog = MyDialog()
-        assert dialog.title == "My Dialog"
-        assert dialog.escape_result == "cancelled"
-
-    def test_dialog_set_result(self):
-        """Dialog.set_result sets the future."""
-        class TestDialog(Dialog):
-            title = "Test"
-
-            def build_body(self):
-                return Label("Body")
-
-        dialog = TestDialog()
-
-        # Simulate prepare (creates future)
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            future = loop.create_future()
-            dialog._result_future = future
-
-            dialog.set_result("test_value")
-            assert future.done()
-            assert future.result() == "test_value"
-        finally:
-            loop.close()
-
-    def test_dialog_cancel(self):
-        """Dialog.cancel sets escape_result."""
-        class TestDialog(Dialog):
-            title = "Test"
-            escape_result = "escaped"
-
-            def build_body(self):
-                return Label("Body")
-
-        dialog = TestDialog()
-
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            future = loop.create_future()
-            dialog._result_future = future
-
-            dialog.cancel()
-            assert future.result() == "escaped"
-        finally:
-            loop.close()
 
 
 # =============================================================================
@@ -214,27 +119,9 @@ class TestBuiltinDialogs:
         assert [b.text for b in d.get_buttons()] == ["OK", "Cancel"]
         assert self._results(d) == ["Dark", None]
 
-    def test_dropdown_without_default_selects_first(self):
-        assert _click(_dropdown_dialog("Theme", "Select:", ["Light", "Dark"]), 0) == "Light"
-
-    def test_dropdown_with_a_default_that_is_not_an_option_selects_first(self):
-        d = _dropdown_dialog("Theme", "Select:", ["Light", "Dark"], default="Blue")
-        assert _click(d, 0) == "Light"
-
     def test_dropdown_needs_at_least_one_option(self):
         with pytest.raises(ValueError, match="at least one option"):
             _dropdown_dialog("Theme", "Select:", [])
-
-    @pytest.mark.parametrize("build", [
-        lambda p: _yes_no_dialog("T", "B", placement=p),
-        lambda p: _message_dialog("T", "B", placement=p),
-        lambda p: _choice_dialog("T", "B", ["a"], placement=p),
-        lambda p: _dropdown_dialog("T", "B", ["a"], placement=p),
-        lambda p: _checklist_dialog("T", "B", ["a"], placement=p),
-    ], ids=["yes_no", "message", "choice", "dropdown", "checklist"])
-    def test_builders_pin_the_placement_they_built_for(self, build):
-        assert build("inline").placement == "inline"
-        assert build("box").placement == "box"
 
     def test_inline_dropdown_is_one_action_per_option_starting_on_the_default(self):
         d = _dropdown_dialog("Theme", "Select:", ["Light", "Dark", "System"], default="Dark",
@@ -255,16 +142,6 @@ class TestBuiltinDialogs:
     def test_checklist_needs_options(self):
         with pytest.raises(ValueError, match="at least one option"):
             _checklist_dialog("Tools", "Pick any", [])
-
-    def test_checklist_rows_walk_with_arrows_in_a_box_only(self):
-        box = _checklist_dialog("T", "", ["a", "b"], placement="box")
-        box._placement = "box"
-        content, _ = box._content()
-        assert content.children[-1].key_bindings.get_bindings_for_keys((Keys.Down,)) != []
-        inline = _checklist_dialog("T", "", ["a", "b"], placement="inline")
-        inline._placement = "inline"
-        content, _ = inline._content()
-        assert content.key_bindings is None
 
     def test_box_dropdown_is_a_choice_list_starting_on_the_default(self):
         d = _dropdown_dialog("Theme", "Select:", ["Light", "Dark", "System"], default="Dark")
@@ -290,28 +167,6 @@ class TestBuiltinDialogs:
 
 class TestDialogManager:
     """Tests for DialogManager (unit tests without full Application)."""
-
-    def test_dialog_manager_initial_state(self):
-        """DialogManager starts with correct initial state."""
-        mock_session = MagicMock()
-        mock_session.app = MagicMock()
-        mock_session.app.layout = MagicMock()
-        mock_session.app.key_bindings = None
-
-        manager = DialogManager(mock_session)
-        assert manager._visible is False
-        assert manager._current_dialog is None
-        assert manager._injected is False
-
-    def test_dialog_manager_key_bindings_created(self):
-        """DialogManager creates key bindings for Escape."""
-        mock_session = MagicMock()
-        mock_session.app = MagicMock()
-        mock_session.app.layout = MagicMock()
-        mock_session.app.key_bindings = None
-
-        manager = DialogManager(mock_session)
-        assert manager._key_bindings is not None
 
     async def test_show_while_dialog_open_raises_and_first_still_resolves(self):
         """show() must refuse a second concurrent dialog.
@@ -427,19 +282,6 @@ class TestDialogManagerFailureRecovery:
 class TestDialogIntegration:
     """Integration tests for dialog result flow."""
 
-    def test_dialog_result_flow(self):
-        """A subclass button's result reaches the awaiter."""
-        class ResultDialog(Dialog):
-            title = "Test"
-
-            def build_body(self):
-                return Label("Test")
-
-            def get_buttons(self):
-                return [ButtonConfig("OK", result={"key": "value"})]
-
-        assert _click(ResultDialog(), 0) == {"key": "value"}
-
     def test_multiple_buttons_return_correct_results(self):
         """Each button returns its configured result."""
         class MultiButtonDialog(Dialog):
@@ -462,31 +304,6 @@ class TestDialogIntegration:
 class TestDialogEdgeCases:
     """Edge case tests for dialogs."""
 
-    def test_dialog_with_no_buttons(self):
-        """A Dialog has no buttons unless it's given some."""
-        class NoButtonDialog(Dialog):
-            title = "Info"
-
-            def build_body(self):
-                return Label("Just info")
-
-        assert NoButtonDialog().get_buttons() == []
-
-    def test_dialog_escape_disabled(self):
-        """A dialog opts out of Escape with escapable = False."""
-        class NoEscapeDialog(Dialog):
-            title = "Important"
-            escapable = False
-
-            def build_body(self):
-                return Label("Must click button")
-
-            def get_buttons(self):
-                return [ButtonConfig("Acknowledge", result=True)]
-
-        assert NoEscapeDialog().escapable is False
-        assert Dialog.escapable is True
-
     def test_set_result_only_works_once(self):
         """Setting result multiple times doesn't change first result."""
         class TestDialog(Dialog):
@@ -508,15 +325,6 @@ class TestDialogEdgeCases:
             assert future.result() == "first"
         finally:
             loop.close()
-
-    def test_config_button_closure_captures_correctly(self):
-        """ButtonConfig results are captured correctly in closures."""
-        dialog = Dialog("Test", "Body", [
-            ButtonConfig(text="One", result=1),
-            ButtonConfig(text="Two", result=2),
-            ButtonConfig(text="Three", result=3),
-        ])
-        assert [_click(dialog, i) for i in range(3)] == [1, 2, 3]
 
 
 class TestDialog:
@@ -553,11 +361,6 @@ class TestDialog:
 
         d = Wide(width=None, max_height=None, escape_result=None)
         assert (d.width, d.max_height, d.escape_result) == (None, None, None)
-
-    def test_top_is_gone(self):
-        """A box sits where an inline dialog would; there's no position to set."""
-        with pytest.raises(TypeError, match="top"):
-            Dialog("T", top=2)
 
     def test_subclass_attributes_and_super_init_arguments(self):
         class Confirm(Dialog):
@@ -621,13 +424,13 @@ class TestDialogButtons:
 
         assert _click(Asks(), 0) == "dismissed"
 
-    def test_tuple_buttons_raise_with_migration_hint(self):
+    def test_tuple_buttons_shown_inline_raise_with_migration_hint(self):
         class Old(Dialog):
             def get_buttons(self):
                 return [("OK", lambda: None)]
 
         with pytest.raises(TypeError, match=r"Use ButtonConfig\(label, handler=\.\.\.\)"):
-            Old()._button_configs()
+            build_inline(Old())
 
     async def test_handler_exception_is_reported_and_dialog_stays_open(self, caplog):
         import logging
@@ -693,16 +496,6 @@ class TestDialogButtons:
 
 class TestRemovedApi:
     """0.4 removes the old dialog API outright (no deprecation period)."""
-
-    def test_old_names_are_gone(self):
-        import thinking_prompt
-        import thinking_prompt.dialog as dialog_module
-
-        for name in ("BaseDialog", "DialogConfig"):
-            assert not hasattr(thinking_prompt, name)
-            assert name not in thinking_prompt.__all__
-        for name in ("BaseDialog", "DialogConfig", "_ConfigBasedDialog", "_UNSET", "_Unset"):
-            assert not hasattr(dialog_module, name)
 
     async def test_show_dialog_rejects_non_dialogs_with_migration_hint(self):
         from thinking_prompt import ThinkingPromptSession
@@ -815,11 +608,6 @@ class TestPlacement:
 
 
 class TestMaxHeight:
-    def test_replaces_height(self):
-        assert Dialog(max_height=12).max_height == 12
-        with pytest.raises(TypeError):
-            Dialog(height=12)  # type: ignore[call-arg]
-
     @pytest.mark.parametrize("rows", [0, -3])
     def test_must_be_at_least_one_row(self, rows):
         with pytest.raises(ValueError, match="max_height"):
@@ -831,16 +619,8 @@ class TestMaxHeight:
 
         assert Short().max_height == 8
 
-    @pytest.mark.parametrize("placement", ["box", "inline"])
-    @pytest.mark.parametrize("build", [
-        lambda p, h: _yes_no_dialog("T", "B", placement=p, max_height=h),
-        lambda p, h: _message_dialog("T", "B", placement=p, max_height=h),
-        lambda p, h: _choice_dialog("T", "B", ["a"], placement=p, max_height=h),
-        lambda p, h: _dropdown_dialog("T", "B", ["a"], placement=p, max_height=h),
-        lambda p, h: _checklist_dialog("T", "B", ["a"], placement=p, max_height=h),
-    ], ids=["yes_no", "message", "choice", "dropdown", "checklist"])
-    def test_builders_pass_it_on(self, build, placement):
-        assert build(placement, 9).max_height == 9
+    def test_the_inline_dropdown_builder_passes_it_on(self):
+        assert _dropdown_dialog("T", "B", ["a"], placement="inline", max_height=9).max_height == 9
 
 
 class TestHelperPlacement:

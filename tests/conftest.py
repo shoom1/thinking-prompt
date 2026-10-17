@@ -12,7 +12,7 @@ from prompt_toolkit.application import create_app_session
 from prompt_toolkit.input import create_pipe_input
 from prompt_toolkit.output import DummyOutput
 
-from thinking_prompt import ThinkingPromptSession, ThinkingPromptStyles
+from thinking_prompt import ThinkingPromptSession
 from thinking_prompt.history import FormattedTextHistory
 
 
@@ -23,21 +23,9 @@ def history() -> FormattedTextHistory:
 
 
 @pytest.fixture
-def default_styles() -> ThinkingPromptStyles:
-    """Create default styles instance."""
-    return ThinkingPromptStyles()
-
-
-@pytest.fixture
 def multiline_content() -> str:
     """Generate multiline content for testing."""
     return "\n".join([f"Line {i}" for i in range(20)])
-
-
-@pytest.fixture
-def short_content() -> str:
-    """Generate short content that fits in collapsed view."""
-    return "\n".join([f"Line {i}" for i in range(3)])
 
 
 @asynccontextmanager

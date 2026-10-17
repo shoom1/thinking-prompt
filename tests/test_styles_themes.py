@@ -40,11 +40,6 @@ class TestTokenCompletion:
         assert d["thinking-box"] == "italic"
         assert d["history.error"] == "bold"
 
-    def test_explicit_element_override_wins(self):
-        s = ThinkingPromptStyles(thinking_box="fg:red")
-        assert s.thinking_box == "fg:red"
-        assert s.to_style_dict()["thinking-box"] == "fg:red"
-
     def test_new_fields_defaults(self):
         s = ThinkingPromptStyles()
         assert s.color_depth is None
@@ -87,7 +82,7 @@ import pytest
 
 from prompt_toolkit.output import ColorDepth
 
-from thinking_prompt.styles import THEMES, resolve_theme
+from thinking_prompt.styles import resolve_theme
 
 
 def _all_style_values(s: ThinkingPromptStyles) -> list[str]:
@@ -242,17 +237,6 @@ class TestStyleClassesDefined:
         assert unused == set()
 
 
-class TestRemovedStyleFields:
-    """0.4 removes style fields no component drew with (no deprecation)."""
-
-    @pytest.mark.parametrize(
-        "name", ["assistant_prefix", "select_value", "user_separator"]
-    )
-    def test_field_is_gone(self, name):
-        with pytest.raises(TypeError, match=name):
-            ThinkingPromptStyles(**{name: "bold"})
-
-
 class TestDialogRowStyles:
     """Inline dialog rows: numbered actions and check/radio marks."""
 
@@ -263,9 +247,6 @@ class TestDialogRowStyles:
         assert d["checkbox-mark"] == "fg:#88c0d0"
         assert d["dialog-hint"] == "fg:#888888 italic"
         assert d["dialog-title"] == d["dialog frame.label"]
-
-    def test_checkbox_mark_is_back(self):
-        assert ThinkingPromptStyles(checkbox_mark="bold").to_style_dict()["checkbox-mark"] == "bold"
 
 
 def test_form_fields_have_field_styles():

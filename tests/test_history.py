@@ -16,25 +16,25 @@ class TestFormattedTextHistoryBasics:
         assert history.is_empty
         assert len(history) == 0
 
-    def test_append_adds_fragment(self, history: FormattedTextHistory):
-        """Append should add a styled fragment."""
+    def test_append_adds_an_entry(self, history: FormattedTextHistory):
+        """Append should add one styled entry."""
         history.append("class:test", "Hello")
 
         assert not history.is_empty
         assert len(history) == 1
 
-    def test_append_multiple_fragments(self, history: FormattedTextHistory):
-        """Multiple appends should accumulate fragments."""
+    def test_each_append_is_an_entry(self, history: FormattedTextHistory):
+        """Each append should add an entry of its own."""
         history.append("class:a", "First")
         history.append("class:b", "Second")
         history.append("class:c", "Third")
 
         assert len(history) == 3
 
-    def test_get_formatted_text_returns_all_fragments(
+    def test_get_formatted_text_renders_every_entry(
         self, history: FormattedTextHistory
     ):
-        """get_formatted_text should return all fragments."""
+        """get_formatted_text should render every entry."""
         history.append("class:a", "First")
         history.append("class:b", "Second")
 
@@ -56,8 +56,8 @@ class TestFormattedTextHistoryBasics:
         assert fragments[0] == ("class:user", "User text")
         assert fragments[1] == ("class:assistant", "Assistant text")
 
-    def test_clear_removes_all_fragments(self, history: FormattedTextHistory):
-        """Clear should remove all fragments."""
+    def test_clear_removes_every_entry(self, history: FormattedTextHistory):
+        """Clear should remove every entry."""
         history.append("class:a", "First")
         history.append("class:b", "Second")
         history.clear()
@@ -69,34 +69,23 @@ class TestFormattedTextHistoryBasics:
 class TestFormattedTextHistoryAppendFormatted:
     """Test append_formatted functionality."""
 
-    def test_append_formatted_with_list(self, history: FormattedTextHistory):
-        """append_formatted should accept list of tuples."""
+    def test_append_formatted_is_one_entry_with_its_fragments(
+        self, history: FormattedTextHistory
+    ):
+        """append_formatted should accept FormattedText (or a list of tuples)."""
         fragments = [
             ("class:a", "First"),
             ("class:b", "Second"),
         ]
-        history.append_formatted(fragments)
+        history.append_formatted(FormattedText(fragments))
 
         # __len__ counts entries, not fragments: one append_formatted call
         # is one entry even though it carries two fragments.
         assert len(history) == 1
+        assert list(history.get_formatted_text()) == fragments
 
-    def test_append_formatted_with_formatted_text(
-        self, history: FormattedTextHistory
-    ):
-        """append_formatted should accept FormattedText object."""
-        formatted = FormattedText([
-            ("class:a", "First"),
-            ("class:b", "Second"),
-        ])
-        history.append_formatted(formatted)
-
-        # __len__ counts entries, not fragments: one append_formatted call
-        # is one entry even though it carries two fragments.
-        assert len(history) == 1
-
-    def test_append_formatted_extends_existing(self, history: FormattedTextHistory):
-        """append_formatted should extend existing fragments."""
+    def test_append_formatted_adds_to_existing_entries(self, history: FormattedTextHistory):
+        """append_formatted should add an entry after the existing ones."""
         history.append("class:existing", "Existing")
         history.append_formatted([("class:new", "New")])
 
@@ -106,12 +95,12 @@ class TestFormattedTextHistoryAppendFormatted:
 class TestFormattedTextHistoryEdgeCases:
     """Test edge cases."""
 
-    def test_empty_string_fragment(self, history: FormattedTextHistory):
-        """Should handle empty string fragments."""
+    def test_empty_text_is_an_entry(self, history: FormattedTextHistory):
+        """Should keep an entry with empty text."""
         history.append("class:test", "")
         assert len(history) == 1
 
-    def test_empty_style_fragment(self, history: FormattedTextHistory):
+    def test_empty_style_is_kept(self, history: FormattedTextHistory):
         """Should handle empty style."""
         history.append("", "Text without style")
         formatted = history.get_formatted_text()

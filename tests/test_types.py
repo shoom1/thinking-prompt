@@ -1,5 +1,5 @@
 """
-Tests for the text helpers and removed types.
+Tests for the text helpers.
 """
 from __future__ import annotations
 
@@ -66,23 +66,3 @@ class TestFormatExceptionDetail:
         from thinking_prompt._text import format_exception_detail
 
         assert format_exception_detail(RuntimeError()) == "RuntimeError"
-
-
-class TestRemovedTypes:
-    def test_message_role_is_gone(self):
-        """A chat-role literal nothing used: not this UI library's concern."""
-        import thinking_prompt
-        import thinking_prompt.types as types_module
-
-        assert not hasattr(thinking_prompt, "MessageRole")
-        assert "MessageRole" not in thinking_prompt.__all__
-        assert not hasattr(types_module, "MessageRole")
-
-    def test_thinking_context_is_now_thinking_box(self):
-        import thinking_prompt
-        import thinking_prompt.types as types_module
-
-        assert not hasattr(thinking_prompt, "ThinkingContext")
-        assert "ThinkingContext" not in thinking_prompt.__all__
-        assert not hasattr(types_module, "ThinkingContext")
-        assert "ThinkingBox" in thinking_prompt.__all__

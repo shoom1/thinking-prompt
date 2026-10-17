@@ -153,14 +153,12 @@ class TestScrollingRegion:
         pane = _region(view)
         layout = Layout(view.container)
         with set_app(_app(layout)):
-            layout.focus(group.rows[0].window)
-            pane.vertical_scroll = 4  # as left by moving down the list and back
-            _render(pane, 4)
-            assert pane.vertical_scroll == 0
-            # Further down the list, the region keeps its scroll.
             layout.focus(group.rows[5].window)
             _render(pane, 4)
             assert pane.vertical_scroll > 0
+            layout.focus(group.rows[0].window)
+            _render(pane, 4)
+            assert pane.vertical_scroll == 0
 
     def test_regrown_on_the_first_stop_the_region_shows_its_top_again(self):
         """A shorter terminal scrolls the text above the first stop off;

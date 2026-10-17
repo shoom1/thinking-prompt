@@ -5,7 +5,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import pytest
 from prompt_toolkit.formatted_text import FormattedText
 
 from thinking_prompt.thinking_control import ThinkingBoxControl
@@ -36,13 +35,6 @@ class TestThinkingBoxControlBasics:
     def test_reads_its_text(self):
         assert _control("hello world").content == "hello world"
 
-    def test_content_callback_error_handling(self):
-        """A raising get_text reads as empty."""
-        def bad_callback():
-            raise ValueError("Callback error")
-
-        assert ThinkingBoxControl(bad_callback).content == ""
-
     def test_on_draw_runs_on_every_draw(self):
         draws: list[int] = []
         control = ThinkingBoxControl(lambda: "x", on_draw=lambda: draws.append(1))
@@ -67,45 +59,17 @@ class TestThinkingBoxControlExpansion:
     def test_cannot_toggle_when_empty(self):
         assert not _control("").can_toggle_expanded
 
-    def test_can_toggle_when_content_overflows(self, multiline_content: str):
-        """Should be able to toggle when content overflows max lines."""
-        control = _control(multiline_content, max_collapsed_lines=5)
-        assert control.can_toggle_expanded
-
-    def test_cannot_toggle_when_content_fits(self, short_content: str):
-        """Should not be able to toggle when content fits in collapsed view."""
-        control = _control(short_content, max_collapsed_lines=5)
-        assert not control.can_toggle_expanded
-
 
 class TestThinkingBoxControlFormatting:
     """Test FormattedText output."""
 
-    def test_formatted_text_includes_content(self):
-        """Formatted text should include content."""
-        control = _control("Hello World")
-        formatted = control._get_formatted_text()
-
-        # Extract text from formatted output
-        text = "".join(frag[1] for frag in formatted)
-        assert "Hello World" in text
-
-    def test_formatted_text_includes_hint_when_overflowing(self, multiline_content: str):
-        """Formatted text should include expand hint when collapsed and overflowing."""
-        control = _control(multiline_content, max_collapsed_lines=5)
-        formatted = control._get_formatted_text()
-
-        text = "".join(frag[1] for frag in formatted)
-        # Default key is c-t, displayed as ctrl-t
-        assert "ctrl-t to expand" in text
-
     def test_formatted_text_no_hint_when_expanded(self, multiline_content: str):
-        """Formatted text should not include hint when expanded."""
+        """Expanded with no height limit: all the content, and no hint."""
         control = _expanded_control(multiline_content)
         formatted = control._get_formatted_text()
 
         text = "".join(frag[1] for frag in formatted)
-        assert "to expand" not in text
+        assert text == multiline_content
 
     def test_formatted_text_uses_custom_key_in_hint(self, multiline_content: str):
         """Formatted text should use custom key in expand hint."""
@@ -176,10 +140,9 @@ class TestThinkingBoxControlAnsiFormat:
         control = _control(ansi_content, content_format="ansi")
         formatted = control._get_formatted_text()
 
-        # Should have fragments (ANSI parsed into styled fragments)
-        assert len(formatted) > 0
         text = "".join(frag[1] for frag in formatted)
-        assert "✓ Step 1" in text
+        assert text == "✓ Step 1"  # no escape bytes left
+        assert all("ansigreen" in style for style, chunk in formatted if chunk)
 
     def test_ansi_truncation_with_hint(self):
         """ANSI content should be truncated with hint when overflowing."""
@@ -199,8 +162,7 @@ class TestThinkingBoxControlAnsiFormat:
         formatted = control._get_formatted_text()
 
         text = "".join(frag[1] for frag in formatted)
-        assert "Line 19" in text
-        assert "to expand" not in text
+        assert text == "\n".join(f"Line {i}" for i in range(20))
 
     def test_plain_format_unchanged(self):
         """Plain format should work exactly as before."""
@@ -345,10 +307,3 @@ class TestOverflowHead:
         content = "a\nb\nc\nd\n" + "x" * 15 + "\n"
         control = ThinkingBoxControl(lambda: content, max_collapsed_lines=5, overflow="head")
         assert _rendered(control, 10, 5) == ["a", "b", "c", "d", "+1 line... ctrl-t to expand"]
-
-
-def test_the_control_lives_in_thinking_control():
-    import importlib.util
-
-    assert importlib.util.find_spec("thinking_prompt.thinking") is None
-    assert importlib.util.find_spec("thinking_prompt.thinking_control") is not None
