@@ -64,10 +64,6 @@ class TestBuildBox:
         view = build_box(Dialog("T", body, [ButtonConfig("OK")]))
         assert view.text_region is None
 
-    def test_a_radio_list_body_has_no_text_region(self):
-        view = build_box(Dialog("T", RadioList([("a", "A"), ("b", "B")]), [ButtonConfig("OK")]))
-        assert view.text_region is None
-
     def test_button_style_is_added_to_the_button_window(self):
         view = build_box(Dialog("T", "B", [ButtonConfig("Danger", result=1, style="class:danger")]))
         assert "class:danger" in _resolved_style(view.buttons[0].window)
@@ -99,10 +95,6 @@ class TestBuildBox:
         with pytest.raises(TypeError, match=r"Use ButtonConfig\(label, handler=\.\.\.\)"):
             build_box(Old())
 
-    def test_the_body_scrolls_in_a_region(self):
-        view = build_box(Dialog("T", "B", [ButtonConfig("OK")]))
-        assert any(isinstance(c, ScrollRegion) for c in walk(to_container(view.widget)))
-
     def test_a_list_that_scrolls_itself_is_not_in_a_region(self):
         body = HSplit([Label("Pick:"), RadioList([("a", "A"), ("b", "B")])])
         view = build_box(Dialog("T", body, [ButtonConfig("OK")]))
@@ -112,6 +104,7 @@ class TestBuildBox:
         group = OptionGroup(["a", "b"], multiple=True)
         view = build_box(Dialog("T", HSplit([r.window for r in group.rows]), [ButtonConfig("OK")]))
         assert any(isinstance(c, ScrollRegion) for c in walk(to_container(view.widget)))
+        assert view.text_region is None
 
     def test_a_lone_choice_list_scrolls_in_a_region(self):
         """Each of a choice list's options is a stop: the list scrolls in a
