@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "thinking-prompt"
-version = "0.3.4"
+version = "0.4.0"
 description = "A prompt_toolkit extension that adds a thinking box above the prompt"
 # README.md, with its relative img/ links made absolute (below), so PyPI shows them.
 dynamic = ["readme"]
@@ -66,6 +66,18 @@ replacement = '](https://raw.githubusercontent.com/shoom1/thinking-prompt/main/i
 
 [tool.hatch.build.targets.wheel]
 packages = ["thinking_prompt"]
+
+# Only these: the sdist otherwise takes every file git doesn't ignore,
+# untracked local ones (AGENTS.md, .superpowers/) too.
+[tool.hatch.build.targets.sdist]
+include = [
+    "thinking_prompt/",
+    "tests/",
+    "examples/",
+    "img/",
+    "README.md",
+    "CHANGELOG.md",
+]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
