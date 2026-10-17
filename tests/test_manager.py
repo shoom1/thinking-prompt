@@ -141,14 +141,6 @@ class TestCreation:
         box = mgr.create_box(lambda: "x", content_format="ansi")
         assert box._control.content_format == "ansi"
 
-    def test_create_box_seq_increments(self):
-        """Each created box should have an incrementing seq."""
-        mgr = make_manager()
-        box1 = mgr.create_box(lambda: "a")
-        box2 = mgr.create_box(lambda: "b")
-        box3 = mgr.create_box(lambda: "c")
-        assert box1._seq < box2._seq < box3._seq
-
 
 # =============================================================================
 # Active state tests

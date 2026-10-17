@@ -3,10 +3,8 @@ Display - Handles output to console and history buffer.
 
 This module provides the Display class which manages all output for
 ThinkingPromptSession, writing to both the console and the
-FormattedTextHistory (the transcript a repaint reprints).
-
-Rich and Pygments integration utilities live in rich_utils; the names
-are re-exported here for backward compatibility.
+FormattedTextHistory (the transcript a repaint reprints). Rich and
+Pygments are used through rich_utils.
 """
 from __future__ import annotations
 
@@ -23,7 +21,6 @@ from .rich_utils import (
     _highlight_code,
     _is_rich_renderable,
     _markdown_to_ansi,
-    _renderable_to_ansi,
     _rich_to_ansi,
 )
 from .types import ContentFormat, Overflow
@@ -33,15 +30,7 @@ if TYPE_CHECKING:
 
     from .styles import ThinkingPromptStyles
 
-__all__ = [
-    "Display",
-    # Backward-compat re-exports (moved to rich_utils)
-    "_highlight_code",
-    "_is_rich_renderable",
-    "_markdown_to_ansi",
-    "_renderable_to_ansi",
-    "_rich_to_ansi",
-]
+__all__ = ["Display"]
 
 
 class Display:

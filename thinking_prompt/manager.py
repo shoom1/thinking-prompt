@@ -101,7 +101,6 @@ class ThinkingBoxManager:
         self._spinner = spinner
         self._spinner_position: Literal["before", "after"] = spinner_position
         self._boxes: list[ThinkingBox] = []  # in creation order
-        self._seq_counter = 0
         self._expanded = False  # the user's choice (Ctrl+T)
         self._lock = threading.RLock()
 
@@ -177,9 +176,6 @@ class ThinkingBoxManager:
                     request_frame=frames.redraw_in if frames is not None else None,
                 )
 
-            seq = self._seq_counter
-            self._seq_counter += 1
-
             box = ThinkingBox(
                 self,
                 content=streaming_content,
@@ -187,7 +183,6 @@ class ThinkingBoxManager:
                 header=header,
                 container=self._build_container(control, header, effective_max_lines),
                 order=order,
-                seq=seq,
                 owner=_current_task(),
             )
             self._boxes.append(box)
@@ -244,13 +239,14 @@ class ThinkingBoxManager:
 
     def get_sorted_boxes(self) -> list[ThinkingBox]:
         """
-        Get all boxes sorted by (order, seq).
+        Get all boxes sorted by order, boxes of the same order in the order
+        they were made (the sort is stable, and boxes are kept in that order).
 
         Returns:
-            List of ThinkingBox sorted by order then creation sequence.
+            List of ThinkingBox sorted by order.
         """
         with self._lock:
-            return sorted(self._boxes, key=lambda b: (b._order, b._seq))
+            return sorted(self._boxes, key=lambda b: b._order)
 
     def get_container(self) -> Container:
         """

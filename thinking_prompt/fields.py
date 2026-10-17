@@ -385,11 +385,6 @@ class FieldControl(RowControl, ABC, Generic[T]):
         """Current value of the field."""
         return self._value
 
-    @value.setter
-    def value(self, val: Any) -> None:
-        """Set the current value."""
-        self._value = val
-
     @property
     def is_editing(self) -> bool:
         """Whether the control is in edit mode."""
@@ -1038,17 +1033,6 @@ class OptionsFieldControl(FieldControl[Any]):
     def value(self) -> Any:
         """The checked options (check list) or the picked one (radio or choice list)."""
         return self._group.checked if self._group.multiple else self._group.picked
-
-    @value.setter
-    def value(self, val: Any) -> None:
-        if self._group.multiple:
-            self._group.select(list(val))
-        elif isinstance(self._item, ChoiceField):
-            # A choice list keeps a pick: anything else is ignored.
-            if val in self._group.options:
-                self._group.select([val])
-        else:
-            self._group.select([] if val is None else [val])
 
     def set_alone(self, accept: Callable[[], None] | None) -> None:
         """A choice list alone in its dialog: Enter, after picking, runs

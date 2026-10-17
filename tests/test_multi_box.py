@@ -74,24 +74,6 @@ class TestMultiBoxLifecycle:
 class TestMultiBoxOrdering:
     """Test sorting of multiple boxes by order and creation sequence."""
 
-    def test_same_order_sorted_by_creation_sequence(self):
-        """Boxes with the same order should be sorted by creation sequence."""
-        session = _make_session()
-        ctx1 = session.start_thinking(lambda: "first", order=0)
-        ctx2 = session.start_thinking(lambda: "second", order=0)
-        ctx3 = session.start_thinking(lambda: "third", order=0)
-
-        sorted_boxes = session._manager.get_sorted_boxes()
-        assert len(sorted_boxes) == 3
-        # seq should be monotonically increasing
-        seqs = [b._seq for b in sorted_boxes]
-        assert seqs == sorted(seqs)
-        assert seqs[0] < seqs[1] < seqs[2]
-
-        ctx1.finish(add_to_history=False, echo_to_console=False)
-        ctx2.finish(add_to_history=False, echo_to_console=False)
-        ctx3.finish(add_to_history=False, echo_to_console=False)
-
     def test_mixed_order_with_sequence_tiebreaker(self):
         """Mixed order values with creation sequence as tiebreaker."""
         session = _make_session()

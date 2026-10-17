@@ -1333,14 +1333,6 @@ class TestChoiceField:
     def test_the_pick_is_the_default_else_the_first_option(self, default, value):
         assert _choice(default=default).value == value
 
-    def test_setting_the_value_ignores_what_isnt_an_option(self):
-        control = _choice()
-        control.value = "z"
-        assert control.value == "z"
-        control.value = "nope"
-        control.value = None
-        assert control.value == "z"
-
     def test_its_value_in_a_dialog(self):
         d = Dialog("T", fields=[ChoiceField("c", "C", options=["x", "y"])])
         assert d.values == {"c": "x"}

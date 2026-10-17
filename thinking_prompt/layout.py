@@ -154,10 +154,6 @@ class ThinkingHeader:
 
         return FormattedText([("class:thinking-box.border", line)])
 
-    def reset(self) -> None:
-        """Reset animation to first frame."""
-        self._first_tick = None
-
 
 def create_thinking_area(manager: ThinkingBoxManager) -> DynamicContainer:
     """Create a dynamic container that renders active thinking boxes."""
