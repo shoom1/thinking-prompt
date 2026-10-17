@@ -4,6 +4,7 @@ from __future__ import annotations
 import pytest
 from prompt_toolkit.output import ColorDepth
 
+from tests.helpers import history_texts, keep_console
 from thinking_prompt import ThinkingPromptSession, ThinkingPromptStyles
 
 
@@ -37,11 +38,6 @@ class TestThemeParam:
 
         assert ThinkingPromptSession().styles.color_accent != "#ff0000"
         assert DEFAULT_STYLES.color_accent != "#ff0000"
-
-    def test_styles_param_is_gone(self):
-        """0.4 removes styles= (no deprecation): theme= takes the instance."""
-        with pytest.raises(TypeError, match="styles"):
-            ThinkingPromptSession(styles=ThinkingPromptStyles())
 
 
 class TestEffectiveColorDepth:
@@ -117,9 +113,12 @@ class TestSetTheme:
 
 
 class TestHistoryLimit:
-    def test_history_limit_flows_to_display(self):
+    def test_history_limit_keeps_the_last_entries(self):
         s = ThinkingPromptSession(history_limit=3)
-        assert s._display.history._max_entries == 3
+        keep_console(s._display)
+        for n in range(1, 5):
+            s.add_response(str(n))
+        assert history_texts(s._display) == ["2\n", "3\n", "4\n"]
 
     def test_history_limit_defaults_to_unbounded(self):
         s = ThinkingPromptSession()
@@ -127,8 +126,8 @@ class TestHistoryLimit:
 
 
 class TestRepaint:
-    """reprint_transcript() re-prints via prompt_toolkit's print_formatted_text(),
-    which writes through the process-wide AppSession's Output — that Output
+    """set_theme(repaint=True) with no app running re-prints the transcript
+    through the process-wide AppSession's Output — that Output
     lazily binds sys.stdout the first time any test triggers it and then
     caches that binding for the rest of the run (same issue documented on
     TestTranscriptWiring.test_markdown_stored_as_source in test_display.py).

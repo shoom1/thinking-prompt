@@ -5,29 +5,30 @@ from __future__ import annotations
 
 import pytest
 
-from thinking_prompt.display import (
-    _is_rich_renderable as is_rich_renderable,
-    _rich_to_ansi as rich_to_ansi,
-    _markdown_to_ansi as markdown_to_ansi,
-    _highlight_code as highlight_code,
+from thinking_prompt.rich_utils import (
+    _highlight_code,
+    _is_rich_renderable,
+    _markdown_to_ansi,
+    _renderable_to_ansi,
+    _rich_to_ansi,
 )
 from tests.helpers import echoed, keep_console, make_display
 
 
 class TestIsRichRenderable:
-    """Test is_rich_renderable function."""
+    """Test _is_rich_renderable function."""
 
     def test_plain_string_not_renderable(self):
         """Plain string should not be considered Rich renderable."""
-        assert not is_rich_renderable("Hello")
+        assert not _is_rich_renderable("Hello")
 
     def test_int_not_renderable(self):
         """Integer should not be considered Rich renderable."""
-        assert not is_rich_renderable(42)
+        assert not _is_rich_renderable(42)
 
     def test_none_not_renderable(self):
         """None should not be considered Rich renderable."""
-        assert not is_rich_renderable(None)
+        assert not _is_rich_renderable(None)
 
     def test_object_with_rich_console_is_renderable(self):
         """Object with __rich_console__ method should be renderable."""
@@ -35,7 +36,7 @@ class TestIsRichRenderable:
             def __rich_console__(self, console, options):
                 pass
 
-        assert is_rich_renderable(FakeRenderable())
+        assert _is_rich_renderable(FakeRenderable())
 
     def test_object_with_rich_is_renderable(self):
         """Object with __rich__ method should be renderable."""
@@ -43,21 +44,22 @@ class TestIsRichRenderable:
             def __rich__(self):
                 pass
 
-        assert is_rich_renderable(FakeRenderable())
+        assert _is_rich_renderable(FakeRenderable())
 
 
-class TestRichToAnsi:
-    """Test rich_to_ansi function."""
+class TestPrivateRichToAnsi:
+    """Test _rich_to_ansi, the converter Display.rich() uses (the public
+    rich_to_ansi is _renderable_to_ansi, tested in TestRenderableToAnsi)."""
 
     def test_converts_string_to_string(self):
         """Should convert plain string to string."""
-        result = rich_to_ansi("Hello World")
+        result = _rich_to_ansi("Hello World")
         assert isinstance(result, str)
         assert "Hello" in result
 
     def test_handles_none_gracefully(self):
         """Should handle None gracefully."""
-        result = rich_to_ansi(None)
+        result = _rich_to_ansi(None)
         assert isinstance(result, str)
 
     def test_rich_text_if_available(self):
@@ -65,43 +67,43 @@ class TestRichToAnsi:
         try:
             from rich.text import Text
             text = Text("Hello", style="bold")
-            result = rich_to_ansi(text)
+            result = _rich_to_ansi(text)
             assert "Hello" in result
         except ImportError:
             # Rich not installed, test fallback
-            result = rich_to_ansi("Hello")
+            result = _rich_to_ansi("Hello")
             assert "Hello" in result
 
 
 class TestMarkdownToAnsi:
-    """Test markdown_to_ansi function."""
+    """Test _markdown_to_ansi function."""
 
     def test_converts_markdown_string(self):
         """Should convert markdown to string."""
-        result = markdown_to_ansi("# Hello\n\nWorld")
+        result = _markdown_to_ansi("# Hello\n\nWorld")
         assert isinstance(result, str)
 
     def test_preserves_content(self):
         """Should preserve text content."""
-        result = markdown_to_ansi("Hello World")
+        result = _markdown_to_ansi("Hello World")
         assert "Hello" in result
         assert "World" in result
 
     def test_handles_code_blocks(self):
         """Should handle code blocks."""
         md = "```python\nprint('hello')\n```"
-        result = markdown_to_ansi(md)
+        result = _markdown_to_ansi(md)
         assert "print" in result
 
     def test_handles_lists(self):
         """Should handle lists."""
         md = "- Item 1\n- Item 2\n- Item 3"
-        result = markdown_to_ansi(md)
+        result = _markdown_to_ansi(md)
         assert "Item 1" in result
 
     def test_empty_string(self):
         """Should handle empty string."""
-        result = markdown_to_ansi("")
+        result = _markdown_to_ansi("")
         assert isinstance(result, str)
 
     def test_does_not_patch_rich_markdown_globally(self):
@@ -112,7 +114,7 @@ class TestMarkdownToAnsi:
         rendering for the host application's own Rich usage."""
         rich_md = pytest.importorskip("rich.markdown")
         # Force our markdown path (which uses the scoped subclass) first.
-        markdown_to_ansi("# Heading\n\nbody")
+        _markdown_to_ansi("# Heading\n\nbody")
         assert rich_md.Markdown.elements["heading_open"] is rich_md.Heading
 
     def test_h1_left_aligned_with_underline(self):
@@ -121,7 +123,7 @@ class TestMarkdownToAnsi:
         pytest.importorskip("rich")
         import re
 
-        result = markdown_to_ansi("# Hi\n\nbody")
+        result = _markdown_to_ansi("# Hi\n\nbody")
         plain = re.sub(r"\x1b\[[0-9;]*m", "", result)
         lines = [line for line in plain.splitlines() if line.strip()]
         # Left-aligned: no centering padding before the heading text.
@@ -130,12 +132,12 @@ class TestMarkdownToAnsi:
 
 
 class TestHighlightCode:
-    """Test highlight_code function."""
+    """Test _highlight_code function."""
 
     def test_highlights_python_code(self):
         """Should return highlighted Python code."""
         code = "def hello():\n    return 'world'"
-        result = highlight_code(code, "python")
+        result = _highlight_code(code, "python")
         assert isinstance(result, str)
         # Should contain the code content
         assert "def" in result or "hello" in result
@@ -143,32 +145,34 @@ class TestHighlightCode:
     def test_handles_unknown_language(self):
         """Should handle unknown language gracefully."""
         code = "some code"
-        result = highlight_code(code, "unknown_language_xyz")
+        result = _highlight_code(code, "unknown_language_xyz")
         assert isinstance(result, str)
         assert "some code" in result
 
     def test_handles_empty_code(self):
         """Should handle empty code."""
-        result = highlight_code("", "python")
+        result = _highlight_code("", "python")
         assert isinstance(result, str)
 
     def test_default_language_is_python(self):
         """Default language should be Python."""
+        pytest.importorskip("pygments")
         code = "x = 1"
-        result = highlight_code(code)
-        assert isinstance(result, str)
+        result = _highlight_code(code)
+        assert result == _highlight_code(code, "python")
+        assert result != _highlight_code(code, "text")
 
     def test_javascript_code(self):
         """Should handle JavaScript code."""
         code = "const x = () => console.log('hello');"
-        result = highlight_code(code, "javascript")
+        result = _highlight_code(code, "javascript")
         assert isinstance(result, str)
         assert "const" in result or "console" in result
 
     def test_code_theme_selects_pygments_style(self):
         pytest.importorskip("pygments")
         code = "def hello():\n    return 'world'"
-        assert highlight_code(code, "python", code_theme="monokai") != highlight_code(
+        assert _highlight_code(code, "python", code_theme="monokai") != _highlight_code(
             code, "python", code_theme="default"
         )
 
@@ -177,8 +181,8 @@ class TestHighlightCode:
         colors, so the terminal's own palette applies."""
         pytest.importorskip("pygments")
         code = "def hello():\n    return 'world'"
-        dark = highlight_code(code, "python", code_theme="ansi_dark")
-        light = highlight_code(code, "python", code_theme="ansi_light")
+        dark = _highlight_code(code, "python", code_theme="ansi_dark")
+        light = _highlight_code(code, "python", code_theme="ansi_light")
         assert dark != light
         for out in (dark, light):
             assert "\x1b[" in out
@@ -186,7 +190,7 @@ class TestHighlightCode:
 
     def test_unknown_code_theme_still_highlights(self):
         pytest.importorskip("pygments")
-        result = highlight_code("x = 1", "python", code_theme="no-such-style")
+        result = _highlight_code("x = 1", "python", code_theme="no-such-style")
         assert "\x1b[" in result
         assert "x" in result
 
@@ -232,14 +236,6 @@ class TestDisplayInit:
         assert display.history.is_empty
 
 
-class TestDisplayHistory:
-    """Test Display history property."""
-
-    def test_history_property(self, display: Display):
-        """Should expose history via property."""
-        assert display.history is display._history
-
-
 class TestDisplayUserInput:
     """Test Display.user_input method."""
 
@@ -281,12 +277,13 @@ class TestDisplayThinking:
         display.thinking("   ")
         assert display.history.is_empty
 
-    def test_truncates_when_requested(self, display: Display):
+    def test_truncates_when_requested(self, kept_display: Display):
         """Should truncate console output when truncate_lines is set."""
         content = "\n".join([f"Line {i}" for i in range(10)])
-        display.thinking(content, truncate_lines=3)
+        kept_display.thinking(content, truncate_lines=3)
+        assert echoed(kept_display) == ["Line 0\nLine 1\nLine 2\n...\n"]
         # History should have full content
-        formatted = display.history.get_formatted_text()
+        formatted = kept_display.history.get_formatted_text()
         text = "".join(t for _, t in formatted)
         assert "Line 9" in text  # Full content in history
 
@@ -317,11 +314,11 @@ class TestDisplayResponse:
         styles = [s for s, _ in formatted]
         assert "class:history.assistant-message" in styles
 
-    def test_adds_empty_to_history_but_skips_print(self, display: Display):
-        """Empty content should still go to history."""
-        display.response("")
-        # History gets it (even if empty)
-        assert len(display.history) == 1
+    def test_empty_content_is_added_and_printed(self, kept_display: Display):
+        """Empty content still goes to history and to the console."""
+        kept_display.response("")
+        assert len(kept_display.history) == 1
+        assert echoed(kept_display) == ["\n"]
 
 
 class TestDisplaySystemMessages:
@@ -354,25 +351,15 @@ class TestDisplaySystemMessages:
         assert "[OK]" in text
         assert "Done" in text
 
-    def test_skips_empty_content(self, display: Display):
-        """Empty content should go to history but skip console output."""
-        display.error("")
-        # Still adds to history (with prefix)
-        assert len(display.history) == 1
+    def test_empty_content_is_added_and_printed_with_its_prefix(self, kept_display: Display):
+        """Empty content still goes to history and to the console, prefixed."""
+        kept_display.error("")
+        assert len(kept_display.history) == 1
+        assert echoed(kept_display) == ["[ERROR] \n"]
 
 
 class TestDisplayMarkdownAndCode:
     """Test Display.markdown and Display.code methods."""
-
-    def test_markdown_adds_to_history(self, display: Display):
-        """Markdown should be added to history."""
-        display.markdown("# Title")
-        assert not display.history.is_empty
-
-    def test_code_adds_to_history(self, display: Display):
-        """Code should be added to history."""
-        display.code("x = 1", "python")
-        assert not display.history.is_empty
 
     def test_markdown_prints_ansi(self, kept_display: Display):
         from prompt_toolkit.formatted_text import ANSI
@@ -396,15 +383,18 @@ class TestDisplayWelcome:
         text = "".join(t for _, t in display.history.get_formatted_text())
         assert "Welcome!" in text
 
-    def test_rich_renderable_converted(self, display: Display):
+    def test_rich_renderable_converted(self, kept_display: Display):
         """Rich renderable should be converted to ANSI."""
+        pytest.importorskip("rich")
+
         class FakeRenderable:
             def __rich__(self):
                 return "Rich content"
 
-        display.welcome(FakeRenderable())
-        # Should not raise and should add to history
-        assert not display.history.is_empty
+        kept_display.welcome(FakeRenderable())
+        text = "".join(t for _, t in kept_display.history.get_formatted_text())
+        assert text == "Rich content\n"
+        assert echoed(kept_display) == ["Rich content\n"]
 
     @pytest.mark.parametrize("content", ["", None])
     def test_empty_content_prints_nothing(self, content):
@@ -507,13 +497,14 @@ class TestDisplayThinkingAnsi:
         display.thinking("\033[32mtext\033[0m", add_to_history=False, content_format="ansi")
         assert display.history.is_empty
 
-    def test_ansi_truncates_when_requested(self, display: Display):
+    def test_ansi_truncates_when_requested(self, kept_display: Display):
         """ANSI thinking should truncate console output when truncate_lines is set."""
         lines = [f"\033[32mLine {i}\033[0m" for i in range(10)]
         content = "\n".join(lines)
-        display.thinking(content, truncate_lines=3, content_format="ansi")
+        kept_display.thinking(content, truncate_lines=3, content_format="ansi")
+        assert echoed(kept_display) == ["Line 0\nLine 1\nLine 2\n...\n"]
         # History should have full content
-        formatted = display.history.get_formatted_text()
+        formatted = kept_display.history.get_formatted_text()
         text = "".join(t for _, t in formatted)
         assert "Line 9" in text
 
@@ -536,26 +527,22 @@ class TestRenderableToAnsi:
 
     def test_converts_markup_string(self):
         pytest.importorskip("rich")
-        from thinking_prompt.display import _renderable_to_ansi
         result = _renderable_to_ansi("[green]hello[/green]")
         assert "hello" in result
         assert "\033[" in result
 
     def test_converts_rich_text_object(self):
         pytest.importorskip("rich")
-        from thinking_prompt.display import _renderable_to_ansi
         from rich.text import Text
         result = _renderable_to_ansi(Text("hello", style="bold"))
         assert "hello" in result
 
     def test_no_trailing_whitespace(self):
-        from thinking_prompt.display import _renderable_to_ansi
         result = _renderable_to_ansi("[green]hello[/green]")
         assert not result.endswith(" ")
         assert not result.endswith("\n")
 
     def test_plain_string(self):
-        from thinking_prompt.display import _renderable_to_ansi
         result = _renderable_to_ansi("plain text")
         assert "plain text" in result
 
@@ -568,7 +555,6 @@ class TestRenderableToAnsi:
         set_line_rich) that promise styled output.
         """
         pytest.importorskip("rich")
-        from thinking_prompt.display import _renderable_to_ansi
         monkeypatch.setenv("NO_COLOR", "1")
         result = _renderable_to_ansi("[green]hello[/green]")
         assert "hello" in result
@@ -657,11 +643,6 @@ class TestTranscriptWiring:
         d = self._display()
         d.thinking("l1\nl2\nl3", truncate_lines=2, echo_to_console=False)
         assert d.history.iter_entries()[-1].truncate_lines == 2
-
-    def test_history_limit_flows_from_session(self):
-        from thinking_prompt import ThinkingPromptSession
-        s = ThinkingPromptSession(history_limit=3)
-        assert s._display.history._max_entries == 3
 
 
 def _texts(contents) -> list[str]:

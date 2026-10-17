@@ -25,13 +25,6 @@ class TestDisplayToAnsi:
         style = Style.from_dict({})
         return Display(get_style=lambda: style)
 
-    def test_converts_rich_text_to_ansi(self, display: Display):
-        """Should convert a Rich Text object to a prompt_toolkit ANSI."""
-        pytest.importorskip("rich")
-        from rich.text import Text
-        result = display.to_ansi(Text("Hello", style="bold"))
-        assert isinstance(result, ANSI)
-
     def test_strips_trailing_newlines(self, display: Display):
         """Should strip trailing newlines from output."""
         pytest.importorskip("rich")

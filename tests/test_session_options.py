@@ -32,6 +32,9 @@ class TestDefaults:
     def test_ctrl_t_expands(self):
         assert (Keys.ControlT,) in _bound_keys(ThinkingPromptSession())
 
+    def test_ctrl_e_is_left_to_prompt_toolkit(self):
+        assert (Keys.ControlE,) not in _bound_keys(ThinkingPromptSession())
+
     def test_boxes_are_titled_thinking_with_dots_before_the_title(self):
         header = _header(ThinkingPromptSession())
         assert header.text == "Thinking"
@@ -78,20 +81,6 @@ class TestMaxThinkingHeight:
     def test_below_two_is_refused(self, height):
         with pytest.raises(ValueError, match="max_thinking_height must be at least 2"):
             ThinkingPromptSession(max_thinking_height=height)
-
-
-class TestFullScreenIsGone:
-    @pytest.mark.parametrize("option", [{"enable_fullscreen": True}, {"fullscreen_key": "c-e"}])
-    def test_its_options_are_gone(self, option):
-        with pytest.raises(TypeError):
-            ThinkingPromptSession(**option)
-
-    @pytest.mark.parametrize("name", ["is_fullscreen", "switch_to_fullscreen", "switch_to_prompt"])
-    def test_its_methods_are_gone(self, name):
-        assert not hasattr(ThinkingPromptSession, name)
-
-    def test_ctrl_e_is_left_to_prompt_toolkit(self):
-        assert (Keys.ControlE,) not in _bound_keys(ThinkingPromptSession())
 
 
 def _banner(app_info: AppInfo | None) -> tuple[list[str], list[str]]:
