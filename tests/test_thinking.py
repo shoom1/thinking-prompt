@@ -59,6 +59,15 @@ class TestThinkingBoxControlExpansion:
     def test_cannot_toggle_when_empty(self):
         assert not _control("").can_toggle_expanded
 
+    def test_can_toggle_counts_rows_at_the_last_width_drawn(self):
+        """Five 60-column lines fit five rows at 80 columns, but wrap to
+        ten at 40."""
+        control = _control(("x" * 60 + "\n") * 5, max_collapsed_lines=5)
+        _rendered(control, 40, 5)
+        assert control.can_toggle_expanded is True
+        _rendered(control, 80, 5)
+        assert control.can_toggle_expanded is False
+
 
 class TestThinkingBoxControlFormatting:
     """Test FormattedText output."""

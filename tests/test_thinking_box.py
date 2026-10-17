@@ -372,3 +372,38 @@ class TestFinishArguments:
             box.append("x\n")
         assert _history(session) == ["x\n\n"]
         assert echoed(session._display) != []
+
+    @pytest.mark.parametrize(
+        "add_to_history, echo_to_console, history, console",
+        [
+            (False, False, [], []),
+            (True, False, ["x\n\n"], []),
+            (False, True, [], ["x\n"]),
+            (True, True, ["x\n\n"], ["x\n"]),
+        ],
+    )
+    async def test_a_cancelled_thinking_block_passes_the_arguments_on(
+        self, add_to_history, echo_to_console, history, console
+    ):
+        """The box's text goes where the arguments say; the cancel line
+        is always said."""
+        session = _kept_session()
+        opened = asyncio.Event()
+
+        async def work() -> None:
+            async with session.thinking(
+                add_to_history=add_to_history, echo_to_console=echo_to_console
+            ) as box:
+                box.append("x\n")
+                opened.set()
+                await asyncio.sleep(3600)
+
+        task = asyncio.create_task(work())
+        await asyncio.wait_for(opened.wait(), 1)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        cancelled = "Operation cancelled...\n"
+        assert _history(session) == [*history, cancelled]
+        assert echoed(session._display) == [*console, cancelled]
