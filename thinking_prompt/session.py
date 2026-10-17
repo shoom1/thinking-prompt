@@ -627,6 +627,9 @@ class ThinkingPromptSession:
         Returns:
             The ThinkingBox: write to it, retitle it, and finish it.
 
+        Raises:
+            ValueError: If max_lines is less than 1.
+
         Example:
             box = session.start_thinking(title="Processing")
             box.append("Processing...\\n")
@@ -635,6 +638,9 @@ class ThinkingPromptSession:
             box.append("Done!\\n")
             box.finish()
         """
+        # One row is enough (the newest line, no hint); none can't be drawn.
+        if max_lines is not None and max_lines < 1:
+            raise ValueError(f"max_lines must be at least 1 (or None), got {max_lines!r}")
         return self._manager.create_box(
             content_callback,
             title=title if title is not None else self._thinking_title,
@@ -695,6 +701,9 @@ class ThinkingPromptSession:
 
         Yields:
             ThinkingBox: the box, to write to and retitle.
+
+        Raises:
+            ValueError: If max_lines is less than 1 (before the block runs).
 
         Example:
             async with session.thinking(title="Processing") as box:

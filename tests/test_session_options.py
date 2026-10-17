@@ -73,6 +73,13 @@ class TestOptions:
             ThinkingPromptSession(">>> ", AppInfo(name="t"))  # type: ignore[misc]
 
 
+class TestMaxThinkingHeight:
+    @pytest.mark.parametrize("height", [1, 0])
+    def test_below_two_is_refused(self, height):
+        with pytest.raises(ValueError, match="max_thinking_height must be at least 2"):
+            ThinkingPromptSession(max_thinking_height=height)
+
+
 class TestFullScreenIsGone:
     @pytest.mark.parametrize("option", [{"enable_fullscreen": True}, {"fullscreen_key": "c-e"}])
     def test_its_options_are_gone(self, option):

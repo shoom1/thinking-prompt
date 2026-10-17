@@ -282,6 +282,21 @@ class TestSessionBoxes:
     def test_start_thinking_with_a_title(self):
         assert _session().start_thinking(title="Processing").title == "Processing"
 
+    @pytest.mark.parametrize("max_lines", [0, -1])
+    def test_start_thinking_refuses_fewer_than_one_line(self, max_lines):
+        """A box with no rows for its text can't be drawn: refused when made."""
+        session = _session()
+        with pytest.raises(ValueError, match=r"max_lines must be at least 1 \(or None\), got "):
+            session.start_thinking(max_lines=max_lines)
+        assert not session.is_thinking
+
+    async def test_thinking_refuses_fewer_than_one_line(self):
+        session = _session()
+        with pytest.raises(ValueError, match="max_lines must be at least 1"):
+            async with session.thinking(max_lines=0):
+                pass
+        assert not session.is_thinking
+
     async def test_thinking_yields_a_box_and_finishes_it(self):
         session = _session()
         async with session.thinking(
