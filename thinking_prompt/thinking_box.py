@@ -52,7 +52,6 @@ class ThinkingBox:
         header: ThinkingHeader | None,
         container: Container,
         order: int,
-        seq: int,
         owner: asyncio.Task[Any] | None,
     ) -> None:
         self._manager = manager
@@ -61,7 +60,6 @@ class ThinkingBox:
         self._header = header
         self._container = container
         self._order = order
-        self._seq = seq
         self._owner = owner
         self._final_text = ""
         self._finished = False

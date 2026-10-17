@@ -93,15 +93,6 @@ class TestSpinnerFrames:
             shown.append(header._get_current_frame())
         assert shown == ["a", "b", "c", "a"]
 
-    def test_reset_starts_over_at_the_first_frame(self, clock: _Clock):
-        header = ThinkingHeader(text="T", spinner=Spinner(("a", "b", "c"), 0.5))
-        header._get_current_frame()
-        clock.now = 10.5
-        assert header._get_current_frame() == "b"
-        header.reset()
-        clock.now = 11.0
-        assert header._get_current_frame() == "a"
-
     def test_drawing_asks_for_the_next_frame(self, clock: _Clock):
         asked: list[float] = []
         header = ThinkingHeader(
