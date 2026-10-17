@@ -11,7 +11,6 @@ from prompt_toolkit.styles import Style
 from thinking_prompt.display import Display
 from thinking_prompt.manager import ThinkingBoxManager
 from thinking_prompt.thinking_box import ThinkingBox
-from thinking_prompt.thinking_control import ThinkingBoxControl
 from thinking_prompt.layout import ThinkingHeader
 from thinking_prompt.spinner import Spinner
 from thinking_prompt.streaming import StreamingContent

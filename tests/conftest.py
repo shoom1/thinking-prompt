@@ -28,12 +28,6 @@ def multiline_content() -> str:
     return "\n".join([f"Line {i}" for i in range(20)])
 
 
-@pytest.fixture
-def short_content() -> str:
-    """Generate short content that fits in collapsed view."""
-    return "\n".join([f"Line {i}" for i in range(3)])
-
-
 @asynccontextmanager
 async def _running(**kwargs: Any) -> AsyncIterator[ThinkingPromptSession]:
     """A session (built with ``kwargs``) whose app runs on piped input with no output."""

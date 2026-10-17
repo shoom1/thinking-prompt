@@ -67,7 +67,6 @@ class TestCreateStatusBarTypeDispatch:
 
     def test_formatted_text_passed_through(self):
         """FormattedText should be returned as-is."""
-        from prompt_toolkit.layout.controls import FormattedTextControl
 
         ft = FormattedText([("bold", "Styled")])
         bar = create_status_bar(
@@ -81,7 +80,6 @@ class TestCreateStatusBarTypeDispatch:
 
     def test_ansi_passed_through(self):
         """ANSI objects should be returned as-is."""
-        from prompt_toolkit.layout.controls import FormattedTextControl
 
         ansi = ANSI("\x1b[1mBold\x1b[0m")
         bar = create_status_bar(

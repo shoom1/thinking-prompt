@@ -5,7 +5,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import pytest
 from prompt_toolkit.formatted_text import FormattedText
 
 from thinking_prompt.thinking_control import ThinkingBoxControl

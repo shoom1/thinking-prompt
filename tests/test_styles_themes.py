@@ -82,7 +82,7 @@ import pytest
 
 from prompt_toolkit.output import ColorDepth
 
-from thinking_prompt.styles import THEMES, resolve_theme
+from thinking_prompt.styles import resolve_theme
 
 
 def _all_style_values(s: ThinkingPromptStyles) -> list[str]:
