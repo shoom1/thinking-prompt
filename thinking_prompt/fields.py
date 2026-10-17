@@ -437,13 +437,17 @@ class FieldControl(RowControl, ABC, Generic[T]):
         value (from the value column when one is set, which counts the
         marker, the longest label and the gap), the row's last column (see
         _layout_row) and, wider still, the description row."""
+        description = self._item.description
+        return max(self.row_width(), 2 + get_cwidth(description) if description else 0)
+
+    def row_width(self) -> int:
+        """The columns the field's own row takes uncut, its description
+        aside: the marker, the label and the gap (or the value column) and
+        the widest value, then the row's last column."""
         widest = self.widest_value()
         if self._value_column is None:
-            row = get_cwidth(MARKER) + get_cwidth(self._item.label) + 2 + widest
-        else:
-            row = self._value_column.least + widest + 1
-        description = self._item.description
-        return max(row, 2 + get_cwidth(description) if description else 0)
+            return get_cwidth(MARKER) + get_cwidth(self._item.label) + 2 + widest
+        return self._value_column.least + widest + 1
 
     @abstractmethod
     def create_content(self, width: int, height: int) -> UIContent:
@@ -935,15 +939,10 @@ class _EditRow(Container):
             child.reset()
 
     def preferred_width(self, max_available_width: int) -> Dimension:
-        # The view row's rule (FieldControl.preferred_width), so the box
-        # keeps its width as the edit starts.
-        control = self._control
-        item = control.item
-        if control._value_column is None:
-            width = get_cwidth(MARKER) + get_cwidth(item.label) + 2 + item.edit_width
-        else:
-            width = control._value_column.least + item.edit_width + 1
-        return Dimension(min=0, preferred=width)
+        # The view row's width, so the box keeps its width as the edit
+        # starts, though a value wider than edit_width is wider than the
+        # input field.
+        return Dimension(min=0, preferred=self._control.row_width())
 
     def preferred_height(self, width: int, max_available_height: int) -> Dimension:
         return Dimension.exact(1)

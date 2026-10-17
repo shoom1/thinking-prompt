@@ -45,7 +45,6 @@ from thinking_prompt.fields import (
     SelectFieldControl,
     TextFieldControl,
     _DropdownMenuControl,
-    _EditRow,
     _RowValue,
     _ValueColumn,
 )
@@ -153,19 +152,6 @@ class TestDialogFields:
         d._content()
         assert not d._is_editing()
         assert d.values == {"m": "a"}
-
-    def test_a_text_fields_edit_row_is_as_wide_as_its_view_row(self):
-        d = Dialog("T", fields=[
-            TextField("a", "A", description="a long description that pushes the value column"),
-            TextField("b", "Bb"),
-        ], align_values="labels")
-        _shown(d)
-        control = d._form.controls[0]
-        assert control._column(100) > control._value_column.least   # pushed by the description
-        row = _EditRow(control, control._buffer_window)
-        assert row.preferred_width(100).preferred == (
-            control._value_column.least + control.item.edit_width + 1
-        )
 
     def test_a_late_bad_align_values_fails_at_show(self):
         d = Dialog("T", fields=[CheckboxField("c", "C")])
@@ -1383,6 +1369,18 @@ class TestAutoWidth:
         # widest value (5 for false, the 15-column text field) and one column.
         column = 2 + len(self.LABEL) + 2
         assert self._widths(d) == [column + 5 + 1, column + 15 + 1]
+
+    @pytest.mark.parametrize("align", ["labels", "right", 30])
+    @pytest.mark.parametrize("default", ["bob", "a value of twenty-three"])
+    def test_a_box_keeps_its_width_as_a_text_edit_starts(self, align, default):
+        """The edit row is as wide as the view row, a value wider than
+        edit_width too (the input field keeps edit_width)."""
+        d = Dialog("S", fields=[TextField("n", "Name", default=default, edit_width=10)], align_values=align)
+        d._placement = "box"
+        box = to_container(build_box(d).widget)
+        viewing = box.preferred_width(200).preferred
+        d._form.controls[0].enter_edit_mode()
+        assert box.preferred_width(200).preferred == viewing
 
     def test_right_aligned_rows(self):
         d = Dialog("S", fields=[CheckboxField("a", self.LABEL)], align_values="right")
