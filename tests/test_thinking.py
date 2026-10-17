@@ -264,6 +264,11 @@ class TestOverflowTail:
             "line 56", "line 57", "line 58", "line 59",
         ]
 
+    def test_one_row_shows_the_newest_line_and_no_hint(self):
+        """max_lines=1 leaves no row for the hint."""
+        control = ThinkingBoxControl(lambda: _numbered(6), max_collapsed_lines=1)
+        assert _rendered(control, 40, 1) == ["line 5"]
+
     def test_exactly_max_lines_fits_without_hint(self):
         content = _numbered(5)
         control = ThinkingBoxControl(lambda: content, max_collapsed_lines=5)
