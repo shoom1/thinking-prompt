@@ -6,6 +6,7 @@ from __future__ import annotations
 import asyncio
 import threading
 
+import pytest
 from prompt_toolkit.styles import Style
 
 from thinking_prompt.display import Display
@@ -359,6 +360,19 @@ class TestSorting:
         container = mgr.get_container()
         assert isinstance(container, Window)
 
+    @pytest.mark.parametrize("orders", [(1, 10), (10, 1)])
+    def test_higher_order_is_drawn_closer_to_the_prompt(self, orders):
+        """The prompt is below the boxes: order=10 is drawn under order=1,
+        whichever was created first."""
+        mgr = make_manager()
+        titles = {1: "Far", 10: "Near"}
+        for order in orders:
+            mgr.create_box(lambda: "x", title=titles[order], order=order)
+        rows = _render_rows(mgr.get_container(), 80, 10)
+        far = next(i for i, row in enumerate(rows) if " Far " in row)
+        near = next(i for i, row in enumerate(rows) if " Near " in row)
+        assert far < near
+
 
 # =============================================================================
 # Expand / Collapse tests
@@ -517,3 +531,24 @@ class TestBoxSizing:
     def test_overflow_head_reaches_the_control(self):
         m = make_manager()
         assert self._box(m, 1, overflow="head")._control.overflow == "head"
+
+
+class TestHeaderLayout:
+    """The header row: the title and the spinner between runs of border."""
+
+    @pytest.mark.parametrize(
+        "spinner, position, title, shown",
+        [
+            (Spinner(("●",)), "before", "T", " ● T "),
+            (Spinner(("●",)), "after", "T", " T ● "),
+            (Spinner(("●",)), "before", "", " ● "),
+            (None, "before", "T", " T "),
+            (None, "before", "", ""),
+        ],
+    )
+    def test_header_row(self, spinner, position, title, shown):
+        mgr = make_manager(spinner=spinner, spinner_position=position)
+        mgr.create_box(lambda: "x", title=title)
+        header_row = _render_rows(mgr.get_container(), 80, 2)[0]
+        assert len(header_row) == 80
+        assert header_row.strip("─") == shown

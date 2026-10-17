@@ -130,6 +130,17 @@ class TestMarkdownToAnsi:
         assert lines[0].startswith("Hi")
         assert "──" in plain  # H1 underline
 
+    @pytest.mark.parametrize("level", [2, 3, 4, 5, 6])
+    def test_h2_to_h6_show_their_text_left_aligned(self, level):
+        pytest.importorskip("rich")
+        import re
+
+        result = _markdown_to_ansi("#" * level + " Sub\n\ntext")
+        plain = re.sub(r"\x1b\[[0-9;]*m", "", result)
+        lines = [line for line in plain.splitlines() if line.strip()]
+        assert lines[0].startswith("Sub")
+        assert "#" not in plain
+
 
 class TestHighlightCode:
     """Test _highlight_code function."""

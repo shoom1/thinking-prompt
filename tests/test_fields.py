@@ -373,6 +373,17 @@ class TestCheckboxControl:
         control.toggle()
         assert control.value is False
 
+    @pytest.mark.parametrize(
+        "key", [" ", Keys.ControlM, Keys.Left, Keys.Right], ids=["space", "enter", "left", "right"]
+    )
+    def test_space_enter_and_the_arrows_toggle(self, key):
+        control = CheckboxFieldControl(CheckboxField(key="stream", label="Stream"))
+        kb = control.get_key_bindings()
+        _press(kb, key, None)
+        assert control.value is True
+        _press(kb, key, None)
+        assert control.value is False
+
 
 class TestSelectControl:
     """Tests for SelectFieldControl."""
@@ -1157,6 +1168,53 @@ class TestDropdownMenuColumns:
     def test_auto_width_counts_columns(self):
         control = DropdownFieldControl(DropdownField("k", "L", options=["日本語", "ab"], width=None))
         assert control._get_dropdown_width() == 6 + 4
+
+
+class TestDropdownMenuKeys:
+    """Enter or Space opens the menu at the value, ↑↓ choose, and the menu
+    scrolls to keep the choice in view."""
+
+    OPTIONS = ["o0", "o1", "o2", "o3", "o4", "o5"]  # more than the menu's 4 rows
+
+    @staticmethod
+    def _menu(control) -> tuple[list[str], str | None]:
+        """The menu as drawn, 4 rows tall (its default height): the options
+        it shows, and the highlighted one."""
+        content = _DropdownMenuControl(control).create_content(control._get_dropdown_width(), 4)
+        rows = [content.get_line(i)[0] for i in range(content.line_count)]
+        highlighted = next(
+            (text.strip() for style, text in rows if style == "class:field-dropdown-selected"), None
+        )
+        return [text.strip() for _, text in rows], highlighted
+
+    @pytest.mark.parametrize("key", [Keys.ControlM, " "], ids=["enter", "space"])
+    def test_enter_or_space_opens_the_menu_at_the_value(self, key):
+        control = DropdownFieldControl(DropdownField("m", "M", options=self.OPTIONS, default="o2"))
+        _press(control.get_key_bindings(), key, None)
+        assert control.is_editing is True
+        assert self._menu(control) == (["o0", "o1", "o2", "o3"], "o2")
+
+    @pytest.mark.parametrize("default", [None, "not-an-option"])
+    def test_without_a_value_among_the_options_the_menu_opens_on_the_first(self, default):
+        control = DropdownFieldControl(DropdownField("m", "M", options=self.OPTIONS, default=default))
+        kb = control.get_key_bindings()
+        _press(kb, Keys.ControlM, None)
+        assert self._menu(control) == (["o0", "o1", "o2", "o3"], "o0")
+        _press(kb, Keys.ControlM, None)  # Enter keeps it
+        assert control.value == "o0"
+
+    def test_up_moves_back_and_the_menu_scrolls_back_to_its_top(self):
+        control = DropdownFieldControl(DropdownField("m", "M", options=self.OPTIONS, default="o0"))
+        kb = control.get_key_bindings()
+        _press(kb, Keys.ControlM, None)
+        for _ in range(5):
+            _press(kb, Keys.Down, None)
+            self._menu(control)  # redrawn after each key
+        assert self._menu(control) == (["o2", "o3", "o4", "o5"], "o5")
+        for _ in range(5):
+            _press(kb, Keys.Up, None)
+            self._menu(control)
+        assert self._menu(control) == (["o0", "o1", "o2", "o3"], "o0")
 
 
 class TestAutoWidth:

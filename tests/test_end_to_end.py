@@ -49,6 +49,7 @@ PGUP = "\x1b[5~"
 PGDN = "\x1b[6~"
 UP = "\x1b[A"
 RIGHT = "\x1b[C"
+LEFT = "\x1b[D"
 
 
 class _ShortOutput(DummyOutput):
@@ -512,6 +513,48 @@ class TestRedraws:
             await run_with(session, lambda text: None, script)
 
 
+class TestThinkingBoxesOnScreen:
+    """Thinking boxes as drawn above the prompt."""
+
+    async def test_ctrl_t_shows_the_lines_a_long_box_hides(self):
+        """A box longer than max_thinking_height (15) keeps its newest lines
+        under a hint naming the rest; Ctrl+T shows them all."""
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                box = session.start_thinking()
+                box.append("\n".join(f"line {i:02}" for i in range(30)))
+                await wait_until(lambda: first_line_shown(session) == 16)
+                assert on_screen(session, "+16 earlier lines... ctrl-t to expand"), screen_lines(session)
+
+                inp.send_text(CTRL_T)
+                await wait_until(lambda: first_line_shown(session) == 0)
+                assert on_screen(session, "line 29"), screen_lines(session)
+                assert not on_screen(session, "earlier lines"), screen_lines(session)
+
+            await run_with(session, lambda text: None, script)
+
+    async def test_a_higher_order_box_sits_closer_to_the_prompt(self):
+        """Higher order = closer to the prompt, whichever box opened first."""
+        with piped_session(spinner=None) as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                tasks = session.start_thinking(title="Tasks", order=100)
+                tasks.append("○ Download\n")
+                step = session.start_thinking(title="Step 1")
+                step.append("20% complete\n")
+                await wait_until(lambda: on_screen(session, "○ Download") and on_screen(session, "20% complete"))
+
+                lines = screen_lines(session)
+                prompt, _ = prompt_and_status_rows(session)
+                # The order=0 box, the order=100 box, the prompt's separator, the prompt.
+                above = lines[prompt - 5:prompt - 1]
+                assert "Step 1" in above[0] and above[1] == "20% complete", lines
+                assert "Tasks" in above[2] and above[3] == "○ Download", lines
+
+            await run_with(session, lambda text: None, script)
+
+
 class TestInputLoopLifetime:
     async def test_app_exits_when_input_loop_ends(self):
         """If the input loop stops (here: a sync handler raising
@@ -528,6 +571,99 @@ class TestInputLoopLifetime:
                 await asyncio.wait_for(asyncio.shield(run), timeout=2)
 
             await run_with(session, handler, script)
+
+
+class TestQuickStart:
+    """The README's Quick Start: a handler registered with @session.on_input
+    serves run_async() called with no handler."""
+
+    async def test_a_handler_registered_with_on_input_answers_each_line(self):
+        with piped_session() as (session, inp):
+
+            @session.on_input
+            async def handle(text: str) -> None:
+                session.add_response(f"You said: {text}")
+
+            run = asyncio.create_task(session.run_async())
+            try:
+                await wait_until(lambda: waiting_for_input(session))
+                inp.send_text("hello" + ENTER)
+                await wait_until(lambda: "You said: hello\n" in history_texts(session._display))
+            finally:
+                session.exit()
+                await asyncio.wait_for(run, timeout=2)
+
+    async def test_run_async_with_no_handler_at_all_raises(self):
+        with piped_session() as (session, inp), pytest.raises(ValueError, match="No handler provided"):
+            await asyncio.wait_for(session.run_async(), timeout=2)
+
+
+class TestHandlerErrors:
+    """A handler that raises: its error line shows, and the session goes on."""
+
+    @pytest.mark.parametrize("is_async", [True, False], ids=["async", "sync"])
+    async def test_the_error_shows_and_the_next_line_still_arrives(self, is_async: bool):
+        delivered: list[str] = []
+
+        def work(text: str) -> None:
+            if text == "boom":
+                raise KeyError("x")
+            delivered.append(text)
+
+        async def async_work(text: str) -> None:
+            work(text)
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("boom" + ENTER)
+                await wait_until(
+                    lambda: "[ERROR] Handler error: KeyError: 'x'\n" in history_texts(session._display)
+                )
+                await wait_until(lambda: waiting_for_input(session))
+                inp.send_text("next" + ENTER)
+                await wait_until(lambda: delivered == ["next"])
+
+            await run_with(session, async_work if is_async else work, script)
+
+
+class TestWhatEnterRecords:
+    """A submitted line is echoed into the transcript and added to the input
+    history (↑ recalls it). A blank line is neither; echo_input=False drops
+    only the echo. The handler gets the line either way."""
+
+    @pytest.mark.parametrize("blank", ["", "   "], ids=["empty", "spaces"])
+    async def test_a_blank_line_reaches_the_handler_unrecorded(self, blank: str):
+        delivered: list[str] = []
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("first" + ENTER)
+                await wait_until(lambda: delivered == ["first"] and waiting_for_input(session))
+                inp.send_text(blank + ENTER)
+                await wait_until(lambda: delivered == ["first", blank] and waiting_for_input(session))
+                assert echoed_inputs(session) == ["first"]
+                await settled_renders(session)  # the prompt reloads its history as it's redrawn
+                inp.send_text(UP)  # the line before the blank one
+                await wait_until(lambda: session.default_buffer.text == "first")
+
+            await run_with(session, delivered.append, script)
+
+    async def test_without_echo_a_line_still_reaches_the_input_history(self):
+        delivered: list[str] = []
+
+        with piped_session(echo_input=False) as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("secret" + ENTER)
+                await wait_until(lambda: delivered == ["secret"] and waiting_for_input(session))
+                assert echoed_inputs(session) == []
+                await settled_renders(session)  # the prompt reloads its history as it's redrawn
+                inp.send_text(UP)
+                await wait_until(lambda: session.default_buffer.text == "secret")
+
+            await run_with(session, delivered.append, script)
 
 
 class TestTypeAhead:
@@ -606,6 +742,29 @@ class TestBusyHint:
                 release.set()
                 await wait_until(lambda: waiting_for_input(session))
                 assert session.status_text == "READY"
+
+            await run_with(session, handler, script)
+
+    async def test_the_status_returns_after_enter_is_pressed_twice(self):
+        release = asyncio.Event()
+
+        async def handler(text: str) -> None:
+            await release.wait()
+
+        with piped_session(status_text="READY") as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("slow" + ENTER)
+                await wait_until(lambda: session._current_handler_task is not None)
+                inp.send_text("x" + ENTER)
+                await wait_until(lambda: on_screen(session, "Busy — press Ctrl+C to cancel"))
+                inp.send_text(ENTER + "!")  # "!" goes on the draft once Enter is refused again
+                await wait_until(lambda: session.default_buffer.text == "x!")
+
+                release.set()
+                await wait_until(lambda: waiting_for_input(session))
+                assert session.status_text == "READY"
+                await wait_until(lambda: on_screen(session, "READY"))
 
             await run_with(session, handler, script)
 
@@ -2492,6 +2651,47 @@ class TestChecklistDialog:
                 inp.send_text(" " + DOWN + " ")  # uncheck search, check code
                 inp.send_text(TAB + ENTER)  # Tab leaves the list: the OK button
                 await wait_until(lambda: results == [["code"]])
+
+            await run_with(session, handler, script)
+
+
+class TestChoiceDialog:
+    """One action per choice; the dialog returns the choice taken."""
+
+    CHOICES = ["Save", "Discard", "Cancel"]
+
+    @pytest.mark.parametrize("keys", [RIGHT, RIGHT * 2 + LEFT], ids=["right", "right-right-left"])
+    async def test_box_arrows_move_between_the_buttons(self, keys: str):
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.choice_dialog("Action", "What to do?", self.CHOICES))
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                inp.send_text(keys + ENTER)
+                await wait_until(lambda: results == ["Discard"])
+
+            await run_with(session, handler, script)
+
+    async def test_inline_a_digit_takes_that_choice(self):
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            results.append(await session.choice_dialog(
+                "Action", "What to do?", self.CHOICES, placement="inline"
+            ))
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                inp.send_text("2")
+                await wait_until(lambda: results == ["Discard"])
 
             await run_with(session, handler, script)
 

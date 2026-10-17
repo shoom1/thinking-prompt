@@ -82,6 +82,38 @@ class TestMaxThinkingHeight:
         with pytest.raises(ValueError, match="max_thinking_height must be at least 2"):
             ThinkingPromptSession(max_thinking_height=height)
 
+    def test_new_boxes_collapse_to_it_unless_they_set_their_own(self):
+        session = ThinkingPromptSession(max_thinking_height=3)
+        assert session.start_thinking()._control.max_collapsed_lines == 3
+        assert session.start_thinking(max_lines=7)._control.max_collapsed_lines == 7
+
+
+def _drawn(session: ThinkingPromptSession, width: int = 40, height: int = 10) -> list[str]:
+    """The session's layout drawn on a ``width`` x ``height`` screen, one string per row."""
+    from prompt_toolkit.application.current import set_app
+    from prompt_toolkit.layout.mouse_handlers import MouseHandlers
+    from prompt_toolkit.layout.screen import Screen, WritePosition
+
+    screen = Screen()
+    with set_app(session.app):
+        session.layout.container.write_to_screen(
+            screen, MouseHandlers(), WritePosition(0, 0, width, height), "", True, None
+        )
+    return [
+        "".join(screen.data_buffer[y][x].char for x in range(width)) for y in range(height)
+    ]
+
+
+class TestStatusBar:
+    """enable_status_bar draws the status bar under the prompt, or leaves it
+    out. (Async: drawing the input buffer starts a history-loading task,
+    which needs a running loop.)"""
+
+    @pytest.mark.parametrize("enabled", [True, False])
+    async def test_enable_status_bar_shows_or_leaves_out_the_status_bar(self, enabled):
+        rows = _drawn(ThinkingPromptSession(enable_status_bar=enabled, status_text="STATUS"))
+        assert any("STATUS" in row for row in rows) is enabled
+
 
 def _banner(app_info: AppInfo | None) -> tuple[list[str], list[str]]:
     """What the session's banner put in history and on the console."""
@@ -103,3 +135,39 @@ class TestBanner:
     @pytest.mark.parametrize("message", ["", lambda: "", lambda: None])
     def test_an_empty_welcome_message_prints_nothing(self, message):
         assert _banner(AppInfo(name="t", welcome_message=message)) == ([], [])
+
+    @pytest.mark.parametrize(
+        "message", ["Hello there", lambda: "Hello there"], ids=["string", "callable"]
+    )
+    def test_a_welcome_message_replaces_the_name_and_version(self, message):
+        _, console = _banner(AppInfo(name="App", version="1.0", welcome_message=message))
+        assert console == ["Hello there\n"]
+
+    def test_a_welcome_message_can_be_a_rich_renderable(self):
+        pytest.importorskip("rich")
+        from rich.panel import Panel
+
+        app_info = AppInfo(name="App", version="1.0", welcome_message=lambda: Panel("Hello there"))
+        _, console = _banner(app_info)
+        (banner,) = console
+        assert "╭" in banner and "Hello there" in banner
+        assert "App v1.0" not in banner
+
+    def test_without_a_version_the_banner_shows_the_name_alone(self):
+        _, console = _banner(AppInfo(name="App"))
+        (banner,) = console
+        assert "App" in banner
+        assert " v" not in banner
+
+    def test_clear_prints_the_banner_again(self):
+        session = ThinkingPromptSession(app_info=AppInfo(name="App", version="1.0"))
+        keep_console(session._display)
+        session._print_welcome()
+        session.add_response("x")
+
+        session.clear()
+
+        banner = echoed(session._display)[0]
+        assert "App v1.0" in banner
+        assert echoed(session._display) == [banner, "x\n", banner]
+        assert [entry.source for entry in session._display.history.iter_entries()] == [banner]

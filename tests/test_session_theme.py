@@ -1,11 +1,54 @@
 """Tests for theme selection and color-depth enforcement on the session."""
 from __future__ import annotations
 
+import asyncio
+import io
+import re
+from typing import Callable
+
 import pytest
+from prompt_toolkit.application import create_app_session
+from prompt_toolkit.data_structures import Size
+from prompt_toolkit.formatted_text import FormattedText
+from prompt_toolkit.input import create_pipe_input
 from prompt_toolkit.output import ColorDepth
+from prompt_toolkit.output.vt100 import Vt100_Output
 
 from tests.helpers import history_texts, keep_console
-from thinking_prompt import ThinkingPromptSession, ThinkingPromptStyles
+from tests.test_end_to_end import run_with, wait_until
+from thinking_prompt import AppInfo, ThinkingPromptSession, ThinkingPromptStyles
+
+
+class _ColorTerminal(Vt100_Output):
+    """A terminal ``rows`` x ``columns`` that shows 24-bit color unless told
+    otherwise, and keeps what's written to it, text and escapes. (capsys'
+    stdout isn't a tty: prompt_toolkit prints plain text to it.)"""
+
+    def __init__(self, rows: int = 24, columns: int = 80) -> None:
+        self._written = io.StringIO()
+        self.size = Size(rows=rows, columns=columns)
+        super().__init__(
+            self._written,
+            lambda: self.size,
+            term="xterm-256color",
+            default_color_depth=ColorDepth.DEPTH_24_BIT,
+            enable_cpr=False,
+        )
+
+    def text(self) -> str:
+        return self._written.getvalue()
+
+
+def _written_by(terminal: _ColorTerminal, act: Callable[[], None]) -> str:
+    """What ``act`` writes to ``terminal``."""
+    start = len(terminal.text())
+    act()
+    return terminal.text()[start:]
+
+
+def _plain(written: str) -> str:
+    """``written`` without its escapes and carriage returns."""
+    return re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", written).replace("\r", "")
 
 
 class TestThemeParam:
@@ -70,6 +113,61 @@ class TestEffectiveColorDepth:
         monkeypatch.delenv("NO_COLOR", raising=False)
         s = ThinkingPromptSession(theme="terminal")
         assert s._effective_color_depth() is None
+
+
+def _respond(session: ThinkingPromptSession) -> None:
+    session.add_response("plain reply")
+    session.add_response(FormattedText([("fg:#ff0000 bold", "hot"), ("italic", " take")]))
+
+
+colorless = pytest.mark.parametrize(
+    "no_color, theme", [("1", "dark"), ("", "mono")], ids=["NO_COLOR", "mono"]
+)
+
+
+class TestColorlessOutput:
+    """Under NO_COLOR, and in the mono theme, the session draws and prints
+    without color on a terminal that has it, keeping bold and italic."""
+
+    @colorless
+    def test_the_app_draws_in_one_bit_color(self, monkeypatch, no_color, theme):
+        monkeypatch.setenv("NO_COLOR", no_color)
+        with create_app_session(output=_ColorTerminal()):
+            session = ThinkingPromptSession(theme=theme)
+        assert session.app.color_depth is ColorDepth.DEPTH_1_BIT
+
+    @colorless
+    def test_responses_print_without_color_but_bold_and_italic(self, monkeypatch, no_color, theme):
+        monkeypatch.setenv("NO_COLOR", no_color)
+        terminal = _ColorTerminal()
+        with create_app_session(output=terminal):
+            session = ThinkingPromptSession(theme=theme)
+            printed = _written_by(terminal, lambda: _respond(session))
+        assert "plain reply" in printed
+        assert "38;" not in printed
+        assert "\x1b[0;1mhot" in printed
+        assert "\x1b[0;3m take" in printed
+
+    @colorless
+    def test_a_repaint_prints_without_color(self, monkeypatch, no_color, theme):
+        monkeypatch.setenv("NO_COLOR", no_color)
+        terminal = _ColorTerminal()
+        with create_app_session(output=terminal):
+            session = ThinkingPromptSession(theme=theme)
+            _respond(session)
+            repainted = _written_by(terminal, lambda: session.set_theme(theme, repaint=True))
+        assert "\x1b[3J" in repainted
+        assert "plain reply" in repainted
+        assert "38;" not in repainted
+
+    def test_a_color_theme_prints_color_on_the_same_terminal(self, monkeypatch):
+        monkeypatch.delenv("NO_COLOR", raising=False)
+        terminal = _ColorTerminal()
+        with create_app_session(output=terminal):
+            session = ThinkingPromptSession(theme="dark")
+            printed = _written_by(terminal, lambda: _respond(session))
+        assert session.app.color_depth is ColorDepth.DEPTH_24_BIT
+        assert "38;2;255;0;0" in printed
 
 
 from unittest.mock import MagicMock
@@ -203,6 +301,95 @@ class TestRepaint:
             s.set_theme("light", repaint=True)
             out = capsys.readouterr().out
         assert ">>> hello" in out
+
+
+def _repainted(session: ThinkingPromptSession, terminal: _ColorTerminal) -> str:
+    """What set_theme("light", repaint=True) writes, with no app running."""
+    return _written_by(terminal, lambda: session.set_theme("light", repaint=True))
+
+
+class TestRepaintedContent:
+    """A repaint prints markdown and code rendered, not their source, and
+    Rich output as it was first printed."""
+
+    def test_markdown_is_repainted_rendered(self):
+        pytest.importorskip("rich")
+        terminal = _ColorTerminal()
+        with create_app_session(output=terminal):
+            session = ThinkingPromptSession(theme="dark")
+            session.add_response("# Title\n\nbody", markdown=True)
+            repainted = _plain(_repainted(session, terminal))
+        assert "Title" in repainted
+        assert "─────" in repainted
+        assert "# Title" not in repainted
+
+    def test_code_is_repainted_highlighted(self, monkeypatch):
+        pytest.importorskip("pygments")
+        monkeypatch.delenv("NO_COLOR", raising=False)
+        terminal = _ColorTerminal()
+        with create_app_session(output=terminal):
+            session = ThinkingPromptSession(theme="dark")
+            session.add_code("def hello():\n    return 'world'")
+            repainted = _repainted(session, terminal)
+        assert "def hello():" in _plain(repainted)
+        assert re.search(r"\x1b\[[0-9;]*mhello", repainted)
+
+    @pytest.mark.parametrize("shown_by", ["add_rich", "banner"])
+    def test_rich_output_is_repainted_as_first_printed(self, monkeypatch, shown_by):
+        pytest.importorskip("rich")
+        monkeypatch.delenv("NO_COLOR", raising=False)
+        from rich.panel import Panel
+
+        panel = Panel("boxed", border_style="green")
+        terminal = _ColorTerminal()
+        with create_app_session(output=terminal):
+            if shown_by == "banner":
+                session = ThinkingPromptSession(
+                    theme="dark", app_info=AppInfo(name="App", welcome_message=lambda: panel)
+                )
+                printed = _written_by(terminal, session._print_welcome)
+            else:
+                session = ThinkingPromptSession(theme="dark")
+                printed = _written_by(terminal, lambda: session.add_rich(panel))
+            repainted = _repainted(session, terminal)
+        assert "\x1b[0;32m╭" in printed
+        assert printed in repainted
+
+
+class TestRepaintAfterShrinking:
+    """Once a running session's terminal stops shrinking, the transcript
+    repaints the same way: banner, markdown and code rendered."""
+
+    async def test_the_banner_markdown_and_code_are_repainted_rendered(self, monkeypatch):
+        pytest.importorskip("rich")
+        pytest.importorskip("pygments")
+        monkeypatch.delenv("NO_COLOR", raising=False)
+        terminal = _ColorTerminal()
+
+        async def handler(text: str) -> None:
+            pass
+
+        with create_pipe_input() as inp, create_app_session(input=inp, output=terminal):
+            session = ThinkingPromptSession(app_info=AppInfo(name="App", version="1.0"))
+
+            async def script(run: asyncio.Task[None]) -> None:
+                session.add_response("# Title\n\nbody", markdown=True)
+                session.add_code("def hello():\n    return 'world'")
+                await wait_until(lambda: "'world'" in terminal.text())
+                start = len(terminal.text())
+                terminal.size = Size(rows=12, columns=80)
+                session.app.invalidate()
+                await wait_until(lambda: "\x1b[3J" in terminal.text()[start:])
+
+                repainted = terminal.text()[start:].split("\x1b[3J", 1)[1]
+                plain = _plain(repainted)
+                assert "App v1.0" in plain
+                assert "Title" in plain and "# Title" not in plain
+                assert "def hello():" in plain
+                assert re.search(r"\x1b\[[0-9;]*mhello", repainted)
+
+            await run_with(session, handler, script)
+
 
 class TestLayoutAppliesThemeClasses:
     """The prompt style field only works if the layout tags its window
