@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 from prompt_toolkit.application import Application
 from prompt_toolkit.application.current import set_app
 from prompt_toolkit.formatted_text import fragment_list_to_text, to_formatted_text
 from prompt_toolkit.input import DummyInput
+from prompt_toolkit.keys import Keys
 from prompt_toolkit.layout import HSplit, Layout, ScrollablePane, Window
 from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.layout.layout import walk
@@ -18,7 +20,7 @@ from prompt_toolkit.widgets import Label, TextArea
 
 from thinking_prompt.dialog import ButtonConfig, Dialog
 from thinking_prompt.dialog_inline import MAX_ROWS, build_inline
-from thinking_prompt.fields import RadioField
+from thinking_prompt.fields import CheckboxField, RadioField, SelectField
 from thinking_prompt.rows import OptionGroup
 
 
@@ -48,6 +50,13 @@ def _region(view) -> ScrollablePane:
 
 def _app(layout: Layout) -> Application:
     return Application(layout=layout, input=DummyInput(), output=DummyOutput())
+
+
+def _press(view, key, app: Application) -> None:
+    """Run the inline dialog's active binding for ``key`` in ``app``, as a key press would."""
+    (keys,) = [c.key_bindings for c in walk(view.container) if getattr(c, "key_bindings", None) is not None]
+    active = [b for b in keys.get_bindings_for_keys((key,)) if b.filter()]
+    active[-1].handler(SimpleNamespace(app=app))
 
 
 def _render(container, height: int) -> Screen:
@@ -89,6 +98,37 @@ class TestBuildInline:
         radio = Dialog("T", fields=[RadioField("m", "Mode", options=["a", "b"])], placement="inline")
         radio._placement = "inline"  # as show_dialog() resolves it
         assert build_inline(radio).hint == "↑↓ navigate · Enter select · Esc cancel"
+
+    @pytest.mark.parametrize("field,keys", [
+        (SelectField("s", "Size", options=["a", "b"]), "←→ change"),
+        (CheckboxField("c", "Stream"), "Space toggle"),
+    ], ids=["select", "checkbox"])
+    def test_a_fields_keys_are_in_the_hint(self, field, keys):
+        dialog = Dialog("T", fields=[field], buttons=[ButtonConfig("OK")], placement="inline")
+        dialog._placement = "inline"  # as show_dialog() resolves it
+        assert build_inline(dialog).hint == f"↑↓ navigate · {keys} · Enter select · Esc cancel"
+
+    def test_tab_and_shift_tab_move_the_cursor_a_row_at_a_time(self):
+        dialog = Dialog(
+            "T", fields=[CheckboxField("c", "Stream")], buttons=[ButtonConfig("A"), ButtonConfig("B")],
+            placement="inline",
+        )
+        dialog._placement = "inline"  # as show_dialog() resolves it
+        view = build_inline(dialog)
+        (stream,) = dialog._form.controls
+        rows = [stream.get_container(), view.actions[0].window, view.actions[1].window]
+        app = _app(Layout(view.container, focused_element=view.focus))
+        with set_app(app):
+            assert app.layout.has_focus(rows[0])
+            _press(view, Keys.Tab, app)
+            _press(view, Keys.Tab, app)
+            assert app.layout.has_focus(rows[2])
+            _press(view, Keys.BackTab, app)     # Shift+Tab: back a row
+            assert app.layout.has_focus(rows[1])
+            _press(view, Keys.BackTab, app)     # from the actions into the fields
+            assert app.layout.has_focus(rows[0])
+            _press(view, Keys.BackTab, app)     # the first row stays
+            assert app.layout.has_focus(rows[0])
 
     def test_a_focused_button_starts_the_cursor(self):
         view = build_inline(Dialog("T", "B", [ButtonConfig("A"), ButtonConfig("B", focused=True)]))
