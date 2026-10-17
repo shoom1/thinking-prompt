@@ -25,28 +25,24 @@ from thinking_prompt import (
 SECRET_KEYS = {"api_key"}
 
 
+# The form's fields, defined once: each show starts them from the settings.
+FIELDS = [
+    DropdownField(
+        "model", "Model", description="The model that answers",
+        options=["gpt-4", "gpt-4-turbo", "gpt-3.5-turbo"],
+    ),
+    SelectField("size", "Text size", options=["small", "medium", "large"]),
+    CheckboxField("stream", "Stream output", description="Show answers as they arrive"),
+    TextField("api_key", "API key", password=True),
+    ChecklistField("tools", "Tools", options=["search", "code", "files"]),
+    RadioField("style", "Answers", options=["concise", "detailed"]),
+    ChoiceField("theme", "Theme", options=["dark", "light", "system"]),
+]
+
+
 def settings_dialog(settings: dict, placement: str) -> Dialog:
     """A form over ``settings``: Save returns every value, Cancel None."""
-    dialog = Dialog(
-        "Settings",
-        fields=[
-            DropdownField(
-                "model", "Model", description="The model that answers",
-                options=["gpt-4", "gpt-4-turbo", "gpt-3.5-turbo"], default=settings["model"],
-            ),
-            SelectField("size", "Text size", options=["small", "medium", "large"], default=settings["size"]),
-            CheckboxField(
-                "stream", "Stream output", description="Show answers as they arrive",
-                default=settings["stream"],
-            ),
-            TextField("api_key", "API key", default=settings["api_key"], password=True),
-            ChecklistField("tools", "Tools", options=["search", "code", "files"], default=tuple(settings["tools"])),
-            RadioField("style", "Answers", options=["concise", "detailed"], default=settings["style"]),
-            ChoiceField("theme", "Theme", options=["dark", "light", "system"], default=settings["theme"]),
-        ],
-        width=60,
-        placement=placement,
-    )
+    dialog = Dialog("Settings", fields=FIELDS, values=settings, width=60, placement=placement)
     dialog.buttons = [
         ButtonConfig("Save", handler=lambda: dialog.set_result(dialog.values)),
         ButtonConfig("Cancel"),

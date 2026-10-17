@@ -456,21 +456,24 @@ Dialogs need a running session; to ask something before
 ### Form fields
 
 Any dialog can hold form fields, under its body. `dialog.values` holds what
-they're set to, by key; a button handler returns it. A settings dialog is a
-few lines:
+they're set to, by key; a button handler returns it. `values=` gives the
+fields their starting values, so a settings dialog is a few lines:
 
 ```python
 from thinking_prompt import (
     ButtonConfig, CheckboxField, Dialog, DropdownField, TextField,
 )
 
+SETTINGS = [
+    DropdownField("model", "Model", options=["gpt-4", "o1"]),
+    CheckboxField("stream", "Stream responses"),
+    TextField("name", "Name", description="Shown to others"),
+]
+
 dialog = Dialog(
     "Settings",
-    fields=[
-        DropdownField("model", "Model", options=["gpt-4", "o1"], default=config["model"]),
-        CheckboxField("stream", "Stream responses", default=config["stream"]),
-        TextField("name", "Name", description="Shown to others", default=config["name"]),
-    ],
+    fields=SETTINGS,
+    values=config,     # starting values by key; keys that aren't fields are ignored
     buttons=[
         ButtonConfig("Save", handler=lambda: dialog.set_result(dialog.values)),
         ButtonConfig("Cancel"),
@@ -482,8 +485,12 @@ if values is not None:
     config.update(values)
 ```
 
-Fields are frozen, so a list of them can be a subclass's `fields` class
-attribute; each dialog keeps its own values. Keys must be unique.
+A field missing from `values=` starts at its `default`. Each show starts
+afresh from `values=` (read again then) or the defaults, so a dialog can be
+kept and shown again: it picks up what Save put in `config`, and an edit the
+user cancelled is gone. Fields are frozen, so a list of them can be a
+subclass's `fields` class attribute (`MySettings(values=config)`). Keys must
+be unique.
 
 | Field | Shows | Keys |
 |---|---|---|
