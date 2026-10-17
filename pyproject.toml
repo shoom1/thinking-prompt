@@ -67,6 +67,18 @@ replacement = '](https://raw.githubusercontent.com/shoom1/thinking-prompt/main/i
 [tool.hatch.build.targets.wheel]
 packages = ["thinking_prompt"]
 
+# Only these: the sdist otherwise takes every file git doesn't ignore,
+# untracked local ones (AGENTS.md, .superpowers/) too.
+[tool.hatch.build.targets.sdist]
+include = [
+    "thinking_prompt/",
+    "tests/",
+    "examples/",
+    "img/",
+    "README.md",
+    "CHANGELOG.md",
+]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
