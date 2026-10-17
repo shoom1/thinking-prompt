@@ -1,0 +1,276 @@
+"""
+Inline presentation of dialogs: rows between the prompt and the status bar.
+
+A title, the body, one numbered row per button (ActionRow) and a key hint,
+with one cursor (RowNavigator) over the body's rows and the actions. The
+rows share the dialog's cap (_Sizes): the actions, and a body with cursor
+stops (form fields, a check list, a text field), scroll in one region
+that follows the cursor; a body without (text) scrolls in its own region
+above them, with PgUp/PgDn.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Callable
+
+from prompt_toolkit.application.current import get_app
+from prompt_toolkit.formatted_text import FormattedText
+from prompt_toolkit.layout import Container, Float, FloatContainer, HSplit, VSplit, Window
+from prompt_toolkit.layout.controls import FormattedTextControl, UIContent
+from prompt_toolkit.layout.dimension import Dimension
+from prompt_toolkit.utils import get_cwidth
+
+from .dialog_scroll import AtMost, ScrollRegion, dialog_cap, focusable_windows, terminal_rows
+from .rows import ActionRow, RowControl, RowNavigator
+
+if TYPE_CHECKING:
+    from .dialog import Dialog
+
+# Without max_height, rows and actions scroll within this many rows; the
+# title, a text body and the hint stay put.
+MAX_ROWS = 12
+
+# Hint line entries, in display order.
+HINT_ORDER = (
+    "↑↓ navigate",
+    "PgUp/PgDn scroll",
+    "←→ change",
+    "Space toggle",
+    "Enter select",
+    "Esc cancel",
+)
+# Between hint entries: the hint line breaks only here.
+HINT_SEPARATOR = " · "
+
+
+@dataclass
+class InlineView:
+    """A built inline dialog.
+
+    Attributes:
+        container: What the layout's inline slot shows.
+        focus: What to focus when the dialog opens (None: nothing can take focus).
+        actions: One ActionRow per ButtonConfig, in order.
+        hint_text: The hint line's text, worked out at each redraw.
+        text_region: The text body's region (a body with no cursor stops),
+            which scrolls by keys; None otherwise.
+        floats: Floats the body needs over the whole screen
+            (Dialog._screen_floats): a dropdown's menu.
+    """
+
+    container: Container
+    focus: Container | None
+    actions: list[ActionRow]
+    hint_text: Callable[[], str]
+    text_region: ScrollRegion | None = None
+    floats: list[Float] = field(default_factory=list)
+
+    @property
+    def hint(self) -> str:
+        """The hint line's text now ("" when there's nothing to say)."""
+        return self.hint_text()
+
+
+class _Sizes:
+    """How an inline dialog's rows share its cap (dialog_cap): the fixed rows
+    (title, hint) first, then the region of cursor stops and actions, so
+    they stay reachable, then a text body. Blank rows take a row each only
+    while that leaves a row each for the text body and the region: in a
+    short terminal they go first. Without max_height the region keeps to
+    MAX_ROWS."""
+
+    def __init__(
+        self, max_height: int | None, region: ScrollRegion | None, text: ScrollRegion | None
+    ) -> None:
+        self.fixed: list[Container] = []
+        self._blanks = 0
+        self._max_height = max_height
+        self._region = region
+        self._text = text
+
+    def _cap(self) -> int:
+        return dialog_cap(self._max_height, terminal_rows())
+
+    def _fixed_rows(self, width: int) -> int:
+        cap = self._cap()
+        return sum(row.preferred_height(width, cap).preferred for row in self.fixed)
+
+    def _blanks_kept(self, width: int) -> int:
+        """How many blank rows keep their row: as many as leave a row each
+        for the text body and the region."""
+        content = sum(part is not None for part in (self._text, self._region))
+        return max(0, min(self._blanks, self._cap() - self._fixed_rows(width) - content))
+
+    def blank(self) -> Callable[[int], int]:
+        """The rows of one more blank row, by width: 1 while it's kept, else
+        0. The last blank rows go first."""
+        index = self._blanks
+        self._blanks += 1
+        return lambda width: 1 if index < self._blanks_kept(width) else 0
+
+    def _room(self, width: int) -> int:
+        """Rows left after the fixed rows and the blank rows kept."""
+        return self._cap() - self._fixed_rows(width) - self._blanks_kept(width)
+
+    def region(self, width: int) -> int:
+        room = self._room(width) - (1 if self._text is not None else 0)
+        if self._max_height is None:
+            room = min(room, MAX_ROWS)
+        return max(1, room)
+
+    def text(self, width: int) -> int:
+        used = 0
+        if self._region is not None:
+            wanted = self._region.preferred_height(width, self._cap()).preferred
+            used = min(wanted, self.region(width))
+        return max(1, self._room(width) - used)
+
+
+def build_inline(dialog: Dialog) -> InlineView:
+    """Build ``dialog`` as rows: title, body, numbered actions, hint."""
+    configs = dialog._button_configs()
+    number_width = len(str(len(configs)))
+    actions = [
+        ActionRow(number, cfg.text, dialog._click_handler(cfg), cfg.style, number_width)
+        for number, cfg in enumerate(configs, start=1)
+    ]
+    body, start = dialog._content()
+    has_stops = body is not None and bool(focusable_windows(body))
+
+    def stops() -> list[Container]:
+        body_stops = focusable_windows(body) if body is not None else []
+        return [*body_stops, *(action.window for action in actions)]
+
+    def at_first_stop() -> bool:
+        first = stops()[:1]
+        return bool(first) and get_app().layout.has_focus(first[0])
+
+    # A body with cursor stops scrolls with the actions; one without (text)
+    # scrolls in a region of its own, above them.
+    text = ScrollRegion(body) if body is not None and not has_stops else None
+    scrolled: list[Container] = []
+    if body is not None and has_stops:
+        scrolled.append(body)
+        if actions:
+            scrolled.append(_blank_row())
+    scrolled.extend(action.window for action in actions)
+    region = ScrollRegion(HSplit(scrolled), at_first_stop) if scrolled else None
+
+    sizes = _Sizes(dialog.max_height, region, text)
+    rows: list[Container] = []
+
+    def fixed(row: Container) -> None:
+        rows.append(row)
+        sizes.fixed.append(row)
+
+    def blank() -> None:
+        rows.append(AtMost(_blank_row(), sizes.blank()))
+
+    if dialog.title:
+        fixed(_text_row("class:dialog-title", dialog.title))
+    if text is not None:
+        rows.append(AtMost(text, sizes.text))
+        if actions:
+            blank()
+    if region is not None:
+        rows.append(AtMost(region, sizes.region))
+
+    def hint() -> str:
+        return _hint(dialog, stops(), text)
+
+    if hint() or text is not None:
+        blank()
+        fixed(Window(_HintControl(hint), dont_extend_height=True))
+
+    navigator = RowNavigator(stops, is_editing=dialog._is_editing, tab=True, actions=actions)
+    content = HSplit(rows, key_bindings=navigator.key_bindings())
+
+    # Initial cursor: a ButtonConfig(focused=True) action, else where the
+    # body's cursor starts, else the first stop.
+    focused = next((a for a, cfg in zip(actions, configs) if cfg.focused), None)
+    first = stops()
+    if focused is not None:
+        focus: Container | None = focused.window
+    elif start is not None:
+        focus = start
+    else:
+        focus = first[0] if first else None
+
+    # A one-column left margin.
+    return InlineView(
+        VSplit([Window(width=1), content]), focus, actions, hint, text, dialog._screen_floats()
+    )
+
+
+def _blank_row() -> Window:
+    """A blank separator row that a short terminal can take away."""
+    return Window(height=Dimension(min=0, preferred=1, max=1))
+
+
+def _text_row(style: str, text: str) -> Window:
+    """A row of ``text``, wrapped."""
+    return Window(
+        FormattedTextControl(FormattedText([(style, text)])), dont_extend_height=True, wrap_lines=True
+    )
+
+
+class _HintControl(FormattedTextControl):
+    """The hint line, broken between its entries to fit the row: an entry
+    is never split, and one wider than the row on its own is cut at its
+    edge."""
+
+    def __init__(self, hint: Callable[[], str]) -> None:
+        super().__init__(lambda: FormattedText([("class:dialog-hint", hint())]))
+        self._hint = hint
+
+    def create_content(self, width: int, height: int | None) -> UIContent:
+        lines: list[str] = []
+        for entry in self._hint().split(HINT_SEPARATOR):
+            if lines and get_cwidth(lines[-1] + HINT_SEPARATOR + entry) <= width:
+                lines[-1] += HINT_SEPARATOR + entry
+            else:
+                lines.append(entry)
+        return UIContent(
+            get_line=lambda i: [("class:dialog-hint", lines[i])], line_count=len(lines)
+        )
+
+
+def _hint(dialog: Dialog, stops: list[Container], text: ScrollRegion | None) -> str:
+    """The keys that do something in this dialog now, in HINT_ORDER."""
+    rows = [s.content for s in stops if isinstance(s, Window) and isinstance(s.content, RowControl)]
+    keys: set[str] = set()
+    if len(stops) >= 2:
+        keys.add("↑↓ navigate")
+    if text is not None and text.overflows:
+        keys.add("PgUp/PgDn scroll")
+    for row in rows:
+        keys |= row.hints
+    if rows:
+        keys.add("Enter select")
+    if dialog.escapable:
+        keys.add("Esc cancel")
+    return HINT_SEPARATOR.join(key for key in HINT_ORDER if key in keys)
+
+
+class InlinePresenter:
+    """Shows inline dialogs in the session layout's inline slot."""
+
+    def __init__(self) -> None:
+        self.view: InlineView | None = None
+        # Where the open dialog's own floats are (open()).
+        self._root: FloatContainer | None = None
+
+    def open(self, dialog: Dialog, root: FloatContainer) -> InlineView:
+        """Build ``dialog``, its own floats (a dropdown's menu) on ``root``,
+        the session's float layer over the whole screen."""
+        self.view = build_inline(dialog)
+        self._root = root
+        root.floats.extend(self.view.floats)
+        return self.view
+
+    def close(self) -> None:
+        if self.view is not None and self._root is not None:
+            for fl in self.view.floats:
+                self._root.floats.remove(fl)
+        self.view = None
+        self._root = None

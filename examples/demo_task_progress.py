@@ -13,22 +13,19 @@ Run:
 """
 import asyncio
 
-from thinking_prompt import ThinkingPromptSession, AppInfo
+from thinking_prompt import ThinkingPromptSession, AppInfo, Spinner
 
 
 async def main():
-    app_info = AppInfo(
-        name="TaskProgress",
-        version="1.0.0",
-        thinking_text="Working",
-        thinking_animation=("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"),
-        thinking_animation_position="before",
-        echo_thinking=False,
-    )
+    app_info = AppInfo(name="TaskProgress", version="1.0.0")
     session = ThinkingPromptSession(
         app_info=app_info,
         message=">>> ",
         max_thinking_height=12,
+        thinking_title="Working",
+        spinner=Spinner.DOTS,
+        spinner_position="before",
+        echo_thinking=False,
     )
 
     @session.on_input
@@ -46,7 +43,9 @@ async def main():
             ("Write output", 0.4),
         ]
 
-        async with session.thinking(title="Processing") as ctx:
+        # overflow="head": a step list reads top-down, so if it outgrew the
+        # box it should keep its first steps (streams use the default, "tail").
+        async with session.thinking(title="Processing", overflow="head") as ctx:
             # Render all steps as dim/pending
             for label, _ in steps:
                 ctx.append_rich(f"[dim]  ○ {label}[/dim]\n")

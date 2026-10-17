@@ -4,62 +4,38 @@ Test script demonstrating the dialog system in thinking_prompt.
 
 This example shows:
 1. Built-in dialogs (yes_no, message, choice, dropdown)
-2. Custom dialog via DialogConfig (composition)
-3. Custom dialog via BaseDialog subclass
+2. Custom dialog built with Dialog(...) arguments
+3. Custom dialog via Dialog subclass
 
 Run with: conda run -n thinking_prompt python examples/dialog_test.py
 """
 
 import asyncio
 
-from prompt_toolkit.layout import HSplit, VSplit, Window, D
-from prompt_toolkit.layout.controls import FormattedTextControl
-from prompt_toolkit.widgets import Label, TextArea
-
 from thinking_prompt import (
     ThinkingPromptSession,
     AppInfo,
-    DialogConfig,
     ButtonConfig,
-    BaseDialog,
+    Dialog,
+    TextField,
 )
 
 
-class LoginDialog(BaseDialog):
-    """Example custom dialog with text input fields."""
+class LoginDialog(Dialog):
+    """Example custom dialog with a form field."""
 
     title = "Login"
     escape_result = None  # Escape returns None (cancel)
-
-    def __init__(self):
-        super().__init__()
-        # Single input for simplicity (demonstrates custom dialog)
-        self.username_input = TextArea(
-            multiline=False,
-            focusable=True,
-            scrollbar=False,
-            wrap_lines=False,
-        )
-
-    def build_body(self):
-        # Simple single-row layout
-        return VSplit([
-            Window(
-                content=FormattedTextControl("Username: "),
-                width=10,
-                dont_extend_width=True,
-            ),
-            self.username_input,
-        ])
+    fields = [TextField("username", "Username")]
 
     def get_buttons(self):
         return [
-            ("Login", self.on_login),
-            ("Cancel", self.cancel),
+            ButtonConfig("Login", handler=self.on_login),
+            ButtonConfig("Cancel", handler=self.cancel),
         ]
 
     def on_login(self):
-        username = self.username_input.text.strip()
+        username = self.values["username"].strip()
         if not username:
             return  # Validation failed, don't close
         self.set_result({"username": username})
@@ -75,8 +51,8 @@ async def main():
             "  info      - Message dialog\n"
             "  action    - Choice dialog\n"
             "  theme     - Dropdown dialog\n"
-            "  custom    - Custom DialogConfig\n"
-            "  login     - Custom BaseDialog subclass\n"
+            "  custom    - Dialog built with arguments\n"
+            "  login     - Dialog subclass\n"
             "  quit      - Exit"
         ),
     )
@@ -133,7 +109,7 @@ async def main():
             return
 
         if text == "theme":
-            # Dropdown dialog (radio list selection)
+            # Dropdown dialog (a choice list in a box)
             result = await session.dropdown_dialog(
                 title="Select Theme",
                 text="Choose a color theme:",
@@ -151,18 +127,16 @@ async def main():
         # =====================================================================
 
         if text == "custom":
-            # Custom dialog via DialogConfig (composition pattern)
-            config = DialogConfig(
+            # Dialog built with arguments
+            result = await session.show_dialog(Dialog(
                 title="Custom Dialog",
-                body="This dialog was created using DialogConfig.\nChoose an option:",
+                body="This dialog was built with Dialog(...).\nChoose an option:",
                 buttons=[
-                    ButtonConfig(text="Option A", result="a"),
-                    ButtonConfig(text="Option B", result="b"),
-                    ButtonConfig(text="Option C", result="c"),
+                    ButtonConfig("Option A", result="a"),
+                    ButtonConfig("Option B", result="b"),
+                    ButtonConfig("Option C", result="c"),
                 ],
-                escape_result=None,  # Escape returns None
-            )
-            result = await session.show_dialog(config)
+            ))
             if result:
                 session.add_response(f"You chose: Option {result.upper()}")
             else:
@@ -170,7 +144,7 @@ async def main():
             return
 
         if text == "login":
-            # Custom dialog via BaseDialog subclass
+            # Custom dialog via Dialog subclass
             dialog = LoginDialog()
             result = await session.show_dialog(dialog)
             if result:

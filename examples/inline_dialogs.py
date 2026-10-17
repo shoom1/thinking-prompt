@@ -1,0 +1,77 @@
+"""
+Inline dialogs: dialogs drawn as rows under the prompt instead of boxes.
+
+Run with: conda run -n thinking_prompt python examples/inline_dialogs.py
+Commands: yesno, choice, dropdown, checklist, settings, box, quit
+"""
+import asyncio
+
+from thinking_prompt import (
+    AppInfo,
+    ButtonConfig,
+    CheckboxField,
+    ChecklistField,
+    Dialog,
+    DropdownField,
+    RadioField,
+    TextField,
+    ThinkingPromptSession,
+)
+
+
+async def main() -> None:
+    session = ThinkingPromptSession(
+        app_info=AppInfo(
+            name="Inline dialogs",
+            version="0.4",
+            welcome_message="Commands: yesno, choice, dropdown, checklist, settings, box, quit",
+        ),
+        dialog_placement="inline",
+    )
+
+    @session.on_input
+    async def handle(text: str) -> None:
+        command = text.strip().lower()
+        if command == "quit":
+            session.exit()
+        elif command == "yesno":
+            ok = await session.yes_no_dialog("Delete 3 files?", "This can't be undone.")
+            session.add_response(f"yes_no_dialog -> {ok}")
+        elif command == "choice":
+            action = await session.choice_dialog("Unsaved changes", "", ["Save", "Discard", "Cancel"])
+            session.add_response(f"choice_dialog -> {action}")
+        elif command == "dropdown":
+            theme = await session.dropdown_dialog(
+                "Theme", "Pick a theme:", ["dark", "light", "mono", "terminal"], default="light"
+            )
+            session.add_response(f"dropdown_dialog -> {theme}")
+        elif command == "checklist":
+            tools = await session.checklist_dialog(
+                "Tools", "Enable any:", ["search", "code execution", "file access"],
+                defaults=["search"],
+            )
+            session.add_response(f"checklist_dialog -> {tools}")
+        elif command == "settings":
+            dialog = Dialog("Settings", fields=[
+                DropdownField("model", "Model", options=["small", "medium", "large"], default="medium"),
+                CheckboxField("stream", "Stream output", default=True),
+                TextField("name", "Name", default=""),
+                ChecklistField("tools", "Tools", options=["search", "code"], default=("search",)),
+                RadioField("mode", "Mode", options=["fast", "careful"], default="fast"),
+            ])
+            dialog.buttons = [
+                ButtonConfig("Save", handler=lambda: dialog.set_result(dialog.values)),
+                ButtonConfig("Cancel"),
+            ]
+            session.add_response(f"settings -> {await session.show_dialog(dialog)}")
+        elif command == "box":
+            ok = await session.yes_no_dialog("Same question", "...as a box.", placement="box")
+            session.add_response(f"yes_no_dialog (box) -> {ok}")
+        elif command:
+            session.add_warning(f"Unknown command: {command}")
+
+    await session.run_async()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

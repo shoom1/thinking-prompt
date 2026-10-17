@@ -1,0 +1,141 @@
+"""The session's output methods: what each one prints to the console and
+keeps in the transcript."""
+from __future__ import annotations
+
+import re
+from typing import Any
+
+import pytest
+from prompt_toolkit.formatted_text import ANSI, FormattedText, to_formatted_text
+
+from tests.helpers import echoed, keep_console
+from thinking_prompt import ThinkingPromptSession
+
+
+def _session(**kwargs: Any) -> ThinkingPromptSession:
+    """A session that keeps its console output (echoed() reads it)."""
+    session = ThinkingPromptSession(**kwargs)
+    keep_console(session._display)
+    return session
+
+
+def _entries(session: ThinkingPromptSession) -> list[Any]:
+    return session._display.history.iter_entries()
+
+
+class TestStyledLines:
+    """Each of these prints its text in its own style, and the transcript
+    keeps that text and style."""
+
+    @pytest.mark.parametrize(
+        "method, args, style, text",
+        [
+            ("add_response", ("x",), "class:history.assistant-message", "x\n"),
+            ("add_success", ("x",), "class:history.success", "[OK] x\n"),
+            ("add_warning", ("x",), "class:history.warning", "[WARN] x\n"),
+            ("add_error", ("x",), "class:history.error", "[ERROR] x\n"),
+            ("add_message", ("assistant", "x"), "class:history.assistant-message", "x\n"),
+            ("add_message", ("system", "x"), "class:history.system", "x\n"),
+            ("add_message", ("thinking", "x"), "class:history.thinking", "x\n"),
+        ],
+        ids=[
+            "add_response",
+            "add_success",
+            "add_warning",
+            "add_error",
+            "add_message-assistant",
+            "add_message-system",
+            "add_message-thinking",
+        ],
+    )
+    def test_prints_and_keeps_its_text_in_its_style(self, method, args, style, text):
+        session = _session()
+        getattr(session, method)(*args)
+
+        (entry,) = _entries(session)
+        assert (entry.kind, entry.style, entry.text) == ("styled", style, text)
+        (printed,) = session._display.kept
+        assert to_formatted_text(printed) == [(style, text)]
+
+
+class TestAddMessage:
+    def test_a_user_message_is_the_prompt_and_the_text_on_one_line(self):
+        session = _session(message="you> ")
+        session.add_message("user", "hello")
+
+        fragments = [
+            ("class:history.user-prefix", "you> "),
+            ("class:history.user-message", "hello\n"),
+        ]
+        (entry,) = _entries(session)
+        assert (entry.kind, entry.fragments) == ("formatted", fragments)
+        (printed,) = session._display.kept
+        assert to_formatted_text(printed) == fragments
+
+
+_FRAGMENTS = [("bold", "Title: "), ("", "Content")]
+
+
+class TestAddResponse:
+    @pytest.mark.parametrize(
+        "content", [FormattedText(_FRAGMENTS), list(_FRAGMENTS)], ids=["FormattedText", "list"]
+    )
+    def test_formatted_text_is_printed_and_kept_as_given(self, content):
+        session = _session()
+        session.add_response(content)
+
+        (entry,) = _entries(session)
+        assert (entry.kind, entry.fragments) == ("formatted", _FRAGMENTS)
+        (printed,) = session._display.kept
+        assert to_formatted_text(printed) == _FRAGMENTS
+
+    def test_markdown_is_printed_rendered_and_kept_as_its_source(self):
+        pytest.importorskip("rich")
+        source = "# Title\n\n- one\n- two"
+        session = _session()
+        session.add_response(source, markdown=True)
+
+        (entry,) = _entries(session)
+        assert (entry.kind, entry.source) == ("markdown", source)
+        (printed,) = echoed(session._display)
+        assert "Title" in printed
+        assert "#" not in printed
+        assert "• one" in printed
+
+
+class TestAddCode:
+    def test_code_is_printed_highlighted_and_kept_as_its_source(self):
+        pytest.importorskip("pygments")
+        source = "def hello():\n    return 'world'"
+        session = _session()
+        session.add_code(source)
+
+        (entry,) = _entries(session)
+        assert (entry.kind, entry.source, entry.language) == ("code", source, "python")
+        (printed,) = session._display.kept
+        assert isinstance(printed, ANSI)
+        assert re.search(r"\x1b\[[0-9;]*mhello", printed.value)
+        assert echoed(session._display) == [source + "\n"]
+
+    def test_the_language_reaches_the_transcript(self):
+        session = _session()
+        session.add_code("let x = 1;", language="javascript")
+        (entry,) = _entries(session)
+        assert entry.language == "javascript"
+
+
+class TestAddRich:
+    def test_the_renderable_is_printed_as_rich_draws_it_and_kept_as_drawn(self, monkeypatch):
+        pytest.importorskip("rich")
+        from rich.panel import Panel
+
+        monkeypatch.delenv("NO_COLOR", raising=False)
+        session = _session()
+        session.add_rich(Panel("boxed", border_style="green"))
+
+        (printed,) = session._display.kept
+        assert isinstance(printed, ANSI)
+        assert "\x1b[32m╭" in printed.value
+        assert "boxed" in echoed(session._display)[0]
+        (entry,) = _entries(session)
+        assert (entry.kind, entry.source) == ("ansi", printed.value)

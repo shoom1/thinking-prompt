@@ -191,10 +191,12 @@ class TestAcceptHandlerWhileBusy:
         finally:
             loop.close()
 
-    def test_busy_session_drops_input(self, session):
+    def test_busy_session_refuses_input(self, session):
         """While a handler task is running, accept_handler refuses the
-        input (returns False, leaves buffer intact, does not resolve the
-        pending input future)."""
+        input: the buffer stays intact and the pending input future is
+        not resolved. Goes through validate_and_handle(), the real call
+        path — accept_handler's return value means *keep_text*, so an
+        inverted value only shows up there."""
         loop = asyncio.new_event_loop()
         try:
             # Simulate a running handler.
@@ -207,15 +209,11 @@ class TestAcceptHandlerWhileBusy:
             session._pending_input = loop.create_future()
             session.default_buffer.text = "queued"
 
-            ah = session.default_buffer.accept_handler
-            assert ah is not None
-            result = ah(session.default_buffer)
+            session.default_buffer.validate_and_handle()
 
             # Don't deliver the text and don't clear the buffer.
             assert session._pending_input.done() is False
             assert session.default_buffer.text == "queued"
-            # Falsy return tells prompt_toolkit to keep the buffer.
-            assert result is False
 
             running.cancel()
             try:
@@ -369,13 +367,18 @@ class TestCtrlDKeyBinding:
         the buffer the binding must not be active (the default emacs
         delete-char binding applies instead), so Ctrl+D can't destroy
         typed input and kill the session."""
+        from prompt_toolkit.application.current import set_app
+
         binding = _get_ctrl_d_binding(session)
 
-        session.default_buffer.text = "draft in progress"
-        assert not binding.filter()
+        # The filter also requires prompt focus, which is resolved via
+        # the current app — evaluate it under the session's own app.
+        with set_app(session.app):
+            session.default_buffer.text = "draft in progress"
+            assert not binding.filter()
 
-        session.default_buffer.reset()
-        assert binding.filter()
+            session.default_buffer.reset()
+            assert binding.filter()
 
     async def test_prompt_async_raises_eoferror_end_to_end(self, session):
         """await prompt_async() must raise EOFError after Ctrl+D."""
@@ -517,3 +520,90 @@ class TestUserCancelledFlagReset:
         run2.cancel()
         with pytest.raises(asyncio.CancelledError):
             await run2
+
+
+class TestEchoedPrompt:
+    """The prompt echoed with each input is the prompt's visible text,
+    whatever AnyFormattedText form the message takes."""
+
+    @staticmethod
+    def _echoed_prefix(session: ThinkingPromptSession) -> str:
+        session.add_message("user", "hi")
+        entry = session._display.history.iter_entries()[-1]
+        return entry.fragments[0][1]
+
+    @pytest.mark.parametrize(
+        "message",
+        [
+            ">>> ",
+            lambda: ">>> ",
+            [("class:x", ">>"), ("", "> ")],
+        ],
+        ids=["str", "callable", "fragments"],
+    )
+    def test_plain_forms(self, message):
+        assert self._echoed_prefix(ThinkingPromptSession(message=message)) == ">>> "
+
+    def test_html_message(self):
+        from prompt_toolkit.formatted_text import HTML
+
+        session = ThinkingPromptSession(message=HTML("<ansigreen>&gt;&gt;&gt; </ansigreen>"))
+        assert self._echoed_prefix(session) == ">>> "
+
+    def test_ansi_message(self):
+        from prompt_toolkit.formatted_text import ANSI
+
+        session = ThinkingPromptSession(message=ANSI("\x1b[32m>>> \x1b[0m"))
+        assert self._echoed_prefix(session) == ">>> "
+
+
+class TestHandlerErrorReporting:
+    """A handler exception must be debuggable: logged with its traceback,
+    and shown with its type (KeyError('x') used to print as just 'x')."""
+
+    @staticmethod
+    def _raise_key_error_async():
+        async def handler(text: str) -> None:
+            raise KeyError("x")
+        return handler
+
+    @staticmethod
+    def _raise_key_error_sync():
+        def handler(text: str) -> None:
+            raise KeyError("x")
+        return handler
+
+    @pytest.mark.parametrize("kind", ["async", "sync"])
+    async def test_error_is_logged_with_traceback(self, session, caplog, kind):
+        import logging
+
+        handler = (self._raise_key_error_async() if kind == "async"
+                   else self._raise_key_error_sync())
+        with caplog.at_level(logging.ERROR, logger="thinking_prompt"):
+            await session._run_handler(handler, "go")
+
+        records = [r for r in caplog.records if r.name.startswith("thinking_prompt")]
+        assert records, "handler error was not logged"
+        assert records[-1].exc_info is not None
+        assert records[-1].exc_info[0] is KeyError
+
+    async def test_error_message_names_the_exception_type(self, session):
+        await session._run_handler(self._raise_key_error_async(), "go")
+        last = session._display.history.iter_entries()[-1]
+        assert last.text == "[ERROR] Handler error: KeyError: 'x'\n"
+
+    def test_library_logging_is_silent_unless_app_configures_it(self):
+        """Libraries must not print log records on their own: with no
+        handler configured, Python's last-resort handler writes to stderr —
+        over the running UI. A NullHandler on the package logger prevents
+        that; apps that configure logging still get the records."""
+        import subprocess
+        import sys
+
+        proc = subprocess.run(
+            [sys.executable, "-c",
+             "import logging, thinking_prompt; "
+             "logging.getLogger('thinking_prompt.session').error('boom')"],
+            capture_output=True, text=True, check=True,
+        )
+        assert proc.stderr == ""

@@ -22,14 +22,8 @@ class TestDisplayToAnsi:
 
     @pytest.fixture
     def display(self) -> Display:
-        return Display(style=Style.from_dict({}), is_fullscreen=lambda: False)
-
-    def test_converts_rich_text_to_ansi(self, display: Display):
-        """Should convert a Rich Text object to a prompt_toolkit ANSI."""
-        pytest.importorskip("rich")
-        from rich.text import Text
-        result = display.to_ansi(Text("Hello", style="bold"))
-        assert isinstance(result, ANSI)
+        style = Style.from_dict({})
+        return Display(get_style=lambda: style)
 
     def test_strips_trailing_newlines(self, display: Display):
         """Should strip trailing newlines from output."""
@@ -73,7 +67,6 @@ class TestCreateStatusBarTypeDispatch:
 
     def test_formatted_text_passed_through(self):
         """FormattedText should be returned as-is."""
-        from prompt_toolkit.layout.controls import FormattedTextControl
 
         ft = FormattedText([("bold", "Styled")])
         bar = create_status_bar(
@@ -87,7 +80,6 @@ class TestCreateStatusBarTypeDispatch:
 
     def test_ansi_passed_through(self):
         """ANSI objects should be returned as-is."""
-        from prompt_toolkit.layout.controls import FormattedTextControl
 
         ansi = ANSI("\x1b[1mBold\x1b[0m")
         bar = create_status_bar(

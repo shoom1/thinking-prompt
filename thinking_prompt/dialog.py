@@ -1,222 +1,335 @@
 """
 Dialog system for ThinkingPromptSession.
 
-Provides floating dialogs that integrate with the existing Application layout,
-avoiding the issues with prompt_toolkit's built-in dialog shortcuts which
-create their own Application and cause rendering conflicts.
+Provides dialogs that integrate with the existing Application layout, shown
+two ways: as a box floating over the session, or inline, as rows under the
+prompt. This avoids the issues with prompt_toolkit's built-in dialog
+shortcuts, which create their own Application and cause rendering conflicts.
 
 Example usage:
 
-    # Simple built-in dialogs
+    # Built-in dialogs
     result = await session.yes_no_dialog("Confirm", "Are you sure?")
     await session.message_dialog("Info", "Operation completed.")
     choice = await session.choice_dialog("Action", "What to do?", ["Save", "Discard"])
 
-    # Custom dialog via composition
-    config = DialogConfig(
-        title="Custom",
-        body="Enter your choice:",
-        buttons=[
-            ButtonConfig(text="OK", result=True),
-            ButtonConfig(text="Cancel", result=False),
-        ],
-    )
-    result = await session.show_dialog(config)
+    # A dialog built with arguments
+    result = await session.show_dialog(Dialog(
+        "Custom",
+        "Enter your choice:",
+        [ButtonConfig("OK", result=True), ButtonConfig("Cancel", result=False)],
+    ))
 
-    # Custom dialog via subclass
-    class MyDialog(BaseDialog):
+    # A custom dialog via subclass
+    class MyDialog(Dialog):
         title = "My Dialog"
 
         def build_body(self):
             return Label("Custom content")
 
         def get_buttons(self):
-            return [("OK", lambda: self.set_result(True))]
+            return [ButtonConfig("OK", result=True)]
 
     result = await session.show_dialog(MyDialog())
 """
 from __future__ import annotations
 
 import asyncio
-from abc import ABC, abstractmethod
-from collections.abc import Sequence
-from dataclasses import dataclass, field
+import inspect
+import logging
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, replace
 from typing import (
     TYPE_CHECKING,
     Any,
     Callable,
+    cast,
 )
 
 from prompt_toolkit.filters import Condition
+from prompt_toolkit.formatted_text import AnyFormattedText
 from prompt_toolkit.key_binding import KeyBindings, merge_key_bindings
-from prompt_toolkit.layout import (
-    AnyContainer,
-    ConditionalContainer,
-    DynamicContainer,
-    Float,
-    FloatContainer,
-    HSplit,
-    ScrollablePane,
-    Window,
-    to_container,
-)
-from prompt_toolkit.layout.dimension import Dimension
-from prompt_toolkit.widgets import Button, Dialog, Label, RadioList
+from prompt_toolkit.layout import AnyContainer, Container, Float, HSplit, Window, to_container
+from prompt_toolkit.layout.containers import is_container
+from prompt_toolkit.widgets import Label
+
+from ._text import format_exception_detail
+from .dialog_box import BoxPresenter
+from .dialog_inline import InlinePresenter, InlineView
+from .dialog_scroll import ScrollRegion, focusable_windows
+from .fields import AlignValues, ChecklistField, ChoiceField, Field, _check_align_values, _Form
+from .types import Placement, check_placement
 
 if TYPE_CHECKING:
     from .session import ThinkingPromptSession
 
-
-# Sentinel value for "escape disabled"
-class _Unset:
-    """Sentinel for unset escape_result (meaning escape is disabled)."""
-    pass
+logger = logging.getLogger(__name__)
 
 
-_UNSET = _Unset()
-
-
-# Sentinel returned by _compute_effective_height when the terminal is
-# too small to show the dialog. Caller aborts without building the widget.
-_TERMINAL_TOO_SMALL = object()
-
-
-@dataclass
+@dataclass(frozen=True)
 class ButtonConfig:
     """
-    Configuration for a dialog button.
+    A dialog button.
 
     Attributes:
         text: Button label text.
-        result: Value returned when this button is clicked.
-        focused: If True, this button gets initial focus.
-        style: Optional style class for the button.
+        result: Value the dialog returns when this button is clicked.
+        focused: If True, this button gets initial focus (the first one wins).
+        style: Optional extra style for the button.
+        handler: Optional function run on click instead of returning
+            ``result``. It decides what happens: call ``set_result(...)`` or
+            ``cancel()`` on the dialog to close it, or return without closing
+            (e.g. while input fails validation).
     """
     text: str
     result: Any = None
     focused: bool = False
     style: str = ""
+    handler: Callable[[], None] | None = None
+
+    def __post_init__(self) -> None:
+        if self.handler is not None and self.result is not None:
+            raise ValueError(
+                "ButtonConfig takes a result or a handler, not both: a handler "
+                "decides the result itself (dialog.set_result(...))."
+            )
+        if inspect.iscoroutinefunction(self.handler):
+            raise TypeError(
+                "ButtonConfig handler must be a regular function, not async: "
+                "start async work from it (e.g. asyncio.ensure_future(...)) "
+                "and call dialog.set_result(...) when it's done."
+            )
 
 
-@dataclass
-class DialogConfig:
+class _NotPassed:
+    """Type of the marker for Dialog() arguments that weren't passed."""
+
+    def __repr__(self) -> str:
+        return "<not passed>"
+
+
+# Dialog() leaves an option at its class default unless the argument is
+# passed. None can't mark "not passed": it's a meaningful value for
+# escape_result, width and max_height.
+_NOT_PASSED = _NotPassed()
+
+
+class Dialog:
     """
-    Configuration for creating a simple dialog via composition.
+    A dialog shown over the running session that returns a result.
+
+    Build one with arguments for simple dialogs, or subclass it and
+    override build_body() / get_buttons() for custom ones. It's drawn as a
+    box (prompt_toolkit's ``Dialog`` widget) or inline, as rows under the
+    prompt (see ``placement``); this class holds what the dialog asks and
+    returns: the result, Escape handling and the options below.
+
+    The class attributes are the only defaults: constructor arguments
+    override them per instance, subclasses override them as class attributes.
 
     Attributes:
-        title: Dialog title displayed in the border.
-        body: Dialog body - either a string or a prompt_toolkit Container.
-        buttons: List of ButtonConfig objects defining the buttons.
-        escape_result: Value returned when Escape is pressed.
-                      Use _UNSET (default) to disable Escape key.
-        width: Optional fixed width for the dialog.
-    """
-    title: str
-    body: str | AnyContainer
-    buttons: list[ButtonConfig] = field(default_factory=list)
-    escape_result: Any = _UNSET
-    width: int | None = None
+        title: Title, shown in the box's frame or as the first inline row
+            (default: none).
+        body: Text (str, HTML, ANSI, FormattedText), shown in a Label, or
+            any prompt_toolkit container.
+        buttons: ButtonConfigs (default: none). A dialog needs something to
+            focus: at least one button, fields, or a focusable body (e.g. a
+            TextArea, closed with Escape).
+        fields: Form fields shown under the body: TextField, CheckboxField,
+            SelectField, DropdownField, ChecklistField, RadioField,
+            ChoiceField. Their keys must be unique; ``values`` holds what
+            they're set to. Read when the dialog is created and each time
+            it's shown.
+        align_values: Where field values start: "labels" (default: two
+            columns after the longest label or description), "right" (the
+            row's right edge) or a column number (longer labels cut with "…").
+        escape_result: What Escape and cancel() return (default None).
+        escapable: If False, Escape does nothing (default True).
+        width: None/0 = auto, >0 = preferred width (never narrower than
+            the buttons), -1 = full width (box only).
+        max_height: The most rows the dialog takes, all of it counted (a
+            box's border, title and buttons; an inline dialog's title,
+            body, actions and hint); content that doesn't fit scrolls.
+            None (default): the terminal's rows less the prompt's. Without
+            it, an inline dialog also keeps its rows and actions within 12.
+        placement: "box" (a framed dialog floating over the rows between
+            the prompt and the status bar, scrolling what doesn't fit, or
+            centered when those are fewer than its smallest size), "inline"
+            (those rows themselves), or None (default) for the session's
+            ``dialog_placement``.
 
-
-class BaseDialog(ABC):
-    """
-    Base class for creating custom dialogs via subclassing.
-
-    Subclass this to create dialogs with custom layout and behavior.
-    Override build_body() and get_buttons() to define the dialog content.
-
-    Attributes:
-        title: Dialog title (class attribute or property).
-        escape_result: Value returned when Escape is pressed.
-                      Set to _UNSET to disable Escape key.
+    The fields' starting values can also be passed to the constructor as
+    ``values``: a mapping of field keys to values, over the fields'
+    defaults (keys that aren't fields are ignored, so a whole config dict
+    will do). Each show starts afresh from these, or from the defaults: what
+    an earlier show left, cancelled edits too, is gone. The mapping is read
+    when the dialog is created and again each time it's shown, so a dialog
+    kept for reuse with ``values=config`` starts from the config as it is
+    then.
 
     Example:
-        class LoginDialog(BaseDialog):
+        # Built with arguments
+        ok = await session.show_dialog(Dialog(
+            "Delete?",
+            "This can't be undone.",
+            [ButtonConfig("Delete", result=True), ButtonConfig("Keep", result=False)],
+            escapable=False,
+        ))
+
+        # Subclassed
+        class LoginDialog(Dialog):
             title = "Login"
-            escape_result = None  # Escape returns None
-
-            def __init__(self):
-                super().__init__()
-                self.username = TextArea(multiline=False)
-
-            def build_body(self):
-                return HSplit([
-                    Label("Username:"),
-                    self.username,
-                ])
+            fields = [TextField("user", "Username")]
 
             def get_buttons(self):
                 return [
-                    ("Login", self.on_login),
-                    ("Cancel", self.cancel),
+                    ButtonConfig("Login", handler=self.on_login),
+                    ButtonConfig("Cancel", handler=self.cancel),
                 ]
 
             def on_login(self):
-                if self.username.text:
-                    self.set_result({"user": self.username.text})
+                if self.values["user"]:  # stays open while empty
+                    self.set_result(self.values)
     """
 
-    title: str = "Dialog"
+    title: str = ""
+    body: AnyFormattedText | AnyContainer = ""
+    buttons: Sequence[ButtonConfig] = ()
+    # Form fields, under the body (see thinking_prompt.fields).
+    fields: Sequence[Field] = ()
+    # Where field values start: "labels", "right" or a column.
+    align_values: AlignValues = "labels"
     escape_result: Any = None
-    width: int | None = None  # None/0=auto, >0=min width, -1=max width
-    # Vertical position: None=center, 0+=from top, negative=from bottom
-    top: int | None = None
-    # Fixed total dialog height. When set, the body is wrapped in a
-    # ScrollablePane so the dialog renders in one shot instead of
-    # growing line-by-line as the renderer measures content.
-    # Body content that overflows scrolls within the allocated area.
-    height: int | None = None
+    escapable: bool = True
+    width: int | None = None
+    # The most rows the dialog takes; what doesn't fit scrolls. None: the
+    # terminal's rows less the prompt's.
+    max_height: int | None = None
+    # "box", "inline", or None for the session's dialog_placement.
+    placement: Placement | None = None
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        title: str | _NotPassed = _NOT_PASSED,
+        body: AnyFormattedText | AnyContainer | _NotPassed = _NOT_PASSED,
+        buttons: Sequence[ButtonConfig] | _NotPassed = _NOT_PASSED,
+        *,
+        escape_result: Any = _NOT_PASSED,
+        escapable: bool | _NotPassed = _NOT_PASSED,
+        width: int | None | _NotPassed = _NOT_PASSED,
+        max_height: int | None | _NotPassed = _NOT_PASSED,
+        placement: Placement | None | _NotPassed = _NOT_PASSED,
+        fields: Sequence[Field] | _NotPassed = _NOT_PASSED,
+        align_values: AlignValues | _NotPassed = _NOT_PASSED,
+        values: Mapping[str, Any] | None = None,
+    ) -> None:
+        if not isinstance(placement, _NotPassed):
+            check_placement(placement, optional=True)
+
+        passed = {
+            "title": title,
+            "body": body,
+            "buttons": buttons,
+            "escape_result": escape_result,
+            "escapable": escapable,
+            "width": width,
+            "max_height": max_height,
+            "placement": placement,
+            "fields": fields,
+            "align_values": align_values,
+        }
+        for name, value in passed.items():
+            if not isinstance(value, _NotPassed):
+                setattr(self, name, value)
+        if self.max_height is not None and self.max_height < 1:
+            raise ValueError(f"max_height must be at least 1, got {self.max_height!r}")
+        _check_align_values(self.align_values)
+        # Not an attribute: one named values would hide the values property.
+        self._start_values = values
+        # One control per field, holding its value (values) until the next
+        # show starts a new form.
+        self._form = self._new_form()
+
         self._result_future: asyncio.Future | None = None
-        self._widget: Dialog | None = None
         self._manager: DialogManager | None = None
-        # Populated by _build_widget. _initial_focus, when non-None, is the
-        # Window the DialogManager should focus after the dialog opens (used
-        # by ButtonConfig(focused=True)). _focused_button is the matching
-        # Button widget; _buttons is the full list for inspection/testing.
-        self._buttons: list[Button] = []
-        self._focused_button: Button | None = None
-        self._initial_focus: Window | None = None
+        # The placement this dialog is (or was last) shown with, resolved by
+        # DialogManager; _content() lays the fields out for it.
+        self._placement: Placement = "box"
 
-    def _get_width_dimension(self) -> Dimension | None:
-        """Convert width setting to prompt_toolkit Dimension.
-
-        Returns:
-            None for auto-size, Dimension for preferred width.
-        """
-        if self.width is None or self.width == 0:
-            return None  # Auto-size
-        elif self.width == -1:
-            # Max width - use large preferred with no max constraint
-            return Dimension(preferred=9999)
-        else:
-            # Preferred width (allows shrinking if terminal is smaller)
-            return Dimension(preferred=self.width)
-
-    @abstractmethod
     def build_body(self) -> AnyContainer:
         """
-        Build and return the dialog body container.
+        Build the dialog body.
 
-        Override this method to define the dialog content.
-
-        Returns:
-            A prompt_toolkit Container for the dialog body.
+        Default: ``body`` itself if it's a container, otherwise ``body``
+        shown as text in a Label. Override for custom content. The fields,
+        if any, are shown under it.
         """
-        pass
+        body = self.body
+        if is_container(body):
+            return body
+        return Label(text=cast("AnyFormattedText", body))
 
-    def get_buttons(self) -> list[tuple[str, Callable[[], None]]]:
+    @property
+    def values(self) -> dict[str, Any]:
+        """Each field's current value by key, in field order ({} without
+        fields): the starting values before the dialog is shown, what the
+        fields hold while it is, and what they held when it closed. Read it
+        from a button handler to return it."""
+        return self._form.values
+
+    def _new_form(self) -> _Form:
+        """A form of the fields, each starting at its value in ``values=``
+        (when the mapping has its key), else at its default."""
+        start = self._start_values or {}
+        return _Form([
+            replace(field, default=start[field.key])
+            if isinstance(field, Field) and field.key in start else field
+            for field in self.fields
+        ])
+
+    def _content(self) -> tuple[Container | None, Container | None]:
+        """What a presenter shows between the title and the buttons, and
+        where the cursor starts in it when no button asks for it.
+
+        The content: the body (unless it's an empty text body), then the
+        fields laid out for the placement; None for neither. The start: the
+        first thing in the body that takes focus, else the first field's
+        start (a radio list's picked option); None for neither.
         """
-        Return the list of buttons for the dialog.
+        _check_align_values(self.align_values)
+        body = to_container(self.build_body()) if self._has_body() else None
+        body_stops = focusable_windows(body) if body is not None else []
+        # A ChoiceField with nothing else to focus: Enter on an option picks
+        # it and accepts the dialog.
+        self._form.set_alone(not body_stops, self._accept_choice)
+        fields = self._form.container(self._placement, self.align_values)
+        start = body_stops[0] if body_stops else self._form.start()
+        if fields is None:
+            return body, start
+        if self._placement == "inline":
+            return (fields if body is None else HSplit([body, fields])), start
+        # A box: Tab walks the body's windows and the fields as groups.
+        tabs = self._form.tab_bindings(
+            lambda: focusable_windows(body) if body is not None else []
+        )
+        if body is None:
+            # Empty, as the fields' own: no "Window too small" flash.
+            return HSplit([fields], key_bindings=tabs, window_too_small=Window()), start
+        return HSplit([body, fields], key_bindings=tabs), start
 
-        Override this method to define custom buttons.
-        Each button is a tuple of (label, handler_callable).
+    def _screen_floats(self) -> list[Float]:
+        """Floats the fields need over the whole screen while the dialog is
+        open: each dropdown's menu."""
+        return self._form.floats()
 
-        Returns:
-            List of (label, handler) tuples.
+    def get_buttons(self) -> list[ButtonConfig]:
         """
-        return [("OK", lambda: self.set_result(None))]
+        Return the dialog's buttons.
+
+        Default: ``buttons``. Override to compute them, e.g. with handlers
+        bound to the instance.
+        """
+        return list(self.buttons)
 
     def set_result(self, value: Any) -> None:
         """
@@ -235,324 +348,307 @@ class BaseDialog(ABC):
         """
         Cancel the dialog and return escape_result.
 
-        Convenience method for cancel buttons.
+        Convenience method for cancel buttons. Works whether or not the
+        dialog is escapable.
         """
         self.set_result(self.escape_result)
 
-    # Chrome height = title bar (2) + button row (2) + padding (1) around the body.
-    # Used when `height` is set to compute the body area from the total.
-    _CHROME_HEIGHT = 5
+    def _has_body(self) -> bool:
+        """False for an empty text body: an inline dialog then skips the body row."""
+        return type(self).build_body is not Dialog.build_body or self.body != ""
 
-    def _build_widget(self, effective_height: int | None = None) -> Dialog:
-        """Build the prompt_toolkit Dialog widget.
+    def _is_editing(self) -> bool:
+        """True while a field is being edited (a text field, an open menu):
+        the cursor stays put meanwhile."""
+        return self._form.is_editing()
 
-        Args:
-            effective_height: Caller-computed height after any terminal
-                clamping. Overrides ``self.height`` for body-wrapping
-                purposes. None means use ``self.height`` directly.
+    def _button_configs(self) -> list[ButtonConfig]:
+        """get_buttons(), checked: every item must be a ButtonConfig.
+
+        One check for every presentation, so a dialog built for 0.3 fails
+        with a hint wherever it's shown.
         """
-        body = self.build_body()
+        configs = self.get_buttons()
+        for cfg in configs:
+            if not isinstance(cfg, ButtonConfig):
+                raise TypeError(
+                    "get_buttons() must return ButtonConfig items; got "
+                    f"{type(cfg).__name__}. Use ButtonConfig(label, "
+                    "handler=...) instead of (label, handler)."
+                )
+        return configs
 
-        # Pin body height so the Dialog renders in one shot (opt-in via
-        # the ``height`` attribute). Overflow scrolls within the pane.
-        h = effective_height if effective_height is not None else self.height
-        if h is not None and h > 0:
-            body_height = max(1, h - self._CHROME_HEIGHT)
-            body = HSplit(
-                [ScrollablePane(to_container(body), show_scrollbar=True)],
-                height=Dimension.exact(body_height),
-            )
+    def _accept_choice(self) -> None:
+        """Enter on a lone choice list, after it picks: click the first
+        button, as Enter on it would; with no buttons, close with the pick.
+        The buttons are read when pressed: they can be set after the dialog
+        is laid out."""
+        configs = self._button_configs()
+        if configs:
+            self._click_handler(configs[0])()
+        else:
+            (pick,) = self.values.values()
+            self.set_result(pick)
 
-        self._buttons = self._build_buttons()
+    def _click_handler(self, cfg: ButtonConfig) -> Callable[[], None]:
+        """What clicking ``cfg`` does: run its handler, or close with its result.
 
-        self._widget = Dialog(
-            title=self.title,
-            body=body,
-            buttons=self._buttons,
-            width=self._get_width_dimension(),
-            with_background=False,  # Use styled dialog, no light overlay
-        )
-        return self._widget
-
-    def _build_buttons(self) -> list[Button]:
-        """Build the prompt_toolkit Button widgets for the dialog.
-
-        Default implementation calls ``get_buttons()`` for backward
-        compatibility. Subclasses that need to apply per-button styling
-        or initial focus (e.g. _ConfigBasedDialog using ButtonConfig)
-        should override this method directly.
+        A handler that raises is logged with its traceback and reported as
+        an error line; the dialog stays open and the session keeps running.
         """
-        return [
-            Button(text=text, handler=handler)
-            for text, handler in self.get_buttons()
-        ]
+        handler = cfg.handler
+        if handler is None:
+            return lambda: self.set_result(cfg.result)
 
-    def _prepare(self, manager: DialogManager) -> asyncio.Future:
-        """Prepare the dialog for showing (called by DialogManager)."""
+        def click() -> None:
+            try:
+                result = handler()
+                if inspect.isawaitable(result):
+                    if hasattr(result, "close"):
+                        result.close()
+                    raise TypeError(
+                        "button handler returned an awaitable; handlers "
+                        "must be regular functions"
+                    )
+            except Exception as exc:
+                logger.error("Dialog button handler raised", exc_info=exc)
+                if self._manager is not None:
+                    detail = format_exception_detail(exc)
+                    self._manager._session.add_error(f"Dialog button error: {detail}")
+
+        return click
+
+    def _prepare(self, manager: DialogManager, placement: Placement = "box") -> asyncio.Future:
+        """Prepare the dialog for showing (called by DialogManager): the
+        fields start afresh, from ``values=`` or their defaults."""
         self._manager = manager
+        self._placement = placement
+        self._form = self._new_form()
         loop = asyncio.get_running_loop()
         self._result_future = loop.create_future()
         return self._result_future
 
 
-def _apply_button_style(button: Button, extra_style: str) -> None:
-    """Append ``extra_style`` to a Button's style classes.
+def _yes_no_dialog(
+    title: str,
+    text: str,
+    yes_text: str = "Yes",
+    no_text: str = "No",
+    placement: Placement = "box",
+    max_height: int | None = None,
+) -> Dialog:
+    """Yes/No confirmation: True or False; Escape returns False."""
+    return Dialog(
+        title,
+        text,
+        [ButtonConfig(yes_text, result=True), ButtonConfig(no_text, result=False)],
+        escape_result=False,
+        placement=placement,
+        max_height=max_height,
+    )
 
-    The Button widget builds its own style callable that toggles between
-    ``class:button`` and ``class:button.focused`` based on focus. We wrap
-    that callable to append the user's style so focus styling still works.
+
+def _message_dialog(
+    title: str,
+    text: str,
+    ok_text: str = "OK",
+    placement: Placement = "box",
+    max_height: int | None = None,
+) -> Dialog:
+    """A message with one button; returns None."""
+    return Dialog(title, text, [ButtonConfig(ok_text)], placement=placement, max_height=max_height)
+
+
+def _choice_dialog(
+    title: str,
+    text: str,
+    choices: Sequence[str],
+    placement: Placement = "box",
+    max_height: int | None = None,
+) -> Dialog:
+    """One button per choice, returning its text; Escape returns None."""
+    return Dialog(
+        title,
+        text,
+        [ButtonConfig(choice, result=choice) for choice in choices],
+        placement=placement,
+        max_height=max_height,
+    )
+
+
+def _dropdown_dialog(
+    title: str,
+    text: str,
+    options: Sequence[str],
+    default: str | None = None,
+    placement: Placement = "box",
+    max_height: int | None = None,
+) -> Dialog:
+    """Pick one option; Cancel and Escape return None.
+
+    Box: a choice list field with OK / Cancel: Enter on an option returns
+    it, and OK returns the pick. Inline: one numbered action per option.
+    Either way the cursor starts on ``default`` (the first option if it
+    isn't one).
     """
-    if not extra_style:
-        return
-    original = button.window.style
-    if callable(original):
-        def combined() -> str:
-            return f"{original()} {extra_style}".strip()
-        button.window.style = combined
-    else:
-        button.window.style = f"{original} {extra_style}".strip()
+    if not options:
+        raise ValueError("dropdown_dialog() needs at least one option")
+    if placement == "inline":
+        return Dialog(
+            title,
+            text,
+            [ButtonConfig(opt, result=opt, focused=opt == default) for opt in options],
+            placement="inline",
+            max_height=max_height,
+        )
+
+    # Alone in the dialog, Enter on an option picks it and presses OK.
+    dialog = Dialog(
+        title,
+        text,
+        fields=[ChoiceField("choice", "", options=list(options), default=default)],
+        placement="box",
+        max_height=max_height,
+    )
+    # Buttons set after construction: OK's handler needs the dialog itself.
+    dialog.buttons = [
+        ButtonConfig("OK", handler=lambda: dialog.set_result(dialog.values["choice"])),
+        ButtonConfig("Cancel"),
+    ]
+    return dialog
 
 
-class _ConfigBasedDialog(BaseDialog):
-    """Internal dialog class that wraps a DialogConfig."""
-
-    def __init__(self, config: DialogConfig) -> None:
-        super().__init__()
-        self._config = config
-        self.title = config.title
-        self.escape_result = config.escape_result
-        self.width = config.width
-
-    def build_body(self) -> AnyContainer:
-        body = self._config.body
-        if isinstance(body, str):
-            return Label(text=body)
-        return body
-
-    def get_buttons(self) -> list[tuple[str, Callable[[], None]]]:
-        def _make_handler(result: Any) -> Callable[[], None]:
-            return lambda: self.set_result(result)
-
-        buttons: list[tuple[str, Callable[[], None]]] = []
-        for btn in self._config.buttons:
-            buttons.append((btn.text, _make_handler(btn.result)))
-        return buttons
-
-    def _build_buttons(self) -> list[Button]:
-        """Build Button widgets, applying per-button style and focus flag."""
-        def _make_handler(result: Any) -> Callable[[], None]:
-            return lambda: self.set_result(result)
-
-        widgets: list[Button] = []
-        focused: Button | None = None
-        for cfg in self._config.buttons:
-            btn = Button(text=cfg.text, handler=_make_handler(cfg.result))
-            _apply_button_style(btn, cfg.style)
-            if cfg.focused and focused is None:
-                focused = btn
-            widgets.append(btn)
-
-        if focused is not None:
-            self._focused_button = focused
-            self._initial_focus = focused.window
-        return widgets
+def _checklist_dialog(
+    title: str,
+    text: str,
+    options: Sequence[str],
+    defaults: Sequence[str] = (),
+    placement: Placement = "box",
+    max_height: int | None = None,
+) -> Dialog:
+    """Check any number of options, one per line: OK returns the checked ones
+    (in option order), Cancel and Escape None."""
+    if not options:
+        raise ValueError("checklist_dialog() needs at least one option")
+    dialog = Dialog(
+        title,
+        text,
+        fields=[ChecklistField("checked", "", options=list(options), default=tuple(defaults))],
+        placement=placement,
+        max_height=max_height,
+    )
+    # Buttons set after construction: OK's handler needs the dialog itself.
+    dialog.buttons = [
+        ButtonConfig("OK", handler=lambda: dialog.set_result(dialog.values["checked"])),
+        ButtonConfig("Cancel"),
+    ]
+    return dialog
 
 
-class _YesNoDialog(BaseDialog):
-    """Built-in Yes/No confirmation dialog."""
-
-    def __init__(
-        self,
-        title: str,
-        text: str,
-        yes_text: str = "Yes",
-        no_text: str = "No",
-    ) -> None:
-        super().__init__()
-        self.title = title
-        self._text = text
-        self._yes_text = yes_text
-        self._no_text = no_text
-        self.escape_result = False  # Escape returns False
-
-    def build_body(self) -> AnyContainer:
-        return Label(text=self._text)
-
-    def get_buttons(self) -> list[tuple[str, Callable[[], None]]]:
-        return [
-            (self._yes_text, lambda: self.set_result(True)),
-            (self._no_text, lambda: self.set_result(False)),
-        ]
-
-
-class _MessageDialog(BaseDialog):
-    """Built-in message/alert dialog with OK button."""
-
-    def __init__(
-        self,
-        title: str,
-        text: str,
-        ok_text: str = "OK",
-    ) -> None:
-        super().__init__()
-        self.title = title
-        self._text = text
-        self._ok_text = ok_text
-        self.escape_result = None  # Escape returns None (same as OK)
-
-    def build_body(self) -> AnyContainer:
-        return Label(text=self._text)
-
-    def get_buttons(self) -> list[tuple[str, Callable[[], None]]]:
-        return [(self._ok_text, lambda: self.set_result(None))]
-
-
-class _ChoiceDialog(BaseDialog):
-    """Built-in choice dialog with multiple buttons."""
-
-    def __init__(
-        self,
-        title: str,
-        text: str,
-        choices: Sequence[str],
-    ) -> None:
-        super().__init__()
-        self.title = title
-        self._text = text
-        self._choices = choices
-        self.escape_result = None  # Escape returns None
-
-    def build_body(self) -> AnyContainer:
-        return Label(text=self._text)
-
-    def get_buttons(self) -> list[tuple[str, Callable[[], None]]]:
-        def _make_handler(choice: str) -> Callable[[], None]:
-            return lambda: self.set_result(choice)
-
-        buttons: list[tuple[str, Callable[[], None]]] = []
-        for choice in self._choices:
-            buttons.append((choice, _make_handler(choice)))
-        return buttons
-
-
-class _DropdownDialog(BaseDialog):
-    """Built-in dropdown selection dialog using RadioList."""
-
-    def __init__(
-        self,
-        title: str,
-        text: str,
-        options: Sequence[str],
-        default: str | None = None,
-    ) -> None:
-        super().__init__()
-        self.title = title
-        self._text = text
-        self._options = options
-        self._default = default
-        self.escape_result = None  # Escape returns None
-
-        # Create RadioList with options
-        values = [(opt, opt) for opt in options]
-        self._radio_list = RadioList(values=values)
-
-        # Set default selection
-        if default and default in options:
-            self._radio_list.current_value = default
-
-    def build_body(self) -> AnyContainer:
-        return HSplit([
-            Label(text=self._text),
-            self._radio_list,
-        ])
-
-    def get_buttons(self) -> list[tuple[str, Callable[[], None]]]:
-        return [
-            ("OK", self._on_ok),
-            ("Cancel", self.cancel),
-        ]
-
-    def _on_ok(self) -> None:
-        self.set_result(self._radio_list.current_value)
+def _nothing_to_focus(dialog: Dialog) -> str:
+    return (
+        f"Dialog {dialog.title!r} has nothing to focus: give it a "
+        "button (buttons=[ButtonConfig(...)]), fields, or a focusable body."
+    )
 
 
 class DialogManager:
     """
-    Manages dialog display within a ThinkingPromptSession.
+    Opens and closes dialogs within a ThinkingPromptSession.
 
-    This class handles:
-    - Injecting a FloatContainer into the session's layout
-    - Showing/hiding dialogs
-    - Focus management
-    - Escape key handling
+    One dialog at a time: it claims the slot, waits for the result (cancelled
+    if the app exits) and always restores focus to the prompt. Drawing is
+    delegated to a presenter picked by the dialog's placement: BoxPresenter
+    floats a framed dialog over the layout, InlinePresenter fills the
+    layout's inline slot.
 
     The DialogManager is created lazily by ThinkingPromptSession
     when dialogs are first used.
     """
 
-    # Rows reserved below/above the dialog: prompt area, status bar, margin.
-    # When a dialog's ``height`` is set, the effective height is clamped to
-    # ``terminal_height - _TERMINAL_BUFFER_ROWS`` so the dialog doesn't
-    # cover the prompt or overflow the screen.
-    _TERMINAL_BUFFER_ROWS = 4
-
-    # Smallest total dialog height (chrome + body) that's considered usable.
-    # With _TERMINAL_BUFFER_ROWS = 4, this implies a minimum terminal height
-    # of _MIN_DIALOG_HEIGHT + _TERMINAL_BUFFER_ROWS = 12 rows.
-    _MIN_DIALOG_HEIGHT = 8
-
     def __init__(self, session: ThinkingPromptSession) -> None:
         self._session = session
-        self._visible = False
-        self._current_dialog: BaseDialog | None = None
+        self._visible = False  # a dialog is open
+        self._current_dialog: Dialog | None = None
         self._injected = False
-        self._dialog_container = DynamicContainer(self._get_dialog_content)
-        self._dialog_float: Float | None = None
+        self._box = BoxPresenter(session)
+        self._inline = InlinePresenter()
 
         # Create and register key bindings
         self._key_bindings = self._create_key_bindings()
 
-    def _get_dialog_content(self) -> AnyContainer:
-        """Return current dialog widget or empty window."""
-        if self._current_dialog and self._current_dialog._widget:
-            return self._current_dialog._widget
-        return Window()
+    @property
+    def inline_view(self) -> InlineView | None:
+        """The open inline dialog, if any: the session's inline slot shows it."""
+        return self._inline.view
+
+    def box_rows(self, width: int, max_rows: int) -> int:
+        """Rows the open box dialog takes; 0 when none is open. The session's
+        inline slot reserves them."""
+        return self._box.rows(width, max_rows)
 
     def _create_key_bindings(self) -> KeyBindings:
-        """Create key bindings for dialog (Escape handler)."""
+        """Escape, and the keys that scroll a text body that doesn't fit:
+        PgUp/PgDn, and in a box also ↑↓ (its buttons use ←→ and Tab)."""
         kb = KeyBindings()
 
         @kb.add("escape", filter=Condition(lambda: self._visible))
         def handle_escape(event: Any) -> None:
-            if self._current_dialog:
-                escape_result = self._current_dialog.escape_result
-                if not isinstance(escape_result, _Unset):
-                    self._current_dialog.set_result(escape_result)
+            dialog = self._current_dialog
+            if dialog and dialog.escapable:
+                dialog.set_result(dialog.escape_result)
+
+        text_overflows = Condition(self._text_overflows)
+        in_box = Condition(lambda: self._box.view is not None)
+
+        @kb.add("pageup", filter=text_overflows)
+        def page_up(event: Any) -> None:
+            self._scroll_text(pages=-1)
+
+        @kb.add("pagedown", filter=text_overflows)
+        def page_down(event: Any) -> None:
+            self._scroll_text(pages=1)
+
+        # Inline, ↑↓ are the cursor's: RowNavigator's own up/down, bound on
+        # the dialog's container, outrank these app-level bindings anyway;
+        # in_box says the intent.
+        @kb.add("up", filter=text_overflows & in_box)
+        def line_up(event: Any) -> None:
+            self._scroll_text(lines=-1)
+
+        @kb.add("down", filter=text_overflows & in_box)
+        def line_down(event: Any) -> None:
+            self._scroll_text(lines=1)
 
         return kb
 
+    def _text_region(self) -> ScrollRegion | None:
+        """The open dialog's text body (box or inline), which scrolls by keys;
+        None when no dialog is open or its body has cursor stops."""
+        if self._box.view is not None:
+            return self._box.view.text_region
+        if self._inline.view is not None:
+            return self._inline.view.text_region
+        return None
+
+    def _text_overflows(self) -> bool:
+        region = self._text_region()
+        return self._visible and region is not None and region.overflows
+
+    def _scroll_text(self, *, lines: int = 0, pages: int = 0) -> None:
+        region = self._text_region()
+        if region is not None:
+            region.scroll(lines)
+            region.page(pages)
+
     def _inject_float_container(self) -> None:
-        """Inject FloatContainer into session layout (one-time)."""
+        """Install the session's float layer (box dialogs, and any open
+        dialog's own floats such as a dropdown's menu) and the Escape
+        binding (one-time)."""
         if self._injected:
             return
 
-        original_container = self._session.app.layout.container
-
-        # Create initial Float with no positioning (centered)
-        self._dialog_float = Float(
-            content=ConditionalContainer(
-                content=self._dialog_container,
-                filter=Condition(lambda: self._visible),
-            ),
-            allow_cover_cursor=True,
-        )
-
-        float_container = FloatContainer(
-            content=original_container,
-            floats=[self._dialog_float],
-        )
-
-        self._session.app.layout.container = float_container
+        self._box.install()
 
         # Merge key bindings with existing app key bindings
         existing_kb = self._session.app.key_bindings
@@ -566,117 +662,120 @@ class DialogManager:
 
         self._injected = True
 
-    async def show(self, dialog: DialogConfig | BaseDialog) -> Any:
+    async def show(self, dialog: Dialog) -> Any:
         """
         Show a dialog and wait for result.
 
         Args:
-            dialog: Either a DialogConfig or a BaseDialog subclass instance.
+            dialog: The Dialog to show.
 
         Returns:
             The result value set by the dialog (via button click or Escape).
-            If the dialog's ``height`` is set and the terminal is too small
-            to fit the minimum viable dialog, shows an error to the user and
-            returns ``dialog.escape_result`` (or None if escape is disabled)
-            without showing the dialog.
 
         Raises:
-            RuntimeError: If a dialog is already being shown. Showing a
-                second dialog would orphan the first one's result future,
-                leaving its awaiter hung forever.
+            RuntimeError: If the session isn't running (not started yet, or
+                ended): only the running app can answer a dialog, so it
+                would wait forever. Also if a dialog is already being
+                shown: a second one would orphan the first one's result
+                future, leaving its awaiter hung forever.
+            asyncio.CancelledError: If the app exits while the dialog is
+                open (e.g. one opened from a background task).
+            TypeError: If ``dialog`` isn't a Dialog.
+            ValueError: If the dialog has nothing focusable (e.g. no buttons
+                and a text body), or its placement isn't 'box' or 'inline'.
+
+        Whatever the dialog raises while being built or opened, the
+        manager is left closed, so later dialogs can still be shown.
         """
+        if not isinstance(dialog, Dialog):
+            if isinstance(dialog, type) and issubclass(dialog, Dialog):
+                raise TypeError(
+                    f"show_dialog() takes a Dialog instance, got the class "
+                    f"{dialog.__qualname__}: call it, e.g. "
+                    f"show_dialog({dialog.__qualname__}())."
+                )
+            t = type(dialog)
+            name = t.__qualname__ if t.__module__ == "builtins" else f"{t.__module__}.{t.__qualname__}"
+            raise TypeError(
+                f"show_dialog() takes a thinking_prompt.Dialog, got {name}. "
+                "(DialogConfig was removed in 0.4: use Dialog(title, body, "
+                "buttons, ...).)"
+            )
+
+        # Only the running app can answer a dialog (its buttons and Escape
+        # are key bindings). prompt_toolkit sets app.future for the length
+        # of a run, so it also tells us when the app exits.
+        app_done = self._session.app.future
+        if not self._session.app.is_running or app_done is None or app_done.done():
+            raise RuntimeError(
+                "show_dialog() needs a running session: call it while run() "
+                "or run_async() is running, e.g. from an input handler."
+            )
+
+        placement = (
+            dialog.placement if dialog.placement is not None
+            else self._session.dialog_placement
+        )
+        check_placement(placement)
+
         if self._current_dialog is not None:
             raise RuntimeError(
                 "A dialog is already being shown. Wait for it to close "
                 "before showing another one."
             )
 
-        # Ensure float container is injected
         self._inject_float_container()
 
-        # Convert DialogConfig to BaseDialog if needed
-        if isinstance(dialog, DialogConfig):
-            dialog = _ConfigBasedDialog(dialog)
-
-        # Clamp dialog.height against terminal height (if height is set).
-        effective_height = self._compute_effective_height(dialog)
-        if effective_height is _TERMINAL_TOO_SMALL:
-            escape = dialog.escape_result
-            return None if isinstance(escape, _Unset) else escape
-
-        # Prepare dialog
+        # Everything after claiming the slot runs under the finally below:
+        # if building or focusing the dialog raises (a bug in a custom
+        # build_body, nothing focusable), the manager must not be left
+        # believing a dialog is open — it would refuse every later one.
         self._current_dialog = dialog
-        future = dialog._prepare(self)
-        dialog._build_widget(effective_height=effective_height)
-
-        # Update Float positioning based on dialog's top attribute
-        if self._dialog_float:
-            if dialog.top is None:
-                # Center: no top or bottom constraint
-                self._dialog_float.top = None
-                self._dialog_float.bottom = None
-            elif dialog.top >= 0:
-                # Offset from top
-                self._dialog_float.top = dialog.top
-                self._dialog_float.bottom = None
-            else:
-                # Negative = offset from bottom
-                self._dialog_float.top = None
-                self._dialog_float.bottom = abs(dialog.top)
-
-            # Pin Float height so prompt_toolkit allocates the full
-            # height in one render frame instead of measuring dialog
-            # content over multiple ticks.
-            if effective_height is not None:
-                self._dialog_float.height = effective_height
-            else:
-                self._dialog_float.height = None
-
-        # Show dialog
-        self._visible = True
-        assert dialog._widget is not None  # _build_widget set this above
-        self._session.app.layout.focus(dialog._widget)
-        # Override default focus when a button opted in via ButtonConfig.focused.
-        if dialog._initial_focus is not None:
-            self._session.app.layout.focus(dialog._initial_focus)
-        self._session.app.invalidate()
-
         try:
-            # Wait for result
-            result = await future
+            future = dialog._prepare(self, placement)
+            target: AnyContainer | None
+            if placement == "box":
+                box = self._box.open(dialog)
+                # A ButtonConfig(focused=True) button, else where the body's
+                # cursor starts (its first focusable window, else the first
+                # field; a radio list's picked option), else the widget's
+                # first focusable element (a button).
+                target = box.initial_focus or box.widget
+            else:
+                target = self._inline.open(dialog, self._box.root).focus
+
+            self._visible = True
+            if target is None:
+                raise ValueError(_nothing_to_focus(dialog))
+            try:
+                self._session.app.layout.focus(target)
+            except ValueError as exc:
+                raise ValueError(_nothing_to_focus(dialog)) from exc
+            # Keys typed before the first render find the dialog's key
+            # bindings (set on containers, not controls) through the parent
+            # links, which prompt_toolkit only refreshes when it redraws.
+            self._session.app.layout.update_parents_relations()
+            self._session.app.invalidate()
+
+            # Wait for result. If the app exits first, nobody can answer the
+            # dialog any more: cancel it, so the awaiter gets CancelledError
+            # instead of waiting forever.
+            def abandon(_app_done: object) -> None:
+                if not future.done():
+                    future.cancel()
+
+            app_done.add_done_callback(abandon)
+            try:
+                result = await future
+            finally:
+                app_done.remove_done_callback(abandon)
         finally:
             # Hide dialog and restore focus
             self._visible = False
             self._current_dialog = None
+            self._box.close()
+            self._inline.close()
             self._session.app.layout.focus(self._session.default_buffer)
             self._session.app.invalidate()
 
         return result
-
-    def _compute_effective_height(self, dialog: BaseDialog) -> Any:
-        """Clamp dialog.height to the terminal and return the value to use.
-
-        Returns:
-            - ``None`` if the dialog didn't request a fixed height.
-            - ``_TERMINAL_TOO_SMALL`` sentinel if the terminal can't fit
-              the minimum viable dialog; caller should abort with an
-              error message.
-            - otherwise the clamped height to pass through to build_widget
-              and Float.height.
-        """
-        if dialog.height is None or dialog.height <= 0:
-            return None
-
-        import shutil
-        term_height = shutil.get_terminal_size().lines
-        max_allowed = term_height - self._TERMINAL_BUFFER_ROWS
-
-        if max_allowed < self._MIN_DIALOG_HEIGHT:
-            required = self._MIN_DIALOG_HEIGHT + self._TERMINAL_BUFFER_ROWS
-            self._session.add_error(
-                f"Not enough room to show dialog: need at least {required} "
-                f"terminal rows, have {term_height}."
-            )
-            return _TERMINAL_TOO_SMALL
-
-        return min(dialog.height, max_allowed)

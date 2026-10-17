@@ -11,11 +11,7 @@ from thinking_prompt import ThinkingPromptSession, AppInfo
 
 
 async def main():
-    app_info = AppInfo(
-        name="MultiBoxDemo",
-        version="1.0.0",
-        thinking_text="Thinking",
-    )
+    app_info = AppInfo(name="MultiBoxDemo", version="1.0.0")
     session = ThinkingPromptSession(app_info=app_info, message=">>> ")
 
     @session.on_input
@@ -27,8 +23,13 @@ async def main():
             session.exit()
             return
 
-        # Task list box — anchored near prompt with order=100
-        tasks = session.start_thinking(title="Tasks", order=100, max_lines=10)
+        # Task list box — anchored near prompt with order=100. A task list
+        # reads top-down, so if it ever outgrew max_lines we'd want its
+        # first items visible: overflow="head" (streams keep the default,
+        # "tail" — the newest lines).
+        tasks = session.start_thinking(
+            title="Tasks", order=100, max_lines=10, overflow="head"
+        )
         tasks.append_rich("[dim]  ○ Download data[/dim]\n")
         tasks.append_rich("[dim]  ○ Process data[/dim]\n")
         tasks.append_rich("[dim]  ○ Generate report[/dim]\n")

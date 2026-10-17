@@ -3,46 +3,86 @@ ThinkingPromptSession - A chat-like interface with thinking box.
 
 This module provides a PromptSession-like interface that adds a thinking box
 above the input. The thinking box appears when processing user input and
-can be expanded to full-screen mode with chat history.
+can be expanded to show all of its content.
 """
 from __future__ import annotations
 
 import asyncio
-import threading
-import warnings
-from collections.abc import AsyncIterator, Coroutine, Sequence
+import logging
+import os
+from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager, suppress
 from typing import (
     TYPE_CHECKING,
     Any,
-    Callable,
     Literal,
     Optional,
+    TypeVar,
     cast,
 )
 
 if TYPE_CHECKING:
-    from .dialog import BaseDialog, DialogConfig, DialogManager
-    from .settings_dialog import SettingsItem
-    from .types import ContentFormat
+    from .dialog import Dialog, DialogManager
+    from .thinking_box import ThinkingBox
+    from .types import ContentCallback, ContentFormat, InputHandler, Overflow
 
-from prompt_toolkit.application import Application
+from prompt_toolkit.application import Application, get_app, run_in_terminal
+from prompt_toolkit.application.current import get_app_session
 from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.completion import Completer
+from prompt_toolkit.data_structures import Point
 from prompt_toolkit.enums import DEFAULT_BUFFER, EditingMode
 from prompt_toolkit.filters import Condition, has_focus
-from prompt_toolkit.formatted_text import AnyFormattedText, FormattedText
+from prompt_toolkit.formatted_text import (
+    AnyFormattedText,
+    FormattedText,
+    fragment_list_to_text,
+    to_formatted_text,
+)
 from prompt_toolkit.history import History, InMemoryHistory
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.key_binding.key_processor import KeyPressEvent
+from prompt_toolkit.layout import AnyContainer, DynamicContainer, Window
+from prompt_toolkit.layout.controls import UIContent, UIControl
+from prompt_toolkit.layout.dimension import Dimension
+from prompt_toolkit.output import ColorDepth, Output
+from prompt_toolkit.styles import DynamicStyle
 
+from ._text import format_exception_detail
 from .app_info import AppInfo
 from .display import Display
+from .frames import POLL_INTERVAL, FrameScheduler
 from .layout import create_layout
 from .manager import ThinkingBoxManager
+from .resize import ShrinkRepaint
 from .rich_utils import _is_rich_renderable
-from .styles import DEFAULT_STYLES, ThinkingPromptStyles
-from .types import ThinkingContext
+from .spinner import Spinner
+from .styles import ThinkingPromptStyles, resolve_theme
+from .types import Placement, check_placement
+
+logger = logging.getLogger(__name__)
+
+# on_input() returns the handler it registers with its own type.
+_HandlerT = TypeVar("_HandlerT", bound="InputHandler")
+
+
+class _RoomControl(UIControl):
+    """Blank content whose menu position is its top-left corner, which a
+    float attached to the window can use as its anchor."""
+
+    def __init__(self) -> None:
+        # (render_counter, rows) of the last draw: whether the room got its
+        # rows in this render.
+        self.drawn: tuple[int, int] | None = None
+
+    def create_content(self, width: int, height: int) -> UIContent:
+        self.drawn = (get_app().render_counter, height)
+        # The first line holds a space: an empty one maps no position to the screen.
+        return UIContent(
+            get_line=lambda i: [("", " ")] if i == 0 else [],
+            line_count=height,
+            menu_position=Point(x=0, y=0),
+        )
 
 
 class ThinkingPromptSession:
@@ -52,13 +92,10 @@ class ThinkingPromptSession:
     This class provides a prompt interface similar to PromptSession but with
     additional features:
     - A thinking box that appears above the input during processing
-    - Expand/collapse functionality (Ctrl+E) for the thinking box
-    - Automatic transition to full-screen mode when expanded
-    - Chat history visible in full-screen mode
+    - Expand/collapse of thinking boxes (Ctrl+T by default)
 
-    The handler decides whether to use thinking mode by calling start_thinking()
-    with a content callback. This allows flexible control over when the thinking
-    box appears.
+    The handler decides whether to show a thinking box: start one with
+    start_thinking() or the thinking() context manager, and write to it.
 
     Example:
         app_info = AppInfo(name="MyApp", version="1.0.0")
@@ -69,101 +106,149 @@ class ThinkingPromptSession:
             if not user_input.strip():
                 return
 
-            async with session.thinking() as ctx:
-                ctx.append("Processing...\\n")
+            async with session.thinking() as box:
+                box.append("Processing...\\n")
                 await asyncio.sleep(1)
-                ctx.append("Done!\\n")
+                box.append("Done!\\n")
 
             session.add_response(f"Echo: {user_input}")
 
         await session.run_async()
     """
 
+    # Status hint shown when Enter is refused because nobody awaits input.
+    _BUSY_STATUS = "Busy — press Ctrl+C to cancel"
+
     def __init__(
         self,
         message: AnyFormattedText = ">>> ",
+        *,
         app_info: AppInfo | None = None,
-        styles: ThinkingPromptStyles | None = None,
+        theme: str | ThinkingPromptStyles | None = None,
         history: History | None = None,
         completer: Completer | None = None,
         complete_while_typing: bool = False,
         completions_menu_height: int = 5,
         editing_mode: EditingMode = EditingMode.EMACS,
-        max_thinking_height: int = 15,
         enable_status_bar: bool = True,
         status_text: AnyFormattedText = "Ctrl+C: cancel | Ctrl+D: exit",
+        expand_key: str = "c-t",
+        max_thinking_height: int = 15,
+        thinking_title: str = "Thinking",
+        spinner: Spinner | None = Spinner.DOTS,
+        spinner_position: Literal["before", "after"] = "before",
         echo_input: bool = True,
+        echo_thinking: bool = True,
+        history_limit: int | None = None,
+        dialog_placement: Placement = "box",
     ) -> None:
         """
         Initialize the ThinkingPromptSession.
 
         Args:
-            message: The prompt message to display.
-            app_info: Application info (name, version, welcome message).
-            styles: Custom styles for the session.
+            message: The prompt message to display. Every other argument
+                is keyword-only.
+            app_info: The banner printed at startup (name, version, welcome
+                message). None (default): no banner.
+            theme: Theme name ('dark', 'light', 'mono', 'terminal', 'auto') or
+                   ThinkingPromptStyles instance. Default: 'dark'.
             history: History object for input history.
             completer: Completer for input autocompletion.
             complete_while_typing: Show completions automatically while typing.
             completions_menu_height: Maximum height of completions dropdown menu.
             editing_mode: Editing mode (EMACS or VI).
-            max_thinking_height: Max lines for collapsed thinking box (must be >= 2).
             enable_status_bar: Whether to show status bar.
             status_text: Text to display in status bar.
+            expand_key: Expands/collapses thinking boxes.
+                Default: "c-t" (Ctrl+T).
+            max_thinking_height: Max lines for collapsed thinking box (must be >= 2).
+            thinking_title: Header title of boxes started without one.
+                "" for none.
+            spinner: The thinking header's spinner: a preset such as
+                ``Spinner.LINE``, your own ``Spinner(frames, interval)``,
+                or None for none. Default: ``Spinner.DOTS``.
+            spinner_position: The spinner "before" (default) or "after" the
+                title.
             echo_input: Whether to echo user input to console before thinking.
+            echo_thinking: Whether a finished box's text is printed to the
+                console when its finish call doesn't say. Default: True.
+            history_limit: Max transcript entries kept for repaints; oldest
+                          trimmed. None = unbounded.
+            dialog_placement: How dialogs are drawn unless they say otherwise:
+                "box" (default) floats a framed dialog over the session;
+                "inline" draws rows between the prompt and the status bar.
 
         Raises:
-            ValueError: If max_thinking_height is less than 2.
+            ValueError: If max_thinking_height is less than 2, or theme= names
+                       an unknown theme, or if dialog_placement isn't 'box'
+                       or 'inline'.
         """
         if max_thinking_height < 2:
             raise ValueError("max_thinking_height must be at least 2")
 
         self._message = message
         self._app_info = app_info
-        self._styles = styles or DEFAULT_STYLES
+        self._thinking_title = thinking_title
+        check_placement(dialog_placement)
+        self._dialog_placement: Placement = dialog_placement
+
+        # A fresh instance per session: sharing DEFAULT_STYLES would let a
+        # tweak to one session's styles restyle every other session.
+        self._styles = resolve_theme(theme) if theme is not None else ThinkingPromptStyles()
+
+        # NO_COLOR is read once at construction (no-color.org: non-empty).
+        self._no_color = bool(os.environ.get("NO_COLOR"))
+
         self._max_thinking_height = max_thinking_height
         self._enable_status_bar = enable_status_bar
         self._status_text = status_text
+        # Status the "Busy" hint replaced, restored once input is accepted
+        # again (see _show_busy_hint / _clear_busy_hint).
+        self._busy_hint_shown = False
+        self._status_before_busy: AnyFormattedText = None
         self._editing_mode = editing_mode
         self._echo_input = echo_input
         self._completer = completer
         self._complete_while_typing = complete_while_typing
         self._completions_menu_height = completions_menu_height
 
-        # Fullscreen state (thread-safe)
-        self._is_fullscreen: bool = False
-        self._fullscreen_lock = threading.RLock()
-        self._pre_fullscreen_expanded: bool | None = None
-
         # Convert styles dataclass to prompt_toolkit Style
         self._style = self._styles.to_style()
 
         # Display handles all output to console and history
         self._display = Display(
-            style=self._style,
-            is_fullscreen=lambda: self.is_fullscreen,  # Use property for thread safety
+            get_style=lambda: self._style,
             thinking_styles=self._styles,
+            get_color_depth=self._effective_color_depth,
+            history_limit=history_limit,
         )
 
-        # Get key bindings and feature flags from app_info or use defaults
-        self._fullscreen_key = app_info.fullscreen_key if app_info else "c-e"
-        self._expand_key = app_info.expand_key if app_info else "c-t"
-        self._fullscreen_enabled = app_info.fullscreen_enabled if app_info else False
-        self._echo_thinking = app_info.echo_thinking if app_info else True
+        self._expand_key = expand_key
 
-        # Thinking box manager (manages multiple thinking boxes).
-        # expand_key flows through to each box so the truncation hint
-        # matches the key bound below in _create_key_bindings.
+        # Redraws on demand: writes redraw now, animations ask for their
+        # next frame; nothing redraws on a timer (see _create_application).
+        self._frames = FrameScheduler(lambda: self.app.invalidate())
+        # A repaint once the terminal stops shrinking (see resize.py).
+        self._shrinks = ShrinkRepaint(self._repaint_after_shrink)
+
+        # Thinking box manager: the boxes on screen, and their echo when
+        # they end. expand_key flows through to each box so the truncation
+        # hint matches the key bound below in _create_key_bindings.
         self._manager = ThinkingBoxManager(
+            self._display,
             default_max_lines=max_thinking_height,
             expand_key=self._expand_key,
+            frames=self._frames,
+            echo_thinking=echo_thinking,
+            spinner=spinner,
+            spinner_position=spinner_position,
         )
 
         # Input history (for up/down arrow)
         self._input_history = history or InMemoryHistory()
 
         # Input handler callback (can be set via @on_input decorator or run_async)
-        # Handler can be sync (returns None) or async (returns Coroutine)
-        self._input_handler: Callable[[str], None | Coroutine[Any, Any, None]] | None = None
+        self._input_handler: InputHandler | None = None
 
         # Pending input future for async handling
         self._pending_input: asyncio.Future[str] | None = None
@@ -177,47 +262,73 @@ class ThinkingPromptSession:
         # (swallow CancelledError, continue the input loop) from an outer
         # cancellation (re-raise to let the input loop exit).
         self._user_cancelled_handler: bool = False
+        # Boxes were cancelled during a Ctrl+C of the handler: one
+        # "Operation cancelled..." follows them once the handler ends.
+        self._cancel_line_pending: bool = False
 
         # Dialog manager (lazy initialization)
         self._dialog_manager: DialogManager | None = None
+        # Shown in the layout's inline-dialog slot while no inline dialog is open.
+        self._no_inline_dialog = Window(height=0)
+        # Blank rows as tall as an open box dialog: see _inline_dialog_content.
+        # Its control reports a menu position at its top-left: the box floats
+        # from there (a window not in focus records no cursor position).
+        self._room_control = _RoomControl()
+        self._box_dialog_room = Window(self._room_control, height=self._box_dialog_rows)
 
         # Create components
         self.default_buffer = self._create_default_buffer()
         self.layout = self._create_session_layout()
         self.app = self._create_application()
 
-        # Set up history change callback for UI invalidation
-        self._display.set_on_change(self._invalidate)
-
     def _get_prompt_string(self) -> str:
-        """Get the prompt as a plain string."""
-        msg: Any = self._message
-        if callable(msg):
-            msg = msg()
-        if isinstance(msg, str):
-            return msg
-        if msg is None:
-            return ""
-        if hasattr(msg, '__iter__'):
-            return ''.join(item[1] if isinstance(item, tuple) else str(item) for item in msg)
-        return str(msg)
+        """Get the prompt's visible text (any AnyFormattedText form, e.g.
+        HTML or ANSI objects, callables, fragment lists)."""
+        return fragment_list_to_text(to_formatted_text(self._message))
+
+    def _input_wanted(self) -> bool:
+        """True when submitted input would reach someone.
+
+        False while a handler is running, and also in the gap between one
+        line resolving the pending future and the input loop's next
+        prompt_async() — a second line arriving in the same read (typed
+        ahead during a blocking handler, say) lands there.
+        """
+        handler_running = (
+            self._current_handler_task is not None
+            and not self._current_handler_task.done()
+        )
+        pending = self._pending_input
+        return not handler_running and pending is not None and not pending.done()
+
+    def _show_busy_hint(self) -> None:
+        """Show the "Busy" status hint, remembering the status it replaces."""
+        if self._status_text != self._BUSY_STATUS:
+            self._status_before_busy = self._status_text
+        self._busy_hint_shown = True
+        self.set_status(self._BUSY_STATUS)
+
+    def _clear_busy_hint(self) -> None:
+        """Restore the status the "Busy" hint replaced — unless something
+        set a new status meanwhile (e.g. the handler reporting its result)."""
+        if not self._busy_hint_shown:
+            return
+        self._busy_hint_shown = False
+        if self._status_text == self._BUSY_STATUS:
+            self.status_text = self._status_before_busy
+        self._status_before_busy = None
 
     def _create_default_buffer(self) -> Buffer:
         """Create the main input buffer."""
 
         def accept_handler(buff: Buffer) -> bool:
             """Handle input acceptance."""
-            # Refuse to deliver input while a handler is already running.
-            # If we accepted, the new text would be echoed and the buffer
-            # cleared, but the handler couldn't pick it up — it would just
-            # vanish. Instead leave the buffer intact and surface a hint
-            # so the user knows why nothing happened.
-            if (
-                self._current_handler_task is not None
-                and not self._current_handler_task.done()
-            ):
-                self.set_status("Busy — press Ctrl+C to cancel")
-                return False
+            # Backstop for the check in the Enter binding (accept_input),
+            # which refuses before prompt_toolkit touches the buffer. Note
+            # the return value means *keep_text*: True keeps the draft.
+            if not self._input_wanted():
+                self._show_busy_hint()
+                return True
 
             text = buff.document.text
 
@@ -231,10 +342,12 @@ class ThinkingPromptSession:
                     self._display.user_input(prompt_str, text)
 
             # Signal that input is ready - handler decides whether to use thinking mode
-            if self._pending_input and not self._pending_input.done():
-                self._pending_input.set_result(text)
+            assert self._pending_input is not None  # checked by _input_wanted()
+            self._pending_input.set_result(text)
 
-            # Clear buffer for next input
+            # Clear buffer for next input. Resetting here (rather than
+            # returning False) empties it before validate_and_handle's own
+            # append_to_history, which would otherwise record it twice.
             buff.reset()
             return True
 
@@ -249,28 +362,23 @@ class ThinkingPromptSession:
 
     def _create_session_layout(self) -> Any:
         """Create the layout using the layout module."""
-        self._default_thinking_text = (
-            self._app_info.thinking_text if self._app_info else "Thinking"
-        )
-        # Store header config from app_info for per-box headers
-        self._header_config: dict[str, Any] = {}
-        if self._app_info:
-            self._header_config = {
-                "frames": self._app_info.thinking_animation,
-                "position": self._app_info.thinking_animation_position,
-            }
-
         return create_layout(
             default_buffer=self.default_buffer,
-            message=lambda: self._message,
+            message=lambda: self._polled(self._message),
             max_thinking_height=self._max_thinking_height,
-            history=self._display.history,
-            is_fullscreen=lambda: self._is_fullscreen,
-            get_status_text=lambda: self._status_text,
+            get_status_text=lambda: self._polled(self._status_text),
             is_status_bar_enabled=lambda: self._enable_status_bar,
             thinking_manager=self._manager,
             completions_menu_height=self._completions_menu_height,
+            inline_dialog=DynamicContainer(self._inline_dialog_content),
         )
+
+    def _polled(self, text: AnyFormattedText) -> AnyFormattedText:
+        """Text about to be drawn. A callable is re-read every
+        POLL_INTERVAL while it's drawn: nothing says when its text changes."""
+        if callable(text):
+            self._frames.redraw_in(POLL_INTERVAL)
+        return text
 
     def _create_application(self) -> Application:
         """Create the Application object."""
@@ -278,25 +386,30 @@ class ThinkingPromptSession:
         # Key bindings
         kb = self._create_key_bindings()
 
-        return Application(
+        app: Application = Application(
             layout=self.layout,
-            style=self._style,
+            style=DynamicStyle(lambda: self._style),
             key_bindings=kb,
             editing_mode=self._editing_mode,
-            full_screen=False,  # Start in normal mode, will be updated dynamically
-            mouse_support=Condition(lambda: self._is_fullscreen),  # Only in fullscreen
-            refresh_interval=0.1,  # For real-time updates
+            # No refresh_interval: redrawn when something changes or an
+            # animation asks (FrameScheduler), so an idle prompt costs
+            # nothing. Bursts of writes are capped at 30 redraws a second.
+            min_redraw_interval=1 / 30,
+            color_depth=self._effective_color_depth,
         )
+        # Every resize redraws: each draw tells _shrinks the terminal's size.
+        app.before_render += lambda sender: self._shrinks.seen(sender.output.get_size())
+        return app
 
     def _create_key_bindings(self) -> KeyBindings:
         """Create key bindings for the session."""
         kb = KeyBindings()
 
-        # Cancel/interrupt — cancel the running handler, finish boxes,
-        # cancel pending input. Falls through to app.exit() when no
-        # handler was running and no boxes were active. A live pending
-        # input future does NOT count as in-flight work: it merely means
-        # the prompt is waiting for input, which is the idle state.
+        # Cancel/interrupt — cancel the running handler, or finish boxes.
+        # Falls through to exit (cancelling pending input) when no handler
+        # was running and no boxes were active. A live pending input
+        # future does NOT count as in-flight work: it merely means the
+        # prompt is waiting for input, which is the idle state.
         @kb.add("c-c")
         def cancel(event: KeyPressEvent) -> None:
             """Cancel current operation or exit."""
@@ -317,17 +430,15 @@ class ThinkingPromptSession:
             if handler_running:
                 # Mark before cancel so _run_handler treats this as a user
                 # cancellation and does not re-raise CancelledError.
+                # Its boxes are finished as it unwinds (and by
+                # _run_handler's cleanup); a background task's live box
+                # keeps going.
                 self._user_cancelled_handler = True
                 assert self._current_handler_task is not None
                 self._current_handler_task.cancel()
-
-            if had_active_boxes:
-                self._manager.finish_all()
-                self._invalidate()
-
-            if had_pending_input:
-                assert self._pending_input is not None
-                self._pending_input.cancel()
+            elif had_active_boxes:
+                # Idle prompt: Ctrl+C clears whatever boxes are left.
+                self._announce_cancel(bool(self._manager.finish_all()))
 
             if not handler_running and not had_active_boxes:
                 # No handler and no boxes — the session is idle, so Ctrl+C
@@ -335,17 +446,28 @@ class ThinkingPromptSession:
                 # is always live (prompt_async is awaiting it), so it must
                 # not count as in-flight work: treating it as such used to
                 # kill the input loop while leaving the app running, after
-                # which typed input was echoed but silently dropped. The
-                # future was cancelled above, so direct prompt_async()
-                # callers still observe KeyboardInterrupt; app.exit() ends
-                # run_async()'s own loop either way.
+                # which typed input was echoed but silently dropped.
+                # Cancelling it makes direct prompt_async() callers observe
+                # KeyboardInterrupt; app.exit() ends run_async()'s own loop.
+                if had_pending_input:
+                    assert self._pending_input is not None
+                    self._pending_input.cancel()
                 event.app.exit()
+            # Otherwise the pending input (if any) is left alone: cancelling
+            # it would end the input loop while the app — which is not
+            # exiting — keeps running, a zombie session.
 
         # Exit (EOF) — only on an empty input line, matching readline
         # semantics. With text in the buffer this binding is inactive and
         # prompt_toolkit's default emacs binding (delete-char) handles the
-        # key, so a typed draft is never destroyed by a stray Ctrl+D.
-        @kb.add("c-d", filter=Condition(lambda: not self.default_buffer.text))
+        # key, so a typed draft is never destroyed by a stray Ctrl+D. The
+        # prompt must also have focus: in a dialog's text field Ctrl+D is
+        # delete-char, whatever the (hidden) main buffer holds.
+        @kb.add(
+            "c-d",
+            filter=has_focus(DEFAULT_BUFFER)
+            & Condition(lambda: not self.default_buffer.text),
+        )
         def exit_app(event: KeyPressEvent) -> None:
             """Exit the application."""
             # Resolve the pending future so direct prompt_async() callers
@@ -357,44 +479,103 @@ class ThinkingPromptSession:
         # Enter to submit (when not thinking)
         @kb.add("enter", filter=has_focus(DEFAULT_BUFFER))
         def accept_input(event: KeyPressEvent) -> None:
-            """Accept input."""
+            """Accept input, or refuse it when nobody is waiting for it."""
+            # Refused input stays in the buffer, untouched: if we accepted,
+            # the text would be echoed and the buffer cleared, but nobody
+            # would pick it up — it would just vanish. The check runs here,
+            # before validate_and_handle(), so prompt_toolkit neither
+            # clears the draft nor records it in the input history.
+            if not self._input_wanted():
+                self._show_busy_hint()
+                return
             self.default_buffer.validate_and_handle()
 
         # Expand/collapse — toggle all via manager
-        def can_toggle() -> bool:
-            if not self._manager.can_toggle():
-                return False
-            return not self._is_fullscreen
-
-        @kb.add(self._expand_key, filter=Condition(can_toggle))
+        @kb.add(self._expand_key, filter=Condition(self._manager.can_toggle))
         def toggle_expand(event: KeyPressEvent) -> None:
             self._manager.toggle_all()
             self._invalidate()
 
-        # Fullscreen toggle key binding (only when enabled)
-        if self._fullscreen_enabled:
-            @kb.add(self._fullscreen_key)
-            def toggle_fullscreen(event: KeyPressEvent) -> None:
-                """Toggle fullscreen mode."""
-                if self._is_fullscreen:
-                    self.switch_to_prompt()
-                else:
-                    if self._manager.has_active_boxes:
-                        self._pre_fullscreen_expanded = self._manager.is_expanded
-                        self._manager.expand_all()
-                    self.switch_to_fullscreen()
-
         return kb
 
-    def _invalidate(self) -> None:
-        """Trigger UI refresh and update full_screen state."""
-        if self.app:
-            # Update full_screen based on state
-            # prompt_toolkit handles alternate buffer switching automatically
-            self.app.full_screen = self._is_fullscreen
+    def _effective_color_depth(self) -> ColorDepth | None:
+        """NO_COLOR (env, at construction) wins; else the theme's hint."""
+        if self._no_color:
+            return ColorDepth.DEPTH_1_BIT
+        return self._styles.color_depth
 
-            if self.app.is_running:
-                self.app.invalidate()
+    @property
+    def styles(self) -> ThinkingPromptStyles:
+        """The active theme's styles instance."""
+        return self._styles
+
+    def set_theme(
+        self, theme: str | ThinkingPromptStyles, repaint: bool = False
+    ) -> None:
+        """Switch the active theme at runtime.
+
+        The live UI (prompt, thinking boxes, dialogs) re-renders in the
+        new theme on the next paint. Content already printed to the
+        terminal (scrollback) keeps its original colors — only the
+        Display's ``get_style`` callable and the Application's
+        ``DynamicStyle`` are re-read; scrollback lines already written to
+        the terminal are not retroactively recolored, unless
+        ``repaint=True`` is passed.
+
+        Args:
+            theme: Theme name ('dark', 'light', 'mono', 'terminal', 'auto')
+                or a ThinkingPromptStyles instance.
+            repaint: If True, clear the screen and scrollback and re-print
+                the transcript in the new theme. Markdown and code re-render
+                from source; rich/raw ANSI keeps its original colors.
+                Terminals that do not support scrollback erase (CSI 3J)
+                keep old content above the viewport; the visible screen
+                still repaints fully.
+
+        Raises:
+            ValueError: For unknown theme names.
+        """
+        resolved = resolve_theme(theme)
+        self._styles = resolved
+        self._style = resolved.to_style()
+        self._display.set_theme(resolved)
+        if repaint:
+            self._repaint_console()
+        self._invalidate()
+
+    def _repaint_console(self) -> None:
+        """Clear screen + scrollback and print the transcript, as it is now,
+        again. While the app runs that's one run_in_terminal job (the UI
+        erased and redrawn once), queued in order with the prints
+        print_formatted_text queues: one already queued prints before the
+        clear, a later one after the transcript, and two repaints in a row
+        print it once."""
+        contents = self._display.transcript()
+
+        def repaint(output: Output) -> None:
+            output.erase_screen()
+            output.cursor_goto(0, 0)
+            # Scrollback erase isn't part of Output's interface: CSI 3J.
+            output.write_raw("\x1b[3J")
+            self._display.print_now(output, contents)
+            output.flush()
+
+        app = self.app
+        if app and app.is_running and app.loop is not None:
+            app.loop.call_soon_threadsafe(lambda: run_in_terminal(lambda: repaint(app.output)))
+        else:
+            repaint(get_app_session().output)
+
+    def _repaint_after_shrink(self) -> None:
+        """Repaint once the terminal stopped shrinking, which left rows of
+        the live UI behind (see resize.py)."""
+        if self.app and self.app.is_running:
+            self._repaint_console()
+
+    def _invalidate(self) -> None:
+        """Trigger a UI refresh."""
+        if self.app and self.app.is_running:
+            self.app.invalidate()
 
     # =========================================================================
     # Welcome Message
@@ -414,152 +595,75 @@ class ThinkingPromptSession:
 
     def start_thinking(
         self,
-        content_callback: Callable[[], str] | None = None,
+        content_callback: ContentCallback | None = None,
         *,
         title: str | None = None,
         order: int = 0,
         max_lines: int | None = None,
         content_format: ContentFormat = "plain",
-    ) -> ThinkingContext:
+        overflow: Overflow = "tail",
+    ) -> ThinkingBox:
         """
-        Start the thinking state with a content callback.
+        Start a thinking box and return it.
 
-        The callback is called repeatedly to get the current content for the
-        thinking box. This allows dynamic content that updates in real-time.
-
-        The callback must be thread-safe if called from multiple threads.
+        Write to the box to show text in it. To show text you already hold,
+        pass ``content_callback`` instead: the box re-reads it while it's
+        drawn (every 0.1 s), and can be read but not written to. The
+        callback must be thread-safe if the text changes in another thread.
 
         Args:
-            content_callback: Callable that returns the current thinking content.
-                If None, a StreamingContent is created internally.
-            title: Optional title to set on the thinking separator.
+            content_callback: Returns the text to show. If None, the box
+                holds its own text, which you write.
+            title: Title on the box's header line (default: the session's
+                ``thinking_title``).
             order: Sort key for multiple boxes (higher = closer to prompt).
             max_lines: Max collapsed lines (overrides session default).
             content_format: Format for rendering ("plain" or "ansi").
+            overflow: Which end of content that overflows the box stays
+                visible — in the box and in the echo when it finishes:
+                "tail" (newest lines, default) or "head" (first lines,
+                e.g. for a task list).
 
         Returns:
-            ThinkingContext for title control and content management.
+            The ThinkingBox: write to it, retitle it, and finish it.
+
+        Raises:
+            ValueError: If max_lines is less than 1.
 
         Example:
-            content = ""
-
-            def get_content():
-                return content
-
-            ctx = session.start_thinking(get_content, title="Processing")
-
-            # Update content dynamically
-            content += "Processing...\\n"
+            box = session.start_thinking(title="Processing")
+            box.append("Processing...\\n")
             await asyncio.sleep(0.5)
-            ctx.set_title("Finishing")
-            content += "Done!\\n"
-
-            ctx.finish()
+            box.set_title("Finishing")
+            box.append("Done!\\n")
+            box.finish()
         """
-        # Always provide a title so a header is created for every box
-        effective_title = title if title is not None else self._default_thinking_text
-        box = self._manager.create_box(
-            content_callback=content_callback,
-            title=effective_title,
+        # One row is enough (the newest line, no hint); none can't be drawn.
+        if max_lines is not None and max_lines < 1:
+            raise ValueError(f"max_lines must be at least 1 (or None), got {max_lines!r}")
+        return self._manager.create_box(
+            content_callback,
+            title=title if title is not None else self._thinking_title,
             order=order,
             max_lines=max_lines,
             content_format=content_format,
+            overflow=overflow,
         )
 
-        # Apply header config from app_info
-        if box.header and self._header_config:
-            if self._header_config.get("frames") is not None:
-                box.header.frames = self._header_config["frames"]
-            if self._header_config.get("position") is not None:
-                box.header.position = self._header_config["position"]
+    def _announce_cancel(self, ended: bool) -> None:
+        """Say "Operation cancelled..." after the boxes a cancel ended.
 
-        self._invalidate()
-
-        # Build finish callback for this specific box
-        def _finish_box(
-            add_to_history: bool = True,
-            echo_to_console: bool | None = None,
-        ) -> str:
-            full_content, _, content_format_val = self._manager.remove_box(box.box_id)
-            should_echo = (
-                echo_to_console if echo_to_console is not None else self._echo_thinking
-            )
-            if full_content.strip():
-                self._display.thinking(
-                    full_content,
-                    truncate_lines=box.control.max_collapsed_lines,
-                    add_to_history=add_to_history,
-                    echo_to_console=should_echo,
-                    content_format=content_format_val,
-                )
+        While Ctrl+C is cancelling the handler, the line waits until the
+        handler is done, so one line follows every box that cancel ends
+        (see _run_handler). When nothing ended, there's nothing to say.
+        """
+        if not ended:
+            return
+        if self._user_cancelled_handler:
+            self._cancel_line_pending = True
+        else:
+            self._display.system("Operation cancelled...")
             self._invalidate()
-            return full_content
-
-        return ThinkingContext(
-            content=box.streaming_content,
-            set_title=lambda t: setattr(box.header, 'text', t) if box.header else None,
-            get_title=lambda: box.header.text if box.header else self._default_thinking_text,
-            set_format=box.control.set_content_format,
-            rich_theme=self._display.rich_theme,
-            finish=_finish_box,
-        )
-
-    def finish_thinking(
-        self,
-        add_to_history: bool = True,
-        echo_to_console: bool | None = None,
-    ) -> str:
-        """
-        Complete the thinking phase (finishes all active boxes).
-
-        .. deprecated::
-            Use ``ThinkingContext.finish()`` on the context returned by
-            ``start_thinking()``, or use the ``thinking()`` async context
-            manager for automatic per-box lifecycle management.
-
-        Console gets collapsed/truncated version (for prompt mode).
-        History gets full content (for fullscreen mode).
-
-        Args:
-            add_to_history: If True, add thinking content to chat history.
-            echo_to_console: If True, print thinking content to console.
-                            If None (default), uses AppInfo.echo_thinking setting.
-
-        Returns:
-            The full thinking content that was displayed.
-        """
-        warnings.warn(
-            "finish_thinking() is deprecated. Use ctx.finish() on the "
-            "ThinkingContext returned by start_thinking(), or use the "
-            "thinking() async context manager instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        if not self._manager.has_active_boxes:
-            return ""
-
-        should_echo = (
-            echo_to_console if echo_to_console is not None else self._echo_thinking
-        )
-
-        results = self._manager.finish_all()
-        all_content = []
-
-        for _box_id, full_content, _, content_format_val, max_lines in results:
-            if full_content.strip():
-                self._display.thinking(
-                    full_content,
-                    # Truncate to each box's own limit, matching the
-                    # per-box finish path (_finish_box).
-                    truncate_lines=max_lines,
-                    add_to_history=add_to_history,
-                    echo_to_console=should_echo,
-                    content_format=content_format_val,
-                )
-                all_content.append(full_content)
-
-        self._invalidate()
-        return "\n".join(all_content)
 
     @property
     def is_thinking(self) -> bool:
@@ -576,13 +680,11 @@ class ThinkingPromptSession:
         echo_to_console: bool | None = None,
         order: int = 0,
         max_lines: int | None = None,
-    ) -> AsyncIterator[ThinkingContext]:
+        overflow: Overflow = "tail",
+    ) -> AsyncIterator[ThinkingBox]:
         """
-        Context manager for thinking operations.
-
-        Provides a more Pythonic way to manage thinking state with automatic
-        cleanup. Returns a ThinkingContext for content accumulation and
-        title control.
+        Context manager for thinking operations: yields a ThinkingBox and
+        finishes it when the block ends.
 
         Args:
             title: Optional title for the thinking separator.
@@ -590,50 +692,66 @@ class ThinkingPromptSession:
             add_to_history: If True, add thinking content to chat history
                 when exiting the context.
             echo_to_console: If True, print thinking content to console.
-                            If None (default), uses AppInfo.echo_thinking setting.
+                            If None (default), uses the session's echo_thinking.
             order: Sort key for multiple boxes (higher = closer to prompt).
             max_lines: Max collapsed lines (overrides session default).
+            overflow: Which end of overflowing content stays visible, in
+                the box and the finish echo: "tail" (newest lines, default)
+                or "head" (first lines).
 
         Yields:
-            ThinkingContext: Content accumulator with title control.
+            ThinkingBox: the box, to write to and retitle.
+
+        Raises:
+            ValueError: If max_lines is less than 1 (before the block runs).
 
         Example:
-            async with session.thinking(title="Processing") as ctx:
-                ctx.append("Working...\\n")
+            async with session.thinking(title="Processing") as box:
+                box.append("Working...\\n")
                 await asyncio.sleep(1)
-                ctx.set_title("Finishing")
-                ctx.append("Done!\\n")
+                box.set_title("Finishing")
+                box.append("Done!\\n")
 
             # Thinking is automatically finished when exiting the context
 
         Example with Rich-styled lines:
-            async with session.thinking() as ctx:
-                ctx.append_rich("[dim]  Step 1: Load data[/dim]\\n")
-                ctx.append_rich("[dim]  Step 2: Process[/dim]\\n")
+            async with session.thinking() as box:
+                box.append_rich("[dim]  Step 1: Load data[/dim]\\n")
+                box.append_rich("[dim]  Step 2: Process[/dim]\\n")
 
                 await do_step_1()
-                ctx.set_line_rich(0, "[green]✓ Step 1: Load data[/green]")
-                ctx.set_line_rich(1, "[bold]⟳ Step 2: Processing...[/bold]")
+                box.set_line_rich(0, "[green]✓ Step 1: Load data[/green]")
+                box.set_line_rich(1, "[bold]⟳ Step 2: Processing...[/bold]")
 
                 await do_step_2()
-                ctx.set_line_rich(1, "[green]✓ Step 2: Process[/green]")
+                box.set_line_rich(1, "[green]✓ Step 2: Process[/green]")
 
         Note:
-            If an exception occurs within the context, thinking is still
-            finished properly but content is not added to history.
+            The box's content is kept however the block ends. If the block
+            is cancelled (e.g. Ctrl+C), "Operation cancelled..." follows the
+            content; if it raises, the exception propagates after the box
+            is finished.
         """
-        ctx = self.start_thinking(
+        box = self.start_thinking(
             title=title,
             content_format=content_format,
             order=order,
             max_lines=max_lines,
+            overflow=overflow,
         )
         try:
-            yield ctx
-            ctx.finish(add_to_history=add_to_history, echo_to_console=echo_to_console)
-        except BaseException:
-            ctx.finish(add_to_history=False, echo_to_console=False)
+            yield box
+        except asyncio.CancelledError:
+            ended = self._manager.finish(
+                box, add_to_history=add_to_history, echo_to_console=echo_to_console
+            )
+            self._announce_cancel(ended)
             raise
+        except BaseException:
+            box.finish(add_to_history=add_to_history, echo_to_console=echo_to_console)
+            raise
+        else:
+            box.finish(add_to_history=add_to_history, echo_to_console=echo_to_console)
 
     # =========================================================================
     # Chat History API
@@ -794,13 +912,9 @@ class ThinkingPromptSession:
         """
         Clear the display and reset to startup state.
 
-        Clears the terminal screen and history buffer, re-prints the welcome
-        message, and returns to prompt mode.
+        Clears the terminal screen and history buffer, and re-prints the
+        welcome message.
         """
-        # Exit fullscreen if active
-        with self._fullscreen_lock:
-            self._is_fullscreen = False
-
         # Clear the terminal screen. While the app is running this must
         # go through the renderer — a raw escape write behind its back
         # leaves the renderer's notion of the screen stale and corrupts
@@ -821,36 +935,8 @@ class ThinkingPromptSession:
         self._invalidate()
 
     # =========================================================================
-    # UI State API
+    # Exiting
     # =========================================================================
-
-    @property
-    def is_fullscreen(self) -> bool:
-        """Check if app is in fullscreen mode."""
-        with self._fullscreen_lock:
-            return self._is_fullscreen
-
-    def switch_to_fullscreen(self) -> None:
-        """Switch to fullscreen mode (no-op if fullscreen is disabled)."""
-        if not self._fullscreen_enabled:
-            return
-        with self._fullscreen_lock:
-            if not self._is_fullscreen:
-                self._is_fullscreen = True
-                self._invalidate()
-
-    def switch_to_prompt(self) -> None:
-        """Switch back to prompt mode from fullscreen."""
-        with self._fullscreen_lock:
-            if self._is_fullscreen:
-                self._is_fullscreen = False
-                # Restore pre-fullscreen expansion state
-                if self._pre_fullscreen_expanded is not None:
-                    if not self._pre_fullscreen_expanded:
-                        self._manager.collapse_all()
-                    self._pre_fullscreen_expanded = None
-                self._display.flush_pending()  # Output cached content to console
-                self._invalidate()
 
     def exit(self) -> None:
         """
@@ -873,7 +959,7 @@ class ThinkingPromptSession:
     # Handler Registration
     # =========================================================================
 
-    def on_input(self, func: Callable[[str], Any]) -> Callable[[str], Any]:
+    def on_input(self, func: _HandlerT) -> _HandlerT:
         """
         Decorator to register an input handler.
 
@@ -896,8 +982,8 @@ class ThinkingPromptSession:
                 if not text.strip():
                     return
 
-                async with session.thinking() as ctx:
-                    ctx.append("Processing...\\n")
+                async with session.thinking() as box:
+                    box.append("Processing...\\n")
                     await asyncio.sleep(1)
 
                 session.add_response(f"Echo: {text}")
@@ -931,6 +1017,8 @@ class ThinkingPromptSession:
             KeyboardInterrupt: When Ctrl+C is pressed (not during thinking).
         """
         self._pending_input = asyncio.get_running_loop().create_future()
+        # Input is wanted again: the "Busy" hint no longer applies.
+        self._clear_busy_hint()
         try:
             return await self._pending_input
         except asyncio.CancelledError as exc:
@@ -938,7 +1026,7 @@ class ThinkingPromptSession:
 
     async def run_async(
         self,
-        handler: Callable[[str], Any] | None = None,
+        handler: InputHandler | None = None,
     ) -> None:
         """
         Run the session asynchronously.
@@ -957,8 +1045,8 @@ class ThinkingPromptSession:
         Example:
             # Option 1: Pass handler directly
             async def handle(text):
-                async with session.thinking() as ctx:
-                    ctx.append("Working...\\n")
+                async with session.thinking() as box:
+                    box.append("Working...\\n")
                     await asyncio.sleep(1)
 
             await session.run_async(handle)
@@ -991,8 +1079,12 @@ class ThinkingPromptSession:
                 except asyncio.CancelledError:
                     break
 
-        # Run input loop as background task
+        # Run input loop as background task. The app must not outlive the
+        # loop: however the loop ends (EOF, KeyboardInterrupt escaping a
+        # handler, a cancelled pending future), a still-running app would
+        # echo typed input that nobody reads — a zombie session.
         loop_task = asyncio.create_task(input_loop())
+        loop_task.add_done_callback(lambda _task: self._exit_app())
 
         try:
             await self.app.run_async()
@@ -1000,10 +1092,12 @@ class ThinkingPromptSession:
             loop_task.cancel()
             with suppress(asyncio.CancelledError):
                 await loop_task
+            self._frames.cancel()
+            self._shrinks.cancel()
 
     async def _run_handler(
         self,
-        handler: Callable[[str], None | Coroutine[Any, Any, None]],
+        handler: InputHandler,
         text: str,
     ) -> None:
         """Invoke the input handler with cancellation and cleanup hooks.
@@ -1016,17 +1110,20 @@ class ThinkingPromptSession:
         CancelledError raised from outside the handler (e.g. the input loop
         being cancelled during shutdown) is re-raised so the loop can exit.
         """
+        # A sync handler (and the sync start of an async one) runs in this
+        # task: boxes it opens are owned by it.
+        caller = asyncio.current_task()
         try:
             result = handler(text)
         except Exception as e:
-            self._cleanup_after_handler()
-            self.add_error(f"Handler error: {e}")
+            self._cleanup_after_handler(caller)
+            self._report_handler_error(e)
             return
 
         if not asyncio.iscoroutine(result):
-            # Sync handler — already complete. Drop any boxes it left
+            # Sync handler — already complete. Finish any boxes it left
             # open so the UI can't get stuck in a "thinking" state.
-            self._cleanup_after_handler()
+            self._cleanup_after_handler(caller)
             return
 
         task = asyncio.create_task(result)
@@ -1036,21 +1133,28 @@ class ThinkingPromptSession:
         except asyncio.CancelledError:
             if self._user_cancelled_handler:
                 # Ctrl+C path: swallow and continue the input loop.
-                self._cleanup_after_handler()
+                self._cleanup_after_handler(task, cancelled=True)
                 return
             # Outer cancellation (e.g. session shutdown) — propagate so
             # the input loop exits.
-            self._cleanup_after_handler()
+            self._cleanup_after_handler(task, cancelled=True)
             raise
         except Exception as e:
-            self._cleanup_after_handler()
-            self.add_error(f"Handler error: {e}")
+            # The boxes' content is echoed, then the error line.
+            self._cleanup_after_handler(task)
+            self._report_handler_error(e)
         else:
-            # Handler completed normally — finish any boxes it left open
-            # (content is discarded, same as the cancel/error paths).
-            self._cleanup_after_handler()
+            # Handler completed normally — finish any boxes it left open,
+            # as box.finish() would.
+            self._cleanup_after_handler(task)
         finally:
             self._current_handler_task = None
+            if self._cancel_line_pending:
+                # One line after all the boxes the Ctrl+C ended, those of
+                # the handler's sub-tasks too.
+                self._cancel_line_pending = False
+                self._display.system("Operation cancelled...")
+                self._invalidate()
             # Always clear the cancel flag for the next invocation. We can't
             # only reset it inside the except CancelledError block: if user
             # code catches CancelledError and returns normally, or if cancel
@@ -1059,13 +1163,36 @@ class ThinkingPromptSession:
             # cancellation look like a Ctrl+C and silently swallowing it.
             self._user_cancelled_handler = False
 
-    def _cleanup_after_handler(self) -> None:
-        """Drop any thinking boxes the handler left open and refresh UI."""
-        if self._manager.has_active_boxes:
-            self._manager.finish_all()
-            self._invalidate()
+    def _report_handler_error(self, exc: Exception) -> None:
+        """Log a handler exception with its traceback; show it on screen.
 
-    def run(self, handler: Callable[[str], Any] | None = None) -> None:
+        The screen line names the exception type — str() alone renders
+        KeyError('x') as just 'x'. The traceback goes to the
+        ``thinking_prompt`` logger, visible once the app configures logging.
+        """
+        logger.error("Input handler raised", exc_info=exc)
+        detail = format_exception_detail(exc)
+        self.add_error(f"Handler error: {detail}")
+
+    def _exit_app(self) -> None:
+        """Exit the app unless it is not running or already exiting."""
+        future = self.app.future
+        if self.app.is_running and future is not None and not future.done():
+            self.app.exit()
+
+    def _cleanup_after_handler(
+        self, owner: asyncio.Task[Any] | None, *, cancelled: bool = False
+    ) -> None:
+        """Finish the boxes the ended handler answers for.
+
+        See ThinkingBoxManager.finish_owned_by. Their content is echoed;
+        when the handler was cancelled, "Operation cancelled..." follows.
+        """
+        ended = self._manager.finish_owned_by(owner)
+        if cancelled:
+            self._announce_cancel(bool(ended))
+
+    def run(self, handler: InputHandler | None = None) -> None:
         """
         Run the session synchronously.
 
@@ -1121,6 +1248,49 @@ class ThinkingPromptSession:
     # =========================================================================
 
     @property
+    def dialog_placement(self) -> Placement:
+        """How dialogs are drawn unless the dialog (or the call) says otherwise."""
+        return self._dialog_placement
+
+    def _inline_dialog_content(self) -> AnyContainer:
+        """What the layout's inline-dialog slot shows: the open inline dialog,
+        rows for an open box dialog to float over, or nothing.
+
+        A box dialog floats over the layout without asking for rows: with
+        the prompt at the bottom of the terminal, it was clipped to the
+        prompt's few rows. Rows here put it where an inline dialog would
+        be, sharing the terminal with the rest of the layout the way an
+        inline dialog does.
+        """
+        manager = self._dialog_manager
+        if manager is None:
+            return self._no_inline_dialog
+        if manager.inline_view is not None:
+            return manager.inline_view.container
+        return self._box_dialog_room
+
+    def _box_room(self) -> tuple[Window, int] | None:
+        """The window holding a box dialog's reserved rows and the rows it
+        got, if it is in the layout now and was drawn in this render, else
+        None. The rest of the layout (a thinking box, a longer prompt) can
+        leave it fewer than it asked for."""
+        room = self._box_dialog_room
+        if self._inline_dialog_content() is not room:
+            return None
+        drawn = self._room_control.drawn
+        if drawn is None or drawn[0] != self.app.render_counter:
+            return None
+        return room, drawn[1]
+
+    def _box_dialog_rows(self) -> Dimension:
+        """The box dialog's rows, to reserve. Flexible down to none, so a
+        dialog taller than the terminal can't overflow the layout."""
+        manager = self._dialog_manager
+        size = self.app.output.get_size()
+        rows = manager.box_rows(size.columns, size.rows) if manager is not None else 0
+        return Dimension(min=0, preferred=rows, max=rows)
+
+    @property
     def _dialogs(self) -> DialogManager:
         """Get or create the dialog manager (lazy initialization)."""
         if self._dialog_manager is None:
@@ -1128,12 +1298,20 @@ class ThinkingPromptSession:
             self._dialog_manager = DialogManager(self)
         return self._dialog_manager
 
+    def _resolve_placement(self, placement: Placement | None) -> Placement:
+        """``placement``, or the session's dialog_placement when None (validated)."""
+        check_placement(placement, optional=True)
+        return placement if placement is not None else self._dialog_placement
+
     async def yes_no_dialog(
         self,
         title: str,
         text: str,
         yes_text: str = "Yes",
         no_text: str = "No",
+        *,
+        placement: Placement | None = None,
+        max_height: int | None = None,
     ) -> bool:
         """
         Show a Yes/No confirmation dialog.
@@ -1143,6 +1321,11 @@ class ThinkingPromptSession:
             text: Dialog body text.
             yes_text: Text for Yes button (default: "Yes").
             no_text: Text for No button (default: "No").
+            placement: "box" or "inline"; None (default) uses the session's
+                dialog_placement.
+            max_height: The most rows the dialog takes; what doesn't fit
+                scrolls (see Dialog.max_height). None (default): the
+                terminal's rows less the prompt's.
 
         Returns:
             True if Yes was clicked, False if No or Escape.
@@ -1151,8 +1334,8 @@ class ThinkingPromptSession:
             if await session.yes_no_dialog("Confirm", "Delete this file?"):
                 delete_file()
         """
-        from .dialog import _YesNoDialog
-        dialog = _YesNoDialog(title, text, yes_text, no_text)
+        from .dialog import _yes_no_dialog
+        dialog = _yes_no_dialog(title, text, yes_text, no_text, self._resolve_placement(placement), max_height)
         return cast(bool, await self._dialogs.show(dialog))
 
     async def message_dialog(
@@ -1160,6 +1343,9 @@ class ThinkingPromptSession:
         title: str,
         text: str,
         ok_text: str = "OK",
+        *,
+        placement: Placement | None = None,
+        max_height: int | None = None,
     ) -> None:
         """
         Show an informational message dialog.
@@ -1168,12 +1354,17 @@ class ThinkingPromptSession:
             title: Dialog title.
             text: Dialog body text.
             ok_text: Text for OK button (default: "OK").
+            placement: "box" or "inline"; None (default) uses the session's
+                dialog_placement.
+            max_height: The most rows the dialog takes; what doesn't fit
+                scrolls (see Dialog.max_height). None (default): the
+                terminal's rows less the prompt's.
 
         Example:
             await session.message_dialog("Info", "Operation completed.")
         """
-        from .dialog import _MessageDialog
-        dialog = _MessageDialog(title, text, ok_text)
+        from .dialog import _message_dialog
+        dialog = _message_dialog(title, text, ok_text, self._resolve_placement(placement), max_height)
         await self._dialogs.show(dialog)
 
     async def choice_dialog(
@@ -1181,6 +1372,9 @@ class ThinkingPromptSession:
         title: str,
         text: str,
         choices: Sequence[str],
+        *,
+        placement: Placement | None = None,
+        max_height: int | None = None,
     ) -> str | None:
         """
         Show a dialog with multiple choice buttons.
@@ -1189,6 +1383,11 @@ class ThinkingPromptSession:
             title: Dialog title.
             text: Dialog body text.
             choices: List of choice strings (each becomes a button).
+            placement: "box" or "inline"; None (default) uses the session's
+                dialog_placement.
+            max_height: The most rows the dialog takes; what doesn't fit
+                scrolls (see Dialog.max_height). None (default): the
+                terminal's rows less the prompt's.
 
         Returns:
             The selected choice string, or None if Escape was pressed.
@@ -1202,8 +1401,8 @@ class ThinkingPromptSession:
             if action == "Save":
                 save_file()
         """
-        from .dialog import _ChoiceDialog
-        dialog = _ChoiceDialog(title, text, choices)
+        from .dialog import _choice_dialog
+        dialog = _choice_dialog(title, text, choices, self._resolve_placement(placement), max_height)
         return cast(Optional[str], await self._dialogs.show(dialog))
 
     async def dropdown_dialog(
@@ -1212,15 +1411,25 @@ class ThinkingPromptSession:
         text: str,
         options: Sequence[str],
         default: str | None = None,
+        *,
+        placement: Placement | None = None,
+        max_height: int | None = None,
     ) -> str | None:
         """
-        Show a dialog with a dropdown/radio list selection.
+        Show a dialog to pick one of ``options``: a choice list in a box,
+        numbered rows inline.
 
         Args:
             title: Dialog title.
             text: Dialog body text.
             options: List of options to choose from.
-            default: Default selected option (optional).
+            default: The option selected, with the cursor on it, when the
+                dialog opens (optional; the first option otherwise).
+            placement: "box" or "inline"; None (default) uses the session's
+                dialog_placement.
+            max_height: The most rows the dialog takes; what doesn't fit
+                scrolls (see Dialog.max_height). None (default): the
+                terminal's rows less the prompt's.
 
         Returns:
             The selected option string, or None if cancelled.
@@ -1233,108 +1442,83 @@ class ThinkingPromptSession:
                 default="System",
             )
         """
-        from .dialog import _DropdownDialog
-        dialog = _DropdownDialog(title, text, options, default)
+        from .dialog import _dropdown_dialog
+        dialog = _dropdown_dialog(title, text, options, default, self._resolve_placement(placement), max_height)
         return cast(Optional[str], await self._dialogs.show(dialog))
 
-    async def show_dialog(
+    async def checklist_dialog(
         self,
-        dialog: DialogConfig | BaseDialog,
-    ) -> Any:
+        title: str,
+        text: str,
+        options: Sequence[str],
+        defaults: Sequence[str] = (),
+        *,
+        placement: Placement | None = None,
+        max_height: int | None = None,
+    ) -> list[str] | None:
         """
-        Show a custom dialog.
+        Show a check list: any number of options, one per line.
 
         Args:
-            dialog: Either a DialogConfig for simple dialogs,
-                   or a BaseDialog subclass for complex dialogs.
+            title: Dialog title.
+            text: Text above the options ("" for none).
+            options: The options to check.
+            defaults: Options checked at first (others are ignored).
+            placement: "box" or "inline"; None (default) uses the session's
+                dialog_placement.
+            max_height: The most rows the dialog takes; what doesn't fit
+                scrolls (see Dialog.max_height). None (default): the
+                terminal's rows less the prompt's.
 
         Returns:
-            The result value set by the dialog.
+            The checked options in option order, or None if cancelled.
 
-        Example with DialogConfig:
-            from thinking_prompt.dialog import DialogConfig, ButtonConfig
+        Raises:
+            ValueError: If ``options`` is empty.
 
-            config = DialogConfig(
+        Example:
+            tools = await session.checklist_dialog(
+                "Tools", "Enable any:", ["search", "code", "files"], defaults=["search"]
+            )
+        """
+        from .dialog import _checklist_dialog
+        dialog = _checklist_dialog(title, text, options, defaults, self._resolve_placement(placement), max_height)
+        return cast("list[str] | None", await self._dialogs.show(dialog))
+
+    async def show_dialog(self, dialog: Dialog) -> Any:
+        """
+        Show a dialog and wait for its result.
+
+        Args:
+            dialog: A Dialog, built with arguments or a subclass instance.
+
+        Returns:
+            The result value set by the dialog (a button or Escape).
+
+        Example (built with arguments):
+            from thinking_prompt import ButtonConfig, Dialog
+
+            result = await session.show_dialog(Dialog(
                 title="Custom",
                 body="Choose an option:",
                 buttons=[
-                    ButtonConfig(text="Option A", result="a"),
-                    ButtonConfig(text="Option B", result="b"),
+                    ButtonConfig("Option A", result="a"),
+                    ButtonConfig("Option B", result="b"),
                 ],
-            )
-            result = await session.show_dialog(config)
+            ))
 
-        Example with BaseDialog subclass:
-            from thinking_prompt.dialog import BaseDialog
+        Example (subclass):
+            from thinking_prompt import ButtonConfig, Dialog
 
-            class MyDialog(BaseDialog):
+            class MyDialog(Dialog):
                 title = "My Dialog"
 
                 def build_body(self):
                     return Label("Custom content")
 
                 def get_buttons(self):
-                    return [("OK", lambda: self.set_result(True))]
+                    return [ButtonConfig("OK", result=True)]
 
             result = await session.show_dialog(MyDialog())
         """
         return await self._dialogs.show(dialog)
-
-    async def show_settings_dialog(
-        self,
-        title: str,
-        items: list[SettingsItem],
-        can_cancel: bool = True,
-        styles: dict | None = None,
-        width: int | None = 60,
-        top: int | None = None,
-        height: int | None = None,
-    ) -> dict[str, Any] | None:
-        """
-        Show a settings dialog and return changed values.
-
-        Args:
-            title: Dialog title.
-            items: List of SettingsItem objects defining the form.
-            can_cancel: If True (default), shows Save/Cancel buttons.
-                       If False, shows only Done button.
-            styles: Optional style overrides.
-            width: Dialog width control:
-                   - None or 0: auto-size to content
-                   - positive int: minimum width (default 60)
-                   - -1: maximum width (stretch to fill)
-            top: Vertical position:
-                   - None: center (default)
-                   - 0 or positive: offset from top
-                   - negative: offset from bottom (e.g., -1 = 1 row from bottom)
-            height: Fixed total dialog height. When set, the dialog is
-                    allocated the full height in one render frame instead
-                    of growing line-by-line. Body overflow scrolls.
-                    When None (default), the dialog sizes to its content.
-
-        Returns:
-            Dictionary of changed values if saved, or None if cancelled.
-            An empty dict {} means no values were changed.
-
-        Example:
-            from thinking_prompt import DropdownItem, CheckboxItem
-
-            result = await session.show_settings_dialog(
-                title="Settings",
-                items=[
-                    DropdownItem(key="model", label="Model",
-                                options=["gpt-4", "gpt-3.5"], default="gpt-4"),
-                    CheckboxItem(key="stream", label="Stream Output", default=True),
-                ],
-            )
-            if result is not None:
-                for key, value in result.items():
-                    update_setting(key, value)
-        """
-        from .settings_dialog import SettingsDialog
-        dialog = SettingsDialog(
-            title, items, can_cancel, styles, width, top, height
-        )
-        return cast(
-            "dict[str, Any] | None", await self._dialogs.show(dialog)
-        )

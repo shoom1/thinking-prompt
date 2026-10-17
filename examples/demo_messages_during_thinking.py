@@ -15,11 +15,7 @@ from thinking_prompt import ThinkingPromptSession, AppInfo
 
 
 async def main():
-    app_info = AppInfo(
-        name="MessagesDemo",
-        version="1.0.0",
-        fullscreen_enabled=False,  # Keep in prompt mode to see messages
-    )
+    app_info = AppInfo(name="MessagesDemo", version="1.0.0")
 
     session = ThinkingPromptSession(
         app_info=app_info,
