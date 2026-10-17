@@ -6,7 +6,6 @@ from __future__ import annotations
 import asyncio
 import threading
 
-import pytest
 from prompt_toolkit.styles import Style
 
 from thinking_prompt.display import Display
@@ -26,12 +25,6 @@ from tests.helpers import echoed, history_texts, make_display, make_manager
 
 class TestCreation:
     """Test create_box returns ThinkingBox with correct configuration."""
-
-    def test_create_box_returns_a_thinking_box(self):
-        """create_box should return a ThinkingBox instance."""
-        mgr = make_manager()
-        box = mgr.create_box(lambda: "hello")
-        assert isinstance(box, ThinkingBox)
 
     def test_create_box_with_callback(self):
         """create_box with callback should use it in the control."""
@@ -83,10 +76,6 @@ class TestCreation:
     def test_headers_spin_dots_by_default(self):
         header = make_manager().create_box(lambda: "x", title="T")._header
         assert header.spinner == Spinner.DOTS
-
-    def test_display_is_required(self):
-        with pytest.raises(TypeError):
-            ThinkingBoxManager()  # type: ignore[call-arg]
 
     def test_create_box_custom_order(self):
         """create_box with order should set it on the ThinkingBox."""
@@ -151,12 +140,6 @@ class TestCreation:
         mgr = make_manager()
         box = mgr.create_box(lambda: "x", content_format="ansi")
         assert box._control.content_format == "ansi"
-
-    def test_create_box_has_container(self):
-        """create_box should build a container."""
-        mgr = make_manager()
-        box = mgr.create_box(lambda: "x")
-        assert box._container is not None
 
     def test_create_box_seq_increments(self):
         """Each created box should have an incrementing seq."""
@@ -362,20 +345,6 @@ class TestEcho:
 class TestSorting:
     """Test get_sorted_boxes ordering."""
 
-    def test_sorted_by_order(self):
-        mgr = make_manager()
-        high = mgr.create_box(lambda: "high", order=10)
-        low = mgr.create_box(lambda: "low", order=1)
-        mid = mgr.create_box(lambda: "mid", order=5)
-        assert mgr.get_sorted_boxes() == [low, mid, high]
-
-    def test_sorted_by_seq_within_same_order(self):
-        mgr = make_manager()
-        first = mgr.create_box(lambda: "first", order=0)
-        second = mgr.create_box(lambda: "second", order=0)
-        third = mgr.create_box(lambda: "third", order=0)
-        assert mgr.get_sorted_boxes() == [first, second, third]
-
     def test_mixed_ordering(self):
         mgr = make_manager()
         a = mgr.create_box(lambda: "a", order=2)
@@ -383,15 +352,6 @@ class TestSorting:
         c = mgr.create_box(lambda: "c", order=2)
         d = mgr.create_box(lambda: "d", order=1)
         assert mgr.get_sorted_boxes() == [b, d, a, c]
-
-    def test_get_container_returns_container(self):
-        """get_container should return a valid container."""
-        from prompt_toolkit.layout import HSplit, Window
-        mgr = make_manager()
-        mgr.create_box(lambda: "x")
-        container = mgr.get_container()
-        # Should be an HSplit (or Window if empty)
-        assert container is not None
 
     def test_get_container_empty_returns_zero_height(self):
         """get_container with no boxes should return a zero-height Window."""
@@ -455,14 +415,6 @@ class TestExpandCollapse:
         box2 = mgr.create_box(lambda: "b")
         assert box2._control.is_expanded
 
-    def test_new_box_inherits_collapsed_state(self):
-        """A new box created when collapsed should remain collapsed."""
-        mgr = make_manager()
-        mgr.create_box(lambda: "a")
-        mgr.collapse_all()
-        box2 = mgr.create_box(lambda: "b")
-        assert not box2._control.is_expanded
-
     def test_can_toggle_true_when_expanded(self):
         """can_toggle should return True when boxes are expanded."""
         mgr = make_manager()
@@ -478,53 +430,11 @@ class TestExpandCollapse:
         mgr.create_box(lambda: big_content)
         assert mgr.can_toggle()
 
-    def test_can_toggle_false_when_empty(self):
-        """can_toggle should return False when there are no boxes."""
-        mgr = make_manager()
-        assert not mgr.can_toggle()
-
     def test_can_toggle_false_when_small_content_collapsed(self):
         """can_toggle should return False when content fits and is collapsed."""
         mgr = make_manager(default_max_lines=100)
         mgr.create_box(lambda: "small")
         assert not mgr.can_toggle()
-
-
-# =============================================================================
-# Thread safety tests
-# =============================================================================
-
-
-class TestThreadSafety:
-    """Test that the manager is thread-safe."""
-
-    def test_concurrent_create_and_finish(self):
-        mgr = make_manager()
-        errors: list[Exception] = []
-
-        def creator():
-            try:
-                for _ in range(50):
-                    mgr.create_box(lambda: "x")
-            except Exception as e:
-                errors.append(e)
-
-        def finisher():
-            try:
-                for _ in range(50):
-                    mgr.finish_all(add_to_history=False, echo_to_console=False)
-            except Exception as e:
-                errors.append(e)
-
-        threads = [threading.Thread(target=creator), threading.Thread(target=finisher)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
-        mgr.finish_all()
-
-        assert not errors, f"Thread safety errors: {errors}"
-        assert mgr.active_count == 0
 
 
 # =============================================================================

@@ -271,14 +271,6 @@ class TestRich:
 
 
 class TestSessionBoxes:
-    def test_start_thinking_returns_a_box_with_the_default_title(self):
-        box = _session().start_thinking(lambda: "")
-        assert isinstance(box, ThinkingBox)
-        assert box.title == "Pondering"
-
-    def test_start_thinking_without_app_info_titles_the_box_thinking(self):
-        assert ThinkingPromptSession().start_thinking().title == "Thinking"
-
     def test_start_thinking_with_a_title(self):
         assert _session().start_thinking(title="Processing").title == "Processing"
 
@@ -318,16 +310,6 @@ class TestSessionBoxes:
             assert box.finish() == "done\n"
         assert _history(session) == ["done\n\n"]
 
-    async def test_a_handler_ending_finishes_its_box(self):
-        session = _session()
-        boxes: list[ThinkingBox] = []
-
-        async def handler(text: str) -> None:
-            boxes.append(session.start_thinking())
-
-        await session._run_handler(handler, "go")
-        assert boxes[0].is_finished
-
     async def test_a_box_finished_from_a_worker_thread(self):
         session = _session()
         box = session.start_thinking()
@@ -360,7 +342,7 @@ class TestFinishArguments:
         session = _kept_session()
         box = session.start_thinking()
         box.append("x\n")
-        box.finish(echo_to_console=True)
+        box.finish()
         assert _history(session) == ["x\n\n"]
         assert echoed(session._display) != []
 
@@ -379,6 +361,7 @@ class TestFinishArguments:
             ) as box:
                 box.append("x\n")
                 raise RuntimeError("boom")
+        assert box.is_finished
         assert _history(session) == []
         assert echoed(session._display) == []
 

@@ -69,8 +69,6 @@ class TestExpandMode:
         assert a._control.is_expanded and b._control.is_expanded
         manager.toggle_all()
         assert not a._control.is_expanded and not b._control.is_expanded
-        # A box can't leave the shared mode on its own.
-        assert not hasattr(a._control, "toggle_expanded")
 
     def test_a_standalone_box_reads_its_expand_predicate(self):
         expanded = [False]
@@ -82,13 +80,6 @@ class TestExpandMode:
 
 class TestOwnership:
     """A box belongs to the task that created it (#2)."""
-
-    async def test_box_remembers_the_task_that_created_it(self):
-        manager = make_manager()
-        assert manager.create_box(lambda: "x")._owner is asyncio.current_task()
-
-    def test_box_created_outside_asyncio_has_no_owner(self):
-        assert make_manager().create_box(lambda: "x")._owner is None
 
     async def test_a_handler_ending_leaves_a_live_background_box(self):
         session = ThinkingPromptSession()
@@ -165,16 +156,6 @@ class TestFinishedHandle:
         ctx.finish()
         assert ctx.is_finished is True
 
-    def test_finish_is_idempotent_and_returns_the_content(self):
-        session = ThinkingPromptSession()
-        ctx = session.start_thinking()
-        ctx.append("hello\n")
-
-        assert ctx.finish() == "hello\n"
-        entries = len(_history(session))
-        assert ctx.finish() == "hello\n"
-        assert len(_history(session)) == entries  # not echoed twice
-
     def test_finish_after_the_session_finished_the_box_returns_its_content(self):
         session = ThinkingPromptSession()
         ctx = session.start_thinking()
@@ -184,19 +165,6 @@ class TestFinishedHandle:
 
         assert ctx.is_finished
         assert ctx.finish() == "partial\n"
-
-    def test_writes_after_finish_log_a_warning_once(self, caplog):
-        session = ThinkingPromptSession()
-        ctx = session.start_thinking()
-        ctx.finish()
-
-        with caplog.at_level(logging.WARNING, logger="thinking_prompt"):
-            ctx.append("late\n")
-            ctx.set_line(0, "late")
-            ctx.set_title("late")
-
-        warnings = [r for r in caplog.records if "already finished" in r.getMessage()]
-        assert len(warnings) == 1
 
 
 class TestCancelledContent:

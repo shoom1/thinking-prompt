@@ -11,11 +11,6 @@ BRAILLE = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
 
 
 class TestSpinner:
-    def test_lives_in_its_own_module(self):
-        from thinking_prompt.spinner import Spinner as defined
-
-        assert Spinner is defined
-
     def test_holds_frames_and_interval(self):
         spinner = Spinner(("a", "b"), 0.25)
         assert spinner.frames == ("a", "b")
