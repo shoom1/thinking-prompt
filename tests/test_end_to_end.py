@@ -2072,6 +2072,49 @@ class TestFormFields:
     """A form of fields, then Save / Cancel: inline, one cursor walks them
     all; in a box, the fields come first, then the buttons."""
 
+    async def test_each_show_starts_from_values_as_they_are_then(self):
+        """A dialog kept for reuse with values=config: a saved change comes
+        back through the config, a cancelled one is gone."""
+        config: dict[str, Any] = {"c": False}
+        dialog = Dialog(
+            "T",
+            fields=[CheckboxField("c", "Cache"), CheckboxField("k", "Keep")],
+            values=config,
+            placement="box",
+        )
+        dialog.buttons = [
+            ButtonConfig("Save", handler=lambda: dialog.set_result(dialog.values)),
+            ButtonConfig("Cancel"),
+        ]
+        results: list[Any] = []
+
+        async def handler(text: str) -> None:
+            values = await session.show_dialog(dialog)
+            results.append(values)
+            if values is not None:
+                config.update(values)
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                inp.send_text(" " + TAB + TAB + ENTER)          # Cache on, Save
+                await wait_until(lambda: results == [{"c": True, "k": False}])
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                assert dialog.values == {"c": True, "k": False}
+                inp.send_text(DOWN + " " + TAB + TAB + ENTER)   # Keep on, Cancel
+                await wait_until(lambda: len(results) == 2)
+                assert results[1] is None
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                assert dialog.values == {"c": True, "k": False}
+                inp.send_text(TAB + TAB + TAB + ENTER)          # Cancel
+                await wait_until(lambda: len(results) == 3)
+
+            await run_with(session, handler, script)
+
     async def test_values_sit_after_their_labels_in_a_wide_terminal(self):
         items = [
             CheckboxField(key="stream", label="Stream", default=True),
@@ -2882,7 +2925,7 @@ class TestRepaintWhileRunning:
 class TestDialogFields:
     """Fields on any Dialog, driven through a running session."""
 
-    async def test_a_dialog_shown_twice_keeps_its_values_and_one_menu_float(self):
+    async def test_a_dialog_shown_twice_starts_afresh_with_one_menu_float(self):
         dialog = Dialog(
             "T",
             fields=[DropdownField("d", "Model", options=["alpha", "beta"], default="alpha")],
@@ -2909,9 +2952,9 @@ class TestDialogFields:
                 assert len(session.app.layout.container.floats) == 1
                 inp.send_text("again" + ENTER)
                 await wait_until(lambda: dialog_rendered(session))
-                assert on_screen(session, "beta")    # still beta
+                assert on_screen(session, "alpha")   # a new show starts from the default
                 inp.send_text(TAB + ENTER)
-                await wait_until(lambda: results == [{"d": "beta"}, {"d": "beta"}])
+                await wait_until(lambda: results == [{"d": "beta"}, {"d": "alpha"}])
                 assert len(session.app.layout.container.floats) == 1
 
             await run_with(session, handler, script)

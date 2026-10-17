@@ -165,6 +165,23 @@ class TestDialogFields:
     def test_no_fields_no_values(self):
         assert Dialog("T", "text", [ButtonConfig("OK")]).values == {}
 
+    def test_values_start_the_fields_over_their_defaults(self):
+        """A field in values= starts there, one not in it at its default;
+        keys that aren't fields are ignored, so a whole config will do."""
+        d = Dialog("T", fields=[
+            TextField("name", "Name", default="bob"),
+            CheckboxField("on", "On"),
+            ChecklistField("tools", "Tools", options=["a", "b"]),
+        ], values={"name": "ann", "tools": ["b"], "theme": "dark"})
+        assert d.values == {"name": "ann", "on": False, "tools": ["b"]}
+
+    def test_a_subclass_takes_values_too(self):
+        class Settings(Dialog):
+            fields = [CheckboxField("on", "On")]
+
+        assert Settings(values={"on": True}).values == {"on": True}
+        assert Settings().values == {"on": False}
+
     @pytest.mark.parametrize("bad", ["name", Field("k", "L"), ButtonConfig("OK")])
     def test_fields_must_be_field_types(self, bad):
         with pytest.raises(TypeError, match="fields"):

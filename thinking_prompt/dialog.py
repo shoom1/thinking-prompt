@@ -37,8 +37,8 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
-from collections.abc import Sequence
-from dataclasses import dataclass
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, replace
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -138,8 +138,8 @@ class Dialog:
         fields: Form fields shown under the body: TextField, CheckboxField,
             SelectField, DropdownField, ChecklistField, RadioField,
             ChoiceField. Their keys must be unique; ``values`` holds what
-            they're set to. Read when the dialog is created: setting it
-            afterwards changes nothing.
+            they're set to. Read when the dialog is created and each time
+            it's shown.
         align_values: Where field values start: "labels" (default: two
             columns after the longest label or description), "right" (the
             row's right edge) or a column number (longer labels cut with "…").
@@ -157,6 +157,15 @@ class Dialog:
             centered when those are fewer than its smallest size), "inline"
             (those rows themselves), or None (default) for the session's
             ``dialog_placement``.
+
+    The fields' starting values can also be passed to the constructor as
+    ``values``: a mapping of field keys to values, over the fields'
+    defaults (keys that aren't fields are ignored, so a whole config dict
+    will do). Each show starts afresh from these, or from the defaults: what
+    an earlier show left, cancelled edits too, is gone. The mapping is read
+    when the dialog is created and again each time it's shown, so a dialog
+    kept for reuse with ``values=config`` starts from the config as it is
+    then.
 
     Example:
         # Built with arguments
@@ -212,6 +221,7 @@ class Dialog:
         placement: Placement | None | _NotPassed = _NOT_PASSED,
         fields: Sequence[Field] | _NotPassed = _NOT_PASSED,
         align_values: AlignValues | _NotPassed = _NOT_PASSED,
+        values: Mapping[str, Any] | None = None,
     ) -> None:
         if not isinstance(placement, _NotPassed):
             check_placement(placement, optional=True)
@@ -233,9 +243,12 @@ class Dialog:
                 setattr(self, name, value)
         if self.max_height is not None and self.max_height < 1:
             raise ValueError(f"max_height must be at least 1, got {self.max_height!r}")
-        # One control per field, holding its value from now on (values).
         _check_align_values(self.align_values)
-        self._form = _Form(self.fields)
+        # Not an attribute: one named values would hide the values property.
+        self._start_values = values
+        # One control per field, holding its value (values) until the next
+        # show starts a new form.
+        self._form = self._new_form()
 
         self._result_future: asyncio.Future | None = None
         self._manager: DialogManager | None = None
@@ -259,9 +272,20 @@ class Dialog:
     @property
     def values(self) -> dict[str, Any]:
         """Each field's current value by key, in field order ({} without
-        fields): what the fields hold now, before, while or after the dialog
-        is shown. Read it from a button handler to return it."""
+        fields): the starting values before the dialog is shown, what the
+        fields hold while it is, and what they held when it closed. Read it
+        from a button handler to return it."""
         return self._form.values
+
+    def _new_form(self) -> _Form:
+        """A form of the fields, each starting at its value in ``values=``
+        (when the mapping has its key), else at its default."""
+        start = self._start_values or {}
+        return _Form([
+            replace(field, default=start[field.key])
+            if isinstance(field, Field) and field.key in start else field
+            for field in self.fields
+        ])
 
     def _content(self) -> tuple[Container | None, Container | None]:
         """What a presenter shows between the title and the buttons, and
@@ -395,9 +419,11 @@ class Dialog:
         return click
 
     def _prepare(self, manager: DialogManager, placement: Placement = "box") -> asyncio.Future:
-        """Prepare the dialog for showing (called by DialogManager)."""
+        """Prepare the dialog for showing (called by DialogManager): the
+        fields start afresh, from ``values=`` or their defaults."""
         self._manager = manager
         self._placement = placement
+        self._form = self._new_form()
         loop = asyncio.get_running_loop()
         self._result_future = loop.create_future()
         return self._result_future
