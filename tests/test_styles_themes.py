@@ -196,7 +196,7 @@ class TestStyleClassesDefined:
 
         used: set[str] = set()
         for path in pathlib.Path(thinking_prompt.__file__).parent.glob("*.py"):
-            tree = ast.parse(path.read_text())
+            tree = ast.parse(path.read_text(encoding="utf-8"))
             docstrings = {
                 id(n.value) for n in ast.walk(tree)
                 if isinstance(n, ast.Expr) and isinstance(n.value, ast.Constant)
@@ -225,7 +225,8 @@ class TestStyleClassesDefined:
         used: set[str] = set()
         for package in (thinking_prompt, prompt_toolkit):
             for path in pathlib.Path(package.__file__).parent.rglob("*.py"):
-                for name in re.findall(r"class:([A-Za-z0-9_.-]+)", path.read_text()):
+                source = path.read_text(encoding="utf-8")
+                for name in re.findall(r"class:([A-Za-z0-9_.-]+)", source):
                     parts = name.split(".")
                     used.update(".".join(parts[:i]) for i in range(1, len(parts) + 1))
 
