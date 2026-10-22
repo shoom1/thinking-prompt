@@ -25,6 +25,9 @@ For markdown and code highlighting support:
 pip install thinking-prompt[all]
 ```
 
+Requires Python 3.9–3.14. CI runs the tests on Linux, macOS and Windows;
+the UI is tested by hand in macOS terminals.
+
 ## Quick Start
 
 ```python
