@@ -135,7 +135,9 @@ class TestAddRich:
 
         (printed,) = session._display.kept
         assert isinstance(printed, ANSI)
-        assert "\x1b[32m╭" in printed.value
+        # The panel's green corner: ╭, or ┌ where Rich can't tell the console
+        # handles it (Windows without a console).
+        assert re.search("\x1b\\[32m[╭┌]", printed.value)
         assert "boxed" in echoed(session._display)[0]
         (entry,) = _entries(session)
         assert (entry.kind, entry.source) == ("ansi", printed.value)
