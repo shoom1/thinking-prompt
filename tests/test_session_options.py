@@ -150,7 +150,9 @@ class TestBanner:
         app_info = AppInfo(name="App", version="1.0", welcome_message=lambda: Panel("Hello there"))
         _, console = _banner(app_info)
         (banner,) = console
-        assert "╭" in banner and "Hello there" in banner
+        # The panel's corner: ╭, or ┌ where Rich can't tell the console
+        # handles it (Windows without a console).
+        assert ("╭" in banner or "┌" in banner) and "Hello there" in banner
         assert "App v1.0" not in banner
 
     def test_without_a_version_the_banner_shows_the_name_alone(self):
