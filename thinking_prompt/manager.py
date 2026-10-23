@@ -335,10 +335,10 @@ class ThinkingBoxManager:
         )
 
     def finish_when_owners_end(self) -> None:
-        """Have each open box ended when its task ends, if the task doesn't
-        end it itself (cancelling a task doesn't end a box it opened with
-        start_thinking()). For the boxes left open once the session's UI is
-        gone: nothing else will look at them again."""
+        """End each open box when its task ends, unless the task ends it
+        first. For the boxes left open once the session's UI is gone:
+        cancelling a task doesn't end a box it opened with start_thinking(),
+        and nothing else will look at the box again."""
         with self._lock:
             owners = {box._owner for box in self._boxes if box._owner is not None}
         for owner in owners:

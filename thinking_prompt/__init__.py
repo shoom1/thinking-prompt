@@ -26,9 +26,10 @@ Example:
     asyncio.run(session.run_async())
 
 Key bindings (defaults; set expand_key on the session):
-    Ctrl+T: Expand/collapse thinking box
-    Ctrl+C: Cancel current thinking or exit
-    Ctrl+D: Exit application (empty input line only)
+    Ctrl+T: Expand/collapse the thinking boxes
+    Ctrl+C: Cancel the running handler; at an idle prompt, end the boxes
+            nobody else will, or exit when no box is open
+    Ctrl+D: Exit (on an empty input line)
 """
 
 import logging

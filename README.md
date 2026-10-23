@@ -72,7 +72,7 @@ if __name__ == "__main__":
 | Key | Action |
 |-----|--------|
 | Ctrl+T | Expand/collapse all thinking boxes (while one is open) |
-| Ctrl+C | Cancel the running request; at an idle prompt, clear boxes nobody is feeding, or exit when there are none |
+| Ctrl+C | Cancel the running handler; at an idle prompt, end the boxes nobody else will (see [When a Box Ends](#when-a-box-ends)), or exit when no box is open |
 | Ctrl+D | Exit application (empty input line only) |
 
 Rebind Ctrl+T with `expand_key=` (see [Session Options](#session-options)).
@@ -141,20 +141,22 @@ as on a normal finish:
 - **The handler raises**: the content, then the `[ERROR] Handler error: ...` line.
 - **Left open** by a handler that returns: finished as `box.finish()` would.
 
-A box belongs to the task that opened it, and the session ends a box only
-when nobody else will:
+A box belongs to the task that opened it. The session ends a box only when
+nobody else will: its task has ended, it was opened outside asyncio (from a
+thread), or the app's own task opened it (the task running `run_async()`,
+e.g. for a startup status box). A box a live task is feeding is that task's
+to end.
 
-- When a handler ends, the session finishes the boxes it opened, and any
-  whose task has ended or that were opened outside asyncio (from a thread).
-- Ctrl+C at an idle prompt clears those boxes too, and the ones the app's
-  own task opened (the task running `run_async()`, e.g. a startup status
-  box). A box a live background task is feeding stays: that task ends it.
-  With only such boxes open, Ctrl+C doesn't exit; the status bar says
-  `Background work is running — Ctrl+D exits`.
-- On exit, the last frame leaves out the boxes and the status bar. Boxes
-  nobody else will end are echoed below it; a background task's box is
-  echoed when that task ends it, or else when the task ends (`asyncio.run`
-  cancels leftover tasks).
+- **A handler ends:** the session finishes the boxes the handler opened,
+  and those whose task has ended or that were opened outside asyncio.
+- **Ctrl+C at an idle prompt:** the session ends the boxes nobody else
+  will. If boxes that live tasks are feeding remain, Ctrl+C doesn't exit:
+  the status bar says `Background work is running — Ctrl+D exits` until
+  those boxes end or the next input is accepted.
+- **Exit:** the last frame leaves out the boxes and the status bar. The
+  boxes nobody else will end are echoed below it. A live task's box is
+  echoed when the task finishes it, or else when the task ends
+  (`asyncio.run` cancels leftover tasks at shutdown).
 
 `box.is_finished` tells whether a box is done. Calling `finish()` again
 returns the same text without echoing it twice. Writes to a finished box are
@@ -299,6 +301,12 @@ session.add_warning("Rate limit approaching")
 session.add_error("Connection failed")
 session.add_message("system", "Connecting to server...")
 ```
+
+The session sometimes puts a hint in the status bar in place of your
+status: `Busy — press Ctrl+C to cancel` when Enter is pressed while a
+handler runs, and `Background work is running — Ctrl+D exits` (see
+[When a Box Ends](#when-a-box-ends)). Your status comes back once the hint
+no longer applies; a status you set meanwhile replaces the hint.
 
 ### Dialogs
 
