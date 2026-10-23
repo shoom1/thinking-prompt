@@ -291,9 +291,7 @@ class TestSessionBoxes:
 
     async def test_thinking_yields_a_box_and_finishes_it(self):
         session = _session()
-        async with session.thinking(
-            title="Working", add_to_history=False, echo_to_console=False
-        ) as box:
+        async with session.thinking(title="Working", echo_to_console=False) as box:
             assert isinstance(box, ThinkingBox)
             assert box.title == "Working"
             box.append("hello\n")
@@ -327,13 +325,14 @@ class TestSessionBoxes:
 
 
 class TestFinishArguments:
-    """add_to_history and echo_to_console reach the echo, on every way out."""
+    """echo_to_console reaches the echo, on every way out: without it the
+    text is neither printed nor kept for a repaint."""
 
     def test_finish_keeps_the_text_out_of_history_and_console_when_told_to(self):
         session = _kept_session()
         box = session.start_thinking()
         box.append("x\n")
-        box.finish(add_to_history=False, echo_to_console=False)
+        box.finish(echo_to_console=False)
         assert _history(session) == []
         assert echoed(session._display) == []
 
@@ -348,7 +347,7 @@ class TestFinishArguments:
 
     async def test_thinking_exit_passes_the_arguments_on(self):
         session = _kept_session()
-        async with session.thinking(add_to_history=False, echo_to_console=False) as box:
+        async with session.thinking(echo_to_console=False) as box:
             box.append("x\n")
         assert _history(session) == []
         assert echoed(session._display) == []
@@ -356,9 +355,7 @@ class TestFinishArguments:
     async def test_thinking_exit_with_an_error_passes_the_arguments_on(self):
         session = _kept_session()
         with pytest.raises(RuntimeError):
-            async with session.thinking(
-                add_to_history=False, echo_to_console=False
-            ) as box:
+            async with session.thinking(echo_to_console=False) as box:
                 box.append("x\n")
                 raise RuntimeError("boom")
         assert box.is_finished
@@ -368,22 +365,20 @@ class TestFinishArguments:
     async def test_thinking_exit_echoes_when_asked_to(self):
         """Positive control for the two tests above."""
         session = _kept_session()
-        async with session.thinking(add_to_history=True, echo_to_console=True) as box:
+        async with session.thinking(echo_to_console=True) as box:
             box.append("x\n")
         assert _history(session) == ["x\n\n"]
         assert echoed(session._display) != []
 
     @pytest.mark.parametrize(
-        "add_to_history, echo_to_console, history, console",
+        "echo_to_console, history, console",
         [
-            (False, False, [], []),
-            (True, False, ["x\n\n"], []),
-            (False, True, [], ["x\n"]),
-            (True, True, ["x\n\n"], ["x\n"]),
+            (False, [], []),
+            (True, ["x\n\n"], ["x\n"]),
         ],
     )
     async def test_a_cancelled_thinking_block_passes_the_arguments_on(
-        self, add_to_history, echo_to_console, history, console
+        self, echo_to_console, history, console
     ):
         """The box's text goes where the arguments say; the cancel line
         is always said."""
@@ -391,9 +386,7 @@ class TestFinishArguments:
         opened = asyncio.Event()
 
         async def work() -> None:
-            async with session.thinking(
-                add_to_history=add_to_history, echo_to_console=echo_to_console
-            ) as box:
+            async with session.thinking(echo_to_console=echo_to_console) as box:
                 box.append("x\n")
                 opened.set()
                 await asyncio.sleep(3600)

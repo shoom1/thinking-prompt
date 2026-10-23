@@ -69,7 +69,7 @@ class TestOptions:
         box.append("x\n")
         box.finish()
         assert echoed(session._display) == []
-        assert history_texts(session._display) == ["x\n\n"]
+        assert history_texts(session._display) == []  # nor kept for a repaint
 
     def test_options_after_message_are_keyword_only(self):
         with pytest.raises(TypeError):

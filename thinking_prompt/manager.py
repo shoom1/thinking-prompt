@@ -296,7 +296,6 @@ class ThinkingBoxManager:
         self,
         box: ThinkingBox,
         *,
-        add_to_history: bool = True,
         echo_to_console: bool | None = None,
     ) -> bool:
         """End ``box``: remove it from the screen and echo its text.
@@ -304,18 +303,13 @@ class ThinkingBoxManager:
         Returns:
             False if the box had already ended (nothing is echoed again).
         """
-        ended = self._finish(
-            lambda b: b is box,
-            add_to_history=add_to_history,
-            echo_to_console=echo_to_console,
-        )
+        ended = self._finish(lambda b: b is box, echo_to_console=echo_to_console)
         return bool(ended)
 
     def finish_owned_by(
         self,
         task: asyncio.Task[Any] | None,
         *,
-        add_to_history: bool = True,
         echo_to_console: bool | None = None,
     ) -> list[ThinkingBox]:
         """End the boxes nobody but ``task`` would end; return them.
@@ -330,9 +324,7 @@ class ThinkingBoxManager:
         def owned(box: ThinkingBox) -> bool:
             return box._owner is None or box._owner is task or box._owner.done()
 
-        return self._finish(
-            owned, add_to_history=add_to_history, echo_to_console=echo_to_console
-        )
+        return self._finish(owned, echo_to_console=echo_to_console)
 
     def finish_when_owners_end(self) -> None:
         """End each open box when its task ends, unless the task ends it
@@ -348,14 +340,14 @@ class ThinkingBoxManager:
         self,
         pick: Callable[[ThinkingBox], bool],
         *,
-        add_to_history: bool,
         echo_to_console: bool | None,
     ) -> list[ThinkingBox]:
         """End the boxes ``pick`` selects, in creation order, and echo them.
 
         The echo runs after the lock is released: each box's text cut to
         its own lines at its overflow end on the console, in full in
-        history (blank text echoes nothing).
+        history (blank text echoes nothing). Without the echo the text is
+        dropped: history is what a repaint prints again.
         """
         with self._lock:
             ended = [box for box in self._boxes if pick(box)]
@@ -364,13 +356,11 @@ class ThinkingBoxManager:
                 box._close()
             self._reset_mode_if_empty()
         echo = self._echo_thinking if echo_to_console is None else echo_to_console
-        for box in ended:
+        for box in ended if echo else []:
             control = box._control
             self._display.thinking(
                 box.text,
                 truncate_lines=control.max_collapsed_lines,
-                add_to_history=add_to_history,
-                echo_to_console=echo,
                 content_format=control.content_format,
                 overflow=control.overflow,
             )

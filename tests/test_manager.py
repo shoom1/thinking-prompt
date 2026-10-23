@@ -306,16 +306,10 @@ class TestEcho:
         mgr = make_manager(display, echo_thinking=False)
         mgr.finish(mgr.create_box(lambda: "x\n"))
         assert echoed(display) == []
-        assert history_texts(display) == ["x\n\n"]
+        assert history_texts(display) == []  # nor kept for a repaint
         mgr.finish(mgr.create_box(lambda: "y\n"), echo_to_console=True)
         assert echoed(display) == ["y\n"]
-
-    def test_add_to_history_false_keeps_history_clean(self):
-        display = make_display()
-        mgr = make_manager(display)
-        mgr.finish(mgr.create_box(lambda: "x\n"), add_to_history=False)
-        assert history_texts(display) == []
-        assert echoed(display) == ["x\n"]
+        assert history_texts(display) == ["y\n\n"]
 
 
 # =============================================================================

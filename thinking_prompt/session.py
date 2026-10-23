@@ -173,7 +173,8 @@ class ThinkingPromptSession:
                 title.
             echo_input: Whether to echo user input to console before thinking.
             echo_thinking: Whether a finished box's text is printed to the
-                console when its finish call doesn't say. Default: True.
+                console (and kept for repaints) or dropped, when its finish
+                call doesn't say. Default: True.
             history_limit: Max transcript entries kept for repaints; oldest
                           trimmed. None = unbounded.
             dialog_placement: How dialogs are drawn unless they say otherwise:
@@ -702,7 +703,6 @@ class ThinkingPromptSession:
         *,
         title: str | None = None,
         content_format: ContentFormat = "plain",
-        add_to_history: bool = True,
         echo_to_console: bool | None = None,
         order: int = 0,
         max_lines: int | None = None,
@@ -715,10 +715,10 @@ class ThinkingPromptSession:
         Args:
             title: Optional title for the thinking separator.
             content_format: Format for rendering ("plain" or "ansi").
-            add_to_history: If True, add thinking content to chat history
-                when exiting the context.
-            echo_to_console: If True, print thinking content to console.
-                            If None (default), uses the session's echo_thinking.
+            echo_to_console: If True, print the box's text to the console
+                (and keep it for repaints) when the block ends; if False,
+                drop it. None (default) follows the session's
+                echo_thinking.
             order: Sort key for multiple boxes (higher = closer to prompt).
             max_lines: Max collapsed lines (overrides session default).
             overflow: Which end of overflowing content stays visible, in
@@ -768,16 +768,14 @@ class ThinkingPromptSession:
         try:
             yield box
         except asyncio.CancelledError:
-            ended = self._manager.finish(
-                box, add_to_history=add_to_history, echo_to_console=echo_to_console
-            )
+            ended = self._manager.finish(box, echo_to_console=echo_to_console)
             self._announce_cancel(ended)
             raise
         except BaseException:
-            box.finish(add_to_history=add_to_history, echo_to_console=echo_to_console)
+            box.finish(echo_to_console=echo_to_console)
             raise
         else:
-            box.finish(add_to_history=add_to_history, echo_to_console=echo_to_console)
+            box.finish(echo_to_console=echo_to_console)
 
     # =========================================================================
     # Chat History API

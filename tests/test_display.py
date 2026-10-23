@@ -298,11 +298,6 @@ class TestDisplayThinking:
         text = "".join(t for _, t in formatted)
         assert "Line 9" in text  # Full content in history
 
-    def test_skip_history_when_requested(self, display: Display):
-        """Should not add to history when add_to_history=False."""
-        display.thinking("Processing...", add_to_history=False)
-        assert display.history.is_empty
-
     def test_prints_once(self, kept_display: Display):
         kept_display.thinking("Processing...")
         assert len(kept_display.kept) == 1
@@ -503,11 +498,6 @@ class TestDisplayThinkingAnsi:
         display.thinking("   ", content_format="ansi")
         assert display.history.is_empty
 
-    def test_ansi_skip_history_when_requested(self, display: Display):
-        """ANSI thinking should not add to history when add_to_history=False."""
-        display.thinking("\033[32mtext\033[0m", add_to_history=False, content_format="ansi")
-        assert display.history.is_empty
-
     def test_ansi_truncates_when_requested(self, kept_display: Display):
         """ANSI thinking should truncate console output when truncate_lines is set."""
         lines = [f"\033[32mLine {i}\033[0m" for i in range(10)]
@@ -651,8 +641,8 @@ class TestTranscriptWiring:
         assert echoed(ThinkingPromptStyles.dark()) != echoed(ThinkingPromptStyles.light())
 
     def test_thinking_truncate_lines_recorded(self):
-        d = self._display()
-        d.thinking("l1\nl2\nl3", truncate_lines=2, echo_to_console=False)
+        d = keep_console(self._display())
+        d.thinking("l1\nl2\nl3", truncate_lines=2)
         assert d.history.iter_entries()[-1].truncate_lines == 2
 
 

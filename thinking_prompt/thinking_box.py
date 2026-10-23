@@ -238,23 +238,17 @@ class ThinkingBox:
 
     # -- finishing -------------------------------------------------------------
 
-    def finish(
-        self,
-        add_to_history: bool = True,
-        echo_to_console: bool | None = None,
-    ) -> str:
+    def finish(self, echo_to_console: bool | None = None) -> str:
         """Finish the box: remove it from the screen and echo its text.
 
         Args:
-            add_to_history: If True, add the text to the chat history.
-            echo_to_console: If True, print it to the console; None follows
-                the session's ``echo_thinking``.
+            echo_to_console: If True, print the text to the console (and keep
+                it for repaints); if False, drop it. None follows the
+                session's ``echo_thinking``.
 
         Returns:
             The box's final text. Finishing again (or after the session
             finished the box) returns it again and echoes nothing.
         """
-        self._manager.finish(
-            self, add_to_history=add_to_history, echo_to_console=echo_to_console
-        )
+        self._manager.finish(self, echo_to_console=echo_to_console)
         return self._final_text

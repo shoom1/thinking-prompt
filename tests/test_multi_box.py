@@ -34,7 +34,6 @@ class TestMultiBoxLifecycle:
 
         async with session.thinking(
             title="Outer",
-            add_to_history=False,
             echo_to_console=False,
         ) as outer_ctx:
             assert session._manager.active_count == 1
@@ -42,8 +41,7 @@ class TestMultiBoxLifecycle:
 
             async with session.thinking(
                 title="Inner",
-                add_to_history=False,
-                echo_to_console=False,
+                    echo_to_console=False,
             ) as inner_ctx:
                 assert session._manager.active_count == 2
                 inner_ctx.append("inner content\n")
@@ -62,7 +60,7 @@ class TestMultiBoxLifecycle:
         ctx = session.start_thinking(lambda: "")
         assert session.is_thinking
 
-        ctx.finish(add_to_history=False, echo_to_console=False)
+        ctx.finish(echo_to_console=False)
         assert not session.is_thinking
 
 
@@ -86,10 +84,10 @@ class TestMultiBoxOrdering:
         titles = [b._header.text for b in sorted_boxes]
         assert titles == ["B", "D", "A", "C"]
 
-        ctx_a.finish(add_to_history=False, echo_to_console=False)
-        ctx_b.finish(add_to_history=False, echo_to_console=False)
-        ctx_c.finish(add_to_history=False, echo_to_console=False)
-        ctx_d.finish(add_to_history=False, echo_to_console=False)
+        ctx_a.finish(echo_to_console=False)
+        ctx_b.finish(echo_to_console=False)
+        ctx_c.finish(echo_to_console=False)
+        ctx_d.finish(echo_to_console=False)
 
 
 # =============================================================================
@@ -112,8 +110,8 @@ class TestMultiBoxExpandCollapse:
         new_box = [b for b in boxes if b._control.content == "b"][0]
         assert not new_box._control.is_expanded
 
-        ctx1.finish(add_to_history=False, echo_to_console=False)
-        ctx2.finish(add_to_history=False, echo_to_console=False)
+        ctx1.finish(echo_to_console=False)
+        ctx2.finish(echo_to_console=False)
 
 
 class TestSessionOverflow:

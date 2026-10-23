@@ -358,6 +358,25 @@ class TestRepaintedContent:
         assert printed in repainted
 
 
+    @pytest.mark.parametrize(
+        "session_kwargs, finish_kwargs",
+        [({"echo_thinking": False}, {}), ({}, {"echo_to_console": False})],
+        ids=["echo_thinking", "echo_to_console"],
+    )
+    def test_a_box_not_echoed_is_not_repainted(self, session_kwargs, finish_kwargs):
+        """A repaint prints what was printed: a box finished without its
+        echo doesn't appear when the terminal is repainted."""
+        terminal = _ColorTerminal()
+        with create_app_session(output=terminal):
+            session = ThinkingPromptSession(**session_kwargs)
+            box = session.start_thinking()
+            box.append("unseen thought\n")
+            box.finish(**finish_kwargs)
+            session.add_response("seen reply")
+            repainted = _plain(_repainted(session, terminal))
+        assert "seen reply" in repainted
+        assert "unseen thought" not in repainted
+
 class TestRepaintAfterShrinking:
     """Once a running session's terminal stops shrinking, the transcript
     repaints the same way: banner, markdown and code rendered."""

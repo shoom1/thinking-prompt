@@ -179,8 +179,6 @@ class Display:
         content: str,
         *,
         truncate_lines: int | None = None,
-        add_to_history: bool = True,
-        echo_to_console: bool = True,
         content_format: ContentFormat = "plain",
         overflow: Overflow = "head",
     ) -> None:
@@ -191,8 +189,6 @@ class Display:
             content: The thinking content.
             truncate_lines: If set, truncate console output to this many lines.
                            History always gets full content.
-            add_to_history: If True, add to history.
-            echo_to_console: If True, print to console.
             content_format: Format of the content ("plain" or "ansi").
             overflow: Which end truncation keeps: "head" (first lines) or
                 "tail" (last lines) — match the box it came from.
@@ -201,59 +197,47 @@ class Display:
             return
 
         if content_format == "ansi":
-            self._thinking_ansi(
-                content,
-                truncate_lines=truncate_lines,
-                add_to_history=add_to_history,
-                echo_to_console=echo_to_console,
-                overflow=overflow,
-            )
+            self._thinking_ansi(content, truncate_lines=truncate_lines, overflow=overflow)
             return
 
         style = "class:history.thinking"
 
         # History gets full content, truncated on repaint to match console
-        if add_to_history:
-            self._history.append(
-                style, f"{content}\n",
-                truncate_lines=truncate_lines, truncate_overflow=overflow,
-            )
+        self._history.append(
+            style, f"{content}\n",
+            truncate_lines=truncate_lines, truncate_overflow=overflow,
+        )
 
         # Console gets possibly truncated content
-        if echo_to_console:
-            if truncate_lines is not None:
-                console_text = truncate_to_lines(content, truncate_lines, overflow=overflow) + "\n"
-            else:
-                console_text = content.rstrip() + "\n"
-            self._print_to_console(FormattedText([(style, console_text)]))
+        if truncate_lines is not None:
+            console_text = truncate_to_lines(content, truncate_lines, overflow=overflow) + "\n"
+        else:
+            console_text = content.rstrip() + "\n"
+        self._print_to_console(FormattedText([(style, console_text)]))
 
     def _thinking_ansi(
         self,
         content: str,
         *,
         truncate_lines: int | None = None,
-        add_to_history: bool = True,
-        echo_to_console: bool = True,
         overflow: Overflow = "head",
     ) -> None:
         """Output ANSI-formatted thinking content."""
         # History gets full content as baked ANSI, truncated on repaint to
         # match the console (never re-themed: ANSI escapes are already baked).
-        if add_to_history:
-            self._history.append_ansi(
-                content.rstrip() + "\n",
-                truncate_lines=truncate_lines, truncate_overflow=overflow,
-            )
+        self._history.append_ansi(
+            content.rstrip() + "\n",
+            truncate_lines=truncate_lines, truncate_overflow=overflow,
+        )
 
         # Console gets possibly truncated content
-        if echo_to_console:
-            if truncate_lines is not None:
-                console_content = truncate_ansi_to_lines(
-                    content, truncate_lines, overflow=overflow
-                ) + '\n'
-            else:
-                console_content = content.rstrip() + '\n'
-            self._print_to_console(ANSI(console_content))
+        if truncate_lines is not None:
+            console_content = truncate_ansi_to_lines(
+                content, truncate_lines, overflow=overflow
+            ) + '\n'
+        else:
+            console_content = content.rstrip() + '\n'
+        self._print_to_console(ANSI(console_content))
 
     def response(self, content: str) -> None:
         """
