@@ -26,8 +26,12 @@ async def main() -> None:
     )
 
     async def run_job(n: int, command: str) -> None:
+        # No stdin: the prompt reads the keyboard, so a job mustn't.
         proc = await asyncio.create_subprocess_shell(
-            command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT
+            command,
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
         )
         assert proc.stdout is not None
         try:
