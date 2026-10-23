@@ -210,7 +210,8 @@ when nobody else will:
   `Background work is running — Ctrl+D exits`.
 - On exit, the last frame leaves out the boxes and the status bar. Boxes
   nobody else will end are echoed below it; a background task's box is
-  echoed when that task ends it (`asyncio.run` cancels leftover tasks).
+  echoed when that task ends it, or else when the task ends (`asyncio.run`
+  cancels leftover tasks).
 
 `box.is_finished` tells whether a box is done. Calling `finish()` again
 returns the same text without echoing it twice. Writes to a finished box are

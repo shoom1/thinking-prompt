@@ -334,6 +334,16 @@ class ThinkingBoxManager:
             owned, add_to_history=add_to_history, echo_to_console=echo_to_console
         )
 
+    def finish_when_owners_end(self) -> None:
+        """Have each open box ended when its task ends, if the task doesn't
+        end it itself (cancelling a task doesn't end a box it opened with
+        start_thinking()). For the boxes left open once the session's UI is
+        gone: nothing else will look at them again."""
+        with self._lock:
+            owners = {box._owner for box in self._boxes if box._owner is not None}
+        for owner in owners:
+            owner.add_done_callback(self.finish_owned_by)
+
     def _finish(
         self,
         pick: Callable[[ThinkingBox], bool],
