@@ -14,7 +14,7 @@ from prompt_toolkit.input import create_pipe_input
 from prompt_toolkit.output import ColorDepth
 from prompt_toolkit.output.vt100 import Vt100_Output
 
-from tests.helpers import history_texts, keep_console
+from tests.helpers import keep_console, transcript_texts
 from tests.test_end_to_end import run_with, wait_until
 from thinking_prompt import AppInfo, ThinkingPromptSession, ThinkingPromptStyles
 
@@ -211,16 +211,16 @@ class TestSetTheme:
 
 
 class TestHistoryLimit:
-    def test_history_limit_keeps_the_last_entries(self):
-        s = ThinkingPromptSession(history_limit=3)
+    def test_transcript_limit_keeps_the_last_entries(self):
+        s = ThinkingPromptSession(transcript_limit=3)
         keep_console(s._display)
         for n in range(1, 5):
             s.add_response(str(n))
-        assert history_texts(s._display) == ["2\n", "3\n", "4\n"]
+        assert transcript_texts(s._display) == ["2\n", "3\n", "4\n"]
 
-    def test_history_limit_defaults_to_unbounded(self):
+    def test_transcript_limit_defaults_to_unbounded(self):
         s = ThinkingPromptSession()
-        assert s._display.history._max_entries is None
+        assert s._display.transcript._max_entries is None
 
 
 class TestRepaint:
@@ -357,6 +357,25 @@ class TestRepaintedContent:
         assert re.search("\x1b\\[0;32m[╭┌]", printed)
         assert printed in repainted
 
+
+    @pytest.mark.parametrize(
+        "session_kwargs, finish_kwargs",
+        [({"echo_thinking": False}, {}), ({}, {"echo_to_console": False})],
+        ids=["echo_thinking", "echo_to_console"],
+    )
+    def test_a_box_not_echoed_is_not_repainted(self, session_kwargs, finish_kwargs):
+        """A repaint prints what was printed: a box finished without its
+        echo doesn't appear when the terminal is repainted."""
+        terminal = _ColorTerminal()
+        with create_app_session(output=terminal):
+            session = ThinkingPromptSession(**session_kwargs)
+            box = session.start_thinking()
+            box.append("unseen thought\n")
+            box.finish(**finish_kwargs)
+            session.add_response("seen reply")
+            repainted = _plain(_repainted(session, terminal))
+        assert "seen reply" in repainted
+        assert "unseen thought" not in repainted
 
 class TestRepaintAfterShrinking:
     """Once a running session's terminal stops shrinking, the transcript

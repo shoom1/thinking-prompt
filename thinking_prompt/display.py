@@ -1,9 +1,9 @@
 """
-Display - Handles output to console and history buffer.
+Display - Handles output to console and transcript.
 
 This module provides the Display class which manages all output for
 ThinkingPromptSession, writing to both the console and the
-FormattedTextHistory (the transcript a repaint reprints). Rich and
+Transcript (what a repaint prints again). Rich and
 Pygments are used through rich_utils.
 """
 from __future__ import annotations
@@ -16,13 +16,13 @@ from prompt_toolkit.renderer import print_formatted_text as print_to_output
 from prompt_toolkit.styles import Style, default_pygments_style, default_ui_style, merge_styles
 
 from ._text import truncate_ansi_to_lines, truncate_to_lines
-from .history import FormattedTextHistory
 from .rich_utils import (
     _highlight_code,
     _is_rich_renderable,
     _markdown_to_ansi,
     _rich_to_ansi,
 )
+from .transcript import Transcript
 from .types import ContentFormat, Overflow
 
 if TYPE_CHECKING:
@@ -35,10 +35,10 @@ __all__ = ["Display"]
 
 class Display:
     """
-    Handles output to console and history buffer.
+    Handles output to console and transcript.
 
-    Writes output to the console and records it in the history: the
-    transcript a repaint prints again.
+    Writes output to the console and records it in the transcript, which a
+    repaint prints again.
     """
 
     def __init__(
@@ -46,7 +46,7 @@ class Display:
         get_style: Callable[[], Style],
         thinking_styles: ThinkingPromptStyles | None = None,
         get_color_depth: Callable[[], ColorDepth | None] = lambda: None,
-        history_limit: int | None = None,
+        transcript_limit: int | None = None,
         get_width: Callable[[], int | None] = lambda: None,
     ) -> None:
         """
@@ -60,8 +60,8 @@ class Display:
             get_color_depth: Callable that returns the effective color depth hint
                             for print_formatted_text. Defaults to a no-op
                             callable returning None.
-            history_limit: Max transcript entries kept; oldest are trimmed.
-                          None (default) means unbounded.
+            transcript_limit: Max transcript entries kept; oldest are trimmed.
+                             None (default) means unbounded.
             get_width: Callable returning the output's width in columns,
                       which Rich lays output out at (markdown, a Panel).
                       None (the default's) leaves Rich to find the
@@ -73,13 +73,13 @@ class Display:
         # The width the transcript's markdown was last rendered at.
         self._rendered_width: int | None = None
         self._thinking_styles = thinking_styles
-        # Assigned before _history is constructed: the render callbacks
+        # Assigned before _transcript is constructed: the render callbacks
         # below close over self._rich_theme/_code_theme so a later
         # set_theme() swap takes effect on the next render.
         self._rich_theme = self._create_rich_theme(thinking_styles)
         self._code_theme = thinking_styles.code_theme if thinking_styles else "monokai"
-        self._history = FormattedTextHistory(
-            max_entries=history_limit,
+        self._transcript = Transcript(
+            max_entries=transcript_limit,
             render_markdown=lambda src: _markdown_to_ansi(
                 src, theme=self._rich_theme, code_theme=self._code_theme, width=self.width
             ),
@@ -101,9 +101,9 @@ class Display:
             return None
 
     @property
-    def history(self) -> FormattedTextHistory:
-        """Get the history buffer (the transcript)."""
-        return self._history
+    def transcript(self) -> Transcript:
+        """What was printed, which a repaint prints again."""
+        return self._transcript
 
     @property
     def rich_theme(self) -> Any:
@@ -120,7 +120,7 @@ class Display:
         self._thinking_styles = styles
         self._rich_theme = self._create_rich_theme(styles)
         self._code_theme = styles.code_theme
-        self._history.invalidate_render_caches()
+        self._transcript.invalidate_render_caches()
 
     # =========================================================================
     # Core Output Helpers
@@ -133,18 +133,18 @@ class Display:
         )
 
     def _output_styled(self, style: str, text: str) -> None:
-        """Output styled text to history and console."""
-        self._history.append(style, text)
+        """Output styled text to the transcript and console."""
+        self._transcript.append(style, text)
         self._print_to_console(FormattedText([(style, text)]))
 
     def _output_ansi(self, content: str) -> None:
-        """Output baked ANSI string to console and history.
+        """Output baked ANSI string to console and transcript.
 
         Used for rich/welcome/unstyled-raw output: this content is never
         re-themed, so it's stored as a baked ANSI entry rather than parsed
         into fragments up front.
         """
-        self._history.append_ansi(content)
+        self._transcript.append_ansi(content)
         self._print_to_console(ANSI(content))
 
     # =========================================================================
@@ -153,7 +153,7 @@ class Display:
 
     def user_input(self, prompt: str, text: str) -> None:
         """
-        Output user input to console and history.
+        Output user input to console and transcript.
 
         Args:
             prompt: The prompt string that was shown.
@@ -163,8 +163,8 @@ class Display:
         # single print matching the add-time echo below. Two styled entries
         # would be reprinted separately (each print adds a trailing newline, and
         # the prefix has none of its own), splitting ">>> hello" across
-        # lines. One input is also one history_limit entry this way.
-        self._history.append_formatted([
+        # lines. One input is also one transcript_limit entry this way.
+        self._transcript.append_formatted([
             ("class:history.user-prefix", prompt),
             ("class:history.user-message", f"{text}\n"),
         ])
@@ -179,20 +179,16 @@ class Display:
         content: str,
         *,
         truncate_lines: int | None = None,
-        add_to_history: bool = True,
-        echo_to_console: bool = True,
         content_format: ContentFormat = "plain",
         overflow: Overflow = "head",
     ) -> None:
         """
-        Output thinking content to console and history.
+        Output thinking content to console and transcript.
 
         Args:
             content: The thinking content.
             truncate_lines: If set, truncate console output to this many lines.
-                           History always gets full content.
-            add_to_history: If True, add to history.
-            echo_to_console: If True, print to console.
+                           The transcript always gets full content.
             content_format: Format of the content ("plain" or "ansi").
             overflow: Which end truncation keeps: "head" (first lines) or
                 "tail" (last lines) — match the box it came from.
@@ -201,63 +197,51 @@ class Display:
             return
 
         if content_format == "ansi":
-            self._thinking_ansi(
-                content,
-                truncate_lines=truncate_lines,
-                add_to_history=add_to_history,
-                echo_to_console=echo_to_console,
-                overflow=overflow,
-            )
+            self._thinking_ansi(content, truncate_lines=truncate_lines, overflow=overflow)
             return
 
         style = "class:history.thinking"
 
-        # History gets full content, truncated on repaint to match console
-        if add_to_history:
-            self._history.append(
-                style, f"{content}\n",
-                truncate_lines=truncate_lines, truncate_overflow=overflow,
-            )
+        # The transcript gets full content, truncated on repaint to match console
+        self._transcript.append(
+            style, f"{content}\n",
+            truncate_lines=truncate_lines, truncate_overflow=overflow,
+        )
 
         # Console gets possibly truncated content
-        if echo_to_console:
-            if truncate_lines is not None:
-                console_text = truncate_to_lines(content, truncate_lines, overflow=overflow) + "\n"
-            else:
-                console_text = content.rstrip() + "\n"
-            self._print_to_console(FormattedText([(style, console_text)]))
+        if truncate_lines is not None:
+            console_text = truncate_to_lines(content, truncate_lines, overflow=overflow) + "\n"
+        else:
+            console_text = content.rstrip() + "\n"
+        self._print_to_console(FormattedText([(style, console_text)]))
 
     def _thinking_ansi(
         self,
         content: str,
         *,
         truncate_lines: int | None = None,
-        add_to_history: bool = True,
-        echo_to_console: bool = True,
         overflow: Overflow = "head",
     ) -> None:
         """Output ANSI-formatted thinking content."""
-        # History gets full content as baked ANSI, truncated on repaint to
+        # The transcript gets full content as baked ANSI, truncated on repaint to
         # match the console (never re-themed: ANSI escapes are already baked).
-        if add_to_history:
-            self._history.append_ansi(
-                content.rstrip() + "\n",
-                truncate_lines=truncate_lines, truncate_overflow=overflow,
-            )
+        self._transcript.append_ansi(
+            content.rstrip() + "\n",
+            truncate_lines=truncate_lines, truncate_overflow=overflow,
+        )
 
         # Console gets possibly truncated content
-        if echo_to_console:
-            if truncate_lines is not None:
-                console_content = truncate_ansi_to_lines(
-                    content, truncate_lines, overflow=overflow
-                ) + '\n'
-            else:
-                console_content = content.rstrip() + '\n'
-            self._print_to_console(ANSI(console_content))
+        if truncate_lines is not None:
+            console_content = truncate_ansi_to_lines(
+                content, truncate_lines, overflow=overflow
+            ) + '\n'
+        else:
+            console_content = content.rstrip() + '\n'
+        self._print_to_console(ANSI(console_content))
 
     def response(self, content: str) -> None:
         """
-        Output assistant response to console and history.
+        Output assistant response to console and transcript.
 
         Args:
             content: The response content.
@@ -266,7 +250,7 @@ class Display:
 
     def system(self, content: str) -> None:
         """
-        Output system message to console and history.
+        Output system message to console and transcript.
 
         Args:
             content: The system message content.
@@ -305,7 +289,7 @@ class Display:
         Output markdown content, rendered via Rich to ANSI.
 
         Falls back to plain text if Rich is not installed. Stored in
-        history by source so a later set_theme() can re-render it with
+        the transcript by source so a later set_theme() can re-render it with
         the new Rich theme and code theme.
 
         Args:
@@ -314,7 +298,7 @@ class Display:
         rendered = _markdown_to_ansi(
             content, theme=self._rich_theme, code_theme=self._code_theme, width=self.width
         )
-        self._history.append_markdown(content)
+        self._transcript.append_markdown(content)
         self._print_to_console(ANSI(rendered))
 
     def code(self, code: str, language: str = "python") -> None:
@@ -322,14 +306,14 @@ class Display:
         Output syntax-highlighted code.
 
         Uses Pygments for highlighting. Falls back to plain text if not
-        installed. Stored in history by source so a later set_theme() can
+        installed. Stored in the transcript by source so a later set_theme() can
         re-render it.
 
         Args:
             code: The source code to highlight.
             language: The programming language (default: "python").
         """
-        self._history.append_code(code, language)
+        self._transcript.append_code(code, language)
         self._print_to_console(
             ANSI(_highlight_code(code, language, code_theme=self._code_theme))
         )
@@ -358,12 +342,12 @@ class Display:
         Args:
             formatted_text: A FormattedText object with (style, text) pairs.
         """
-        self._history.append_formatted(formatted_text)
+        self._transcript.append_formatted(formatted_text)
         self._print_to_console(formatted_text)
 
     def rich(self, renderable: Any) -> None:
         """
-        Output a Rich renderable (Panel, Table, Text, etc.) to console and history.
+        Output a Rich renderable (Panel, Table, Text, etc.) to console and transcript.
 
         Converts the renderable to ANSI-formatted string using Rich's Console.
         Falls back to str() if Rich is not installed.
@@ -416,20 +400,20 @@ class Display:
             self._output_ansi(content)
 
     def clear(self) -> None:
-        """Clear the history buffer.
+        """Clear the transcript.
 
         Clearing the terminal screen itself is the caller's job: while
         an Application is running it must go through the renderer so the
         renderer's state stays in sync with the screen (see
         ThinkingPromptSession.clear()).
         """
-        self._history.clear()
+        self._transcript.clear()
 
-    def transcript(self) -> list[AnyFormattedText]:
+    def printed_contents(self) -> list[AnyFormattedText]:
         """Every transcript entry as the console shows it, in the current
         theme and width: what a repaint prints (print_now), as it is now.
 
-        Nothing is appended to history. Thinking entries are truncated to
+        Nothing is appended to the transcript. Thinking entries are truncated to
         their recorded truncate_lines, reproducing the form originally
         echoed.
         """
@@ -437,10 +421,10 @@ class Display:
         # another (before the terminal shrank) is rendered again.
         width = self.width
         if width != self._rendered_width:
-            self._history.invalidate_render_caches()
+            self._transcript.invalidate_render_caches()
             self._rendered_width = width
         contents: list[AnyFormattedText] = []
-        for entry in self._history.iter_entries():
+        for entry in self._transcript.iter_entries():
             if entry.kind == "styled":
                 # Mirror the add-time console normalization: stored text
                 # carries an unconditional trailing "\n" (on top of
@@ -468,7 +452,7 @@ class Display:
                     )
                 )
             else:  # markdown/code (fresh render via cache) and untruncated ansi
-                contents.append(FormattedText(self._history.render_entry(entry)))
+                contents.append(FormattedText(self._transcript.render_entry(entry)))
         return contents
 
     def print_now(self, output: Output, contents: list[AnyFormattedText]) -> None:

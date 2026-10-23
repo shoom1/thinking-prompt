@@ -1,133 +1,133 @@
 """
-Tests for FormattedTextHistory.
+Tests for Transcript.
 """
 from __future__ import annotations
 
 from prompt_toolkit.formatted_text import FormattedText
 
-from thinking_prompt.history import FormattedTextHistory, _coalesce
+from thinking_prompt.transcript import Transcript, _coalesce
 
 
-class TestFormattedTextHistoryBasics:
-    """Test basic functionality of FormattedTextHistory."""
+class TestTranscriptBasics:
+    """Test basic functionality of Transcript."""
 
-    def test_initial_state_empty(self, history: FormattedTextHistory):
+    def test_initial_state_empty(self, transcript: Transcript):
         """History should be empty when first created."""
-        assert history.is_empty
-        assert len(history) == 0
+        assert transcript.is_empty
+        assert len(transcript) == 0
 
-    def test_append_adds_an_entry(self, history: FormattedTextHistory):
+    def test_append_adds_an_entry(self, transcript: Transcript):
         """Append should add one styled entry."""
-        history.append("class:test", "Hello")
+        transcript.append("class:test", "Hello")
 
-        assert not history.is_empty
-        assert len(history) == 1
+        assert not transcript.is_empty
+        assert len(transcript) == 1
 
-    def test_each_append_is_an_entry(self, history: FormattedTextHistory):
+    def test_each_append_is_an_entry(self, transcript: Transcript):
         """Each append should add an entry of its own."""
-        history.append("class:a", "First")
-        history.append("class:b", "Second")
-        history.append("class:c", "Third")
+        transcript.append("class:a", "First")
+        transcript.append("class:b", "Second")
+        transcript.append("class:c", "Third")
 
-        assert len(history) == 3
+        assert len(transcript) == 3
 
     def test_get_formatted_text_renders_every_entry(
-        self, history: FormattedTextHistory
+        self, transcript: Transcript
     ):
         """get_formatted_text should render every entry."""
-        history.append("class:a", "First")
-        history.append("class:b", "Second")
+        transcript.append("class:a", "First")
+        transcript.append("class:b", "Second")
 
-        formatted = history.get_formatted_text()
+        formatted = transcript.get_formatted_text()
 
         assert isinstance(formatted, FormattedText)
         assert len(list(formatted)) == 2
 
     def test_get_formatted_text_preserves_styles(
-        self, history: FormattedTextHistory
+        self, transcript: Transcript
     ):
         """get_formatted_text should preserve style information."""
-        history.append("class:user", "User text")
-        history.append("class:assistant", "Assistant text")
+        transcript.append("class:user", "User text")
+        transcript.append("class:assistant", "Assistant text")
 
-        formatted = history.get_formatted_text()
+        formatted = transcript.get_formatted_text()
         fragments = list(formatted)
 
         assert fragments[0] == ("class:user", "User text")
         assert fragments[1] == ("class:assistant", "Assistant text")
 
-    def test_clear_removes_every_entry(self, history: FormattedTextHistory):
+    def test_clear_removes_every_entry(self, transcript: Transcript):
         """Clear should remove every entry."""
-        history.append("class:a", "First")
-        history.append("class:b", "Second")
-        history.clear()
+        transcript.append("class:a", "First")
+        transcript.append("class:b", "Second")
+        transcript.clear()
 
-        assert history.is_empty
-        assert len(history) == 0
+        assert transcript.is_empty
+        assert len(transcript) == 0
 
 
-class TestFormattedTextHistoryAppendFormatted:
+class TestTranscriptAppendFormatted:
     """Test append_formatted functionality."""
 
     def test_append_formatted_is_one_entry_with_its_fragments(
-        self, history: FormattedTextHistory
+        self, transcript: Transcript
     ):
         """append_formatted should accept FormattedText (or a list of tuples)."""
         fragments = [
             ("class:a", "First"),
             ("class:b", "Second"),
         ]
-        history.append_formatted(FormattedText(fragments))
+        transcript.append_formatted(FormattedText(fragments))
 
         # __len__ counts entries, not fragments: one append_formatted call
         # is one entry even though it carries two fragments.
-        assert len(history) == 1
-        assert list(history.get_formatted_text()) == fragments
+        assert len(transcript) == 1
+        assert list(transcript.get_formatted_text()) == fragments
 
-    def test_append_formatted_adds_to_existing_entries(self, history: FormattedTextHistory):
+    def test_append_formatted_adds_to_existing_entries(self, transcript: Transcript):
         """append_formatted should add an entry after the existing ones."""
-        history.append("class:existing", "Existing")
-        history.append_formatted([("class:new", "New")])
+        transcript.append("class:existing", "Existing")
+        transcript.append_formatted([("class:new", "New")])
 
-        assert len(history) == 2
+        assert len(transcript) == 2
 
 
-class TestFormattedTextHistoryEdgeCases:
+class TestTranscriptEdgeCases:
     """Test edge cases."""
 
-    def test_empty_text_is_an_entry(self, history: FormattedTextHistory):
+    def test_empty_text_is_an_entry(self, transcript: Transcript):
         """Should keep an entry with empty text."""
-        history.append("class:test", "")
-        assert len(history) == 1
+        transcript.append("class:test", "")
+        assert len(transcript) == 1
 
-    def test_empty_style_is_kept(self, history: FormattedTextHistory):
+    def test_empty_style_is_kept(self, transcript: Transcript):
         """Should handle empty style."""
-        history.append("", "Text without style")
-        formatted = history.get_formatted_text()
+        transcript.append("", "Text without style")
+        formatted = transcript.get_formatted_text()
         fragments = list(formatted)
         assert fragments[0] == ("", "Text without style")
 
-    def test_unicode_content(self, history: FormattedTextHistory):
+    def test_unicode_content(self, transcript: Transcript):
         """Should handle unicode content."""
-        history.append("class:test", "Hello 世界 🌍")
-        formatted = history.get_formatted_text()
+        transcript.append("class:test", "Hello 世界 🌍")
+        formatted = transcript.get_formatted_text()
         fragments = list(formatted)
         assert fragments[0][1] == "Hello 世界 🌍"
 
-    def test_multiline_content(self, history: FormattedTextHistory):
+    def test_multiline_content(self, transcript: Transcript):
         """Should handle multiline content."""
-        history.append("class:test", "Line 1\nLine 2\nLine 3")
-        formatted = history.get_formatted_text()
+        transcript.append("class:test", "Line 1\nLine 2\nLine 3")
+        formatted = transcript.get_formatted_text()
         fragments = list(formatted)
         assert "\n" in fragments[0][1]
 
-    def test_get_formatted_text_returns_copy(self, history: FormattedTextHistory):
+    def test_get_formatted_text_returns_copy(self, transcript: Transcript):
         """get_formatted_text should return a copy, not the internal list."""
-        history.append("class:test", "Original")
-        formatted1 = history.get_formatted_text()
+        transcript.append("class:test", "Original")
+        formatted1 = transcript.get_formatted_text()
 
-        history.append("class:test", "Added")
-        formatted2 = history.get_formatted_text()
+        transcript.append("class:test", "Added")
+        formatted2 = transcript.get_formatted_text()
 
         # First formatted text should not be affected by later additions
         assert len(list(formatted1)) == 1
@@ -164,7 +164,7 @@ class TestTypedEntries:
             calls.append(src)
             return f"\x1b[1m{src}\x1b[0m"
 
-        h = FormattedTextHistory(render_markdown=render)
+        h = Transcript(render_markdown=render)
         h.append_markdown("# Title")
         first = h.get_formatted_text()
         second = h.get_formatted_text()
@@ -174,7 +174,7 @@ class TestTypedEntries:
 
     def test_invalidate_rerenders_markdown_not_ansi(self):
         md_calls = []
-        h = FormattedTextHistory(render_markdown=lambda s: (md_calls.append(s) or s))
+        h = Transcript(render_markdown=lambda s: (md_calls.append(s) or s))
         h.append_markdown("hello")
         h.append_ansi("\x1b[31mred\x1b[0m")
         h.get_formatted_text()
@@ -187,19 +187,19 @@ class TestTypedEntries:
         assert "red" in text
 
     def test_code_entry_renders_with_language(self):
-        h = FormattedTextHistory(render_code=lambda src, lang: f"{lang}:{src}")
+        h = Transcript(render_code=lambda src, lang: f"{lang}:{src}")
         h.append_code("x = 1", "python")
         text = "".join(t for _, t in h.get_formatted_text())
         assert "python:x = 1" in text
 
     def test_render_callback_none_falls_back_to_plain(self):
-        h = FormattedTextHistory()
+        h = Transcript()
         h.append_markdown("# raw")
         text = "".join(t for _, t in h.get_formatted_text())
         assert "# raw" in text
 
     def test_max_entries_trims_oldest(self):
-        h = FormattedTextHistory(max_entries=2)
+        h = Transcript(max_entries=2)
         h.append("class:a", "one")
         h.append("class:a", "two")
         h.append("class:a", "three")
@@ -208,7 +208,7 @@ class TestTypedEntries:
         assert len(h) == 2
 
     def test_styled_and_formatted_unchanged(self):
-        h = FormattedTextHistory()
+        h = Transcript()
         h.append("class:x", "hello\n")
         h.append_formatted([("bold", "world")])
         frags = list(h.get_formatted_text())

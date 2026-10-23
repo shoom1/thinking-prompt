@@ -415,7 +415,7 @@ class TestSessionClear:
 
         session.app.renderer.clear.assert_called_once()
         assert "\033[2J" not in capsys.readouterr().out
-        assert session._display.history.is_empty
+        assert session._display.transcript.is_empty
 
     def test_clear_falls_back_to_escape_codes_when_not_running(
         self, session, capsys
@@ -529,7 +529,7 @@ class TestEchoedPrompt:
     @staticmethod
     def _echoed_prefix(session: ThinkingPromptSession) -> str:
         session.add_message("user", "hi")
-        entry = session._display.history.iter_entries()[-1]
+        entry = session._display.transcript.iter_entries()[-1]
         return entry.fragments[0][1]
 
     @pytest.mark.parametrize(
@@ -589,7 +589,7 @@ class TestHandlerErrorReporting:
 
     async def test_error_message_names_the_exception_type(self, session):
         await session._run_handler(self._raise_key_error_async(), "go")
-        last = session._display.history.iter_entries()[-1]
+        last = session._display.transcript.iter_entries()[-1]
         assert last.text == "[ERROR] Handler error: KeyError: 'x'\n"
 
     def test_library_logging_is_silent_unless_app_configures_it(self):

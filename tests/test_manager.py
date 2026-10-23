@@ -15,7 +15,7 @@ from thinking_prompt.thinking_box import ThinkingBox
 from thinking_prompt.layout import ThinkingHeader
 from thinking_prompt.spinner import Spinner
 from thinking_prompt.streaming import StreamingContent
-from tests.helpers import echoed, history_texts, make_display, make_manager
+from tests.helpers import echoed, transcript_texts, make_display, make_manager
 
 
 # =============================================================================
@@ -209,7 +209,7 @@ class TestFinish:
         box = mgr.create_box(lambda: "x\n")
         mgr.finish(box)
         assert mgr.finish(box) is False
-        assert history_texts(display) == ["x\n\n"]
+        assert transcript_texts(display) == ["x\n\n"]
 
 
 class TestFinishOwnedBy:
@@ -262,7 +262,7 @@ class TestEcho:
         mgr.finish(a)
         mgr.finish(b)
         assert echoed(display) == ["...\n3\n4\n", "1\n2\n...\n"]
-        assert history_texts(display) == ["1\n2\n3\n4\n\n", "1\n2\n3\n4\n\n"]
+        assert transcript_texts(display) == ["1\n2\n3\n4\n\n", "1\n2\n3\n4\n\n"]
 
     def test_the_echo_runs_outside_the_manager_lock(self):
         """The echo prints with the manager lock released: nothing that
@@ -291,14 +291,14 @@ class TestEcho:
         display = make_display()
         mgr = make_manager(display)
         mgr.finish(mgr.create_box(lambda: "\x1b[31mred\x1b[0m\n", content_format="ansi"))
-        (entry,) = display.history.iter_entries()
+        (entry,) = display.transcript.iter_entries()
         assert entry.kind == "ansi"
 
     def test_blank_boxes_echo_nothing(self):
         display = make_display()
         mgr = make_manager(display)
         mgr.finish(mgr.create_box(lambda: "  \n"))
-        assert history_texts(display) == []
+        assert transcript_texts(display) == []
         assert echoed(display) == []
 
     def test_echo_thinking_off_keeps_the_console_quiet_by_default(self):
@@ -306,16 +306,10 @@ class TestEcho:
         mgr = make_manager(display, echo_thinking=False)
         mgr.finish(mgr.create_box(lambda: "x\n"))
         assert echoed(display) == []
-        assert history_texts(display) == ["x\n\n"]
+        assert transcript_texts(display) == []  # nor kept for a repaint
         mgr.finish(mgr.create_box(lambda: "y\n"), echo_to_console=True)
         assert echoed(display) == ["y\n"]
-
-    def test_add_to_history_false_keeps_history_clean(self):
-        display = make_display()
-        mgr = make_manager(display)
-        mgr.finish(mgr.create_box(lambda: "x\n"), add_to_history=False)
-        assert history_texts(display) == []
-        assert echoed(display) == ["x\n"]
+        assert transcript_texts(display) == ["y\n\n"]
 
 
 # =============================================================================

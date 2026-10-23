@@ -1,5 +1,5 @@
 """
-Typed transcript history for ThinkingPromptSession.
+The transcript: what ThinkingPromptSession printed, for repaints.
 
 Stores typed entries (styled text, explicit fragments, markdown/code
 sources, baked ANSI) with per-entry render caches so theme switches can
@@ -60,7 +60,7 @@ class _Entry:
     cache: Optional[list[OneStyleAndTextTuple]] = None  # noqa: UP045
 
 
-class FormattedTextHistory:
+class Transcript:
     """
     Thread-safe typed transcript of display output.
 
@@ -71,14 +71,14 @@ class FormattedTextHistory:
     ANSI entries are baked once and never re-themed.
 
     Example:
-        history = FormattedTextHistory()
+        transcript = Transcript()
 
         # Add styled text
-        history.append("class:user", ">>> hello\\n")
-        history.append("class:response", "Hi there!\\n")
+        transcript.append("class:user", ">>> hello\\n")
+        transcript.append("class:response", "Hi there!\\n")
 
         # Get as FormattedText for display
-        formatted = history.get_formatted_text()
+        formatted = transcript.get_formatted_text()
     """
 
     def __init__(
@@ -218,7 +218,7 @@ class FormattedTextHistory:
 
     @property
     def is_empty(self) -> bool:
-        """Check if history is empty."""
+        """Check if the transcript is empty."""
         with self._lock:
             return len(self._entries) == 0
 

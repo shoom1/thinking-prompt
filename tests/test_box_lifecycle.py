@@ -17,8 +17,8 @@ LONG = "\n".join(f"line {i}" for i in range(40))
 CANCELLED = "Operation cancelled...\n"
 
 
-def _history(session: ThinkingPromptSession) -> list[str]:
-    return [entry.text for entry in session._display.history.iter_entries()]
+def _transcript(session: ThinkingPromptSession) -> list[str]:
+    return [entry.text for entry in session._display.transcript.iter_entries()]
 
 
 def _ctrl_c(session: ThinkingPromptSession):
@@ -102,7 +102,7 @@ class TestOwnership:
         assert session._manager.active_count == 1  # the background box
         gate.set()
         await asyncio.wait_for(task, 1)
-        assert any("indexed 1" in text for text in _history(session))
+        assert any("indexed 1" in text for text in _transcript(session))
 
     async def test_a_handler_ending_finishes_boxes_whose_task_ended(self):
         session = ThinkingPromptSession()
@@ -162,11 +162,11 @@ class TestOwnership:
         _ctrl_c(session)(event)
 
         assert session._manager.active_count == 1  # the background box
-        assert CANCELLED not in _history(session)
+        assert CANCELLED not in _transcript(session)
         event.app.exit.assert_not_called()
         gate.set()
         await asyncio.wait_for(task, 1)
-        assert sum("indexed 1" in text for text in _history(session)) == 1
+        assert sum("indexed 1" in text for text in _transcript(session)) == 1
 
     async def test_idle_ctrl_c_ends_the_boxes_nobody_else_will(self):
         """A box whose task ended, one with no known owner and one the
@@ -194,11 +194,11 @@ class TestOwnership:
 
         _ctrl_c(session)(event)
 
-        history = _history(session)
+        transcript = _transcript(session)
         for text in ("app's own", "task ended", "from a thread"):
-            assert sum(text in entry for entry in history) == 1
-        assert history[-1] == CANCELLED
-        assert not any("still going" in entry for entry in history)
+            assert sum(text in entry for entry in transcript) == 1
+        assert transcript[-1] == CANCELLED
+        assert not any("still going" in entry for entry in transcript)
         assert session._manager.active_count == 1
         event.app.exit.assert_not_called()
         gate.set()
@@ -215,7 +215,7 @@ class TestOwnership:
         _ctrl_c(session)(event)
 
         assert session._manager.active_count == 1  # this task's box
-        assert sum("thread" in text for text in _history(session)) == 1
+        assert sum("thread" in text for text in _transcript(session)) == 1
         event.app.exit.assert_not_called()
 
     async def test_without_a_status_bar_idle_ctrl_c_still_does_not_exit(self):
@@ -270,10 +270,10 @@ class TestCancelledContent:
 
         _ctrl_c(session)(MagicMock())
 
-        history = _history(session)
-        assert any("half done" in text for text in history)
-        assert history[-1] == CANCELLED
-        assert not any(text.startswith("[WARN]") for text in history)
+        transcript = _transcript(session)
+        assert any("half done" in text for text in transcript)
+        assert transcript[-1] == CANCELLED
+        assert not any(text.startswith("[WARN]") for text in transcript)
 
     def test_one_line_after_several_boxes(self):
         session = ThinkingPromptSession()
@@ -282,11 +282,11 @@ class TestCancelledContent:
 
         _ctrl_c(session)(MagicMock())
 
-        history = _history(session)
-        assert history.count(CANCELLED) == 1
-        assert history[-1] == CANCELLED
-        assert any("a" in text for text in history[:-1])
-        assert any("b" in text for text in history[:-1])
+        transcript = _transcript(session)
+        assert transcript.count(CANCELLED) == 1
+        assert transcript[-1] == CANCELLED
+        assert any("a" in text for text in transcript[:-1])
+        assert any("b" in text for text in transcript[:-1])
 
     def test_cancelling_an_empty_box_still_says_so(self):
         session = ThinkingPromptSession()
@@ -294,7 +294,7 @@ class TestCancelledContent:
 
         _ctrl_c(session)(MagicMock())
 
-        assert _history(session) == [CANCELLED]
+        assert _transcript(session) == [CANCELLED]
 
     async def test_ctrl_c_during_a_handler_says_so_once(self):
         session = ThinkingPromptSession()
@@ -313,10 +313,10 @@ class TestCancelledContent:
         _ctrl_c(session)(event)
         await asyncio.wait_for(run, 1)
 
-        history = _history(session)
-        assert sum("working" in text for text in history) == 1
-        assert history.count(CANCELLED) == 1
-        assert history[-1] == CANCELLED
+        transcript = _transcript(session)
+        assert sum("working" in text for text in transcript) == 1
+        assert transcript.count(CANCELLED) == 1
+        assert transcript[-1] == CANCELLED
 
     async def test_ctrl_c_says_so_once_after_the_boxes_of_the_handlers_subtasks(self):
         session = ThinkingPromptSession()
@@ -341,11 +341,11 @@ class TestCancelledContent:
         _ctrl_c(session)(event)
         await asyncio.wait_for(run, 1)
 
-        history = _history(session)
-        assert history.count(CANCELLED) == 1
-        assert history[-1] == CANCELLED
-        assert any("a working" in text for text in history)
-        assert any("b working" in text for text in history)
+        transcript = _transcript(session)
+        assert transcript.count(CANCELLED) == 1
+        assert transcript[-1] == CANCELLED
+        assert any("a working" in text for text in transcript)
+        assert any("b working" in text for text in transcript)
 
     async def test_a_cancelled_thinking_block_echoes_then_says_so(self):
         session = ThinkingPromptSession()
@@ -363,9 +363,9 @@ class TestCancelledContent:
         with pytest.raises(asyncio.CancelledError):
             await task
 
-        history = _history(session)
-        assert any("step 1" in text for text in history)
-        assert history[-1] == CANCELLED
+        transcript = _transcript(session)
+        assert any("step 1" in text for text in transcript)
+        assert transcript[-1] == CANCELLED
 
     async def test_a_failing_thinking_block_echoes_without_the_cancel_line(self):
         session = ThinkingPromptSession()
@@ -374,9 +374,9 @@ class TestCancelledContent:
                 ctx.append("step 1\n")
                 raise RuntimeError("boom")
 
-        history = _history(session)
-        assert any("step 1" in text for text in history)
-        assert CANCELLED not in history
+        transcript = _transcript(session)
+        assert any("step 1" in text for text in transcript)
+        assert CANCELLED not in transcript
 
     async def test_a_handler_error_echoes_content_then_the_error(self):
         session = ThinkingPromptSession()
@@ -387,10 +387,10 @@ class TestCancelledContent:
 
         await session._run_handler(handler, "go")
 
-        history = _history(session)
-        index = next(i for i, text in enumerate(history) if "step 1" in text)
-        assert history[index + 1].startswith("[ERROR] Handler error: KeyError")
-        assert CANCELLED not in history
+        transcript = _transcript(session)
+        index = next(i for i, text in enumerate(transcript) if "step 1" in text)
+        assert transcript[index + 1].startswith("[ERROR] Handler error: KeyError")
+        assert CANCELLED not in transcript
 
     async def test_a_box_left_open_by_a_handler_is_finished_normally(self):
         session = ThinkingPromptSession()
@@ -400,9 +400,9 @@ class TestCancelledContent:
 
         await session._run_handler(handler, "go")
 
-        history = _history(session)
-        assert any("result" in text for text in history)
-        assert CANCELLED not in history
+        transcript = _transcript(session)
+        assert any("result" in text for text in transcript)
+        assert CANCELLED not in transcript
 
 
 class TestCallbackErrors:

@@ -172,8 +172,9 @@ box = session.start_thinking(title="Processing")
 box.append("Processing...\n")
 await asyncio.sleep(0.5)
 
-# Finish this specific box and optionally echo to console
-box.finish(add_to_history=True, echo_to_console=True)
+# Finish this box: its text is printed above the prompt
+# (echo_to_console=False drops it instead)
+box.finish()
 ```
 
 To show text you already hold, pass a content callback instead. The box
@@ -189,8 +190,8 @@ box.finish()
 
 ### When a Box Ends
 
-A box's content is kept however it ends, echoed to the console and history
-as on a normal finish:
+A box's content is kept however it ends, echoed to the console as on a
+normal finish:
 
 - **Cancelled** (Ctrl+C, or the task running a `thinking()` block is
   cancelled): the content, then one `Operation cancelled...` line after all
@@ -242,7 +243,7 @@ idle prompt costs no CPU:
   window re-wraps the UI's full-width rows and a shorter one pushes its top
   into scrollback, so the old frame can't be erased row by row. Shell
   output from before the session, anything printed outside it (plain
-  `print()`) and entries `history_limit` dropped don't come back.
+  `print()`) and entries `transcript_limit` dropped don't come back.
 
 ### Long Content
 
@@ -280,7 +281,7 @@ dl = session.start_thinking(title="Download", max_lines=2)
 for pct in range(0, 101, 20):
     dl.set_line(0, f"  {pct}% complete")
     await asyncio.sleep(0.3)
-dl.finish(echo_to_console=False, add_to_history=False)
+dl.finish(echo_to_console=False)
 tasks.set_line_rich(0, "[green]  ✓ Download[/green]")
 
 # Step 2: another detail box
@@ -289,11 +290,11 @@ proc = session.start_thinking(title="Process", max_lines=2)
 for i in range(5):
     proc.set_line(0, f"  Batch {i+1}/5...")
     await asyncio.sleep(0.4)
-proc.finish(echo_to_console=False, add_to_history=False)
+proc.finish(echo_to_console=False)
 tasks.set_line_rich(1, "[green]  ✓ Process[/green]")
 
 # Finish task list
-tasks.finish(echo_to_console=False, add_to_history=False)
+tasks.finish(echo_to_console=False)
 ```
 
 ### Rich/ANSI Content in Thinking Box
@@ -614,7 +615,7 @@ session = ThinkingPromptSession(
     thinking_title="Thinking",   # Header title of boxes started without one
     spinner=Spinner.DOTS,        # Spinner.LINE, Spinner.ELLIPSIS, your own, or None
     spinner_position="before",   # "before" or "after" the title
-    echo_thinking=True,          # Echo a finished box to the console
+    echo_thinking=True,          # Echo a finished box to the console (False: drop it)
 )
 ```
 
@@ -705,10 +706,10 @@ colorless rendering regardless of theme, while keeping bold/italic.
 | `assistant_prefix`, `select_value`, `user_separator` | Removed: no component drew with them. |
 | `checkbox_mark` (styled nothing) | Now styles the `[x]` / `(•)` marks of check and radio lists. |
 
-Bound history growth for long sessions:
+Bound transcript growth for long sessions:
 
 ```python
-session = ThinkingPromptSession(history_limit=1000)  # max transcript entries
+session = ThinkingPromptSession(transcript_limit=1000)  # max transcript entries
 ```
 
 ## Examples
@@ -720,7 +721,7 @@ See the `examples/` directory for complete demos:
 - `streaming.py` - Character-by-character streaming
 - `chat_demo.py` - Chat-style conversation loop
 - `claude_chat.py` - Chat with Claude: its thinking streams into a box, its answer prints as markdown (needs `anthropic` and an API key)
-- `clear_demo.py` - Clearing the screen and history with `session.clear()`
+- `clear_demo.py` - Clearing the screen and transcript with `session.clear()`
 - `progress_demo.py` - Progress bar with callback
 - `demo_progress_line.py` - In-place progress updates
 - `demo_multi_box.py` - Multiple concurrent thinking boxes with task list

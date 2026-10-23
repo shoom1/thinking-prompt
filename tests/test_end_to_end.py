@@ -23,7 +23,7 @@ from prompt_toolkit.layout import BufferControl
 from prompt_toolkit.output import DummyOutput
 from prompt_toolkit.widgets import TextArea
 
-from tests.helpers import history_texts
+from tests.helpers import transcript_texts
 from thinking_prompt import (
     ButtonConfig,
     CheckboxField,
@@ -139,7 +139,7 @@ def echoed_inputs(session: ThinkingPromptSession) -> list[str]:
     """User inputs echoed into the transcript, in order."""
     return [
         entry.fragments[1][1].rstrip("\n")
-        for entry in session._display.history.iter_entries()
+        for entry in session._display.transcript.iter_entries()
         if entry.kind == "formatted"
     ]
 
@@ -321,7 +321,7 @@ class TestBoxLifecycle:
 
     async def test_a_background_box_survives_an_unrelated_handler(self):
         """A box opened by a background task stays open when a handler
-        that didn't open it ends, and finishes into history normally."""
+        that didn't open it ends, and finishes into the transcript normally."""
         delivered: list[str] = []
         opened, gate = asyncio.Event(), asyncio.Event()
 
@@ -346,7 +346,7 @@ class TestBoxLifecycle:
                 gate.set()
                 await asyncio.wait_for(task, 2)
                 assert not session.is_thinking
-                assert any("indexed 1" in text for text in history_texts(session._display))
+                assert any("indexed 1" in text for text in transcript_texts(session._display))
 
             await run_with(session, handler, script)
 
@@ -364,9 +364,9 @@ class TestBoxLifecycle:
                 inp.send_text(CTRL_C)
                 await wait_until(lambda: waiting_for_input(session) and not session.is_thinking)
 
-                history = history_texts(session._display)
-                assert sum("working" in text for text in history) == 1
-                assert history[-1] == "Operation cancelled...\n"
+                transcript = transcript_texts(session._display)
+                assert sum("working" in text for text in transcript) == 1
+                assert transcript[-1] == "Operation cancelled...\n"
                 assert not run.done()
 
             await run_with(session, handler, script)
@@ -653,7 +653,7 @@ class TestQuickStart:
             try:
                 await wait_until(lambda: waiting_for_input(session))
                 inp.send_text("hello" + ENTER)
-                await wait_until(lambda: "You said: hello\n" in history_texts(session._display))
+                await wait_until(lambda: "You said: hello\n" in transcript_texts(session._display))
             finally:
                 session.exit()
                 await asyncio.wait_for(run, timeout=2)
@@ -683,7 +683,7 @@ class TestHandlerErrors:
             async def script(run: asyncio.Task[None]) -> None:
                 inp.send_text("boom" + ENTER)
                 await wait_until(
-                    lambda: "[ERROR] Handler error: KeyError: 'x'\n" in history_texts(session._display)
+                    lambda: "[ERROR] Handler error: KeyError: 'x'\n" in transcript_texts(session._display)
                 )
                 await wait_until(lambda: waiting_for_input(session))
                 inp.send_text("next" + ENTER)
@@ -882,7 +882,7 @@ class TestBackgroundHint:
                 inp.send_text(CTRL_C)
                 await wait_until(lambda: on_screen(session, BACKGROUND_HINT))
                 assert session.is_thinking and not run.done()
-                assert "Operation cancelled...\n" not in history_texts(session._display)
+                assert "Operation cancelled...\n" not in transcript_texts(session._display)
 
                 gate.set()
                 await asyncio.wait_for(task, 2)
@@ -904,7 +904,7 @@ class TestBackgroundHint:
                 await wait_until(lambda: session.default_buffer.text == "x")
                 assert not run.done() and session.is_thinking
                 assert session.status_text == BACKGROUND_HINT
-                assert "Operation cancelled...\n" not in history_texts(session._display)
+                assert "Operation cancelled...\n" not in transcript_texts(session._display)
                 gate.set()
                 await asyncio.wait_for(task, 2)
 
@@ -1022,8 +1022,8 @@ class TestExit:
                 inp.send_text(CTRL_D)
                 await asyncio.wait_for(run, 2)
                 assert not session.is_thinking
-                history = history_texts(session._display)
-                assert sum("starting up" in text for text in history) == 1
+                transcript = transcript_texts(session._display)
+                assert sum("starting up" in text for text in transcript) == 1
 
             await run_with(
                 session, lambda text: None, script,
@@ -1075,8 +1075,8 @@ class TestExit:
                     await task
                 await wait_until(lambda: not session.is_thinking)
                 assert "".join(output.written[mark:]).count("watched 1") == 1
-                history = history_texts(session._display)
-                assert sum("watched 1" in text for text in history) == 1
+                transcript = transcript_texts(session._display)
+                assert sum("watched 1" in text for text in transcript) == 1
 
             await run_with(session, lambda text: None, script)
 
@@ -1096,8 +1096,8 @@ class TestExit:
                 await wait_until(lambda: session.is_thinking)
                 session.exit()
                 await asyncio.wait_for(run, 2)
-                history = history_texts(session._display)
-                assert sum("working" in text for text in history) == 1
+                transcript = transcript_texts(session._display)
+                assert sum("working" in text for text in transcript) == 1
                 assert not session.is_thinking
 
             await run_with(session, handler, script)

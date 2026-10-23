@@ -243,25 +243,25 @@ class TestDisplayInit:
         assert display._get_style() is default_style
 
     def test_creates_empty_history(self, display: Display):
-        """Should start with empty history."""
-        assert display.history.is_empty
+        """Should start with an empty transcript."""
+        assert display.transcript.is_empty
 
 
 class TestDisplayUserInput:
     """Test Display.user_input method."""
 
     def test_adds_to_history(self, display: Display):
-        """Should add prompt and text to history."""
+        """Should add prompt and text to the transcript."""
         display.user_input(">>> ", "hello")
-        formatted = display.history.get_formatted_text()
+        formatted = display.transcript.get_formatted_text()
         text = "".join(t for _, t in formatted)
         assert ">>> " in text
         assert "hello" in text
 
     def test_history_has_correct_styles(self, display: Display):
-        """Should use correct style classes in history."""
+        """Should use correct style classes in the transcript."""
         display.user_input(">>> ", "hello")
-        formatted = display.history.get_formatted_text()
+        formatted = display.transcript.get_formatted_text()
         styles = [s for s, _ in formatted]
         assert "class:history.user-prefix" in styles
         assert "class:history.user-message" in styles
@@ -276,9 +276,9 @@ class TestDisplayThinking:
     """Test Display.thinking method."""
 
     def test_adds_to_history(self, display: Display):
-        """Should add thinking content to history."""
+        """Should add thinking content to the transcript."""
         display.thinking("Processing...")
-        formatted = display.history.get_formatted_text()
+        formatted = display.transcript.get_formatted_text()
         text = "".join(t for _, t in formatted)
         assert "Processing..." in text
 
@@ -286,7 +286,7 @@ class TestDisplayThinking:
         """Should skip empty or whitespace-only content."""
         display.thinking("")
         display.thinking("   ")
-        assert display.history.is_empty
+        assert display.transcript.is_empty
 
     def test_truncates_when_requested(self, kept_display: Display):
         """Should truncate console output when truncate_lines is set."""
@@ -294,14 +294,9 @@ class TestDisplayThinking:
         kept_display.thinking(content, truncate_lines=3)
         assert echoed(kept_display) == ["Line 0\nLine 1\nLine 2\n...\n"]
         # History should have full content
-        formatted = kept_display.history.get_formatted_text()
+        formatted = kept_display.transcript.get_formatted_text()
         text = "".join(t for _, t in formatted)
-        assert "Line 9" in text  # Full content in history
-
-    def test_skip_history_when_requested(self, display: Display):
-        """Should not add to history when add_to_history=False."""
-        display.thinking("Processing...", add_to_history=False)
-        assert display.history.is_empty
+        assert "Line 9" in text  # Full content in the transcript
 
     def test_prints_once(self, kept_display: Display):
         kept_display.thinking("Processing...")
@@ -312,23 +307,23 @@ class TestDisplayResponse:
     """Test Display.response method."""
 
     def test_adds_to_history(self, display: Display):
-        """Should add response to history."""
+        """Should add response to the transcript."""
         display.response("Hello, world!")
-        formatted = display.history.get_formatted_text()
+        formatted = display.transcript.get_formatted_text()
         text = "".join(t for _, t in formatted)
         assert "Hello, world!" in text
 
     def test_uses_correct_style(self, display: Display):
         """Should use assistant-message style."""
         display.response("Hello")
-        formatted = display.history.get_formatted_text()
+        formatted = display.transcript.get_formatted_text()
         styles = [s for s, _ in formatted]
         assert "class:history.assistant-message" in styles
 
     def test_empty_content_is_added_and_printed(self, kept_display: Display):
-        """Empty content still goes to history and to the console."""
+        """Empty content still goes to the transcript and to the console."""
         kept_display.response("")
-        assert len(kept_display.history) == 1
+        assert len(kept_display.transcript) == 1
         assert echoed(kept_display) == ["\n"]
 
 
@@ -336,36 +331,36 @@ class TestDisplaySystemMessages:
     """Test Display system, error, warning, success methods."""
 
     def test_system_adds_to_history(self, display: Display):
-        """System message should be added to history."""
+        """System message should be added to the transcript."""
         display.system("System message")
-        text = "".join(t for _, t in display.history.get_formatted_text())
+        text = "".join(t for _, t in display.transcript.get_formatted_text())
         assert "System message" in text
 
     def test_error_has_prefix(self, display: Display):
         """Error should have [ERROR] prefix."""
         display.error("Something failed")
-        text = "".join(t for _, t in display.history.get_formatted_text())
+        text = "".join(t for _, t in display.transcript.get_formatted_text())
         assert "[ERROR]" in text
         assert "Something failed" in text
 
     def test_warning_has_prefix(self, display: Display):
         """Warning should have [WARN] prefix."""
         display.warning("Be careful")
-        text = "".join(t for _, t in display.history.get_formatted_text())
+        text = "".join(t for _, t in display.transcript.get_formatted_text())
         assert "[WARN]" in text
         assert "Be careful" in text
 
     def test_success_has_prefix(self, display: Display):
         """Success should have [OK] prefix."""
         display.success("Done")
-        text = "".join(t for _, t in display.history.get_formatted_text())
+        text = "".join(t for _, t in display.transcript.get_formatted_text())
         assert "[OK]" in text
         assert "Done" in text
 
     def test_empty_content_is_added_and_printed_with_its_prefix(self, kept_display: Display):
-        """Empty content still goes to history and to the console, prefixed."""
+        """Empty content still goes to the transcript and to the console, prefixed."""
         kept_display.error("")
-        assert len(kept_display.history) == 1
+        assert len(kept_display.transcript) == 1
         assert echoed(kept_display) == ["[ERROR] \n"]
 
 
@@ -389,9 +384,9 @@ class TestDisplayWelcome:
     """Test Display.welcome method."""
 
     def test_plain_text_adds_to_history(self, display: Display):
-        """Plain text welcome should be added to history."""
+        """Plain text welcome should be added to the transcript."""
         display.welcome("Welcome!")
-        text = "".join(t for _, t in display.history.get_formatted_text())
+        text = "".join(t for _, t in display.transcript.get_formatted_text())
         assert "Welcome!" in text
 
     def test_rich_renderable_converted(self, kept_display: Display):
@@ -403,7 +398,7 @@ class TestDisplayWelcome:
                 return "Rich content"
 
         kept_display.welcome(FakeRenderable())
-        text = "".join(t for _, t in kept_display.history.get_formatted_text())
+        text = "".join(t for _, t in kept_display.transcript.get_formatted_text())
         assert text == "Rich content\n"
         assert echoed(kept_display) == ["Rich content\n"]
 
@@ -411,7 +406,7 @@ class TestDisplayWelcome:
     def test_empty_content_prints_nothing(self, content):
         display = make_display()
         display.welcome(content)
-        assert display.history.is_empty
+        assert display.transcript.is_empty
         assert echoed(display) == []
 
 
@@ -419,10 +414,10 @@ class TestDisplayFormatted:
     """Test Display.formatted method."""
 
     def test_adds_to_history(self, display: Display):
-        """FormattedText should be added to history."""
+        """FormattedText should be added to the transcript."""
         ft = FormattedText([("bold", "Hello")])
         display.formatted(ft)
-        formatted = display.history.get_formatted_text()
+        formatted = display.transcript.get_formatted_text()
         assert len(formatted) > 0
 
     def test_prints_formatted_text(self, kept_display: Display):
@@ -436,15 +431,15 @@ class TestDisplayRaw:
     """Test Display.raw method."""
 
     def test_adds_to_history(self, display: Display):
-        """Raw content should be added to history."""
+        """Raw content should be added to the transcript."""
         display.raw("Raw content")
-        text = "".join(t for _, t in display.history.get_formatted_text())
+        text = "".join(t for _, t in display.transcript.get_formatted_text())
         assert "Raw content" in text
 
     def test_with_style_class(self, display: Display):
         """Should apply style class when provided."""
         display.raw("Styled", style_class="class:custom")
-        formatted = display.history.get_formatted_text()
+        formatted = display.transcript.get_formatted_text()
         styles = [s for s, _ in formatted]
         assert "class:custom" in styles
 
@@ -464,11 +459,11 @@ class TestDisplayClear:
     """Test Display.clear method."""
 
     def test_clears_history(self, display: Display):
-        """Should clear the history buffer."""
+        """Should clear the transcript."""
         display.response("Hello")
-        assert not display.history.is_empty
+        assert not display.transcript.is_empty
         display.clear()
-        assert display.history.is_empty
+        assert display.transcript.is_empty
 
 
 # =============================================================================
@@ -480,19 +475,19 @@ class TestDisplayThinkingAnsi:
     """Test Display.thinking() with ANSI format."""
 
     def test_ansi_adds_to_history(self, display: Display):
-        """ANSI thinking content should be added to history as fragments."""
+        """ANSI thinking content should be added to the transcript as fragments."""
         content = "\033[32m✓ Done\033[0m"
         display.thinking(content, content_format="ansi")
-        formatted = display.history.get_formatted_text()
+        formatted = display.transcript.get_formatted_text()
         assert len(formatted) > 0
         text = "".join(t for _, t in formatted)
         assert "✓ Done" in text
 
     def test_ansi_history_has_no_thinking_style(self, display: Display):
-        """ANSI content in history should NOT use class:history.thinking style."""
+        """ANSI content in the transcript should NOT use class:history.thinking style."""
         content = "\033[32m✓ Done\033[0m"
         display.thinking(content, content_format="ansi")
-        formatted = display.history.get_formatted_text()
+        formatted = display.transcript.get_formatted_text()
         styles = [s for s, _ in formatted]
         # Should not use the plain thinking style
         assert "class:history.thinking" not in styles
@@ -501,12 +496,7 @@ class TestDisplayThinkingAnsi:
         """ANSI thinking should skip empty content."""
         display.thinking("", content_format="ansi")
         display.thinking("   ", content_format="ansi")
-        assert display.history.is_empty
-
-    def test_ansi_skip_history_when_requested(self, display: Display):
-        """ANSI thinking should not add to history when add_to_history=False."""
-        display.thinking("\033[32mtext\033[0m", add_to_history=False, content_format="ansi")
-        assert display.history.is_empty
+        assert display.transcript.is_empty
 
     def test_ansi_truncates_when_requested(self, kept_display: Display):
         """ANSI thinking should truncate console output when truncate_lines is set."""
@@ -515,7 +505,7 @@ class TestDisplayThinkingAnsi:
         kept_display.thinking(content, truncate_lines=3, content_format="ansi")
         assert echoed(kept_display) == ["Line 0\nLine 1\nLine 2\n...\n"]
         # History should have full content
-        formatted = kept_display.history.get_formatted_text()
+        formatted = kept_display.transcript.get_formatted_text()
         text = "".join(t for _, t in formatted)
         assert "Line 9" in text
 
@@ -528,7 +518,7 @@ class TestDisplayThinkingAnsi:
     def test_plain_format_unchanged(self, display: Display):
         """Plain format should work the same as before."""
         display.thinking("Processing...", content_format="plain")
-        formatted = display.history.get_formatted_text()
+        formatted = display.transcript.get_formatted_text()
         styles = [s for s, _ in formatted]
         assert "class:history.thinking" in styles
 
@@ -597,7 +587,7 @@ class TestTranscriptWiring:
         d = self._display()
         with create_app_session(output=create_output()):
             d.markdown("# Hello")
-        entries = d.history.iter_entries()
+        entries = d.transcript.iter_entries()
         assert entries[-1].kind == "markdown"
         assert entries[-1].source == "# Hello"
         assert "Hello" in capsys.readouterr().out
@@ -605,7 +595,7 @@ class TestTranscriptWiring:
     def test_code_stored_as_source(self, capsys):
         d = self._display()
         d.code("x = 1", "python")
-        entries = d.history.iter_entries()
+        entries = d.transcript.iter_entries()
         assert entries[-1].kind == "code"
         assert entries[-1].language == "python"
 
@@ -614,7 +604,7 @@ class TestTranscriptWiring:
         from rich.text import Text
         d = self._display()
         d.rich(Text("boxed"))
-        assert d.history.iter_entries()[-1].kind == "ansi"
+        assert d.transcript.iter_entries()[-1].kind == "ansi"
 
     def test_set_theme_invalidates_markdown_cache_and_code_theme(self, monkeypatch):
         pytest.importorskip("rich")
@@ -623,9 +613,9 @@ class TestTranscriptWiring:
         monkeypatch.delenv("NO_COLOR", raising=False)
         d = self._display()
         d.markdown("```python\nx = 1\n```")
-        before = list(d.history.get_formatted_text())
+        before = list(d.transcript.get_formatted_text())
         d.set_theme(ThinkingPromptStyles.light())
-        after = list(d.history.get_formatted_text())
+        after = list(d.transcript.get_formatted_text())
         assert before != after  # monokai vs default code theme
 
     def test_set_theme_rerenders_add_code_in_new_theme(self):
@@ -633,9 +623,9 @@ class TestTranscriptWiring:
         from thinking_prompt.styles import ThinkingPromptStyles
         d = self._display()
         d.code("def hello():\n    return 'world'", "python")
-        before = list(d.history.get_formatted_text())
+        before = list(d.transcript.get_formatted_text())
         d.set_theme(ThinkingPromptStyles.light())
-        after = list(d.history.get_formatted_text())
+        after = list(d.transcript.get_formatted_text())
         assert before != after
 
     def test_add_code_console_echo_follows_theme(self):
@@ -651,9 +641,9 @@ class TestTranscriptWiring:
         assert echoed(ThinkingPromptStyles.dark()) != echoed(ThinkingPromptStyles.light())
 
     def test_thinking_truncate_lines_recorded(self):
-        d = self._display()
-        d.thinking("l1\nl2\nl3", truncate_lines=2, echo_to_console=False)
-        assert d.history.iter_entries()[-1].truncate_lines == 2
+        d = keep_console(self._display())
+        d.thinking("l1\nl2\nl3", truncate_lines=2)
+        assert d.transcript.iter_entries()[-1].truncate_lines == 2
 
 
 def _texts(contents) -> list[str]:
@@ -674,7 +664,7 @@ class TestThinkingEchoRepaintParity:
     def test_content_that_fits_is_not_marked_truncated(self, kept_display, fmt):
         kept_display.thinking("a\nb\n", truncate_lines=2, content_format=fmt)
         echoed = self._printed(kept_display)
-        repainted = _texts(kept_display.transcript())
+        repainted = _texts(kept_display.printed_contents())
 
         assert echoed == ["a\nb\n"]
         assert repainted == echoed
@@ -697,5 +687,5 @@ class TestThinkingEchoTail:
             content, truncate_lines=3, content_format=fmt, overflow="tail"
         )
         echoed = self._printed(kept_display)
-        assert _texts(kept_display.transcript()) == echoed
+        assert _texts(kept_display.printed_contents()) == echoed
         assert echoed == ["...\nline 7\nline 8\nline 9\n"]

@@ -447,7 +447,7 @@ class TestDialogButtons:
             d._click_handler(d._button_configs()[0])()
 
         assert d._result_future is not None and not d._result_future.done()
-        last = session._display.history.iter_entries()[-1]
+        last = session._display.transcript.iter_entries()[-1]
         assert last.text == "[ERROR] Dialog button error: KeyError: 'x'\n"
         assert any(r.exc_info and r.exc_info[0] is KeyError for r in caplog.records)
 
@@ -473,7 +473,7 @@ class TestDialogButtons:
             d._click_handler(d._button_configs()[0])()
 
         assert d._result_future is not None and not d._result_future.done()
-        last = session._display.history.iter_entries()[-1]
+        last = session._display.transcript.iter_entries()[-1]
         assert last.text == (
             "[ERROR] Dialog button error: TypeError: button handler returned "
             "an awaitable; handlers must be regular functions\n"

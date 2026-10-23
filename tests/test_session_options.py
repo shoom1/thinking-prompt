@@ -6,7 +6,7 @@ import dataclasses
 import pytest
 from prompt_toolkit.keys import Keys
 
-from tests.helpers import echoed, history_texts, keep_console
+from tests.helpers import echoed, keep_console, transcript_texts
 from thinking_prompt import AppInfo, Spinner, ThinkingPromptSession
 
 
@@ -69,7 +69,7 @@ class TestOptions:
         box.append("x\n")
         box.finish()
         assert echoed(session._display) == []
-        assert history_texts(session._display) == ["x\n\n"]
+        assert transcript_texts(session._display) == []  # nor kept for a repaint
 
     def test_options_after_message_are_keyword_only(self):
         with pytest.raises(TypeError):
@@ -116,11 +116,11 @@ class TestStatusBar:
 
 
 def _banner(app_info: AppInfo | None) -> tuple[list[str], list[str]]:
-    """What the session's banner put in history and on the console."""
+    """What the session's banner put in the transcript and on the console."""
     session = ThinkingPromptSession(app_info=app_info)
     keep_console(session._display)
     session._print_welcome()
-    return history_texts(session._display), echoed(session._display)
+    return transcript_texts(session._display), echoed(session._display)
 
 
 class TestBanner:
@@ -172,4 +172,4 @@ class TestBanner:
         banner = echoed(session._display)[0]
         assert "App v1.0" in banner
         assert echoed(session._display) == [banner, "x\n", banner]
-        assert [entry.source for entry in session._display.history.iter_entries()] == [banner]
+        assert [entry.source for entry in session._display.transcript.iter_entries()] == [banner]
