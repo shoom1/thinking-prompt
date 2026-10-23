@@ -15,8 +15,6 @@ from typing import Callable, Optional
 from prompt_toolkit.formatted_text import ANSI, FormattedText, to_formatted_text
 from prompt_toolkit.formatted_text.base import OneStyleAndTextTuple
 
-from .types import Overflow
-
 
 def _coalesce(fragments: list[OneStyleAndTextTuple]) -> list[OneStyleAndTextTuple]:
     """Merge adjacent fragments with identical style; drop empty text.
@@ -54,9 +52,6 @@ class _Entry:
     # resolving this dataclass's hints at runtime on the Python 3.9 floor
     # (typing.get_type_hints(), dataclass introspection tooling) raises
     # TypeError for `X | None` pre-3.10; Optional stays resolvable.
-    truncate_lines: Optional[int] = None  # noqa: UP045
-    # Which end truncate_lines keeps on repaint — as it was echoed.
-    truncate_overflow: Overflow = "head"
     cache: Optional[list[OneStyleAndTextTuple]] = None  # noqa: UP045
 
 
@@ -100,28 +95,15 @@ class Transcript:
                 while len(self._entries) > self._max_entries:
                     self._entries.pop(0)
 
-    def append(
-        self,
-        style: str,
-        text: str,
-        truncate_lines: int | None = None,
-        truncate_overflow: Overflow = "head",
-    ) -> None:
+    def append(self, style: str, text: str) -> None:
         """
         Append a styled text fragment (re-themes via live Style).
 
         Args:
             style: Style class (e.g., "class:history.user-message").
             text: Text content.
-            truncate_lines: Optional cap on rendered lines for this entry.
-            truncate_overflow: Which end the cap keeps ("head" or "tail").
         """
-        self._append_entry(
-            _Entry(
-                kind="styled", style=style, text=text,
-                truncate_lines=truncate_lines, truncate_overflow=truncate_overflow,
-            )
-        )
+        self._append_entry(_Entry(kind="styled", style=style, text=text))
 
     def append_formatted(
         self, formatted: Iterable[OneStyleAndTextTuple]
@@ -142,19 +124,9 @@ class Transcript:
         """Append code by source; re-rendered on theme change."""
         self._append_entry(_Entry(kind="code", source=source, language=language))
 
-    def append_ansi(
-        self,
-        raw: str,
-        truncate_lines: int | None = None,
-        truncate_overflow: Overflow = "head",
-    ) -> None:
+    def append_ansi(self, raw: str) -> None:
         """Append pre-rendered ANSI (baked; never re-themed)."""
-        self._append_entry(
-            _Entry(
-                kind="ansi", source=raw,
-                truncate_lines=truncate_lines, truncate_overflow=truncate_overflow,
-            )
-        )
+        self._append_entry(_Entry(kind="ansi", source=raw))
 
     def _render_entry(self, entry: _Entry) -> list[OneStyleAndTextTuple]:
         if entry.kind == "styled":

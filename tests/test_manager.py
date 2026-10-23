@@ -209,7 +209,7 @@ class TestFinish:
         box = mgr.create_box(lambda: "x\n")
         mgr.finish(box)
         assert mgr.finish(box) is False
-        assert transcript_texts(display) == ["x\n\n"]
+        assert transcript_texts(display) == ["x\n"]
 
 
 class TestFinishOwnedBy:
@@ -262,7 +262,7 @@ class TestEcho:
         mgr.finish(a)
         mgr.finish(b)
         assert echoed(display) == ["...\n3\n4\n", "1\n2\n...\n"]
-        assert transcript_texts(display) == ["1\n2\n3\n4\n\n", "1\n2\n3\n4\n\n"]
+        assert transcript_texts(display) == echoed(display)
 
     def test_the_echo_runs_outside_the_manager_lock(self):
         """The echo prints with the manager lock released: nothing that
@@ -309,7 +309,7 @@ class TestEcho:
         assert transcript_texts(display) == []  # nor kept for a repaint
         mgr.finish(mgr.create_box(lambda: "y\n"), echo_to_console=True)
         assert echoed(display) == ["y\n"]
-        assert transcript_texts(display) == ["y\n\n"]
+        assert transcript_texts(display) == ["y\n"]
 
 
 # =============================================================================

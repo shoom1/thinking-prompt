@@ -358,6 +358,16 @@ class TestRepaintedContent:
         assert printed in repainted
 
 
+    def test_a_response_repaints_with_its_own_spacing(self):
+        """Its trailing newlines too: a repaint prints what was printed."""
+        terminal = _ColorTerminal()
+        with create_app_session(output=terminal):
+            session = ThinkingPromptSession()
+            printed = _plain(_written_by(terminal, lambda: session.add_response("answer\n\n")))
+            repainted = _plain(_repainted(session, terminal))
+        assert printed == "answer\n\n\n\n"
+        assert printed in repainted
+
     @pytest.mark.parametrize(
         "session_kwargs, finish_kwargs",
         [({"echo_thinking": False}, {}), ({}, {"echo_to_console": False})],

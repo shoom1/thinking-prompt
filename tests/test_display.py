@@ -293,10 +293,9 @@ class TestDisplayThinking:
         content = "\n".join([f"Line {i}" for i in range(10)])
         kept_display.thinking(content, truncate_lines=3)
         assert echoed(kept_display) == ["Line 0\nLine 1\nLine 2\n...\n"]
-        # History should have full content
+        # The transcript keeps it as printed
         formatted = kept_display.transcript.get_formatted_text()
-        text = "".join(t for _, t in formatted)
-        assert "Line 9" in text  # Full content in the transcript
+        assert "".join(t for _, t in formatted) == "Line 0\nLine 1\nLine 2\n...\n"
 
     def test_prints_once(self, kept_display: Display):
         kept_display.thinking("Processing...")
@@ -504,10 +503,9 @@ class TestDisplayThinkingAnsi:
         content = "\n".join(lines)
         kept_display.thinking(content, truncate_lines=3, content_format="ansi")
         assert echoed(kept_display) == ["Line 0\nLine 1\nLine 2\n...\n"]
-        # History should have full content
+        # The transcript keeps it as printed
         formatted = kept_display.transcript.get_formatted_text()
-        text = "".join(t for _, t in formatted)
-        assert "Line 9" in text
+        assert "".join(t for _, t in formatted) == "Line 0\nLine 1\nLine 2\n...\n"
 
     def test_ansi_prints_ansi(self, kept_display: Display):
         from prompt_toolkit.formatted_text import ANSI
@@ -639,11 +637,6 @@ class TestTranscriptWiring:
             return d.kept[0].value
 
         assert echoed(ThinkingPromptStyles.dark()) != echoed(ThinkingPromptStyles.light())
-
-    def test_thinking_truncate_lines_recorded(self):
-        d = keep_console(self._display())
-        d.thinking("l1\nl2\nl3", truncate_lines=2)
-        assert d.transcript.iter_entries()[-1].truncate_lines == 2
 
 
 def _texts(contents) -> list[str]:

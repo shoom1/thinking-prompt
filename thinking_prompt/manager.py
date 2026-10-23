@@ -54,8 +54,8 @@ class ThinkingBoxManager:
     """
     The thinking boxes on screen: creates them, lays them out in order,
     keeps the expand mode they share, and ends them. Ending a box removes
-    it and echoes its text through the Display: cut to the box's own
-    lines on the console, in full in the transcript.
+    it and echoes its text through the Display, cut to the box's own
+    lines.
 
     Thread-safe via RLock.
 
@@ -345,9 +345,9 @@ class ThinkingBoxManager:
         """End the boxes ``pick`` selects, in creation order, and echo them.
 
         The echo runs after the lock is released: each box's text cut to
-        its own lines at its overflow end on the console, in full in
-        the transcript (blank text echoes nothing). Without the echo the
-        text is dropped: the transcript is what a repaint prints again.
+        its own lines at its overflow end (blank text echoes nothing),
+        printed and kept for repaints. Without the echo the text is
+        dropped.
         """
         with self._lock:
             ended = [box for box in self._boxes if pick(box)]

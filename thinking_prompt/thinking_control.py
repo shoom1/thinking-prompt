@@ -36,7 +36,8 @@ def _char_width(char: str) -> int:
 def _wrap(line: StyleAndTextTuples, width: int) -> list[StyleAndTextTuples]:
     """``line`` cut into the rows it takes at ``width`` columns, as the
     window wraps it: a character wider than what's left of a row starts
-    the next one."""
+    the next one, even at the start of a row (one wider than the window
+    leaves an empty row before it)."""
     if width <= 0:
         return [line]
     rows: list[StyleAndTextTuples] = [[]]
@@ -48,7 +49,7 @@ def _wrap(line: StyleAndTextTuples, width: int) -> list[StyleAndTextTuples]:
             continue
         if text.isascii() and text.isprintable():  # a column a character
             while text:
-                if used == width:
+                if used >= width:
                     rows.append([])
                     used = 0
                 piece = text[: width - used]
@@ -59,7 +60,7 @@ def _wrap(line: StyleAndTextTuples, width: int) -> list[StyleAndTextTuples]:
         start = 0
         for i, char in enumerate(text):
             char_width = _char_width(char)
-            if used + char_width > width and used:
+            if used + char_width > width:
                 if i > start:
                     rows[-1].append((style, text[start:i]))
                 rows.append([])
@@ -250,10 +251,11 @@ class ThinkingBoxControl(FormattedTextControl):
     ) -> FormattedText:
         """Keep the rows that fit in ``limit`` rows (None = no limit).
 
-        On overflow one row goes to the hint and the rest to the rows at the
-        ``overflow`` end: whole lines, then as many rows of the next line as
-        fit (its end in tail mode, its start in head mode). A line cut so is
-        hidden in part, and the hint counts it.
+        On overflow the hint takes the rows it wraps to and the rest go to
+        the rows at the ``overflow`` end: whole lines, then as many rows of
+        the next line as fit (its end in tail mode, its start in head mode).
+        A line cut so is hidden in part, and the hint counts it. With no row
+        left for content beside the hint, the box shows content only.
         """
         rows = [self._rows(line, width) for line in lines]
         if limit is None or sum(rows) <= limit:
@@ -261,7 +263,11 @@ class ThinkingBoxControl(FormattedTextControl):
 
         tail = self._overflow == "tail"
         order = range(len(lines) - 1, -1, -1) if tail else range(len(lines))
-        room = max(1, limit - 1)
+        # The hint's rows, counted at its longest (every line hidden): the
+        # count it names can't make it wrap onto a row it wasn't given.
+        hint_rows = self._rows([("", self._hint(len(lines)))], width)
+        show_hint = hint_rows < limit
+        room = limit - hint_rows if show_hint else limit
         body: list[StyleAndTextTuples] = []  # from the overflow end
         whole = 0
         for i in order:
@@ -276,8 +282,8 @@ class ThinkingBoxControl(FormattedTextControl):
             break
         if tail:
             body.reverse()
-        if limit < 2:
-            return self._join(body)  # no room for a hint
+        if not show_hint:
+            return self._join(body)
 
         hint: StyleAndTextTuples = [
             ("class:thinking-box.hint", self._hint(len(lines) - whole))
