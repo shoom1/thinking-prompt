@@ -1,18 +1,37 @@
 # thinking-prompt
 
-A prompt_toolkit extension that adds a "thinking box" above the prompt for displaying AI thinking/processing content with real-time streaming updates.
+[![PyPI](https://img.shields.io/pypi/v/thinking-prompt)](https://pypi.org/project/thinking-prompt/)
+[![Python](https://img.shields.io/pypi/pyversions/thinking-prompt)](https://pypi.org/project/thinking-prompt/)
+[![CI](https://github.com/shoom1/thinking-prompt/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/shoom1/thinking-prompt/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/pypi/l/thinking-prompt)](https://github.com/shoom1/thinking-prompt/blob/main/LICENSE)
+
+A prompt_toolkit extension that adds "thinking boxes" above the prompt, for
+streaming what an AI model is thinking or doing as it happens. Use it for your
+own agent CLI, or any CLI that runs long tasks: thinking boxes, dialogs and
+form fields on a prompt that stays inline, in the terminal's scrollback.
 
 ![Demo](img/demo.gif)
 
 ## Features
 
-- **Thinking Box**: A collapsible area above the prompt that shows processing/thinking content
-- **Multiple Thinking Boxes**: Run multiple independent boxes concurrently with ordering and per-box lifecycle control
-- **Real-time Streaming**: Content updates in real-time as your callback returns new content
-- **Animated Header**: Configurable animated indicator showing thinking is in progress
-- **Rich Output**: Support for markdown rendering and syntax-highlighted code blocks
-- **Rich/ANSI in Thinking Box**: Use Rich markup for styled, in-place-updating content inside the thinking box
-- **Customizable Styles**: Full control over colors and styling
+- **Thinking boxes**: stream text into a box above the prompt as it arrives.
+  It keeps the newest lines in view, Ctrl+T shows it all, and its content
+  stays in the transcript when it ends.
+- **Several at once**: boxes run side by side, each finished on its own,
+  ordered by `order=`.
+- **Animated header**: a spinner, and a title you can change while it runs.
+- **Dialogs**: yes/no, choice, dropdown, checklist or your own, drawn as a
+  box or inline under the prompt.
+- **Form fields**: text, checkbox, select, dropdown, checklist, radio and
+  choice fields on any dialog, so a settings dialog is a few lines.
+- **Rich output**: markdown, syntax-highlighted code and Rich renderables, in
+  the transcript or inside a box.
+- **Themes**: dark, light, mono, the terminal's own colors, or auto;
+  switchable at runtime, and `NO_COLOR` is honored.
+- **Light on the terminal**: no full screen, and the screen is redrawn only
+  when something changes, so an idle prompt costs no CPU.
+- **Typed, one dependency**: `prompt_toolkit`, plus optional `rich` and
+  `pygments`.
 
 ## Installation
 
@@ -69,6 +88,41 @@ if __name__ == "__main__":
 > own; configure logging to see tracebacks — to a file, since stderr
 > would draw over the UI:
 > `logging.basicConfig(filename="app.log", level=logging.ERROR)`.
+
+## Use with a model
+
+Stream a model's thinking into a box and print its answer when it's done.
+With Claude (`pip install anthropic`), the Quick Start's handler becomes:
+
+```python
+from anthropic import AsyncAnthropic
+
+client = AsyncAnthropic()  # reads ANTHROPIC_API_KEY
+history = []
+
+@session.on_input
+async def handle(text: str):
+    turn = {"role": "user", "content": text}
+    async with session.thinking(title="Thinking") as box:
+        async with client.messages.stream(
+            model="claude-sonnet-5-5",
+            max_tokens=16000,
+            thinking={"type": "adaptive", "display": "summarized"},
+            messages=[*history, turn],
+        ) as stream:
+            async for event in stream:
+                if event.type == "thinking":
+                    box.append(event.thinking)
+            reply = await stream.get_final_message()
+    history.extend([turn, {"role": "assistant", "content": reply.content}])
+    answer = "".join(b.text for b in reply.content if b.type == "text")
+    session.add_response(answer, markdown=True)
+```
+
+When the reply is done the box closes, leaving the thinking (its last lines,
+if it's long) in the transcript above the answer. Ctrl+C cancels the handler,
+which closes the stream, and the unanswered turn stays out of `history`.
+`examples/claude_chat.py` is the whole program.
 
 ## Key Bindings
 
@@ -660,6 +714,7 @@ See the `examples/` directory for complete demos:
 - `demo.py` - Interactive demo with simulated AI thinking
 - `streaming.py` - Character-by-character streaming
 - `chat_demo.py` - Chat-style conversation loop
+- `claude_chat.py` - Chat with Claude: its thinking streams into a box, its answer prints as markdown (needs `anthropic` and an API key)
 - `clear_demo.py` - Clearing the screen and history with `session.clear()`
 - `progress_demo.py` - Progress bar with callback
 - `demo_progress_line.py` - In-place progress updates
