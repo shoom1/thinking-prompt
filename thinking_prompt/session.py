@@ -1104,7 +1104,12 @@ class ThinkingPromptSession:
         self._app_task = asyncio.current_task()
 
         async def input_loop() -> None:
-            while True:
+            # The loop must not outlive the app: a stopped app reads no
+            # input, so waiting for some would block run_async() for good.
+            # The exit's cancellation alone doesn't ensure that: when it
+            # lands while a handler a Ctrl+C cancelled is still cleaning
+            # up, _run_handler swallows it as the Ctrl+C's.
+            while self.app.is_running:
                 try:
                     text = await self.prompt_async()
                     await self._run_handler(effective_handler, text)
