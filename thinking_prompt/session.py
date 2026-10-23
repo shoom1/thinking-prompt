@@ -257,6 +257,9 @@ class ThinkingPromptSession:
         # input handler is executing). Ctrl+C cancels this task; the input
         # buffer's accept_handler refuses new input while it is running.
         self._current_handler_task: asyncio.Task[None] | None = None
+        # The task running run_async() (None otherwise). Its boxes count as
+        # nobody's: it's busy running the app, so the session ends them.
+        self._app_task: asyncio.Task[Any] | None = None
         # Set to True by the Ctrl+C binding when it cancels the handler task.
         # _run_handler reads this to distinguish a user-initiated cancel
         # (swallow CancelledError, continue the input loop) from an outer
@@ -415,7 +418,7 @@ class ThinkingPromptSession:
             """Cancel current operation or exit."""
             # Snapshot state BEFORE we mutate anything. Otherwise the final
             # idle check below would re-read state we just cleared (e.g.
-            # has_active_boxes after finish_all) and incorrectly conclude
+            # has_active_boxes after ending the boxes) and incorrectly conclude
             # there was nothing to cancel, triggering app.exit().
             handler_running = (
                 self._current_handler_task is not None
@@ -437,8 +440,11 @@ class ThinkingPromptSession:
                 assert self._current_handler_task is not None
                 self._current_handler_task.cancel()
             elif had_active_boxes:
-                # Idle prompt: Ctrl+C clears whatever boxes are left.
-                self._announce_cancel(bool(self._manager.finish_all()))
+                # Idle prompt: end the boxes nobody else will end (their task
+                # ended, no known owner, or the app's own task opened them).
+                # A live task's box is that task's to end.
+                ended = self._manager.finish_owned_by(self._app_task)
+                self._announce_cancel(bool(ended))
 
             if not handler_running and not had_active_boxes:
                 # No handler and no boxes — the session is idle, so Ctrl+C
@@ -1068,6 +1074,7 @@ class ThinkingPromptSession:
                 "No handler provided. Either pass a handler to run_async() "
                 "or register one with @session.on_input decorator."
             )
+        self._app_task = asyncio.current_task()
 
         async def input_loop() -> None:
             while True:
@@ -1094,6 +1101,7 @@ class ThinkingPromptSession:
                 await loop_task
             self._frames.cancel()
             self._shrinks.cancel()
+            self._app_task = None
 
     async def _run_handler(
         self,

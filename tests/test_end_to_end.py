@@ -240,9 +240,19 @@ async def run_with(
     session: ThinkingPromptSession,
     handler: Callable[[str], Any],
     script: Callable[[asyncio.Task[None]], Awaitable[None]],
+    *,
+    before_run: Callable[[], Any] | None = None,
 ) -> None:
-    """Run the session while ``script`` drives it; always tear down."""
-    run = asyncio.create_task(session.run_async(handler))
+    """Run the session while ``script`` drives it; always tear down.
+    ``before_run`` runs in the app's task just before ``run_async()``, as
+    an app's own setup does (e.g. opening a startup status box)."""
+
+    async def app() -> None:
+        if before_run is not None:
+            before_run()
+        await session.run_async(handler)
+
+    run = asyncio.create_task(app())
     try:
         await wait_until(lambda: waiting_for_input(session))
         await script(run)
@@ -254,15 +264,15 @@ async def run_with(
 
 class TestCtrlCWithIdleBox:
     async def test_ctrl_c_clears_orphan_box_and_keeps_accepting_input(self):
-        """A box left open while idle (e.g. a startup status box): Ctrl+C
-        clears it, and the session keeps delivering input afterwards."""
+        """A box the app's own task opened while idle (e.g. a startup status
+        box): Ctrl+C clears it, and the session keeps delivering input
+        afterwards."""
         delivered: list[str] = []
 
         async def handler(text: str) -> None:
             delivered.append(text)
 
         with piped_session() as (session, inp):
-            session.start_thinking(title="startup status")
 
             async def script(run: asyncio.Task[None]) -> None:
                 inp.send_text(CTRL_C)
@@ -271,7 +281,10 @@ class TestCtrlCWithIdleBox:
                 inp.send_text("hello" + ENTER)
                 await wait_until(lambda: delivered == ["hello"])
 
-            await run_with(session, handler, script)
+            await run_with(
+                session, handler, script,
+                before_run=lambda: session.start_thinking(title="startup status"),
+            )
 
 
 LONG = "\n".join(f"line {i}" for i in range(40))
