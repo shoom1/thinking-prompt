@@ -141,7 +141,7 @@ class ThinkingPromptSession:
         spinner_position: Literal["before", "after"] = "before",
         echo_input: bool = True,
         echo_thinking: bool = True,
-        history_limit: int | None = None,
+        transcript_limit: int | None = None,
         dialog_placement: Placement = "box",
     ) -> None:
         """
@@ -175,8 +175,8 @@ class ThinkingPromptSession:
             echo_thinking: Whether a finished box's text is printed to the
                 console (and kept for repaints) or dropped, when its finish
                 call doesn't say. Default: True.
-            history_limit: Max transcript entries kept for repaints; oldest
-                          trimmed. None = unbounded.
+            transcript_limit: Max transcript entries kept for repaints;
+                             oldest trimmed. None = unbounded.
             dialog_placement: How dialogs are drawn unless they say otherwise:
                 "box" (default) floats a framed dialog over the session;
                 "inline" draws rows between the prompt and the status bar.
@@ -219,12 +219,12 @@ class ThinkingPromptSession:
         # Convert styles dataclass to prompt_toolkit Style
         self._style = self._styles.to_style()
 
-        # Display handles all output to console and history
+        # Display handles all output to console and transcript
         self._display = Display(
             get_style=lambda: self._style,
             thinking_styles=self._styles,
             get_color_depth=self._effective_color_depth,
-            history_limit=history_limit,
+            transcript_limit=transcript_limit,
             get_width=lambda: self.app.output.get_size().columns,
         )
 
@@ -354,7 +354,7 @@ class ThinkingPromptSession:
                 self._input_history.append_string(text)
 
                 if self._echo_input:
-                    # Echo user input to console and history
+                    # Echo user input to console and transcript
                     prompt_str = self._get_prompt_string()
                     self._display.user_input(prompt_str, text)
 
@@ -575,7 +575,7 @@ class ThinkingPromptSession:
         print_formatted_text queues: one already queued prints before the
         clear, a later one after the transcript, and two repaints in a row
         print it once."""
-        contents = self._display.transcript()
+        contents = self._display.printed_contents()
 
         def repaint(output: Output) -> None:
             output.erase_screen()
@@ -778,7 +778,7 @@ class ThinkingPromptSession:
             box.finish(echo_to_console=echo_to_console)
 
     # =========================================================================
-    # Chat History API
+    # Output API
     # =========================================================================
 
     def add_response(
@@ -788,7 +788,7 @@ class ThinkingPromptSession:
         markdown: bool = False,
     ) -> None:
         """
-        Add a response to history and console.
+        Add a response to the console and transcript.
 
         This is the primary method for displaying assistant responses. Supports
         plain text, markdown, or pre-formatted FormattedText.
@@ -828,7 +828,7 @@ class ThinkingPromptSession:
         content: str,
     ) -> None:
         """
-        Add a styled message to history and print to console.
+        Print a styled message to the console and add it to the transcript.
 
         Args:
             role: The message role. Must be one of:
@@ -907,7 +907,7 @@ class ThinkingPromptSession:
 
     def add_rich(self, renderable: Any) -> None:
         """
-        Add a Rich renderable (Panel, Table, Text, etc.) to history and console.
+        Add a Rich renderable (Panel, Table, Text, etc.) to the console and transcript.
 
         Converts the renderable to ANSI-formatted output using Rich's Console.
         Falls back to str() if Rich is not installed.
@@ -936,7 +936,7 @@ class ThinkingPromptSession:
         """
         Clear the display and reset to startup state.
 
-        Clears the terminal screen and history buffer, and re-prints the
+        Clears the terminal screen and transcript, and re-prints the
         welcome message.
         """
         # Clear the terminal screen. While the app is running this must
@@ -949,7 +949,7 @@ class ThinkingPromptSession:
             # \033[2J clears screen, \033[H homes the cursor.
             print("\033[2J\033[H", end="", flush=True)
 
-        # Clear history buffer and any pending output
+        # Clear the transcript and any pending output
         self._display.clear()
 
         # Re-print welcome message

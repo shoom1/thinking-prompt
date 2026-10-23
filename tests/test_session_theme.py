@@ -14,7 +14,7 @@ from prompt_toolkit.input import create_pipe_input
 from prompt_toolkit.output import ColorDepth
 from prompt_toolkit.output.vt100 import Vt100_Output
 
-from tests.helpers import history_texts, keep_console
+from tests.helpers import keep_console, transcript_texts
 from tests.test_end_to_end import run_with, wait_until
 from thinking_prompt import AppInfo, ThinkingPromptSession, ThinkingPromptStyles
 
@@ -211,16 +211,16 @@ class TestSetTheme:
 
 
 class TestHistoryLimit:
-    def test_history_limit_keeps_the_last_entries(self):
-        s = ThinkingPromptSession(history_limit=3)
+    def test_transcript_limit_keeps_the_last_entries(self):
+        s = ThinkingPromptSession(transcript_limit=3)
         keep_console(s._display)
         for n in range(1, 5):
             s.add_response(str(n))
-        assert history_texts(s._display) == ["2\n", "3\n", "4\n"]
+        assert transcript_texts(s._display) == ["2\n", "3\n", "4\n"]
 
-    def test_history_limit_defaults_to_unbounded(self):
+    def test_transcript_limit_defaults_to_unbounded(self):
         s = ThinkingPromptSession()
-        assert s._display.history._max_entries is None
+        assert s._display.transcript._max_entries is None
 
 
 class TestRepaint:

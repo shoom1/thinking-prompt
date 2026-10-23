@@ -243,7 +243,7 @@ idle prompt costs no CPU:
   window re-wraps the UI's full-width rows and a shorter one pushes its top
   into scrollback, so the old frame can't be erased row by row. Shell
   output from before the session, anything printed outside it (plain
-  `print()`) and entries `history_limit` dropped don't come back.
+  `print()`) and entries `transcript_limit` dropped don't come back.
 
 ### Long Content
 
@@ -706,10 +706,10 @@ colorless rendering regardless of theme, while keeping bold/italic.
 | `assistant_prefix`, `select_value`, `user_separator` | Removed: no component drew with them. |
 | `checkbox_mark` (styled nothing) | Now styles the `[x]` / `(•)` marks of check and radio lists. |
 
-Bound history growth for long sessions:
+Bound transcript growth for long sessions:
 
 ```python
-session = ThinkingPromptSession(history_limit=1000)  # max transcript entries
+session = ThinkingPromptSession(transcript_limit=1000)  # max transcript entries
 ```
 
 ## Examples
@@ -721,7 +721,7 @@ See the `examples/` directory for complete demos:
 - `streaming.py` - Character-by-character streaming
 - `chat_demo.py` - Chat-style conversation loop
 - `claude_chat.py` - Chat with Claude: its thinking streams into a box, its answer prints as markdown (needs `anthropic` and an API key)
-- `clear_demo.py` - Clearing the screen and history with `session.clear()`
+- `clear_demo.py` - Clearing the screen and transcript with `session.clear()`
 - `progress_demo.py` - Progress bar with callback
 - `demo_progress_line.py` - In-place progress updates
 - `demo_multi_box.py` - Multiple concurrent thinking boxes with task list

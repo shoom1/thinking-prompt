@@ -16,7 +16,7 @@ from prompt_toolkit.output import defaults as output_defaults
 from prompt_toolkit.output.plain_text import PlainTextOutput
 
 from thinking_prompt import ThinkingPromptSession
-from thinking_prompt.history import FormattedTextHistory
+from thinking_prompt.transcript import Transcript
 
 
 @pytest.fixture(autouse=True)
@@ -37,9 +37,9 @@ def _plain_text_when_stdout_is_not_a_terminal(monkeypatch: pytest.MonkeyPatch) -
 
 
 @pytest.fixture
-def history() -> FormattedTextHistory:
-    """Create a fresh FormattedTextHistory instance."""
-    return FormattedTextHistory()
+def transcript() -> Transcript:
+    """Create a fresh Transcript instance."""
+    return Transcript()
 
 
 @pytest.fixture

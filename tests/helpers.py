@@ -40,6 +40,6 @@ def echoed(display: Display) -> list[str]:
     return [fragment_list_to_text(to_formatted_text(item)) for item in display.kept]
 
 
-def history_texts(display: Display) -> list[str]:
-    """The text of each history entry."""
-    return [entry.text for entry in display.history.iter_entries()]
+def transcript_texts(display: Display) -> list[str]:
+    """The text of each transcript entry."""
+    return [entry.text for entry in display.transcript.iter_entries()]

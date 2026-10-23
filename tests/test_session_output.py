@@ -27,7 +27,7 @@ def _session(**kwargs: Any) -> ThinkingPromptSession:
 
 
 def _entries(session: ThinkingPromptSession) -> list[Any]:
-    return session._display.history.iter_entries()
+    return session._display.transcript.iter_entries()
 
 
 class TestStyledLines:

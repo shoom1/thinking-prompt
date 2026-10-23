@@ -13,7 +13,7 @@ from prompt_toolkit.keys import Keys
 
 from thinking_prompt import ThinkingBox, ThinkingPromptSession, ThinkingPromptStyles
 from thinking_prompt.frames import FrameScheduler
-from tests.helpers import echoed, history_texts, keep_console, make_display, make_manager
+from tests.helpers import echoed, transcript_texts, keep_console, make_display, make_manager
 
 NO_CONTENT = "shows a content callback's text"
 
@@ -29,8 +29,8 @@ def _kept_session() -> ThinkingPromptSession:
     return session
 
 
-def _history(session: ThinkingPromptSession) -> list[str]:
-    return history_texts(session._display)
+def _transcript(session: ThinkingPromptSession) -> list[str]:
+    return transcript_texts(session._display)
 
 
 def _ctrl_c(session: ThinkingPromptSession):
@@ -204,7 +204,7 @@ class TestFinishedBox:
         box.append("hello\n")
         assert box.finish() == "hello\n"
         assert box.finish() == "hello\n"
-        assert history_texts(display) == ["hello\n\n"]
+        assert transcript_texts(display) == ["hello\n\n"]
 
     def test_a_write_racing_finish_is_in_the_text_or_nowhere(self):
         display = make_display()
@@ -231,7 +231,7 @@ class TestFinishedBox:
             assert returned == "".join(f"{i}\n" for i in range(n))  # no gaps
             assert box.text == returned
             if returned.strip():
-                assert history_texts(display)[-1] == returned + "\n"
+                assert transcript_texts(display)[-1] == returned + "\n"
 
 
 class TestRich:
@@ -306,7 +306,7 @@ class TestSessionBoxes:
         async with session.thinking() as box:
             box.append("done\n")
             assert box.finish() == "done\n"
-        assert _history(session) == ["done\n\n"]
+        assert _transcript(session) == ["done\n\n"]
 
     async def test_a_box_finished_from_a_worker_thread(self):
         session = _session()
@@ -315,41 +315,41 @@ class TestSessionBoxes:
         await asyncio.to_thread(box.finish)
         assert box.is_finished
         assert not session.is_thinking
-        assert _history(session) == ["from a thread\n\n"]
+        assert _transcript(session) == ["from a thread\n\n"]
 
     def test_ctrl_c_echoes_what_a_callback_box_showed(self):
         session = _session()
         session.start_thinking(lambda: "shown\n")
         _ctrl_c(session)(MagicMock())
-        assert _history(session) == ["shown\n\n", "Operation cancelled...\n"]
+        assert _transcript(session) == ["shown\n\n", "Operation cancelled...\n"]
 
 
 class TestFinishArguments:
     """echo_to_console reaches the echo, on every way out: without it the
     text is neither printed nor kept for a repaint."""
 
-    def test_finish_keeps_the_text_out_of_history_and_console_when_told_to(self):
+    def test_finish_keeps_the_text_off_the_console_and_out_of_the_transcript_when_told_to(self):
         session = _kept_session()
         box = session.start_thinking()
         box.append("x\n")
         box.finish(echo_to_console=False)
-        assert _history(session) == []
+        assert _transcript(session) == []
         assert echoed(session._display) == []
 
-    def test_finish_defaults_put_the_text_in_history_and_console(self):
+    def test_finish_defaults_put_the_text_on_the_console_and_in_the_transcript(self):
         """Positive control: the checks above can tell echoed from not."""
         session = _kept_session()
         box = session.start_thinking()
         box.append("x\n")
         box.finish()
-        assert _history(session) == ["x\n\n"]
+        assert _transcript(session) == ["x\n\n"]
         assert echoed(session._display) != []
 
     async def test_thinking_exit_passes_the_arguments_on(self):
         session = _kept_session()
         async with session.thinking(echo_to_console=False) as box:
             box.append("x\n")
-        assert _history(session) == []
+        assert _transcript(session) == []
         assert echoed(session._display) == []
 
     async def test_thinking_exit_with_an_error_passes_the_arguments_on(self):
@@ -359,7 +359,7 @@ class TestFinishArguments:
                 box.append("x\n")
                 raise RuntimeError("boom")
         assert box.is_finished
-        assert _history(session) == []
+        assert _transcript(session) == []
         assert echoed(session._display) == []
 
     async def test_thinking_exit_echoes_when_asked_to(self):
@@ -367,18 +367,18 @@ class TestFinishArguments:
         session = _kept_session()
         async with session.thinking(echo_to_console=True) as box:
             box.append("x\n")
-        assert _history(session) == ["x\n\n"]
+        assert _transcript(session) == ["x\n\n"]
         assert echoed(session._display) != []
 
     @pytest.mark.parametrize(
-        "echo_to_console, history, console",
+        "echo_to_console, transcript, console",
         [
             (False, [], []),
             (True, ["x\n\n"], ["x\n"]),
         ],
     )
     async def test_a_cancelled_thinking_block_passes_the_arguments_on(
-        self, echo_to_console, history, console
+        self, echo_to_console, transcript, console
     ):
         """The box's text goes where the arguments say; the cancel line
         is always said."""
@@ -398,5 +398,5 @@ class TestFinishArguments:
             await task
 
         cancelled = "Operation cancelled...\n"
-        assert _history(session) == [*history, cancelled]
+        assert _transcript(session) == [*transcript, cancelled]
         assert echoed(session._display) == [*console, cancelled]
