@@ -155,7 +155,8 @@ class StreamingContent:
                 with a newline, or a Panel).
         """
         from .rich_utils import _renderable_to_ansi
-        ansi = _renderable_to_ansi(renderable, theme=theme)
+        # The newline that ends the line isn't a second line.
+        ansi = _renderable_to_ansi(renderable, theme=theme).rstrip("\n")
         rows = ansi.count("\n") + 1
         if rows > 1:
             raise ValueError(

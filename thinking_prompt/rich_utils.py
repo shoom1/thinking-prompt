@@ -36,10 +36,12 @@ def _rich_to_ansi(renderable: Any, theme: Any = None) -> str:
 
 
 def _renderable_to_ansi(renderable: Any, theme: Any = None) -> str:
-    """Convert a Rich renderable or markup string to ANSI (no trailing newline/padding).
+    """Convert a Rich renderable or markup string to ANSI.
 
     Handles both markup strings like "[green]text[/green]" and Rich objects
-    like Text("text", style="green").
+    like Text("text", style="green"). The text's own whitespace is kept
+    (a newline that ends it, a space before the next streamed word) and
+    none is added.
 
     NO_COLOR is intentionally ignored here. The contract of this helper, and
     of the public APIs that build on it (rich_to_ansi, StreamingContent's
@@ -61,7 +63,7 @@ def _renderable_to_ansi(renderable: Any, theme: Any = None) -> str:
             theme=theme,
         )
         console.print(renderable, end="", highlight=False, soft_wrap=True)
-        return f.getvalue().rstrip()
+        return f.getvalue()
     except ImportError:
         return str(renderable)
 

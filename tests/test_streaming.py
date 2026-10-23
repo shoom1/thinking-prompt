@@ -6,8 +6,14 @@ from __future__ import annotations
 import random
 
 import pytest
+from prompt_toolkit.formatted_text import ANSI, fragment_list_to_text, to_formatted_text
 
 from thinking_prompt import StreamingContent
+
+
+def _plain(text: str) -> str:
+    """``text`` without its ANSI escapes."""
+    return fragment_list_to_text(to_formatted_text(ANSI(text)))
 
 
 class TestStreamingContentBasics:
@@ -274,6 +280,33 @@ class TestStreamingContentRichMethods:
         content.append_rich("plain text\n")
         text = content.get_content()
         assert "plain text" in text
+
+    def test_append_rich_keeps_the_newline_that_ends_a_line(self):
+        """A task list built with append_rich, then updated line by line
+        (the README's example): each append is its own line."""
+        pytest.importorskip("rich")
+        content = StreamingContent()
+        for task in ("Download", "Process", "Report"):
+            content.append_rich(f"[dim]  ○ {task}[/dim]\n")
+        assert len(content) == 3
+        content.set_line_rich(0, "[green]  ✓ Download[/green]")
+        assert _plain(content.text) == "  ✓ Download\n  ○ Process\n  ○ Report\n"
+
+    def test_append_rich_keeps_a_trailing_space(self):
+        """Streamed words keep the space between them."""
+        pytest.importorskip("rich")
+        content = StreamingContent()
+        content.append_rich("[bold]Hello[/bold] ")
+        content.append_rich("world")
+        assert _plain(content.text) == "Hello world"
+
+    def test_set_line_rich_takes_markup_ending_its_line(self):
+        """The newline that ends the line isn't a second line."""
+        pytest.importorskip("rich")
+        content = StreamingContent()
+        content.append("line0\nline1\n")
+        content.set_line_rich(0, "[green]done[/green]\n")
+        assert _plain(content.text) == "done\nline1\n"
 
     def test_set_line_rich_markup(self):
         """set_line_rich should replace a line with Rich-converted content."""
