@@ -248,9 +248,10 @@ idle prompt costs no CPU:
 
 A collapsed box shows at most `max_lines` rows (at least 1; session
 default: `max_thinking_height`, at least 2). When content overflows, the
-box keeps the **newest** lines under a `+N earlier lines... ctrl-t to
-expand` hint, so a stream stays visibly live; a one-row box has no room
-for the hint and shows just the newest line. Ctrl+T expands the box to fit its content, up to
+box keeps the **newest** rows under a `+N earlier lines... ctrl-t to
+expand` hint, so a stream stays visibly live, even mid-paragraph: a line
+longer than the box shows its end, and the hint counts it. A one-row box
+has no room for the hint and shows just the newest row. Ctrl+T expands the box to fit its content, up to
 the space the terminal has. When the box finishes, the console echo keeps
 the same end the box showed.
 

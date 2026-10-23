@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
 from prompt_toolkit.formatted_text import FormattedText
 
 from thinking_prompt.thinking_control import ThinkingBoxControl
@@ -224,6 +225,11 @@ def _numbered(n: int) -> str:
     return "".join(f"line {i}\n" for i in range(n))
 
 
+def _words(n: int, start: int = 0) -> str:
+    """Words w00, w01, ...: 4 columns each with the space between."""
+    return " ".join(f"w{i:02d}" for i in range(start, start + n))
+
+
 class TestOverflowTail:
     """Default: an overflowing box shows its newest lines under a hint."""
 
@@ -259,6 +265,36 @@ class TestOverflowTail:
         rows = _rendered(control, 10, 5)
         assert rows[0].startswith("+8 earlier lines")
         assert "".join(rows[1:]).startswith("08") and "09" in "".join(rows[1:])
+
+    def test_a_line_longer_than_the_box_shows_its_end(self):
+        """A streamed paragraph longer than the box: its newest rows show,
+        and the line, partly hidden, counts in the hint."""
+        content = "intro\n" + _words(40)  # the paragraph: 4 rows at width 40
+        control = ThinkingBoxControl(lambda: content, max_collapsed_lines=3)
+        assert _rendered(control, 40, 3) == [
+            "+2 earlier lines... ctrl-t to expand",
+            _words(10, start=20) + " ",
+            _words(10, start=30),
+        ]
+
+    @pytest.mark.parametrize(
+        "content, content_format",
+        [("abcd中ef中", "plain"), ("\x1b[31mabcd\x1b[0m中ef中", "ansi")],
+    )
+    def test_a_wide_character_that_does_not_fit_starts_the_next_row(
+        self, content: str, content_format: str
+    ):
+        """As the window wraps it: 中 doesn't fit in the column left."""
+        control = ThinkingBoxControl(
+            lambda: content, max_collapsed_lines=2, content_format=content_format
+        )
+        assert control.get_line_count(width=5) == 3
+        assert _rendered(control, 5, 2)[1:] == ["中"]
+
+    def test_a_tab_takes_the_two_columns_it_is_drawn_in(self):
+        """The window draws a tab as ^I."""
+        control = ThinkingBoxControl(lambda: "x" * 39 + "\t", max_collapsed_lines=5)
+        assert control.get_line_count(width=40) == 2
 
     def test_squeezed_box_fits_the_rows_it_gets(self):
         content = _numbered(60)
@@ -308,6 +344,15 @@ class TestOverflowHead:
         assert _rendered(control, 40, 5) == [
             "line 0", "line 1", "line 2", "line 3",
             "+56 lines... ctrl-t to expand",
+        ]
+
+    def test_a_line_longer_than_the_box_shows_its_start_over_the_hint(self):
+        content = _words(40) + "\nnext\n"
+        control = ThinkingBoxControl(lambda: content, max_collapsed_lines=3, overflow="head")
+        assert _rendered(control, 40, 3) == [
+            _words(10) + " ",
+            _words(10, start=10) + " ",
+            "+2 lines... ctrl-t to expand",
         ]
 
     def test_singular_hint_and_wrap_aware_fit(self):

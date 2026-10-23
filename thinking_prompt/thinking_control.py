@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from functools import lru_cache
 from typing import Callable
 
 from prompt_toolkit.formatted_text import (
@@ -14,8 +15,9 @@ from prompt_toolkit.formatted_text import (
     fragment_list_to_text,
     to_formatted_text,
 )
-from prompt_toolkit.formatted_text.utils import fragment_list_width, split_lines
+from prompt_toolkit.formatted_text.utils import split_lines
 from prompt_toolkit.layout.controls import FormattedTextControl, UIContent
+from prompt_toolkit.layout.screen import Char
 
 from .types import ContentCallback, ContentFormat, Overflow
 
@@ -23,6 +25,50 @@ logger = logging.getLogger(__name__)
 
 # Width assumed when formatting before the first render (size unknown).
 _DEFAULT_WIDTH = 80
+
+
+@lru_cache(maxsize=4096)
+def _char_width(char: str) -> int:
+    """Columns the window draws ``char`` in (a tab, drawn as ^I, takes 2)."""
+    return Char(char).width
+
+
+def _wrap(line: StyleAndTextTuples, width: int) -> list[StyleAndTextTuples]:
+    """``line`` cut into the rows it takes at ``width`` columns, as the
+    window wraps it: a character wider than what's left of a row starts
+    the next one."""
+    if width <= 0:
+        return [line]
+    rows: list[StyleAndTextTuples] = [[]]
+    used = 0
+    for fragment in line:
+        style, text = fragment[0], fragment[1]
+        if "[ZeroWidthEscape]" in style:
+            rows[-1].append((style, text))
+            continue
+        if text.isascii() and text.isprintable():  # a column a character
+            while text:
+                if used == width:
+                    rows.append([])
+                    used = 0
+                piece = text[: width - used]
+                rows[-1].append((style, piece))
+                used += len(piece)
+                text = text[len(piece):]
+            continue
+        start = 0
+        for i, char in enumerate(text):
+            char_width = _char_width(char)
+            if used + char_width > width and used:
+                if i > start:
+                    rows[-1].append((style, text[start:i]))
+                rows.append([])
+                used = 0
+                start = i
+            used += char_width
+        if start < len(text):
+            rows[-1].append((style, text[start:]))
+    return rows
 
 
 def _format_key_for_display(key: str) -> str:
@@ -197,17 +243,17 @@ class ThinkingBoxControl(FormattedTextControl):
     @staticmethod
     def _rows(line: StyleAndTextTuples, width: int) -> int:
         """Rows a line occupies when wrapped at ``width`` columns."""
-        if width <= 0:
-            return 1
-        return max(1, -(-fragment_list_width(line) // width))
+        return len(_wrap(line, width))
 
     def _fit(
         self, lines: list[StyleAndTextTuples], width: int, limit: int | None
     ) -> FormattedText:
-        """Keep the lines that fit in ``limit`` rows (None = no limit).
+        """Keep the rows that fit in ``limit`` rows (None = no limit).
 
-        On overflow one row goes to the hint and the rest to lines from the
-        ``overflow`` end — at least one line, even if it alone overflows.
+        On overflow one row goes to the hint and the rest to the rows at the
+        ``overflow`` end: whole lines, then as many rows of the next line as
+        fit (its end in tail mode, its start in head mode). A line cut so is
+        hidden in part, and the hint counts it.
         """
         rows = [self._rows(line, width) for line in lines]
         if limit is None or sum(rows) <= limit:
@@ -215,20 +261,26 @@ class ThinkingBoxControl(FormattedTextControl):
 
         tail = self._overflow == "tail"
         order = range(len(lines) - 1, -1, -1) if tail else range(len(lines))
-        budget = max(1, limit - 1)
-        kept: list[int] = []
-        used = 0
+        room = max(1, limit - 1)
+        body: list[StyleAndTextTuples] = []  # from the overflow end
+        whole = 0
         for i in order:
-            if kept and used + rows[i] > budget:
-                break
-            kept.append(i)
-            used += rows[i]
-        body = [lines[i] for i in sorted(kept)]
+            if rows[i] <= room:
+                body.append(lines[i])
+                whole += 1
+                room -= rows[i]
+                continue
+            if room:
+                wrapped = _wrap(lines[i], width)
+                body.extend(reversed(wrapped[-room:]) if tail else wrapped[:room])
+            break
+        if tail:
+            body.reverse()
         if limit < 2:
             return self._join(body)  # no room for a hint
 
         hint: StyleAndTextTuples = [
-            ("class:thinking-box.hint", self._hint(len(lines) - len(kept)))
+            ("class:thinking-box.hint", self._hint(len(lines) - whole))
         ]
         return self._join([hint, *body] if tail else [*body, hint])
 
