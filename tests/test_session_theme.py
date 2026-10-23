@@ -352,7 +352,9 @@ class TestRepaintedContent:
                 session = ThinkingPromptSession(theme="dark")
                 printed = _written_by(terminal, lambda: session.add_rich(panel))
             repainted = _repainted(session, terminal)
-        assert "\x1b[0;32m╭" in printed
+        # The panel's green corner: ╭, or ┌ where Rich can't tell the console
+        # handles it (Windows without a console).
+        assert re.search("\x1b\\[0;32m[╭┌]", printed)
         assert printed in repainted
 
 
