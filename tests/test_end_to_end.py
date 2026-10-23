@@ -568,6 +568,22 @@ class TestThinkingBoxesOnScreen:
 
             await run_with(session, lambda text: None, script)
 
+    async def test_a_line_longer_than_the_box_shows_its_newest_words(self):
+        """A streamed paragraph overflowing a 3-row box: its end shows, and
+        words appended to it appear."""
+        with piped_session(rows=20, columns=40, spinner=None) as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                box = session.start_thinking(max_lines=3)
+                box.append(" ".join(f"w{i:02}" for i in range(40)))
+                await wait_until(lambda: on_screen(session, "w39"))
+                assert on_screen(session, "+1 earlier line... ctrl-t to expand"), screen_lines(session)
+
+                box.append(" NEW")
+                await wait_until(lambda: on_screen(session, "NEW"))
+
+            await run_with(session, lambda text: None, script)
+
 
 class TestInputLoopLifetime:
     async def test_app_exits_when_input_loop_ends(self):
