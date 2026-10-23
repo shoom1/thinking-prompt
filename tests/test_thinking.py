@@ -299,11 +299,11 @@ class TestOverflowTail:
         assert control.can_toggle_expanded is True
 
     def test_fits_by_rows_counting_wrapped_lines(self):
-        """Ten 15-char lines at width 10 take two rows each: a 5-row box
+        """Ten 50-char lines at width 40 take two rows each: a 5-row box
         has 4 rows for content, i.e. the last two lines."""
-        content = "".join(f"{i:02d}" + "x" * 13 + "\n" for i in range(10))
+        content = "".join(f"{i:02d}" + "x" * 48 + "\n" for i in range(10))
         control = ThinkingBoxControl(lambda: content, max_collapsed_lines=5)
-        rows = _rendered(control, 10, 5)
+        rows = _rendered(control, 40, 5)
         assert rows[0].startswith("+8 earlier lines")
         assert "".join(rows[1:]).startswith("08") and "09" in "".join(rows[1:])
 
@@ -362,6 +362,17 @@ class TestOverflowTail:
         """The window draws a tab as ^I."""
         control = ThinkingBoxControl(lambda: "x" * 39 + "\t", max_collapsed_lines=5)
         assert control.get_line_count(width=40) == 2
+
+    def test_a_hint_wrapping_in_a_narrow_box_takes_its_rows(self):
+        """At 20 columns the hint wraps onto two rows: the newest line
+        gets the one left, not a row the box doesn't have."""
+        control = ThinkingBoxControl(lambda: _numbered(10), max_collapsed_lines=3)
+        assert _rendered(control, 20, 3) == ["+9 earlier lines... ctrl-t to expand", "line 9"]
+
+    def test_with_no_row_left_for_content_the_hint_goes(self):
+        """As in a one-row box: the newest lines rather than only a hint."""
+        control = ThinkingBoxControl(lambda: _numbered(10), max_collapsed_lines=2)
+        assert _rendered(control, 20, 2) == ["line 8", "line 9"]
 
     def test_squeezed_box_fits_the_rows_it_gets(self):
         content = _numbered(60)
@@ -425,6 +436,6 @@ class TestOverflowHead:
     def test_singular_hint_and_wrap_aware_fit(self):
         """Four short lines fill the 4 content rows; the long last line is
         the single hidden one."""
-        content = "a\nb\nc\nd\n" + "x" * 15 + "\n"
+        content = "a\nb\nc\nd\n" + "x" * 45 + "\n"
         control = ThinkingBoxControl(lambda: content, max_collapsed_lines=5, overflow="head")
-        assert _rendered(control, 10, 5) == ["a", "b", "c", "d", "+1 line... ctrl-t to expand"]
+        assert _rendered(control, 40, 5) == ["a", "b", "c", "d", "+1 line... ctrl-t to expand"]
