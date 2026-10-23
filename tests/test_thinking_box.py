@@ -12,6 +12,7 @@ import pytest
 from prompt_toolkit.keys import Keys
 
 from thinking_prompt import ThinkingBox, ThinkingPromptSession, ThinkingPromptStyles
+from thinking_prompt._text import truncate_to_lines
 from thinking_prompt.frames import FrameScheduler
 from tests.helpers import echoed, transcript_texts, keep_console, make_display, make_manager
 
@@ -204,7 +205,7 @@ class TestFinishedBox:
         box.append("hello\n")
         assert box.finish() == "hello\n"
         assert box.finish() == "hello\n"
-        assert transcript_texts(display) == ["hello\n\n"]
+        assert transcript_texts(display) == ["hello\n"]
 
     def test_a_write_racing_finish_is_in_the_text_or_nowhere(self):
         display = make_display()
@@ -231,7 +232,11 @@ class TestFinishedBox:
             assert returned == "".join(f"{i}\n" for i in range(n))  # no gaps
             assert box.text == returned
             if returned.strip():
-                assert transcript_texts(display)[-1] == returned + "\n"
+                control = box._control
+                kept = truncate_to_lines(
+                    returned, control.max_collapsed_lines, overflow=control.overflow
+                )
+                assert transcript_texts(display)[-1] == kept + "\n"
 
 
 class TestRich:
@@ -306,7 +311,7 @@ class TestSessionBoxes:
         async with session.thinking() as box:
             box.append("done\n")
             assert box.finish() == "done\n"
-        assert _transcript(session) == ["done\n\n"]
+        assert _transcript(session) == ["done\n"]
 
     async def test_a_box_finished_from_a_worker_thread(self):
         session = _session()
@@ -315,13 +320,13 @@ class TestSessionBoxes:
         await asyncio.to_thread(box.finish)
         assert box.is_finished
         assert not session.is_thinking
-        assert _transcript(session) == ["from a thread\n\n"]
+        assert _transcript(session) == ["from a thread\n"]
 
     def test_ctrl_c_echoes_what_a_callback_box_showed(self):
         session = _session()
         session.start_thinking(lambda: "shown\n")
         _ctrl_c(session)(MagicMock())
-        assert _transcript(session) == ["shown\n\n", "Operation cancelled...\n"]
+        assert _transcript(session) == ["shown\n", "Operation cancelled...\n"]
 
 
 class TestFinishArguments:
@@ -342,7 +347,7 @@ class TestFinishArguments:
         box = session.start_thinking()
         box.append("x\n")
         box.finish()
-        assert _transcript(session) == ["x\n\n"]
+        assert _transcript(session) == ["x\n"]
         assert echoed(session._display) != []
 
     async def test_thinking_exit_passes_the_arguments_on(self):
@@ -367,14 +372,14 @@ class TestFinishArguments:
         session = _kept_session()
         async with session.thinking(echo_to_console=True) as box:
             box.append("x\n")
-        assert _transcript(session) == ["x\n\n"]
+        assert _transcript(session) == ["x\n"]
         assert echoed(session._display) != []
 
     @pytest.mark.parametrize(
         "echo_to_console, transcript, console",
         [
             (False, [], []),
-            (True, ["x\n\n"], ["x\n"]),
+            (True, ["x\n"], ["x\n"]),
         ],
     )
     async def test_a_cancelled_thinking_block_passes_the_arguments_on(

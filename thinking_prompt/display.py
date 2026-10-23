@@ -187,8 +187,8 @@ class Display:
 
         Args:
             content: The thinking content.
-            truncate_lines: If set, truncate console output to this many lines.
-                           The transcript always gets full content.
+            truncate_lines: If set, cut the text to this many lines, at the
+                           ``overflow`` end, as printed and as kept.
             content_format: Format of the content ("plain" or "ansi").
             overflow: Which end truncation keeps: "head" (first lines) or
                 "tail" (last lines) — match the box it came from.
@@ -200,20 +200,11 @@ class Display:
             self._thinking_ansi(content, truncate_lines=truncate_lines, overflow=overflow)
             return
 
-        style = "class:history.thinking"
-
-        # The transcript gets full content, truncated on repaint to match console
-        self._transcript.append(
-            style, f"{content}\n",
-            truncate_lines=truncate_lines, truncate_overflow=overflow,
-        )
-
-        # Console gets possibly truncated content
         if truncate_lines is not None:
-            console_text = truncate_to_lines(content, truncate_lines, overflow=overflow) + "\n"
+            text = truncate_to_lines(content, truncate_lines, overflow=overflow) + "\n"
         else:
-            console_text = content.rstrip() + "\n"
-        self._print_to_console(FormattedText([(style, console_text)]))
+            text = content.rstrip() + "\n"
+        self._output_styled("class:history.thinking", text)
 
     def _thinking_ansi(
         self,
@@ -222,22 +213,12 @@ class Display:
         truncate_lines: int | None = None,
         overflow: Overflow = "head",
     ) -> None:
-        """Output ANSI-formatted thinking content."""
-        # The transcript gets full content as baked ANSI, truncated on repaint to
-        # match the console (never re-themed: ANSI escapes are already baked).
-        self._transcript.append_ansi(
-            content.rstrip() + "\n",
-            truncate_lines=truncate_lines, truncate_overflow=overflow,
-        )
-
-        # Console gets possibly truncated content
+        """Output ANSI-formatted thinking content (baked: never re-themed)."""
         if truncate_lines is not None:
-            console_content = truncate_ansi_to_lines(
-                content, truncate_lines, overflow=overflow
-            ) + '\n'
+            text = truncate_ansi_to_lines(content, truncate_lines, overflow=overflow) + "\n"
         else:
-            console_content = content.rstrip() + '\n'
-        self._print_to_console(ANSI(console_content))
+            text = content.rstrip() + "\n"
+        self._output_ansi(text)
 
     def response(self, content: str) -> None:
         """
@@ -413,9 +394,8 @@ class Display:
         """Every transcript entry as the console shows it, in the current
         theme and width: what a repaint prints (print_now), as it is now.
 
-        Nothing is appended to the transcript. Thinking entries are truncated to
-        their recorded truncate_lines, reproducing the form originally
-        echoed.
+        Each entry is what was printed; nothing is appended to the
+        transcript.
         """
         # Markdown is laid out at the output's width: what was rendered at
         # another (before the terminal shrank) is rendered again.
@@ -423,37 +403,10 @@ class Display:
         if width != self._rendered_width:
             self._transcript.invalidate_render_caches()
             self._rendered_width = width
-        contents: list[AnyFormattedText] = []
-        for entry in self._transcript.iter_entries():
-            if entry.kind == "styled":
-                # Mirror the add-time console normalization: stored text
-                # carries an unconditional trailing "\n" (on top of
-                # whatever the caller's content already had); strip it so
-                # the entry ends with exactly one newline, as echoed.
-                text = entry.text.rstrip("\n")
-                if entry.truncate_lines is not None:
-                    text = truncate_to_lines(
-                        text, entry.truncate_lines, overflow=entry.truncate_overflow
-                    ) + "\n"
-                else:
-                    text = text + "\n"
-                contents.append(FormattedText([(entry.style, text)]))
-            elif entry.kind == "formatted":
-                contents.append(FormattedText(entry.fragments))
-            elif entry.kind == "ansi" and entry.truncate_lines is not None:
-                contents.append(
-                    ANSI(
-                        truncate_ansi_to_lines(
-                            entry.source.rstrip("\n"),
-                            entry.truncate_lines,
-                            overflow=entry.truncate_overflow,
-                        )
-                        + "\n"
-                    )
-                )
-            else:  # markdown/code (fresh render via cache) and untruncated ansi
-                contents.append(FormattedText(self._transcript.render_entry(entry)))
-        return contents
+        return [
+            FormattedText(self._transcript.render_entry(entry))
+            for entry in self._transcript.iter_entries()
+        ]
 
     def print_now(self, output: Output, contents: list[AnyFormattedText]) -> None:
         """Print ``contents`` to ``output`` at once, each as _print_to_console
