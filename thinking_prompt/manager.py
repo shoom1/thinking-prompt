@@ -389,6 +389,12 @@ class ThinkingBoxManager:
         return self._display.rich_theme
 
     @property
+    def output_width(self) -> int | None:
+        """The Display's output width: what boxes' rich writes lay a Panel
+        or Table out at."""
+        return self._display.width
+
+    @property
     def is_expanded(self) -> bool:
         """True if boxes are currently expanded."""
         with self._lock:

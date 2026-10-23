@@ -224,6 +224,7 @@ class ThinkingPromptSession:
             thinking_styles=self._styles,
             get_color_depth=self._effective_color_depth,
             history_limit=history_limit,
+            get_width=lambda: self.app.output.get_size().columns,
         )
 
         self._expand_key = expand_key
