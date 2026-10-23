@@ -142,6 +142,9 @@ class ThinkingBox:
     def append_rich(self, renderable: Any, *, theme: Any = None) -> None:
         """Append a Rich renderable or markup string; the box switches to ANSI.
 
+        Text keeps its whitespace and wraps in the box like plain text; a
+        Panel or Table is laid out at the session's width.
+
         Args:
             renderable: Rich markup string or Rich renderable object.
             theme: Rich Theme for this write (default: the session's
@@ -150,7 +153,11 @@ class ThinkingBox:
         content = self._writable("append_rich")
         if content is not None:
             self._control.set_content_format("ansi")
-            content.append_rich(renderable, theme=theme or self._manager.rich_theme)
+            content.append_rich(
+                renderable,
+                theme=theme or self._manager.rich_theme,
+                width=self._manager.output_width,
+            )
 
     def set_line_rich(self, index: int, renderable: Any, *, theme: Any = None) -> None:
         """Replace one line with a Rich renderable; the box switches to ANSI.
@@ -168,7 +175,10 @@ class ThinkingBox:
         if content is not None:
             self._control.set_content_format("ansi")
             content.set_line_rich(
-                index, renderable, theme=theme or self._manager.rich_theme
+                index,
+                renderable,
+                theme=theme or self._manager.rich_theme,
+                width=self._manager.output_width,
             )
 
     @property

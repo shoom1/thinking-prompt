@@ -300,6 +300,24 @@ class TestStreamingContentRichMethods:
         content.append_rich("world")
         assert _plain(content.text) == "Hello world"
 
+    def test_append_rich_lays_a_panel_out_at_the_width_given(self):
+        """Its text wraps inside it, none cut off."""
+        pytest.importorskip("rich")
+        from rich.panel import Panel
+        content = StreamingContent()
+        content.append_rich(Panel("alpha beta gamma delta epsilon zeta"), width=20)
+        lines = _plain(content.text).splitlines()
+        assert {len(line) for line in lines} == {20}
+        assert "zeta" in _plain(content.text)
+
+    def test_append_rich_leaves_text_unwrapped_for_the_box_to_wrap(self):
+        pytest.importorskip("rich")
+        from rich.text import Text
+        content = StreamingContent()
+        content.append_rich("[dim]alpha beta gamma delta[/dim] ", width=10)
+        content.append_rich(Text("epsilon zeta"), width=10)
+        assert _plain(content.text) == "alpha beta gamma delta epsilon zeta"
+
     def test_set_line_rich_takes_markup_ending_its_line(self):
         """The newline that ends the line isn't a second line."""
         pytest.importorskip("rich")

@@ -315,6 +315,10 @@ async with session.thinking(title="Processing") as box:
     box.set_line_rich(1, "[green]  ✓ Transform[/green]")
 ```
 
+Markup keeps its whitespace, so the newline above ends each task's line, and
+text wraps in the box like plain text. A Rich renderable such as a `Panel` or
+`Table` is laid out at the terminal's width.
+
 ### Dynamic Titles & In-Place Updates
 
 Use `set_title()` to change the thinking header and `set_line()` to update lines in place:
