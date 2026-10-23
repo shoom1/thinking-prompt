@@ -648,7 +648,9 @@ class ThinkingPromptSession:
                 e.g. for a task list).
 
         Returns:
-            The ThinkingBox: write to it, retitle it, and finish it.
+            The ThinkingBox: write to it, retitle it, and finish it. It
+            belongs to the calling task: a box that task leaves open is
+            ended by the session (see the README's "When a Box Ends").
 
         Raises:
             ValueError: If max_lines is less than 1.
@@ -965,7 +967,8 @@ class ThinkingPromptSession:
         """
         Exit the session.
 
-        Call this from a handler to end the session loop.
+        Call this from a handler to end the session loop. Open boxes are
+        handled as on any exit (see run_async()).
 
         Example:
             @session.on_input
@@ -1037,7 +1040,8 @@ class ThinkingPromptSession:
 
         Raises:
             EOFError: When Ctrl+D is pressed on an empty input line.
-            KeyboardInterrupt: When Ctrl+C is pressed (not during thinking).
+            KeyboardInterrupt: When Ctrl+C exits: no handler is running and
+                no box is open.
         """
         self._pending_input = asyncio.get_running_loop().create_future()
         # Input is wanted again: a status hint no longer applies.
@@ -1063,10 +1067,10 @@ class ThinkingPromptSession:
                      on_input() for details.
 
         When the session ends, its last frame leaves out the thinking boxes
-        and the status bar. Boxes nobody else will end (see the README's
-        "When a Box Ends") are then echoed below it; a box a live background
-        task is feeding is left to that task, and echoed when the task ends
-        it or ends.
+        and the status bar. The boxes nobody else will end (see the README's
+        "When a Box Ends") are echoed below it. A box a live task is feeding
+        is left to that task: it's echoed when the task finishes it, or else
+        when the task ends.
 
         Raises:
             ValueError: If no handler is provided and none was registered.
