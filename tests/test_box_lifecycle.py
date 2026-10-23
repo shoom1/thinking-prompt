@@ -218,6 +218,27 @@ class TestOwnership:
         assert sum("thread" in text for text in _history(session)) == 1
         event.app.exit.assert_not_called()
 
+    async def test_without_a_status_bar_idle_ctrl_c_still_does_not_exit(self):
+        """Guard: the exit decision doesn't depend on the status bar."""
+        session = ThinkingPromptSession(enable_status_bar=False)
+        opened, gate = asyncio.Event(), asyncio.Event()
+
+        async def background() -> None:
+            async with session.thinking():
+                opened.set()
+                await gate.wait()
+
+        task = asyncio.create_task(background())
+        await asyncio.wait_for(opened.wait(), 1)
+        event = MagicMock()
+
+        _ctrl_c(session)(event)
+
+        event.app.exit.assert_not_called()
+        assert session.is_thinking
+        gate.set()
+        await asyncio.wait_for(task, 1)
+
 
 class TestFinishedHandle:
     """A finished box's handle says so, and finishing again is harmless (#3)."""
