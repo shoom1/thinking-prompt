@@ -3,6 +3,7 @@ Tests for ThinkingBoxControl.
 """
 from __future__ import annotations
 
+import threading
 from typing import Any
 
 import pytest
@@ -225,6 +226,46 @@ def _numbered(n: int) -> str:
     return "".join(f"line {i}\n" for i in range(n))
 
 
+def _wrapped(text: str, width: int) -> list[str]:
+    """The rows _wrap cuts ``text`` into, as the screen shows them."""
+    from prompt_toolkit.formatted_text import fragment_list_to_text
+    from prompt_toolkit.layout.screen import Char
+
+    from thinking_prompt.thinking_control import _wrap
+
+    return [
+        "".join(Char(c).char for c in fragment_list_to_text(row))
+        for row in _wrap([("", text)], width)
+    ]
+
+
+def _drawn(text: str, width: int) -> list[str]:
+    """The rows a wrapping window ``width`` columns wide draws ``text`` in."""
+    from prompt_toolkit.application import Application
+    from prompt_toolkit.application.current import set_app
+    from prompt_toolkit.input import create_pipe_input
+    from prompt_toolkit.layout import FormattedTextControl, Window
+    from prompt_toolkit.layout.mouse_handlers import MouseHandlers
+    from prompt_toolkit.layout.screen import Screen, WritePosition
+    from prompt_toolkit.output import DummyOutput
+
+    height = 20
+    with create_pipe_input() as inp, set_app(Application(output=DummyOutput(), input=inp)):
+        screen = Screen()
+        window = Window(FormattedTextControl(text), wrap_lines=True)
+        window.write_to_screen(
+            screen, MouseHandlers(), WritePosition(0, 0, width, height), "",
+            erase_bg=False, z_index=None,
+        )
+    rows = [
+        "".join(screen.data_buffer[y][x].char for x in range(width + 1)).rstrip()
+        for y in range(height)
+    ]
+    while rows and not rows[-1]:
+        rows.pop()
+    return rows
+
+
 def _words(n: int, start: int = 0) -> str:
     """Words w00, w01, ...: 4 columns each with the space between."""
     return " ".join(f"w{i:02d}" for i in range(start, start + n))
@@ -290,6 +331,32 @@ class TestOverflowTail:
         )
         assert control.get_line_count(width=5) == 3
         assert _rendered(control, 5, 2)[1:] == ["中"]
+
+    @pytest.mark.parametrize(
+        "text, width",
+        [
+            ("中a", 1),  # wider than the window: a row of its own, after an empty one
+            ("ab中cd", 3),
+            ("a\tb", 2),  # the tab is drawn as ^I
+            ("abcdef", 4),
+            ("中中中", 4),
+        ],
+    )
+    def test_rows_are_the_rows_the_window_draws(self, text: str, width: int):
+        assert _wrapped(text, width) == _drawn(text, width)
+
+    def test_a_character_wider_than_the_box_ends(self):
+        """It used to loop forever: 中 left the row wider than the box, and
+        the next fragment then took nothing from its text, again and again.
+        (Run in a thread, so a regression fails here instead of hanging.)"""
+        control = ThinkingBoxControl(lambda: "\x1b[31m中\x1b[0ma", content_format="ansi")
+        counted: list[int] = []
+        thread = threading.Thread(
+            target=lambda: counted.append(control.get_line_count(width=1)), daemon=True
+        )
+        thread.start()
+        thread.join(timeout=2)
+        assert counted == [3]
 
     def test_a_tab_takes_the_two_columns_it_is_drawn_in(self):
         """The window draws a tab as ^I."""

@@ -36,7 +36,8 @@ def _char_width(char: str) -> int:
 def _wrap(line: StyleAndTextTuples, width: int) -> list[StyleAndTextTuples]:
     """``line`` cut into the rows it takes at ``width`` columns, as the
     window wraps it: a character wider than what's left of a row starts
-    the next one."""
+    the next one, even at the start of a row (one wider than the window
+    leaves an empty row before it)."""
     if width <= 0:
         return [line]
     rows: list[StyleAndTextTuples] = [[]]
@@ -48,7 +49,7 @@ def _wrap(line: StyleAndTextTuples, width: int) -> list[StyleAndTextTuples]:
             continue
         if text.isascii() and text.isprintable():  # a column a character
             while text:
-                if used == width:
+                if used >= width:
                     rows.append([])
                     used = 0
                 piece = text[: width - used]
@@ -59,7 +60,7 @@ def _wrap(line: StyleAndTextTuples, width: int) -> list[StyleAndTextTuples]:
         start = 0
         for i, char in enumerate(text):
             char_width = _char_width(char)
-            if used + char_width > width and used:
+            if used + char_width > width:
                 if i > start:
                     rows[-1].append((style, text[start:i]))
                 rows.append([])
