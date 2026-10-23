@@ -392,6 +392,35 @@ class TestRepaintAfterShrinking:
 
             await run_with(session, handler, script)
 
+    async def test_markdown_is_repainted_at_the_new_width(self):
+        """After the terminal narrows, markdown is laid out again at the
+        new width, not as rendered for an earlier repaint."""
+        pytest.importorskip("rich")
+        terminal = _ColorTerminal(columns=80)
+
+        async def handler(text: str) -> None:
+            pass
+
+        with create_pipe_input() as inp, create_app_session(input=inp, output=terminal):
+            session = ThinkingPromptSession()
+
+            async def script(run: asyncio.Task[None]) -> None:
+                session.add_response(" ".join(["word"] * 30), markdown=True)
+                await wait_until(lambda: "word" in terminal.text())
+                # Shorter first, then narrower: two repaints.
+                for size in (Size(rows=12, columns=80), Size(rows=12, columns=40)):
+                    start = len(terminal.text())
+                    terminal.size = size
+                    session.app.invalidate()
+                    await wait_until(lambda start=start: "\x1b[3J" in terminal.text()[start:])
+
+                repainted = _plain(terminal.text()[start:])
+                assert "word" in repainted
+                # 16 words fit a line 80 columns wide; 8 fit 40.
+                assert not re.search(r"(word ){8}word", repainted)
+
+            await run_with(session, handler, script)
+
 
 class TestLayoutAppliesThemeClasses:
     """The prompt style field only works if the layout tags its window

@@ -47,6 +47,7 @@ class Display:
         thinking_styles: ThinkingPromptStyles | None = None,
         get_color_depth: Callable[[], ColorDepth | None] = lambda: None,
         history_limit: int | None = None,
+        get_width: Callable[[], int | None] = lambda: None,
     ) -> None:
         """
         Initialize the Display.
@@ -61,9 +62,16 @@ class Display:
                             callable returning None.
             history_limit: Max transcript entries kept; oldest are trimmed.
                           None (default) means unbounded.
+            get_width: Callable returning the output's width in columns,
+                      which Rich lays output out at (markdown, a Panel).
+                      None (the default's) leaves Rich to find the
+                      terminal's.
         """
         self._get_style = get_style
         self._get_color_depth = get_color_depth
+        self._get_width = get_width
+        # The width the transcript's markdown was last rendered at.
+        self._rendered_width: int | None = None
         self._thinking_styles = thinking_styles
         # Assigned before _history is constructed: the render callbacks
         # below close over self._rich_theme/_code_theme so a later
@@ -73,7 +81,7 @@ class Display:
         self._history = FormattedTextHistory(
             max_entries=history_limit,
             render_markdown=lambda src: _markdown_to_ansi(
-                src, theme=self._rich_theme, code_theme=self._code_theme
+                src, theme=self._rich_theme, code_theme=self._code_theme, width=self.width
             ),
             render_code=lambda src, language: _highlight_code(
                 src, language, code_theme=self._code_theme
@@ -101,6 +109,11 @@ class Display:
     def rich_theme(self) -> Any:
         """Get the Rich theme for consistent styling."""
         return self._rich_theme
+
+    @property
+    def width(self) -> int | None:
+        """The output's width in columns (None: unknown)."""
+        return self._get_width()
 
     def set_theme(self, styles: ThinkingPromptStyles) -> None:
         """Adopt a new theme: rebuild Rich theme, re-render markdown/code."""
@@ -299,7 +312,7 @@ class Display:
             content: The markdown content.
         """
         rendered = _markdown_to_ansi(
-            content, theme=self._rich_theme, code_theme=self._code_theme
+            content, theme=self._rich_theme, code_theme=self._code_theme, width=self.width
         )
         self._history.append_markdown(content)
         self._print_to_console(ANSI(rendered))
@@ -369,7 +382,7 @@ class Display:
             table.add_row("Alice")
             display.rich(table)
         """
-        self._output_ansi(_rich_to_ansi(renderable, theme=self._rich_theme))
+        self._output_ansi(_rich_to_ansi(renderable, theme=self._rich_theme, width=self.width))
 
     def to_ansi(self, renderable: Any) -> ANSI:
         """
@@ -383,7 +396,7 @@ class Display:
         Returns:
             An ANSI object with trailing newlines stripped.
         """
-        ansi_str = _rich_to_ansi(renderable, theme=self._rich_theme)
+        ansi_str = _rich_to_ansi(renderable, theme=self._rich_theme, width=self.width)
         return ANSI(ansi_str.rstrip("\n"))
 
     def raw(self, content: str, style_class: str = "") -> None:
@@ -414,12 +427,18 @@ class Display:
 
     def transcript(self) -> list[AnyFormattedText]:
         """Every transcript entry as the console shows it, in the current
-        theme: what a repaint prints (print_now), as it is now.
+        theme and width: what a repaint prints (print_now), as it is now.
 
         Nothing is appended to history. Thinking entries are truncated to
         their recorded truncate_lines, reproducing the form originally
         echoed.
         """
+        # Markdown is laid out at the output's width: what was rendered at
+        # another (before the terminal shrank) is rendered again.
+        width = self.width
+        if width != self._rendered_width:
+            self._history.invalidate_render_caches()
+            self._rendered_width = width
         contents: list[AnyFormattedText] = []
         for entry in self._history.iter_entries():
             if entry.kind == "styled":

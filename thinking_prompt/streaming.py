@@ -132,30 +132,42 @@ class StreamingContent:
                     self._lines[count:count] = added
         self._changed()
 
-    def append_rich(self, renderable: Any, *, theme: Any = None) -> None:
+    def append_rich(
+        self, renderable: Any, *, theme: Any = None, width: int | None = None
+    ) -> None:
         """Append a Rich renderable or markup string, converted to ANSI.
+
+        Text isn't wrapped (where it's shown wraps it); a Panel or Table is
+        laid out ``width`` columns wide.
 
         Args:
             renderable: Rich markup string or Rich renderable object.
             theme: Optional Rich Theme for styling.
+            width: Columns to lay a Panel or Table out in (None: the
+                terminal's, as Rich finds it).
         """
         from .rich_utils import _renderable_to_ansi
-        self.append(_renderable_to_ansi(renderable, theme=theme))
+        self.append(_renderable_to_ansi(renderable, theme=theme, width=width))
 
-    def set_line_rich(self, index: int, renderable: Any, *, theme: Any = None) -> None:
+    def set_line_rich(
+        self, index: int, renderable: Any, *, theme: Any = None, width: int | None = None
+    ) -> None:
         """Set a line from a Rich renderable or markup string.
 
         Args:
             index: Line index (supports negative indices).
             renderable: Rich markup string or Rich renderable object.
             theme: Optional Rich Theme for styling.
+            width: Columns to lay a renderable such as a Rule out in (None:
+                the terminal's, as Rich finds it).
 
         Raises:
             ValueError: If it renders to more than one line (e.g. markup
                 with a newline, or a Panel).
         """
         from .rich_utils import _renderable_to_ansi
-        ansi = _renderable_to_ansi(renderable, theme=theme)
+        # The newline that ends the line isn't a second line.
+        ansi = _renderable_to_ansi(renderable, theme=theme, width=width).rstrip("\n")
         rows = ansi.count("\n") + 1
         if rows > 1:
             raise ValueError(

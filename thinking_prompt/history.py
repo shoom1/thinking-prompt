@@ -199,7 +199,8 @@ class FormattedTextHistory:
             return FormattedText(frags)
 
     def invalidate_render_caches(self) -> None:
-        """Drop caches of re-renderable entries (markdown/code) on theme change."""
+        """Drop caches of re-renderable entries (markdown/code), on a change
+        of theme or width."""
         with self._lock:
             for entry in self._entries:
                 if entry.kind in ("markdown", "code"):
