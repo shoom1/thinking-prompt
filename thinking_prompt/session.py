@@ -118,6 +118,8 @@ class ThinkingPromptSession:
 
     # Status hint shown when Enter is refused because nobody awaits input.
     _BUSY_STATUS = "Busy — press Ctrl+C to cancel"
+    # Status hint shown when Ctrl+C at an idle prompt leaves live tasks' boxes.
+    _BACKGROUND_STATUS = "Background work is running — Ctrl+D exits"
 
     def __init__(
         self,
@@ -202,10 +204,11 @@ class ThinkingPromptSession:
         self._max_thinking_height = max_thinking_height
         self._enable_status_bar = enable_status_bar
         self._status_text = status_text
-        # Status the "Busy" hint replaced, restored once input is accepted
-        # again (see _show_busy_hint / _clear_busy_hint).
-        self._busy_hint_shown = False
-        self._status_before_busy: AnyFormattedText = None
+        # A status hint ("Busy", "Background work") replaces the status
+        # until it's cleared, and the status it replaced comes back (see
+        # _show_hint / _clear_hint / _status_now).
+        self._hint: str | None = None
+        self._status_under_hint: AnyFormattedText = None
         self._editing_mode = editing_mode
         self._echo_input = echo_input
         self._completer = completer
@@ -304,22 +307,29 @@ class ThinkingPromptSession:
         pending = self._pending_input
         return not handler_running and pending is not None and not pending.done()
 
-    def _show_busy_hint(self) -> None:
-        """Show the "Busy" status hint, remembering the status it replaces."""
-        if self._status_text != self._BUSY_STATUS:
-            self._status_before_busy = self._status_text
-        self._busy_hint_shown = True
-        self.set_status(self._BUSY_STATUS)
+    def _show_hint(self, hint: str) -> None:
+        """Show a status hint, keeping the status it replaces."""
+        if self._hint is None or self._status_text != self._hint:
+            self._status_under_hint = self._status_text
+        self._hint = hint
+        self.set_status(hint)
 
-    def _clear_busy_hint(self) -> None:
-        """Restore the status the "Busy" hint replaced — unless something
-        set a new status meanwhile (e.g. the handler reporting its result)."""
-        if not self._busy_hint_shown:
+    def _clear_hint(self) -> None:
+        """Restore the status the hint replaced — unless something set a new
+        status meanwhile (e.g. the handler reporting its result)."""
+        if self._hint is None:
             return
-        self._busy_hint_shown = False
-        if self._status_text == self._BUSY_STATUS:
-            self.status_text = self._status_before_busy
-        self._status_before_busy = None
+        if self._status_text == self._hint:
+            self.status_text = self._status_under_hint
+        self._hint = None
+        self._status_under_hint = None
+
+    def _status_now(self) -> AnyFormattedText:
+        """The status to show. The background hint lasts only while a box
+        is open: once the last one ends, the status it replaced is back."""
+        if self._hint == self._BACKGROUND_STATUS and not self._manager.has_active_boxes:
+            self._clear_hint()
+        return self._status_text
 
     def _create_default_buffer(self) -> Buffer:
         """Create the main input buffer."""
@@ -330,8 +340,10 @@ class ThinkingPromptSession:
             # which refuses before prompt_toolkit touches the buffer. Note
             # the return value means *keep_text*: True keeps the draft.
             if not self._input_wanted():
-                self._show_busy_hint()
+                self._show_hint(self._BUSY_STATUS)
                 return True
+            # Input is accepted: a status hint no longer applies.
+            self._clear_hint()
 
             text = buff.document.text
 
@@ -369,7 +381,7 @@ class ThinkingPromptSession:
             default_buffer=self.default_buffer,
             message=lambda: self._polled(self._message),
             max_thinking_height=self._max_thinking_height,
-            get_status_text=lambda: self._polled(self._status_text),
+            get_status_text=lambda: self._polled(self._status_now()),
             is_status_bar_enabled=lambda: self._enable_status_bar,
             thinking_manager=self._manager,
             completions_menu_height=self._completions_menu_height,
@@ -445,6 +457,11 @@ class ThinkingPromptSession:
                 # A live task's box is that task's to end.
                 ended = self._manager.finish_owned_by(self._app_task)
                 self._announce_cancel(bool(ended))
+                if self._manager.has_active_boxes:
+                    # Only live tasks' boxes are left: their work is theirs to
+                    # stop, so don't exit, now or at the next Ctrl+C;
+                    # say how to.
+                    self._show_hint(self._BACKGROUND_STATUS)
 
             if not handler_running and not had_active_boxes:
                 # No handler and no boxes — the session is idle, so Ctrl+C
@@ -492,7 +509,7 @@ class ThinkingPromptSession:
             # before validate_and_handle(), so prompt_toolkit neither
             # clears the draft nor records it in the input history.
             if not self._input_wanted():
-                self._show_busy_hint()
+                self._show_hint(self._BUSY_STATUS)
                 return
             self.default_buffer.validate_and_handle()
 
@@ -1023,8 +1040,8 @@ class ThinkingPromptSession:
             KeyboardInterrupt: When Ctrl+C is pressed (not during thinking).
         """
         self._pending_input = asyncio.get_running_loop().create_future()
-        # Input is wanted again: the "Busy" hint no longer applies.
-        self._clear_busy_hint()
+        # Input is wanted again: a status hint no longer applies.
+        self._clear_hint()
         try:
             return await self._pending_input
         except asyncio.CancelledError as exc:
@@ -1230,8 +1247,8 @@ class ThinkingPromptSession:
 
     @property
     def status_text(self) -> AnyFormattedText:
-        """Get the current status bar text."""
-        return self._status_text
+        """Get the current status bar text (a hint, while one shows)."""
+        return self._status_now()
 
     @status_text.setter
     def status_text(self, value: AnyFormattedText) -> None:

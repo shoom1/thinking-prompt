@@ -803,6 +803,121 @@ class TestBusyHint:
             await run_with(session, handler, script)
 
 
+BACKGROUND_HINT = "Background work is running — Ctrl+D exits"
+
+
+async def _indexing(
+    session: ThinkingPromptSession, opened: asyncio.Event, gate: asyncio.Event
+) -> None:
+    """A background task's box: open until ``gate`` is set."""
+    async with session.thinking(title="Indexing") as box:
+        box.append("indexed 1\n")
+        opened.set()
+        await gate.wait()
+
+
+class TestBackgroundHint:
+    """Ctrl+C at an idle prompt leaves a live task's box and doesn't exit;
+    a status hint says how to, while a box is open."""
+
+    async def test_ctrl_c_leaves_the_box_and_shows_the_hint_until_it_ends(self):
+        opened, gate = asyncio.Event(), asyncio.Event()
+        with piped_session(status_text="READY") as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                task = asyncio.create_task(_indexing(session, opened, gate))
+                await asyncio.wait_for(opened.wait(), 2)
+                inp.send_text(CTRL_C)
+                await wait_until(lambda: on_screen(session, BACKGROUND_HINT))
+                assert session.is_thinking and not run.done()
+                assert "Operation cancelled...\n" not in history_texts(session._display)
+
+                gate.set()
+                await asyncio.wait_for(task, 2)
+                await wait_until(lambda: on_screen(session, "READY"))
+                assert session.status_text == "READY"
+
+            await run_with(session, lambda text: None, script)
+
+    async def test_ctrl_c_again_keeps_the_hint_and_the_app(self):
+        opened, gate = asyncio.Event(), asyncio.Event()
+        with piped_session(status_text="READY") as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                task = asyncio.create_task(_indexing(session, opened, gate))
+                await asyncio.wait_for(opened.wait(), 2)
+                inp.send_text(CTRL_C)
+                await wait_until(lambda: on_screen(session, BACKGROUND_HINT))
+                inp.send_text(CTRL_C + "x")  # "x" lands once the second Ctrl+C is handled
+                await wait_until(lambda: session.default_buffer.text == "x")
+                assert not run.done() and session.is_thinking
+                assert session.status_text == BACKGROUND_HINT
+                assert "Operation cancelled...\n" not in history_texts(session._display)
+                gate.set()
+                await asyncio.wait_for(task, 2)
+
+            await run_with(session, lambda text: None, script)
+
+    async def test_the_hint_clears_when_input_is_accepted(self):
+        opened, gate, release = asyncio.Event(), asyncio.Event(), asyncio.Event()
+        delivered: list[str] = []
+
+        async def handler(text: str) -> None:
+            delivered.append(text)
+            await release.wait()
+
+        with piped_session(status_text="READY") as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                task = asyncio.create_task(_indexing(session, opened, gate))
+                await asyncio.wait_for(opened.wait(), 2)
+                inp.send_text(CTRL_C)
+                await wait_until(lambda: session.status_text == BACKGROUND_HINT)
+                inp.send_text("next" + ENTER)
+                await wait_until(lambda: delivered == ["next"])
+                assert session.status_text == "READY"  # while the handler still runs
+                assert session.is_thinking  # the job's box is still open
+                release.set()
+                gate.set()
+                await asyncio.wait_for(task, 2)
+
+            await run_with(session, handler, script)
+
+    async def test_a_status_set_while_the_hint_shows_wins(self):
+        opened, gate = asyncio.Event(), asyncio.Event()
+        with piped_session(status_text="READY") as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                task = asyncio.create_task(_indexing(session, opened, gate))
+                await asyncio.wait_for(opened.wait(), 2)
+                inp.send_text(CTRL_C)
+                await wait_until(lambda: session.status_text == BACKGROUND_HINT)
+                session.set_status("INDEXING 50%")
+                gate.set()
+                await asyncio.wait_for(task, 2)
+                await wait_until(lambda: on_screen(session, "INDEXING 50%"))
+                assert session.status_text == "INDEXING 50%"
+
+            await run_with(session, lambda text: None, script)
+
+    async def test_a_callable_status_comes_back_after_the_hint(self):
+        opened, gate = asyncio.Event(), asyncio.Event()
+        shown = ["one"]
+        with piped_session(status_text=lambda: shown[-1]) as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                task = asyncio.create_task(_indexing(session, opened, gate))
+                await asyncio.wait_for(opened.wait(), 2)
+                inp.send_text(CTRL_C)
+                await wait_until(lambda: on_screen(session, BACKGROUND_HINT))
+                shown.append("two")
+                gate.set()
+                await asyncio.wait_for(task, 2)
+                await wait_until(lambda: on_screen(session, "two"))
+
+            await run_with(session, lambda text: None, script)
+
+
 class TestCtrlDInDialog:
     async def test_ctrl_d_in_dialog_text_field_deletes_char(self):
         """Ctrl+D while editing a dialog text field is emacs delete-char;
