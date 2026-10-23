@@ -919,6 +919,17 @@ class TestBackgroundHint:
             await run_with(session, lambda text: None, script)
 
 
+@contextmanager
+def recorded_session(
+    **kwargs: Any,
+) -> Iterator[tuple[ThinkingPromptSession, PipeInput, _RecordingOutput]]:
+    """A piped session whose output keeps what's written to it: the frames
+    and what's printed above them."""
+    output = _RecordingOutput(40)
+    with create_pipe_input() as inp, create_app_session(input=inp, output=output):
+        yield ThinkingPromptSession(**kwargs), inp, output
+
+
 def done_frame(session: ThinkingPromptSession) -> list[str]:
     """The frame the app draws as it exits, drawn now. prompt_toolkit draws
     the last frame with is_done true, then resets its renderer, so it can't
@@ -968,22 +979,53 @@ class TestExit:
                 before_run=lambda: session.start_thinking().append("starting up\n"),
             )
 
-    async def test_a_live_tasks_box_is_left_to_it_and_echoed_once(self):
-        """Guard: exit doesn't end a live task's box; the task does, once."""
+    async def test_a_live_tasks_box_is_left_to_it_and_printed_once(self):
+        """Exit leaves a live task's box to the task, and its lines reach the
+        terminal once: not in the last frame and again when the task ends."""
         opened, gate = asyncio.Event(), asyncio.Event()
-        with piped_session() as (session, inp):
+        with recorded_session() as (session, inp, output):
 
             async def script(run: asyncio.Task[None]) -> None:
                 task = asyncio.create_task(_indexing(session, opened, gate))
                 await asyncio.wait_for(opened.wait(), 2)
+                await wait_until(lambda: "indexed 1" in output.text())
+                mark = len(output.written)
                 inp.send_text(CTRL_D)
                 await asyncio.wait_for(run, 2)
                 assert session.is_thinking  # left to its task
                 task.cancel()
                 with suppress(asyncio.CancelledError):
                     await task
+                assert "".join(output.written[mark:]).count("indexed 1") == 1
+
+            await run_with(session, lambda text: None, script)
+
+    async def test_a_box_its_task_leaves_open_is_printed_once_when_the_task_ends(self):
+        """A box from start_thinking() isn't ended by cancelling its task:
+        exit leaves it to the task, and it's ended once the task ends."""
+        opened = asyncio.Event()
+
+        async def watch() -> None:
+            session.start_thinking(title="Watching").append("watched 1\n")
+            opened.set()
+            await asyncio.sleep(3600)
+
+        with recorded_session() as (session, inp, output):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                task = asyncio.create_task(watch())
+                await asyncio.wait_for(opened.wait(), 2)
+                await wait_until(lambda: "watched 1" in output.text())
+                mark = len(output.written)
+                inp.send_text(CTRL_D)
+                await asyncio.wait_for(run, 2)
+                task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await task
+                await wait_until(lambda: not session.is_thinking)
+                assert "".join(output.written[mark:]).count("watched 1") == 1
                 history = history_texts(session._display)
-                assert sum("indexed 1" in text for text in history) == 1
+                assert sum("watched 1" in text for text in history) == 1
 
             await run_with(session, lambda text: None, script)
 

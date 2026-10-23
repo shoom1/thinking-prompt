@@ -1065,7 +1065,8 @@ class ThinkingPromptSession:
         When the session ends, its last frame leaves out the thinking boxes
         and the status bar. Boxes nobody else will end (see the README's
         "When a Box Ends") are then echoed below it; a box a live background
-        task is feeding is left to that task, which echoes it when it ends.
+        task is feeding is left to that task, and echoed when the task ends
+        it or ends.
 
         Raises:
             ValueError: If no handler is provided and none was registered.
@@ -1122,8 +1123,10 @@ class ThinkingPromptSession:
             with suppress(asyncio.CancelledError):
                 await loop_task
             # The UI is gone. End the boxes nobody else will end, echoing
-            # them below its last frame; a live task's box is left to it.
+            # them below its last frame; a live task's box is left to it,
+            # and ended when that task ends if the task doesn't end it.
             self._manager.finish_owned_by(self._app_task)
+            self._manager.finish_when_owners_end()
             self._app_task = None
             self._frames.cancel()
             self._shrinks.cancel()
