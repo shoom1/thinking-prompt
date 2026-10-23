@@ -72,7 +72,7 @@ if __name__ == "__main__":
 | Key | Action |
 |-----|--------|
 | Ctrl+T | Expand/collapse all thinking boxes (while one is open) |
-| Ctrl+C | Cancel current operation or exit |
+| Ctrl+C | Cancel the running request; at an idle prompt, clear boxes nobody is feeding, or exit when there are none |
 | Ctrl+D | Exit application (empty input line only) |
 
 Rebind Ctrl+T with `expand_key=` (see [Session Options](#session-options)).
@@ -141,10 +141,19 @@ as on a normal finish:
 - **The handler raises**: the content, then the `[ERROR] Handler error: ...` line.
 - **Left open** by a handler that returns: finished as `box.finish()` would.
 
-A box belongs to the task that opened it. When a handler ends, the session
-finishes the boxes it opened (and any whose task has already ended); a box
-opened by a background task stays until that task finishes it. Ctrl+C at
-an idle prompt clears every remaining box.
+A box belongs to the task that opened it, and the session ends a box only
+when nobody else will:
+
+- When a handler ends, the session finishes the boxes it opened, and any
+  whose task has ended or that were opened outside asyncio (from a thread).
+- Ctrl+C at an idle prompt clears those boxes too, and the ones the app's
+  own task opened (the task running `run_async()`, e.g. a startup status
+  box). A box a live background task is feeding stays: that task ends it.
+  With only such boxes open, Ctrl+C doesn't exit; the status bar says
+  `Background work is running — Ctrl+D exits`.
+- On exit, the last frame leaves out the boxes and the status bar. Boxes
+  nobody else will end are echoed below it; a background task's box is
+  echoed when that task ends it (`asyncio.run` cancels leftover tasks).
 
 `box.is_finished` tells whether a box is done. Calling `finish()` again
 returns the same text without echoing it twice. Writes to a finished box are
@@ -653,6 +662,7 @@ See the `examples/` directory for complete demos:
 - `completer_demo.py` - Slash-command autocompletion (like Claude Code)
 - `demo_themes.py` - Built-in themes and runtime theme switching
 - `inline_dialogs.py` - Dialogs drawn inline under the prompt (and the same ones as boxes)
+- `shell_jobs.py` - Shell commands as background jobs, each streaming into its own numbered box while you type the next; `/stop N` stops one, `rm` asks first
 
 ## License
 
