@@ -10,12 +10,13 @@ from __future__ import annotations
 import asyncio
 import threading
 from collections.abc import Awaitable, Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from typing import Any, Callable
-from unittest.mock import patch
+from unittest.mock import PropertyMock, patch
 
 import pytest
-from prompt_toolkit.application import create_app_session
+from prompt_toolkit.application import Application, create_app_session
+from prompt_toolkit.application.current import set_app
 from prompt_toolkit.data_structures import Size
 from prompt_toolkit.input import PipeInput, create_pipe_input
 from prompt_toolkit.layout import BufferControl
@@ -240,9 +241,19 @@ async def run_with(
     session: ThinkingPromptSession,
     handler: Callable[[str], Any],
     script: Callable[[asyncio.Task[None]], Awaitable[None]],
+    *,
+    before_run: Callable[[], Any] | None = None,
 ) -> None:
-    """Run the session while ``script`` drives it; always tear down."""
-    run = asyncio.create_task(session.run_async(handler))
+    """Run the session while ``script`` drives it; always tear down.
+    ``before_run`` runs in the app's task just before ``run_async()``, as
+    an app's own setup does (e.g. opening a startup status box)."""
+
+    async def app() -> None:
+        if before_run is not None:
+            before_run()
+        await session.run_async(handler)
+
+    run = asyncio.create_task(app())
     try:
         await wait_until(lambda: waiting_for_input(session))
         await script(run)
@@ -254,15 +265,15 @@ async def run_with(
 
 class TestCtrlCWithIdleBox:
     async def test_ctrl_c_clears_orphan_box_and_keeps_accepting_input(self):
-        """A box left open while idle (e.g. a startup status box): Ctrl+C
-        clears it, and the session keeps delivering input afterwards."""
+        """A box the app's own task opened while idle (e.g. a startup status
+        box): Ctrl+C clears it, and the session keeps delivering input
+        afterwards."""
         delivered: list[str] = []
 
         async def handler(text: str) -> None:
             delivered.append(text)
 
         with piped_session() as (session, inp):
-            session.start_thinking(title="startup status")
 
             async def script(run: asyncio.Task[None]) -> None:
                 inp.send_text(CTRL_C)
@@ -271,7 +282,10 @@ class TestCtrlCWithIdleBox:
                 inp.send_text("hello" + ENTER)
                 await wait_until(lambda: delivered == ["hello"])
 
-            await run_with(session, handler, script)
+            await run_with(
+                session, handler, script,
+                before_run=lambda: session.start_thinking(title="startup status"),
+            )
 
 
 LONG = "\n".join(f"line {i}" for i in range(40))
@@ -786,6 +800,254 @@ class TestBusyHint:
                 release.set()
                 await wait_until(lambda: waiting_for_input(session))
                 assert session.status_text == "DONE"
+
+            await run_with(session, handler, script)
+
+
+BACKGROUND_HINT = "Background work is running — Ctrl+D exits"
+
+
+async def _indexing(
+    session: ThinkingPromptSession, opened: asyncio.Event, gate: asyncio.Event
+) -> None:
+    """A background task's box: open until ``gate`` is set."""
+    async with session.thinking(title="Indexing") as box:
+        box.append("indexed 1\n")
+        opened.set()
+        await gate.wait()
+
+
+class TestBackgroundHint:
+    """Ctrl+C at an idle prompt leaves a live task's box and doesn't exit;
+    a status hint says how to, while a box is open."""
+
+    async def test_ctrl_c_leaves_the_box_and_shows_the_hint_until_it_ends(self):
+        opened, gate = asyncio.Event(), asyncio.Event()
+        with piped_session(status_text="READY") as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                task = asyncio.create_task(_indexing(session, opened, gate))
+                await asyncio.wait_for(opened.wait(), 2)
+                inp.send_text(CTRL_C)
+                await wait_until(lambda: on_screen(session, BACKGROUND_HINT))
+                assert session.is_thinking and not run.done()
+                assert "Operation cancelled...\n" not in history_texts(session._display)
+
+                gate.set()
+                await asyncio.wait_for(task, 2)
+                await wait_until(lambda: on_screen(session, "READY"))
+                assert session.status_text == "READY"
+
+            await run_with(session, lambda text: None, script)
+
+    async def test_ctrl_c_again_keeps_the_hint_and_the_app(self):
+        opened, gate = asyncio.Event(), asyncio.Event()
+        with piped_session(status_text="READY") as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                task = asyncio.create_task(_indexing(session, opened, gate))
+                await asyncio.wait_for(opened.wait(), 2)
+                inp.send_text(CTRL_C)
+                await wait_until(lambda: on_screen(session, BACKGROUND_HINT))
+                inp.send_text(CTRL_C + "x")  # "x" lands once the second Ctrl+C is handled
+                await wait_until(lambda: session.default_buffer.text == "x")
+                assert not run.done() and session.is_thinking
+                assert session.status_text == BACKGROUND_HINT
+                assert "Operation cancelled...\n" not in history_texts(session._display)
+                gate.set()
+                await asyncio.wait_for(task, 2)
+
+            await run_with(session, lambda text: None, script)
+
+    async def test_the_hint_clears_when_input_is_accepted(self):
+        opened, gate, release = asyncio.Event(), asyncio.Event(), asyncio.Event()
+        delivered: list[str] = []
+
+        async def handler(text: str) -> None:
+            delivered.append(text)
+            await release.wait()
+
+        with piped_session(status_text="READY") as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                task = asyncio.create_task(_indexing(session, opened, gate))
+                await asyncio.wait_for(opened.wait(), 2)
+                inp.send_text(CTRL_C)
+                await wait_until(lambda: session.status_text == BACKGROUND_HINT)
+                inp.send_text("next" + ENTER)
+                await wait_until(lambda: delivered == ["next"])
+                assert session.status_text == "READY"  # while the handler still runs
+                assert session.is_thinking  # the job's box is still open
+                release.set()
+                gate.set()
+                await asyncio.wait_for(task, 2)
+
+            await run_with(session, handler, script)
+
+    async def test_a_status_set_while_the_hint_shows_wins(self):
+        opened, gate = asyncio.Event(), asyncio.Event()
+        with piped_session(status_text="READY") as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                task = asyncio.create_task(_indexing(session, opened, gate))
+                await asyncio.wait_for(opened.wait(), 2)
+                inp.send_text(CTRL_C)
+                await wait_until(lambda: session.status_text == BACKGROUND_HINT)
+                session.set_status("INDEXING 50%")
+                gate.set()
+                await asyncio.wait_for(task, 2)
+                await wait_until(lambda: on_screen(session, "INDEXING 50%"))
+                assert session.status_text == "INDEXING 50%"
+
+            await run_with(session, lambda text: None, script)
+
+    async def test_a_callable_status_comes_back_after_the_hint(self):
+        opened, gate = asyncio.Event(), asyncio.Event()
+        shown = ["one"]
+        with piped_session(status_text=lambda: shown[-1]) as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                task = asyncio.create_task(_indexing(session, opened, gate))
+                await asyncio.wait_for(opened.wait(), 2)
+                inp.send_text(CTRL_C)
+                await wait_until(lambda: on_screen(session, BACKGROUND_HINT))
+                shown.append("two")
+                gate.set()
+                await asyncio.wait_for(task, 2)
+                await wait_until(lambda: on_screen(session, "two"))
+
+            await run_with(session, lambda text: None, script)
+
+
+@contextmanager
+def recorded_session(
+    **kwargs: Any,
+) -> Iterator[tuple[ThinkingPromptSession, PipeInput, _RecordingOutput]]:
+    """A piped session whose output keeps what's written to it: the frames
+    and what's printed above them."""
+    output = _RecordingOutput(40)
+    with create_pipe_input() as inp, create_app_session(input=inp, output=output):
+        yield ThinkingPromptSession(**kwargs), inp, output
+
+
+def done_frame(session: ThinkingPromptSession) -> list[str]:
+    """The frame the app draws as it exits, drawn now. prompt_toolkit draws
+    the last frame with is_done true, then resets its renderer, so it can't
+    be read afterwards: draw it once more with is_done patched true."""
+    with set_app(session.app), patch.object(
+        Application, "is_done", new_callable=PropertyMock, return_value=True
+    ):
+        session.app.renderer.render(session.app, session.app.layout)
+    return [line for line in screen_lines(session) if line]
+
+
+class TestExit:
+    """The app's last frame leaves out the boxes and the status bar; open
+    boxes are echoed once, below it."""
+
+    async def test_the_last_frame_leaves_out_the_boxes_and_the_status_bar(self):
+        opened, gate = asyncio.Event(), asyncio.Event()
+        with piped_session(status_text="READY") as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                task = asyncio.create_task(_indexing(session, opened, gate))
+                await asyncio.wait_for(opened.wait(), 2)
+                await wait_until(lambda: on_screen(session, "indexed 1"))
+
+                frame = done_frame(session)
+
+                assert any(line.startswith(">>>") for line in frame)
+                for text in ("Indexing", "indexed 1", "READY"):
+                    assert not any(text in line for line in frame), frame
+                gate.set()
+                await asyncio.wait_for(task, 2)
+
+            await run_with(session, lambda text: None, script)
+
+    async def test_a_box_the_apps_task_opened_is_echoed_after_exit(self):
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text(CTRL_D)
+                await asyncio.wait_for(run, 2)
+                assert not session.is_thinking
+                history = history_texts(session._display)
+                assert sum("starting up" in text for text in history) == 1
+
+            await run_with(
+                session, lambda text: None, script,
+                before_run=lambda: session.start_thinking().append("starting up\n"),
+            )
+
+    async def test_a_live_tasks_box_is_left_to_it_and_printed_once(self):
+        """Exit leaves a live task's box to the task, and its lines reach the
+        terminal once: not in the last frame and again when the task ends."""
+        opened, gate = asyncio.Event(), asyncio.Event()
+        with recorded_session() as (session, inp, output):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                task = asyncio.create_task(_indexing(session, opened, gate))
+                await asyncio.wait_for(opened.wait(), 2)
+                await wait_until(lambda: "indexed 1" in output.text())
+                mark = len(output.written)
+                inp.send_text(CTRL_D)
+                await asyncio.wait_for(run, 2)
+                assert session.is_thinking  # left to its task
+                task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await task
+                assert "".join(output.written[mark:]).count("indexed 1") == 1
+
+            await run_with(session, lambda text: None, script)
+
+    async def test_a_box_its_task_leaves_open_is_printed_once_when_the_task_ends(self):
+        """A box from start_thinking() isn't ended by cancelling its task:
+        exit leaves it to the task, and it's ended once the task ends."""
+        opened = asyncio.Event()
+
+        async def watch() -> None:
+            session.start_thinking(title="Watching").append("watched 1\n")
+            opened.set()
+            await asyncio.sleep(3600)
+
+        with recorded_session() as (session, inp, output):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                task = asyncio.create_task(watch())
+                await asyncio.wait_for(opened.wait(), 2)
+                await wait_until(lambda: "watched 1" in output.text())
+                mark = len(output.written)
+                inp.send_text(CTRL_D)
+                await asyncio.wait_for(run, 2)
+                task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await task
+                await wait_until(lambda: not session.is_thinking)
+                assert "".join(output.written[mark:]).count("watched 1") == 1
+                history = history_texts(session._display)
+                assert sum("watched 1" in text for text in history) == 1
+
+            await run_with(session, lambda text: None, script)
+
+    async def test_exit_while_a_handler_runs_echoes_its_box_once(self):
+        """Guard: the handler's cleanup echoes its box; the exit step after
+        it finds nothing left to end."""
+
+        async def handler(text: str) -> None:
+            async with session.thinking() as box:
+                box.append("working\n")
+                await asyncio.sleep(3600)
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: session.is_thinking)
+                session.exit()
+                await asyncio.wait_for(run, 2)
+                history = history_texts(session._display)
+                assert sum("working" in text for text in history) == 1
+                assert not session.is_thinking
 
             await run_with(session, handler, script)
 

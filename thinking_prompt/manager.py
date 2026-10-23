@@ -311,14 +311,6 @@ class ThinkingBoxManager:
         )
         return bool(ended)
 
-    def finish_all(
-        self, *, add_to_history: bool = True, echo_to_console: bool | None = None
-    ) -> list[ThinkingBox]:
-        """End every box (e.g. Ctrl+C at an idle prompt); return them."""
-        return self._finish(
-            lambda b: True, add_to_history=add_to_history, echo_to_console=echo_to_console
-        )
-
     def finish_owned_by(
         self,
         task: asyncio.Task[Any] | None,
@@ -326,12 +318,13 @@ class ThinkingBoxManager:
         add_to_history: bool = True,
         echo_to_console: bool | None = None,
     ) -> list[ThinkingBox]:
-        """End the boxes a handler answers for when it ends; return them.
+        """End the boxes nobody but ``task`` would end; return them.
 
-        Those ``task`` created, those whose task has already ended (nobody
-        else will finish them), and those with no known owner (created
-        outside asyncio, e.g. from a thread). A live background task's box
-        is left alone.
+        Those ``task`` created, those whose task has already ended, and those
+        with no known owner (created outside asyncio, e.g. from a thread). A
+        live task's box is left to that task. A handler's cleanup passes the
+        handler's task; idle Ctrl+C and the end of run_async() pass the
+        app's task (the one running run_async()).
         """
 
         def owned(box: ThinkingBox) -> bool:
@@ -340,6 +333,16 @@ class ThinkingBoxManager:
         return self._finish(
             owned, add_to_history=add_to_history, echo_to_console=echo_to_console
         )
+
+    def finish_when_owners_end(self) -> None:
+        """End each open box when its task ends, unless the task ends it
+        first. For the boxes left open once the session's UI is gone:
+        cancelling a task doesn't end a box it opened with start_thinking(),
+        and nothing else will look at the box again."""
+        with self._lock:
+            owners = {box._owner for box in self._boxes if box._owner is not None}
+        for owner in owners:
+            owner.add_done_callback(self.finish_owned_by)
 
     def _finish(
         self,

@@ -35,9 +35,10 @@ class ThinkingBox:
     can read it (``text``), but writing raises TypeError.
 
     Once the box is finished (by ``finish()``, the end of a ``thinking()``
-    block, the handler ending, or Ctrl+C), ``is_finished`` is True and its
-    text is final: writes are dropped (the first logs a warning), and
-    ``finish()`` returns the same text again without echoing it twice.
+    block, or the session: when its handler ends, at Ctrl+C, or on exit; see
+    the README's "When a Box Ends"), ``is_finished`` is True and its text is
+    final: writes are dropped (the first logs a warning), and ``finish()``
+    returns the same text again without echoing it twice.
 
     ThinkingBoxManager.create_box() makes boxes; the constructor and the
     underscore attributes are internal.
