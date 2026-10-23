@@ -586,6 +586,41 @@ class TestInputLoopLifetime:
 
             await run_with(session, handler, script)
 
+    @pytest.mark.parametrize("cleanup_lets_cancel_through", [True, False])
+    async def test_exit_while_a_cancelled_handler_cleans_up_ends_the_run(
+        self, cleanup_lets_cancel_through: bool
+    ):
+        """Ctrl+C cancels the handler; Ctrl+D lands while its cleanup still
+        awaits. The exit's cancellation must end the run, not be taken for
+        the Ctrl+C's and send the loop back to wait for input from an app
+        that has stopped, whether the cleanup lets it through or absorbs it."""
+        started = asyncio.Event()
+        cleaning = asyncio.Event()
+
+        async def handler(text: str) -> None:
+            try:
+                started.set()
+                await asyncio.sleep(3600)
+            finally:
+                cleaning.set()
+                try:
+                    await asyncio.sleep(0.5)
+                except asyncio.CancelledError:
+                    if cleanup_lets_cancel_through:
+                        raise
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await started.wait()
+                inp.send_text(CTRL_C)
+                await cleaning.wait()
+                inp.send_text(CTRL_D)
+                await asyncio.wait_for(asyncio.shield(run), timeout=2)
+
+            await run_with(session, handler, script)
+
 
 class TestQuickStart:
     """The README's Quick Start: a handler registered with @session.on_input
