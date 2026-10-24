@@ -59,6 +59,7 @@ from .types import (
     ContentCallback,
     ContentFormat,
     InputHandler,
+    InputWhileBusy,
     Overflow,
     Placement,
 )
@@ -83,6 +84,7 @@ __all__ = [
     "ContentFormat",
     "Overflow",
     "Placement",
+    "InputWhileBusy",
     "InputHandler",
     "AlignValues",
     # Dialog

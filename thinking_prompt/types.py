@@ -28,6 +28,15 @@ Overflow = Literal["tail", "head"]
 Placement = Literal["box", "inline"]
 
 
+InputWhileBusy = Literal["refuse", "queue"]
+
+
+def check_input_while_busy(value: object) -> None:
+    """Raise ValueError unless ``value`` is 'refuse' or 'queue'."""
+    if value not in ("refuse", "queue"):
+        raise ValueError(f"input_while_busy must be 'refuse' or 'queue', got {value!r}")
+
+
 def check_placement(value: object, *, optional: bool = False) -> None:
     """Raise ValueError unless ``value`` is a Placement (or None, when ``optional``)."""
     if optional and value is None:

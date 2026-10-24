@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+from collections import deque
 from collections.abc import AsyncIterator, Coroutine, Sequence
 from contextlib import asynccontextmanager, suppress
 from typing import (
@@ -31,6 +32,7 @@ from prompt_toolkit.application.current import get_app_session
 from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.completion import Completer
 from prompt_toolkit.data_structures import Point
+from prompt_toolkit.document import Document
 from prompt_toolkit.enums import DEFAULT_BUFFER, EditingMode
 from prompt_toolkit.filters import Condition, has_focus
 from prompt_toolkit.formatted_text import (
@@ -42,8 +44,8 @@ from prompt_toolkit.formatted_text import (
 from prompt_toolkit.history import History, InMemoryHistory
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.key_binding.key_processor import KeyPressEvent
-from prompt_toolkit.layout import AnyContainer, DynamicContainer, Window
-from prompt_toolkit.layout.controls import UIContent, UIControl
+from prompt_toolkit.layout import AnyContainer, ConditionalContainer, DynamicContainer, Window
+from prompt_toolkit.layout.controls import FormattedTextControl, UIContent, UIControl
 from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.output import ColorDepth, Output
 from prompt_toolkit.styles import DynamicStyle
@@ -58,7 +60,7 @@ from .resize import ShrinkRepaint
 from .rich_utils import _is_rich_renderable
 from .spinner import Spinner
 from .styles import ThinkingPromptStyles, resolve_theme
-from .types import Placement, check_placement
+from .types import InputWhileBusy, Placement, check_input_while_busy, check_placement
 
 logger = logging.getLogger(__name__)
 
@@ -150,6 +152,7 @@ class ThinkingPromptSession:
         thinking_echo: bool = True,
         transcript_limit: int | None = None,
         dialog_placement: Placement = "box",
+        input_while_busy: InputWhileBusy = "refuse",
     ) -> None:
         """
         Initialize the ThinkingPromptSession.
@@ -192,11 +195,18 @@ class ThinkingPromptSession:
             dialog_placement: How dialogs are drawn unless they say otherwise:
                 "box" (default) floats a framed dialog over the session;
                 "inline" draws rows between the prompt and the status bar.
+            input_while_busy: What Enter does while nobody is waiting in
+                prompt_async() (a query runs): "refuse" (default) keeps
+                the line in the prompt and says the session is busy;
+                "queue" takes the line, shows it under the prompt, and
+                prompt_async() returns it next. Up on an empty prompt
+                takes the newest queued line back to edit.
 
         Raises:
             ValueError: If thinking_max_lines is less than 0, or theme= names
                        an unknown theme, or if dialog_placement isn't 'box'
-                       or 'inline'.
+                       or 'inline', or if input_while_busy isn't 'refuse' or
+                       'queue'.
         """
         if thinking_max_lines < 0:
             raise ValueError("thinking_max_lines must be at least 0")
@@ -206,6 +216,10 @@ class ThinkingPromptSession:
         self._thinking_title = thinking_title
         check_placement(dialog_placement)
         self._dialog_placement: Placement = dialog_placement
+        check_input_while_busy(input_while_busy)
+        self._input_while_busy: InputWhileBusy = input_while_busy
+        # Lines Enter took while nobody waited for input ("queue"), oldest first.
+        self._queued: deque[str] = deque()
 
         # A fresh instance per session: a shared one would let a tweak to
         # one session's styles restyle every other session.
@@ -320,6 +334,26 @@ class ThinkingPromptSession:
         pending = self._pending_input
         return pending is not None and not pending.done()
 
+    def _record_input(self, text: str) -> None:
+        """A line becomes input: it goes into the input history (↑) and
+        is echoed."""
+        if text.strip():
+            self._input_history.append_string(text)
+            if self._echo_input:
+                self._display.user_input(self._get_prompt_string(), text)
+
+    def _busy_enter(self) -> None:
+        """Enter while nobody waits for input: queue the line, or refuse it
+        (it stays in the prompt, and the status bar says so)."""
+        if self._input_while_busy == "queue":
+            text = self._default_buffer.text
+            if text.strip():
+                self._queued.append(text)
+                self._default_buffer.reset()
+                self._invalidate()
+            return
+        self._show_hint(self._BUSY_STATUS)
+
     def _show_hint(self, hint: str) -> None:
         """Show a status hint, keeping the status it replaces."""
         if self._hint is None or self._status_text != self._hint:
@@ -353,21 +387,14 @@ class ThinkingPromptSession:
             # which refuses before prompt_toolkit touches the buffer. Note
             # the return value means *keep_text*: True keeps the draft.
             if not self._input_wanted():
-                self._show_hint(self._BUSY_STATUS)
+                self._busy_enter()
                 return True
             # Input is accepted: a status hint no longer applies.
             self._clear_hint()
 
             text = buff.document.text
 
-            # Add to input history (for up/down arrow)
-            if text.strip():
-                self._input_history.append_string(text)
-
-                if self._echo_input:
-                    # Echo user input to console and transcript
-                    prompt_str = self._get_prompt_string()
-                    self._display.user_input(prompt_str, text)
+            self._record_input(text)
 
             # Signal that input is ready - handler decides whether to use thinking mode
             assert self._pending_input is not None  # checked by _input_wanted()
@@ -399,6 +426,22 @@ class ThinkingPromptSession:
             thinking_manager=self._manager,
             completions_menu_height=self._completions_menu_height,
             inline_dialog=DynamicContainer(self._inline_dialog_content),
+            queued=self._queued_rows(),
+        )
+
+    def _queued_rows(self) -> AnyContainer:
+        """The queued lines, one row each, under the input area."""
+        def text() -> FormattedText:
+            rows = "\n".join(f"  queued: {line}" for line in self._queued)
+            return FormattedText([("class:queued-input", rows)])
+
+        return ConditionalContainer(
+            Window(
+                FormattedTextControl(text),
+                height=lambda: Dimension.exact(len(self._queued)),
+                wrap_lines=False,
+            ),
+            filter=Condition(lambda: bool(self._queued)),
         )
 
     def _polled(self, text: AnyFormattedText) -> AnyFormattedText:
@@ -522,9 +565,20 @@ class ThinkingPromptSession:
             # before validate_and_handle(), so prompt_toolkit neither
             # clears the draft nor records it in the input history.
             if not self._input_wanted():
-                self._show_hint(self._BUSY_STATUS)
+                self._busy_enter()
                 return
             self._default_buffer.validate_and_handle()
+
+        @kb.add(
+            "up",
+            filter=has_focus(DEFAULT_BUFFER)
+            & Condition(lambda: bool(self._queued) and not self._default_buffer.text),
+        )
+        def recall_queued(event: KeyPressEvent) -> None:
+            """Up on an empty prompt: the newest queued line, back to edit."""
+            text = self._queued.pop()
+            self._default_buffer.document = Document(text, len(text))
+            self._invalidate()
 
         # Expand/collapse — toggle all via manager
         @kb.add(self._expand_key, filter=Condition(self._manager.can_toggle))
@@ -1078,6 +1132,7 @@ class ThinkingPromptSession:
             await asyncio.wait({run})
         finally:
             self._app_run = None
+            self._queued.clear()
             # The UI is gone. End the boxes nobody else will end, echoing
             # them below its last frame; a live task's box is left to it,
             # and ended when that task ends if the task doesn't end it.
@@ -1107,7 +1162,9 @@ class ThinkingPromptSession:
 
         Call it inside ``async with session:`` (a handler of run_async() is
         inside too, e.g. to ask a follow-up). The app runs for the whole
-        block; this only waits for the next line it accepts.
+        block; this only waits for the next line it accepts. Lines queued
+        while busy (input_while_busy="queue") come first, oldest first, each
+        echoed as it's returned.
 
         Returns:
             The input line.
@@ -1131,6 +1188,12 @@ class ThinkingPromptSession:
         pending = self._pending_input
         if pending is not None and not pending.done():
             raise RuntimeError("Another task is already waiting in prompt_async()")
+        if self._queued:
+            text = self._queued.popleft()
+            self._clear_hint()
+            self._record_input(text)
+            self._invalidate()
+            return text
         future: asyncio.Future[str] = asyncio.get_running_loop().create_future()
         self._pending_input = future
         # Input is wanted again: a status hint no longer applies.

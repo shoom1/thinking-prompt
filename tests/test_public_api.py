@@ -32,6 +32,7 @@ PUBLIC = {
     "ContentFormat",
     "Overflow",
     "Placement",
+    "InputWhileBusy",
     "InputHandler",
     "AlignValues",
     "Dialog",
@@ -127,7 +128,7 @@ def _parameters(func: Callable[..., object]) -> list[str]:
                 "complete_while_typing", "completions_menu_height", "editing_mode",
                 "enable_status_bar", "status_text", "expand_key", "thinking_max_lines",
                 "thinking_title", "thinking_border", "spinner", "spinner_position", "echo_input",
-                "thinking_echo", "transcript_limit", "dialog_placement",
+                "thinking_echo", "transcript_limit", "dialog_placement", "input_while_busy",
             ],
         ),
         (
@@ -208,6 +209,11 @@ def test_printed_messages_are_styled_as_the_transcript():
 def test_the_session_runs_as_an_async_context_manager():
     assert hasattr(ThinkingPromptSession, "__aenter__")
     assert hasattr(ThinkingPromptSession, "__aexit__")
+
+
+def test_queued_input_has_its_style():
+    assert "queued_input" in {field.name for field in dataclasses.fields(ThinkingPromptStyles)}
+    assert "queued-input" in ThinkingPromptStyles().to_style_dict()
 
 
 def test_the_welcome_stays_a_customization_point():

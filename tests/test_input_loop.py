@@ -15,8 +15,10 @@ from tests.test_end_to_end import (
     CTRL_C,
     CTRL_D,
     ENTER,
+    UP,
     echoed_inputs,
     piped_session,
+    screen_lines,
     wait_until,
     waiting_for_input,
 )
@@ -458,3 +460,136 @@ class TestConcurrent:
                 assert "a working\n" in texts and "b working\n" in texts
 
             await run_loop(session, body, script)
+
+
+class TestQueue:
+    @staticmethod
+    def _loop(session: ThinkingPromptSession, ran: list[str], started: list[str], release: asyncio.Event):
+        async def respond(text: str) -> None:
+            started.append(text)
+            if text == "slow":
+                await release.wait()
+            ran.append(text)
+
+        async def body() -> None:
+            while True:
+                try:
+                    text = await session.prompt_async()
+                except (EOFError, KeyboardInterrupt):
+                    return
+                await session.query(respond(text))
+
+        return body
+
+    def test_an_unknown_policy_is_refused(self):
+        with pytest.raises(ValueError, match="input_while_busy must be 'refuse' or 'queue'"):
+            ThinkingPromptSession(input_while_busy="drop")  # type: ignore[arg-type]
+
+    async def test_refuse_keeps_the_draft_and_says_busy(self):
+        ran: list[str] = []
+        started: list[str] = []
+        release = asyncio.Event()
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("slow" + ENTER)
+                await wait_until(lambda: started == ["slow"])
+                inp.send_text("next" + ENTER)
+                await wait_until(lambda: session.status_text == session._BUSY_STATUS)
+                assert session._default_buffer.text == "next"
+                assert not session._queued
+                release.set()
+
+            await run_loop(session, self._loop(session, ran, started, release), script)
+
+    async def test_queued_lines_run_in_order_each_echoed_when_it_runs(self):
+        ran: list[str] = []
+        started: list[str] = []
+        release = asyncio.Event()
+        with piped_session(input_while_busy="queue") as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("slow" + ENTER)
+                await wait_until(lambda: started == ["slow"])
+                inp.send_text("two" + ENTER + "three" + ENTER)
+                await wait_until(lambda: list(session._queued) == ["two", "three"])
+                assert session._default_buffer.text == ""
+                assert echoed_inputs(session) == ["slow"]
+                await wait_until(lambda: any("queued: three" in line for line in screen_lines(session)))
+                release.set()
+                await wait_until(lambda: ran == ["slow", "two", "three"])
+                assert echoed_inputs(session) == ["slow", "two", "three"]
+                assert session._input_history.get_strings()[-3:] == ["slow", "two", "three"]
+
+            await run_loop(session, self._loop(session, ran, started, release), script)
+
+    async def test_up_recalls_the_newest_queued_line(self):
+        ran: list[str] = []
+        started: list[str] = []
+        release = asyncio.Event()
+        with piped_session(input_while_busy="queue") as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("slow" + ENTER)
+                await wait_until(lambda: started == ["slow"])
+                inp.send_text("two" + ENTER + "three" + ENTER)
+                await wait_until(lambda: list(session._queued) == ["two", "three"])
+                inp.send_text(UP)
+                await wait_until(lambda: session._default_buffer.text == "three")
+                assert list(session._queued) == ["two"]
+                release.set()
+                await wait_until(lambda: ran == ["slow", "two"] and waiting_for_input(session))
+                assert session._default_buffer.text == "three"
+
+            await run_loop(session, self._loop(session, ran, started, release), script)
+
+    async def test_blank_lines_are_not_queued(self):
+        ran: list[str] = []
+        started: list[str] = []
+        release = asyncio.Event()
+        with piped_session(input_while_busy="queue") as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("slow" + ENTER)
+                await wait_until(lambda: started == ["slow"])
+                inp.send_text("  " + ENTER)
+                await asyncio.sleep(0.1)
+                assert not session._queued
+                release.set()
+
+            await run_loop(session, self._loop(session, ran, started, release), script)
+
+    async def test_ctrl_c_cancels_the_query_and_the_queue_runs(self):
+        ran: list[str] = []
+        started: list[str] = []
+        release = asyncio.Event()
+        with piped_session(input_while_busy="queue") as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("slow" + ENTER)
+                await wait_until(lambda: started == ["slow"])
+                inp.send_text("two" + ENTER)
+                await wait_until(lambda: list(session._queued) == ["two"])
+                inp.send_text(CTRL_C)
+                await wait_until(lambda: ran == ["two"])
+
+            await run_loop(session, self._loop(session, ran, started, release), script)
+
+    async def test_exit_drops_the_queue_unechoed(self):
+        ran: list[str] = []
+        started: list[str] = []
+        release = asyncio.Event()
+        with piped_session(input_while_busy="queue") as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("slow" + ENTER)
+                await wait_until(lambda: started == ["slow"])
+                inp.send_text("two" + ENTER)
+                await wait_until(lambda: list(session._queued) == ["two"])
+                inp.send_text(CTRL_D)
+                await finished(run)
+                assert not session._queued
+                assert echoed_inputs(session) == ["slow"]
+
+            await run_loop(session, self._loop(session, ran, started, release), script)
+        assert ran == []
