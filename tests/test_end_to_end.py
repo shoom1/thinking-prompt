@@ -800,7 +800,7 @@ class TestBusyHint:
 
             async def script(run: asyncio.Task[None]) -> None:
                 inp.send_text("slow" + ENTER)
-                await wait_until(lambda: session._current_handler_task is not None)
+                await wait_until(lambda: session._foreground is not None)
                 inp.send_text("x" + ENTER)
                 await wait_until(lambda: session.status_text == session._BUSY_STATUS)
 
@@ -820,7 +820,7 @@ class TestBusyHint:
 
             async def script(run: asyncio.Task[None]) -> None:
                 inp.send_text("slow" + ENTER)
-                await wait_until(lambda: session._current_handler_task is not None)
+                await wait_until(lambda: session._foreground is not None)
                 inp.send_text("x" + ENTER)
                 await wait_until(lambda: on_screen(session, "Busy — press Ctrl+C to cancel"))
                 inp.send_text(ENTER + "!")  # "!" goes on the draft once Enter is refused again
@@ -844,7 +844,7 @@ class TestBusyHint:
 
             async def script(run: asyncio.Task[None]) -> None:
                 inp.send_text("slow" + ENTER)
-                await wait_until(lambda: session._current_handler_task is not None)
+                await wait_until(lambda: session._foreground is not None)
                 inp.send_text("x" + ENTER)
                 await wait_until(lambda: session.status_text == session._BUSY_STATUS)
 

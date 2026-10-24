@@ -62,12 +62,12 @@ class TestRunHandler:
         # Wait until the handler is actually running, then verify the
         # session exposes the in-flight task.
         await asyncio.wait_for(running_event.wait(), timeout=1)
-        assert session._current_handler_task is not None
-        assert not session._current_handler_task.done()
+        assert session._foreground is not None
+        assert not session._foreground.done()
 
         gate.set()
         await run_task
-        assert session._current_handler_task is None
+        assert session._foreground is None
 
     async def test_sync_handler_does_not_set_task(self, session):
         called = []
@@ -75,11 +75,11 @@ class TestRunHandler:
         def handler(text: str) -> None:
             called.append(text)
             # Sync handler completes synchronously; no task should be tracked.
-            assert session._current_handler_task is None
+            assert session._foreground is None
 
         await session._run_handler(handler, "hi")
         assert called == ["hi"]
-        assert session._current_handler_task is None
+        assert session._foreground is None
 
     async def test_handler_exception_finishes_active_boxes(self, session):
         async def handler(text: str) -> None:
@@ -89,7 +89,7 @@ class TestRunHandler:
         # has_active_boxes will be False after _run_handler returns.
         await session._run_handler(handler, "go")
         assert session._manager.has_active_boxes is False
-        assert session._current_handler_task is None
+        assert session._foreground is None
 
     async def test_async_handler_success_finishes_orphan_boxes(self, session):
         """A handler that returns without finishing its box must not leave
@@ -102,7 +102,7 @@ class TestRunHandler:
 
         await session._run_handler(handler, "go")
         assert session._manager.has_active_boxes is False
-        assert session._current_handler_task is None
+        assert session._foreground is None
 
     async def test_sync_handler_finishes_orphan_boxes(self, session):
         """Same contract for sync handlers: the early-return path must
@@ -131,19 +131,19 @@ class TestRunHandler:
         # Wait for the handler task to register.
         for _ in range(20):
             await asyncio.sleep(0)
-            if session._current_handler_task is not None:
+            if session._foreground is not None:
                 break
-        assert session._current_handler_task is not None
+        assert session._foreground is not None
 
         # Simulate Ctrl+C: mark as user cancellation, then cancel.
         session._user_cancelled_handler = True
-        session._current_handler_task.cancel()
+        session._foreground.cancel()
 
         # _run_handler should swallow the CancelledError.
         await run_task
 
         assert session._manager.has_active_boxes is False
-        assert session._current_handler_task is None
+        assert session._foreground is None
         assert session._user_cancelled_handler is False
 
     async def test_outer_cancel_propagates(self, session):
@@ -158,7 +158,7 @@ class TestRunHandler:
 
         for _ in range(20):
             await asyncio.sleep(0)
-            if session._current_handler_task is not None:
+            if session._foreground is not None:
                 break
 
         # No _user_cancelled_handler flag set: this is an external cancel.
@@ -192,27 +192,31 @@ class TestAcceptHandlerWhileBusy:
             loop.close()
 
     def test_busy_session_refuses_input(self, session):
-        """While a handler task is running, accept_handler refuses the
-        input: the buffer stays intact and the pending input future is
-        not resolved. Goes through validate_and_handle(), the real call
-        path — accept_handler's return value means *keep_text*, so an
-        inverted value only shows up there."""
+        """While a query runs and nobody waits in prompt_async() (the loop
+        is waiting for the query, which isn't asking), accept_handler
+        refuses the input: the buffer stays intact. Goes through
+        validate_and_handle(), the real call path — accept_handler's
+        return value means *keep_text*, so an inverted value only shows up
+        there. (A query that asks a follow-up waits in prompt_async() and
+        gets the line: see tests/test_input_loop.py.)"""
         loop = asyncio.new_event_loop()
         try:
-            # Simulate a running handler.
+            # Simulate a running query whose loop's last line was taken.
             async def _noop():
                 await asyncio.sleep(3600)
 
             running = loop.create_task(_noop())
-            session._current_handler_task = running
+            session._foreground = running
 
-            session._pending_input = loop.create_future()
+            taken = loop.create_future()
+            taken.set_result("earlier")
+            session._pending_input = taken
             session._default_buffer.text = "queued"
 
             session._default_buffer.validate_and_handle()
 
             # Don't deliver the text and don't clear the buffer.
-            assert session._pending_input.done() is False
+            assert session._pending_input.result() == "earlier"
             assert session._default_buffer.text == "queued"
 
             running.cancel()
@@ -240,7 +244,7 @@ class TestCtrlCKeyBinding:
                 await asyncio.sleep(3600)
 
             running = loop.create_task(_noop())
-            session._current_handler_task = running
+            session._foreground = running
 
             handler = self._get_ctrl_c_handler(session)
             event = MagicMock()
@@ -265,7 +269,7 @@ class TestCtrlCKeyBinding:
         a state that never occurs at an idle prompt in a real run, which
         is how the zombie-session bug slipped past.)"""
         session._pending_input = asyncio.get_running_loop().create_future()
-        session._current_handler_task = None
+        session._foreground = None
 
         handler = self._get_ctrl_c_handler(session)
         event = MagicMock()
@@ -291,13 +295,16 @@ class TestCtrlCKeyBinding:
         # like the real one — but without a terminal.
         exited = asyncio.Event()
 
-        async def fake_run_async() -> None:
+        async def fake_run_async(pre_run=None, **kwargs) -> None:
+            if pre_run is not None:
+                pre_run()  # as the real one does, once it's running
             await exited.wait()
 
         app = MagicMock()
         app.run_async = fake_run_async
         app.exit = MagicMock(side_effect=exited.set)
         app.is_running = True
+        app.is_done = False
         session.app = app
 
         async def handler(text: str) -> None:
@@ -380,24 +387,17 @@ class TestCtrlDKeyBinding:
             session._default_buffer.reset()
             assert binding.filter()
 
-    async def test_prompt_async_raises_eoferror_end_to_end(self, session):
+    async def test_prompt_async_raises_eoferror_end_to_end(self):
         """await prompt_async() must raise EOFError after Ctrl+D."""
-        prompt_task = asyncio.create_task(session.prompt_async())
-        # Let prompt_async install its future.
-        for _ in range(20):
-            await asyncio.sleep(0)
-            if session._pending_input is not None and not session._pending_input.done():
-                break
+        from tests.test_end_to_end import CTRL_D, piped_session, wait_until, waiting_for_input
 
-        assert session._pending_input is not None
-        assert not session._pending_input.done()
-
-        binding = _get_ctrl_d_binding(session)
-        event = MagicMock()
-        binding.handler(event)
-
-        with pytest.raises(EOFError):
-            await prompt_task
+        with piped_session() as (session, inp):
+            async with session:
+                prompt_task = asyncio.create_task(session.prompt_async())
+                await wait_until(lambda: waiting_for_input(session))
+                inp.send_text(CTRL_D)
+                with pytest.raises(EOFError):
+                    await asyncio.wait_for(prompt_task, timeout=2)
 
 
 class TestSessionClear:
@@ -461,16 +461,16 @@ class TestUserCancelledFlagReset:
 
         # Wait until the handler is actually running before issuing cancel.
         await asyncio.wait_for(started.wait(), timeout=1)
-        assert session._current_handler_task is not None
+        assert session._foreground is not None
 
         session._user_cancelled_handler = True
-        session._current_handler_task.cancel()
+        session._foreground.cancel()
         await run_task
 
         # After _run_handler returns the flag MUST be reset, regardless of
         # whether the inner task raised CancelledError or returned normally.
         assert session._user_cancelled_handler is False
-        assert session._current_handler_task is None
+        assert session._foreground is None
 
     async def test_flag_reset_when_cancel_loses_race_to_completion(self, session):
         """If Ctrl+C cancel is set but the task completes naturally before
@@ -484,7 +484,7 @@ class TestUserCancelledFlagReset:
         await session._run_handler(handler, "go")
 
         assert session._user_cancelled_handler is False
-        assert session._current_handler_task is None
+        assert session._foreground is None
 
     async def test_outer_cancel_after_user_swallow_propagates(self, session):
         """End-to-end: user cancel + handler swallow + later outer cancel
@@ -500,10 +500,10 @@ class TestUserCancelledFlagReset:
         run1 = asyncio.create_task(session._run_handler(swallowing, "first"))
         for _ in range(50):
             await asyncio.sleep(0)
-            if session._current_handler_task is not None:
+            if session._foreground is not None:
                 break
         session._user_cancelled_handler = True
-        session._current_handler_task.cancel()
+        session._foreground.cancel()
         await run1
         assert session._user_cancelled_handler is False
 
@@ -514,7 +514,7 @@ class TestUserCancelledFlagReset:
         run2 = asyncio.create_task(session._run_handler(long_running, "second"))
         for _ in range(50):
             await asyncio.sleep(0)
-            if session._current_handler_task is not None:
+            if session._foreground is not None:
                 break
 
         run2.cancel()

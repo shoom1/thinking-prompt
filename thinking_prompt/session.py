@@ -10,7 +10,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from collections.abc import AsyncIterator, Sequence
+from collections import deque
+from collections.abc import AsyncIterator, Coroutine, Sequence
 from contextlib import asynccontextmanager, suppress
 from typing import (
     TYPE_CHECKING,
@@ -31,8 +32,9 @@ from prompt_toolkit.application.current import get_app_session
 from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.completion import Completer
 from prompt_toolkit.data_structures import Point
+from prompt_toolkit.document import Document
 from prompt_toolkit.enums import DEFAULT_BUFFER, EditingMode
-from prompt_toolkit.filters import Condition, has_focus
+from prompt_toolkit.filters import Condition, has_focus, is_done
 from prompt_toolkit.formatted_text import (
     AnyFormattedText,
     FormattedText,
@@ -42,8 +44,8 @@ from prompt_toolkit.formatted_text import (
 from prompt_toolkit.history import History, InMemoryHistory
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.key_binding.key_processor import KeyPressEvent
-from prompt_toolkit.layout import AnyContainer, DynamicContainer, Window
-from prompt_toolkit.layout.controls import UIContent, UIControl
+from prompt_toolkit.layout import AnyContainer, ConditionalContainer, DynamicContainer, Window
+from prompt_toolkit.layout.controls import FormattedTextControl, UIContent, UIControl
 from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.output import ColorDepth, Output
 from prompt_toolkit.styles import DynamicStyle
@@ -58,12 +60,13 @@ from .resize import ShrinkRepaint
 from .rich_utils import _is_rich_renderable
 from .spinner import Spinner
 from .styles import ThinkingPromptStyles, resolve_theme
-from .types import Placement, check_placement
+from .types import InputWhileBusy, Placement, check_input_while_busy, check_placement
 
 logger = logging.getLogger(__name__)
 
 # on_input() returns the handler it registers with its own type.
 _HandlerT = TypeVar("_HandlerT", bound="InputHandler")
+_T = TypeVar("_T")
 
 
 class _RoomControl(UIControl):
@@ -149,6 +152,7 @@ class ThinkingPromptSession:
         thinking_echo: bool = True,
         transcript_limit: int | None = None,
         dialog_placement: Placement = "box",
+        input_while_busy: InputWhileBusy = "refuse",
     ) -> None:
         """
         Initialize the ThinkingPromptSession.
@@ -191,11 +195,18 @@ class ThinkingPromptSession:
             dialog_placement: How dialogs are drawn unless they say otherwise:
                 "box" (default) floats a framed dialog over the session;
                 "inline" draws rows between the prompt and the status bar.
+            input_while_busy: What Enter does while nobody is waiting in
+                prompt_async() (a query runs): "refuse" (default) keeps
+                the line in the prompt and says the session is busy;
+                "queue" takes the line, shows it under the prompt, and
+                prompt_async() returns it next. Up on an empty prompt
+                takes the newest queued line back to edit.
 
         Raises:
             ValueError: If thinking_max_lines is less than 0, or theme= names
                        an unknown theme, or if dialog_placement isn't 'box'
-                       or 'inline'.
+                       or 'inline', or if input_while_busy isn't 'refuse' or
+                       'queue'.
         """
         if thinking_max_lines < 0:
             raise ValueError("thinking_max_lines must be at least 0")
@@ -205,6 +216,10 @@ class ThinkingPromptSession:
         self._thinking_title = thinking_title
         check_placement(dialog_placement)
         self._dialog_placement: Placement = dialog_placement
+        check_input_while_busy(input_while_busy)
+        self._input_while_busy: InputWhileBusy = input_while_busy
+        # Lines Enter took while nobody waited for input ("queue"), oldest first.
+        self._queued: deque[str] = deque()
 
         # A fresh instance per session: a shared one would let a tweak to
         # one session's styles restyle every other session.
@@ -270,13 +285,15 @@ class ThinkingPromptSession:
         # Pending input future for async handling
         self._pending_input: asyncio.Future[str] | None = None
 
-        # Currently running handler task (set by _run_handler while a user
-        # input handler is executing). Ctrl+C cancels this task; the input
-        # buffer's accept_handler refuses new input while it is running.
-        self._current_handler_task: asyncio.Task[None] | None = None
+        # The foreground query (a run_async handler's, or query()'s): the
+        # task Ctrl+C cancels.
+        self._foreground: asyncio.Task[Any] | None = None
         # The task running run_async() (None otherwise). Its boxes count as
         # nobody's: it's busy running the app, so the session ends them.
         self._app_task: asyncio.Task[Any] | None = None
+        # The task running the Application while `async with session:` (or
+        # run_async()) runs it; None outside.
+        self._app_run: asyncio.Task[Any] | None = None
         # Set to True by the Ctrl+C binding when it cancels the handler task.
         # _run_handler reads this to distinguish a user-initiated cancel
         # (swallow CancelledError, continue the input loop) from an outer
@@ -306,19 +323,36 @@ class ThinkingPromptSession:
         return fragment_list_to_text(to_formatted_text(self._message))
 
     def _input_wanted(self) -> bool:
-        """True when submitted input would reach someone.
+        """True when submitted input would reach someone: a task is waiting
+        in prompt_async() (the input loop, or a query asking a follow-up).
 
-        False while a handler is running, and also in the gap between one
-        line resolving the pending future and the input loop's next
-        prompt_async() — a second line arriving in the same read (typed
+        False while a query runs without asking, and in the gap between one
+        line resolving the pending future and the loop's next
+        prompt_async(): a second line arriving in the same read (typed
         ahead during a blocking handler, say) lands there.
         """
-        handler_running = (
-            self._current_handler_task is not None
-            and not self._current_handler_task.done()
-        )
         pending = self._pending_input
-        return not handler_running and pending is not None and not pending.done()
+        return pending is not None and not pending.done()
+
+    def _record_input(self, text: str) -> None:
+        """A line becomes input: it goes into the input history (↑) and
+        is echoed."""
+        if text.strip():
+            self._input_history.append_string(text)
+            if self._echo_input:
+                self._display.user_input(self._get_prompt_string(), text)
+
+    def _busy_enter(self) -> None:
+        """Enter while nobody waits for input: queue the line, or refuse it
+        (it stays in the prompt, and the status bar says so)."""
+        if self._input_while_busy == "queue":
+            text = self._default_buffer.text
+            if text.strip():
+                self._queued.append(text)
+                self._default_buffer.reset()
+                self._invalidate()
+            return
+        self._show_hint(self._BUSY_STATUS)
 
     def _show_hint(self, hint: str) -> None:
         """Show a status hint, keeping the status it replaces."""
@@ -353,21 +387,14 @@ class ThinkingPromptSession:
             # which refuses before prompt_toolkit touches the buffer. Note
             # the return value means *keep_text*: True keeps the draft.
             if not self._input_wanted():
-                self._show_hint(self._BUSY_STATUS)
+                self._busy_enter()
                 return True
             # Input is accepted: a status hint no longer applies.
             self._clear_hint()
 
             text = buff.document.text
 
-            # Add to input history (for up/down arrow)
-            if text.strip():
-                self._input_history.append_string(text)
-
-                if self._echo_input:
-                    # Echo user input to console and transcript
-                    prompt_str = self._get_prompt_string()
-                    self._display.user_input(prompt_str, text)
+            self._record_input(text)
 
             # Signal that input is ready - handler decides whether to use thinking mode
             assert self._pending_input is not None  # checked by _input_wanted()
@@ -399,6 +426,24 @@ class ThinkingPromptSession:
             thinking_manager=self._manager,
             completions_menu_height=self._completions_menu_height,
             inline_dialog=DynamicContainer(self._inline_dialog_content),
+            queued=self._queued_rows(),
+        )
+
+    def _queued_rows(self) -> AnyContainer:
+        """The queued lines, one row each, under the input area."""
+        def text() -> FormattedText:
+            rows = "\n".join(f"  queued: {line}" for line in self._queued)
+            return FormattedText([("class:queued-input", rows)])
+
+        return ConditionalContainer(
+            Window(
+                FormattedTextControl(text),
+                height=lambda: Dimension.exact(len(self._queued)),
+                wrap_lines=False,
+            ),
+            # Left out of the app's last frame: lines still queued at exit
+            # are dropped, so the scrollback shouldn't keep them.
+            filter=Condition(lambda: bool(self._queued)) & ~is_done,
         )
 
     def _polled(self, text: AnyFormattedText) -> AnyFormattedText:
@@ -446,8 +491,8 @@ class ThinkingPromptSession:
             # has_active_boxes after ending the boxes) and incorrectly conclude
             # there was nothing to cancel, triggering app.exit().
             handler_running = (
-                self._current_handler_task is not None
-                and not self._current_handler_task.done()
+                self._foreground is not None
+                and not self._foreground.done()
             )
             had_active_boxes = self._manager.has_active_boxes
             had_pending_input = (
@@ -462,8 +507,8 @@ class ThinkingPromptSession:
                 # _run_handler's cleanup); a background task's live box
                 # keeps going.
                 self._user_cancelled_handler = True
-                assert self._current_handler_task is not None
-                self._current_handler_task.cancel()
+                assert self._foreground is not None
+                self._foreground.cancel()
             elif had_active_boxes:
                 # Idle prompt: end the boxes nobody else will end (their task
                 # ended, no known owner, or the app's own task opened them).
@@ -506,9 +551,14 @@ class ThinkingPromptSession:
         )
         def exit_app(event: KeyPressEvent) -> None:
             """Exit the application."""
-            # Resolve the pending future so direct prompt_async() callers
-            # observe the documented EOFError instead of hanging forever.
-            if self._pending_input is not None and not self._pending_input.done():
+            # A running query is cancelled, as when the app stops: if it
+            # was asking a follow-up, its prompt ends with it and query()
+            # returns None. Otherwise a waiting prompt_async() gets the
+            # documented EOFError instead of hanging forever.
+            foreground = self._foreground
+            if foreground is not None and not foreground.done():
+                foreground.cancel()
+            elif self._pending_input is not None and not self._pending_input.done():
                 self._pending_input.set_exception(EOFError())
             event.app.exit()
 
@@ -522,9 +572,20 @@ class ThinkingPromptSession:
             # before validate_and_handle(), so prompt_toolkit neither
             # clears the draft nor records it in the input history.
             if not self._input_wanted():
-                self._show_hint(self._BUSY_STATUS)
+                self._busy_enter()
                 return
             self._default_buffer.validate_and_handle()
+
+        @kb.add(
+            "up",
+            filter=has_focus(DEFAULT_BUFFER)
+            & Condition(lambda: bool(self._queued) and not self._default_buffer.text),
+        )
+        def recall_queued(event: KeyPressEvent) -> None:
+            """Up on an empty prompt: the newest queued line, back to edit."""
+            text = self._queued.pop()
+            self._default_buffer.document = Document(text, len(text))
+            self._invalidate()
 
         # Expand/collapse — toggle all via manager
         @kb.add(self._expand_key, filter=Condition(self._manager.can_toggle))
@@ -1035,27 +1096,213 @@ class ThinkingPromptSession:
     # Running the Application
     # =========================================================================
 
-    async def prompt_async(self) -> str:
-        """
-        Wait for the next user input.
-
-        This should be called in a loop to handle multiple inputs.
-
-        Returns:
-            The user's input string.
+    async def __aenter__(self) -> ThinkingPromptSession:
+        """Run the session until the block ends: print the welcome, then
+        start the Application. Inputs are read with prompt_async(), and
+        query() runs one input's work.
 
         Raises:
-            EOFError: When Ctrl+D is pressed on an empty input line.
-            KeyboardInterrupt: When Ctrl+C exits: no handler is running and
-                no box is open.
+            RuntimeError: If the session is already running.
         """
-        self._pending_input = asyncio.get_running_loop().create_future()
+        if self._app_run is not None:
+            raise RuntimeError("The session is already running")
+        self._print_welcome()
+        self._app_task = asyncio.current_task()
+        started = asyncio.Event()
+        run = asyncio.ensure_future(self.app.run_async(pre_run=started.set))
+        run.add_done_callback(self._app_stopped)
+        self._app_run = run
+        waiting = asyncio.ensure_future(started.wait())
+        try:
+            await asyncio.wait({waiting, run}, return_when=asyncio.FIRST_COMPLETED)
+        except BaseException:
+            run.cancel()
+            self._app_run = None
+            self._app_task = None
+            raise
+        finally:
+            waiting.cancel()
+        if not started.is_set():
+            # The app ended before it started (e.g. no terminal): its error.
+            self._app_run = None
+            self._app_task = None
+            run.result()
+        return self
+
+    async def __aexit__(self, *exc_info: object) -> None:
+        """Stop the app, then end the boxes as any exit does."""
+        run = self._app_run
+        if run is None:
+            return
+        try:
+            self._exit_app()
+            await asyncio.wait({run})
+        finally:
+            self._app_run = None
+            self._queued.clear()
+            # The UI is gone. End the boxes nobody else will end, echoing
+            # them below its last frame; a live task's box is left to it,
+            # and ended when that task ends if the task doesn't end it.
+            self._manager.finish_owned_by(self._app_task)
+            self._manager.finish_when_owners_end()
+            self._app_task = None
+            self._frames.cancel()
+            self._shrinks.cancel()
+        error = None if run.cancelled() else run.exception()
+        if error is not None and exc_info[1] is None:
+            raise error
+
+    def _app_stopped(self, run: asyncio.Future[Any]) -> None:
+        """The app has stopped (Ctrl+D, exit(), the block ending): the
+        foreground query is cancelled, and a waiting prompt_async() raises
+        EOFError."""
+        foreground = self._foreground
+        if foreground is not None and not foreground.done():
+            foreground.cancel()
+        pending = self._pending_input
+        if pending is not None and not pending.done():
+            pending.set_exception(EOFError())
+
+    async def prompt_async(self) -> str:
+        """
+        Wait for the next input line.
+
+        Call it inside ``async with session:`` (a handler of run_async() is
+        inside too, e.g. to ask a follow-up). The app runs for the whole
+        block; this only waits for the next line it accepts. Lines queued
+        while busy (input_while_busy="queue") come first, oldest first, each
+        echoed as it's returned.
+
+        Returns:
+            The input line.
+
+        Raises:
+            EOFError: On Ctrl+D at an empty prompt, and on any call once the
+                app has stopped (Ctrl+D, exit()).
+            KeyboardInterrupt: On Ctrl+C at an idle prompt (no query
+                running, no box open); the app exits.
+            RuntimeError: Outside ``async with session:``, or while another
+                task is already waiting here.
+        """
+        run = self._app_run
+        if run is None:
+            raise RuntimeError(
+                "prompt_async() reads the input of a running session: "
+                "call it inside `async with session:`"
+            )
+        if run.done() or self.app.is_done:
+            # Stopped, or told to stop (exit() takes the app a few loop
+            # turns): queued lines don't run after a quit.
+            raise EOFError
+        pending = self._pending_input
+        if pending is not None and not pending.done():
+            raise RuntimeError("Another task is already waiting in prompt_async()")
+        if self._queued:
+            text = self._queued.popleft()
+            self._clear_hint()
+            self._record_input(text)
+            self._invalidate()
+            return text
+        future: asyncio.Future[str] = asyncio.get_running_loop().create_future()
+        self._pending_input = future
         # Input is wanted again: a status hint no longer applies.
         self._clear_hint()
         try:
-            return await self._pending_input
-        except asyncio.CancelledError as exc:
-            raise KeyboardInterrupt() from exc
+            # wait() rather than await: this task's own cancellation stays a
+            # cancellation, and only the future's (Ctrl+C) is an interrupt.
+            await asyncio.wait({future})
+        except asyncio.CancelledError:
+            future.cancel()
+            raise
+        if future.cancelled():
+            raise KeyboardInterrupt
+        return future.result()  # EOFError after Ctrl+D or the app stopping
+
+    async def query(self, coro: Coroutine[Any, Any, _T]) -> _T | None:
+        """
+        Run one input's work as the foreground query: the one Ctrl+C cancels.
+
+        The coroutine runs as a task of its own, which owns the boxes it
+        opens: boxes it leaves open end when it does, echoed as
+        box.finish() would.
+
+        Returns:
+            The coroutine's result, or None when Ctrl+C (or the app
+            stopping) cancelled it.
+
+        Raises:
+            Whatever the coroutine raises, after its boxes are echoed.
+            TypeError: If given something other than a coroutine (call the
+                function: query(respond(text))).
+            RuntimeError: Outside ``async with session:``, or while another
+                query runs (start a task for work beside the next input).
+
+        Example:
+            async with session:
+                while True:
+                    try:
+                        text = await session.prompt_async()
+                    except (EOFError, KeyboardInterrupt):
+                        break
+                    await session.query(respond(text))
+        """
+        if not asyncio.iscoroutine(coro):
+            raise TypeError(
+                f"query() takes a coroutine: call the function, as in "
+                f"query(respond(text)); got {coro!r}"
+            )
+        if self._app_run is None:
+            coro.close()
+            raise RuntimeError(
+                "query() runs a query of a running session: "
+                "call it inside `async with session:`"
+            )
+        return await self._run_query(coro)
+
+    async def _run_query(self, coro: Coroutine[Any, Any, _T]) -> _T | None:
+        """The foreground-query core, shared by query() and run_async's
+        handlers (it doesn't check that the app runs)."""
+        foreground = self._foreground
+        if foreground is not None and not foreground.done():
+            coro.close()
+            raise RuntimeError(
+                "A query is already running: one at a time "
+                "(start a task for work beside it)"
+            )
+        task: asyncio.Task[_T] = asyncio.ensure_future(coro)
+        self._foreground = task
+        try:
+            try:
+                # wait() rather than await: the query's cancellation (Ctrl+C,
+                # the app stopping) and this task's own stay apart.
+                await asyncio.wait({task})
+            except asyncio.CancelledError:
+                # This task is being cancelled, not the query: the query
+                # goes too, and its boxes end once it has unwound.
+                task.cancel()
+                await asyncio.wait({task})
+                self._cleanup_after_handler(task, cancelled=True)
+                raise
+            if task.cancelled():
+                # Ctrl+C, or the app stopping: the query ends, the loop goes on.
+                self._cleanup_after_handler(task, cancelled=True)
+                return None
+            # Its boxes are echoed before its result or its error.
+            self._cleanup_after_handler(task)
+            return task.result()
+        finally:
+            self._foreground = None
+            if self._cancel_line_pending:
+                # One line after all the boxes the Ctrl+C ended, those of
+                # the query's sub-tasks too.
+                self._cancel_line_pending = False
+                self._display.system("Operation cancelled...")
+                self._invalidate()
+            # Always clear the cancel flag for the next query: if the query
+            # catches CancelledError and returns, or the cancel races its
+            # natural end, nothing else would, and the next outer
+            # cancellation would look like a Ctrl+C.
+            self._user_cancelled_handler = False
 
     async def run_async(
         self,
@@ -1097,54 +1344,38 @@ class ThinkingPromptSession:
 
             await session.run_async()  # Uses registered handler
         """
-        # Print welcome message once at startup
-        self._print_welcome()
-
-        # Use provided handler or previously registered one
         effective_handler = handler or self._input_handler
         if effective_handler is None:
             raise ValueError(
                 "No handler provided. Either pass a handler to run_async() "
                 "or register one with @session.on_input decorator."
             )
-        self._app_task = asyncio.current_task()
+        async with self:
+            # The input loop runs in a task of its own: boxes a sync handler
+            # opens are its own, not the app's (an app's startup box is).
+            loop = asyncio.ensure_future(self._input_loop(effective_handler))
+            # The loop must not outlive the app: when the app stops first
+            # (Ctrl+D, exit()), the loop goes too, a running handler with it.
+            assert self._app_run is not None
+            self._app_run.add_done_callback(lambda _run: loop.cancel())
+            try:
+                # wait() rather than await: the loop's cancellation ends the
+                # run quietly; run_async()'s own cancellation propagates.
+                await asyncio.wait({loop})
+            finally:
+                loop.cancel()
+                with suppress(asyncio.CancelledError):
+                    await loop
 
-        async def input_loop() -> None:
-            # The loop must not outlive the app: a stopped app reads no
-            # input, so waiting for some would block run_async() for good.
-            # The exit's cancellation alone doesn't ensure that: when it
-            # lands while a handler a Ctrl+C cancelled is still cleaning
-            # up, _run_handler swallows it as the Ctrl+C's.
-            while self.app.is_running:
-                try:
-                    text = await self.prompt_async()
-                    await self._run_handler(effective_handler, text)
-                except (EOFError, KeyboardInterrupt):
-                    break
-                except asyncio.CancelledError:
-                    break
-
-        # Run input loop as background task. The app must not outlive the
-        # loop: however the loop ends (EOF, KeyboardInterrupt escaping a
-        # handler, a cancelled pending future), a still-running app would
-        # echo typed input that nobody reads — a zombie session.
-        loop_task = asyncio.create_task(input_loop())
-        loop_task.add_done_callback(lambda _task: self._exit_app())
-
-        try:
-            await self.app.run_async()
-        finally:
-            loop_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await loop_task
-            # The UI is gone. End the boxes nobody else will end, echoing
-            # them below its last frame; a live task's box is left to it,
-            # and ended when that task ends if the task doesn't end it.
-            self._manager.finish_owned_by(self._app_task)
-            self._manager.finish_when_owners_end()
-            self._app_task = None
-            self._frames.cancel()
-            self._shrinks.cancel()
+    async def _input_loop(self, handler: InputHandler) -> None:
+        """run_async()'s loop: each input to the handler, until the app
+        stops (EOFError) or Ctrl+C exits at an idle prompt."""
+        while True:
+            try:
+                text = await self.prompt_async()
+                await self._run_handler(handler, text)
+            except (EOFError, KeyboardInterrupt):
+                return
 
     async def _run_handler(
         self,
@@ -1153,13 +1384,11 @@ class ThinkingPromptSession:
     ) -> None:
         """Invoke the input handler with cancellation and cleanup hooks.
 
-        Async handlers run as a tracked ``asyncio.Task`` so the Ctrl+C
-        binding can cancel them. On user cancellation, on handler exception,
-        or on completion, any thinking boxes the handler left open are
-        finished so the UI cannot get stuck in a "thinking" state.
-
-        CancelledError raised from outside the handler (e.g. the input loop
-        being cancelled during shutdown) is re-raised so the loop can exit.
+        A sync handler runs in this task; any boxes it left open are
+        finished when it returns or raises, so the UI cannot get stuck in a
+        "thinking" state. An async handler runs as the foreground query
+        (_run_query): Ctrl+C cancels it, and its boxes end with it. An
+        outer cancellation propagates.
         """
         # A sync handler (and the sync start of an async one) runs in this
         # task: boxes it opens are owned by it.
@@ -1177,42 +1406,11 @@ class ThinkingPromptSession:
             self._cleanup_after_handler(caller)
             return
 
-        task = asyncio.create_task(result)
-        self._current_handler_task = task
         try:
-            await task
-        except asyncio.CancelledError:
-            if self._user_cancelled_handler:
-                # Ctrl+C path: swallow and continue the input loop.
-                self._cleanup_after_handler(task, cancelled=True)
-                return
-            # Outer cancellation (e.g. session shutdown) — propagate so
-            # the input loop exits.
-            self._cleanup_after_handler(task, cancelled=True)
-            raise
+            await self._run_query(result)
         except Exception as e:
             # The boxes' content is echoed, then the error line.
-            self._cleanup_after_handler(task)
             self._report_handler_error(e)
-        else:
-            # Handler completed normally — finish any boxes it left open,
-            # as box.finish() would.
-            self._cleanup_after_handler(task)
-        finally:
-            self._current_handler_task = None
-            if self._cancel_line_pending:
-                # One line after all the boxes the Ctrl+C ended, those of
-                # the handler's sub-tasks too.
-                self._cancel_line_pending = False
-                self._display.system("Operation cancelled...")
-                self._invalidate()
-            # Always clear the cancel flag for the next invocation. We can't
-            # only reset it inside the except CancelledError block: if user
-            # code catches CancelledError and returns normally, or if cancel
-            # races against natural completion, no exception propagates here
-            # and the flag would stay sticky — making the *next* outer
-            # cancellation look like a Ctrl+C and silently swallowing it.
-            self._user_cancelled_handler = False
 
     def _report_handler_error(self, exc: Exception) -> None:
         """Log a handler exception with its traceback; show it on screen.

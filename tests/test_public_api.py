@@ -32,6 +32,7 @@ PUBLIC = {
     "ContentFormat",
     "Overflow",
     "Placement",
+    "InputWhileBusy",
     "InputHandler",
     "AlignValues",
     "Dialog",
@@ -127,7 +128,7 @@ def _parameters(func: Callable[..., object]) -> list[str]:
                 "complete_while_typing", "completions_menu_height", "editing_mode",
                 "enable_status_bar", "status_text", "expand_key", "thinking_max_lines",
                 "thinking_title", "thinking_border", "spinner", "spinner_position", "echo_input",
-                "thinking_echo", "transcript_limit", "dialog_placement",
+                "thinking_echo", "transcript_limit", "dialog_placement", "input_while_busy",
             ],
         ),
         (
@@ -162,10 +163,11 @@ def _parameters(func: Callable[..., object]) -> list[str]:
             ThinkingPromptSession.checklist_dialog,
             ["title", "text", "options", "defaults", "placement", "max_height"],
         ),
+        (ThinkingPromptSession.query, ["coro"]),
     ],
     ids=[
         "session", "start_thinking", "thinking", "finish", "message_dialog",
-        "yes_no_dialog", "choice_dialog", "dropdown_dialog", "checklist_dialog",
+        "yes_no_dialog", "choice_dialog", "dropdown_dialog", "checklist_dialog", "query",
     ],
 )
 def test_parameter_names(func: Callable[..., object], names: list[str]):
@@ -202,6 +204,16 @@ def test_printed_messages_are_styled_as_the_transcript():
     classes = set(ThinkingPromptStyles().to_style_dict())
     assert {"transcript", "transcript.error", "transcript.user-message"} <= classes
     assert not [name for name in classes if name.split(".")[0] == "history"]
+
+
+def test_the_session_runs_as_an_async_context_manager():
+    assert hasattr(ThinkingPromptSession, "__aenter__")
+    assert hasattr(ThinkingPromptSession, "__aexit__")
+
+
+def test_queued_input_has_its_style():
+    assert "queued_input" in {field.name for field in dataclasses.fields(ThinkingPromptStyles)}
+    assert "queued-input" in ThinkingPromptStyles().to_style_dict()
 
 
 def test_the_welcome_stays_a_customization_point():

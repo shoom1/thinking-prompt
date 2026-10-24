@@ -217,6 +217,7 @@ def create_layout(
     thinking_manager: ThinkingBoxManager | None = None,
     completions_menu_height: int = 5,
     inline_dialog: AnyContainer | None = None,
+    queued: AnyContainer | None = None,
 ) -> Layout:
     """
     Create the layout with thinking boxes, input and status bar.
@@ -231,6 +232,7 @@ def create_layout(
         completions_menu_height: Maximum height of the completions dropdown menu.
         inline_dialog: Shown between the input area and the status bar
             (inline dialogs).
+        queued: Rows of input queued while busy, under the input area.
 
     Returns:
         The complete Layout.
@@ -317,6 +319,7 @@ def create_layout(
     main_layout = HSplit([
         thinking_area,         # Only visible when thinking
         input_with_separators, # Always visible
+        *([queued] if queued is not None else []),  # Input queued while busy
         *([inline_dialog] if inline_dialog is not None else []),  # Inline dialogs
         status_bar,            # Status bar at bottom
     ])

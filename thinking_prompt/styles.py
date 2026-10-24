@@ -118,6 +118,7 @@ class ThinkingPromptStyles:
     assistant_message: str = ""  # Defaults to color_text_bright
     thinking_message: str = ""
     system_message: str = ""  # Defaults to color_warning
+    queued_input: str = ""  # Defaults to color_text_muted italic
 
     # ==========================================================================
     # Status messages
@@ -315,6 +316,7 @@ class ThinkingPromptStyles:
             ),
             "assistant_message": _fg(self.color_text_bright),
             "system_message": _fg(self.color_warning),
+            "queued_input": _style_str(_fg(self.color_text_muted), "italic"),
             # Status messages
             "error_message": _style_str(_fg(self.color_error), "bold"),
             "warning_message": _fg(self.color_warning),
@@ -382,6 +384,7 @@ class ThinkingPromptStyles:
             'transcript.error': r("error_message"),
             'transcript.warning': r("warning_message"),
             'transcript.success': r("success_message"),
+            'queued-input': r("queued_input"),
             'prompt': r("prompt"),
             'input-separator': r("input_separator"),
             # Dialog styles
