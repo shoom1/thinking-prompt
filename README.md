@@ -355,9 +355,9 @@ session.add_response("# Title\n- Item 1\n- Item 2", markdown=True)
 session.add_code("def hello(): return 'world'", language="python")
 
 # Status bar text
-session.set_status("Ready")                    # Plain text
+session.status_text = "Ready"                  # Plain text
 from rich.text import Text
-session.set_status(Text.from_markup("[bold]Processing[/bold]"))  # Rich renderable
+session.status_text = Text.from_markup("[bold]Processing[/bold]")  # Rich renderable
 
 # Status messages
 session.add_success("Operation completed")

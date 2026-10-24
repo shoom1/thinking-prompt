@@ -186,7 +186,7 @@ async def main():
 
         if cmd == "inline":
             placement = "box" if placement == "inline" else "inline"
-            session.set_status(ready_status())
+            session.status_text = ready_status()
             session.add_response(f"Dialogs are now drawn **{placement}**.", markdown=True)
             return
 
@@ -447,7 +447,7 @@ async def main():
         # Use context manager for thinking
         async with session.thinking(title="Initializing") as ctx:
             # Phase 1: Initialization with spinner effect
-            session.set_status("Phase 1/3: Initializing…")
+            session.status_text = "Phase 1/3: Initializing…"
             ctx.append("Initialization\n")
 
             steps = ["Loading modules", "Parsing input", "Allocating memory"]
@@ -461,7 +461,7 @@ async def main():
 
             # Phase 2: Processing with progress bar
             ctx.set_title("Processing")
-            session.set_status("Phase 2/3: Processing…")
+            session.status_text = "Phase 2/3: Processing…"
             total = 15
             bar_width = 30
             ctx.append(f"  [{'░' * bar_width}]   0%\n")
@@ -472,11 +472,11 @@ async def main():
 
                 # Update status bar with progress percentage
                 if RICH_AVAILABLE:
-                    session.set_status(Text.from_markup(
+                    session.status_text = Text.from_markup(
                         f"[bold]Phase 2/3:[/bold] Processing \\[{bar}] {percent:3d}%"
-                    ))
+                    )
                 else:
-                    session.set_status(f"Phase 2/3: Processing [{bar}] {percent:3d}%")
+                    session.status_text = f"Phase 2/3: Processing [{bar}] {percent:3d}%"
 
                 # Update progress line in place
                 ctx.set_line(-1, f"  [{bar}] {percent:3d}%")
@@ -488,7 +488,7 @@ async def main():
 
             # Phase 3: Analysis
             ctx.set_title("Analyzing")
-            session.set_status("Phase 3/3: Analyzing…")
+            session.status_text = "Phase 3/3: Analyzing…"
             ctx.append("Analysis\n")
             findings = [
                 f"Input length: {len(user_input)} characters",
@@ -504,7 +504,7 @@ async def main():
             await asyncio.sleep(0.3)
 
         # Reset status bar after thinking
-        session.set_status(ready_status())
+        session.status_text = ready_status()
 
         # Final output with markdown
         session.add_response(

@@ -838,7 +838,7 @@ class TestBusyHint:
 
         async def handler(text: str) -> None:
             await release.wait()
-            session.set_status("DONE")
+            session.status_text = "DONE"
 
         with piped_session(status_text="READY") as (session, inp):
 
@@ -944,7 +944,7 @@ class TestBackgroundHint:
                 await asyncio.wait_for(opened.wait(), 2)
                 inp.send_text(CTRL_C)
                 await wait_until(lambda: session.status_text == BACKGROUND_HINT)
-                session.set_status("INDEXING 50%")
+                session.status_text = "INDEXING 50%"
                 gate.set()
                 await asyncio.wait_for(task, 2)
                 await wait_until(lambda: on_screen(session, "INDEXING 50%"))

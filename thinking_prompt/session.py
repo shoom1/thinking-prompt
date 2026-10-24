@@ -318,7 +318,7 @@ class ThinkingPromptSession:
         if self._hint is None or self._status_text != self._hint:
             self._status_under_hint = self._status_text
         self._hint = hint
-        self.set_status(hint)
+        self.status_text = hint
 
     def _clear_hint(self) -> None:
         """Restore the status the hint replaced — unless something set a new
@@ -1274,21 +1274,12 @@ class ThinkingPromptSession:
         return self._status_now()
 
     @status_text.setter
-    def status_text(self, value: AnyFormattedText) -> None:
-        """Set the status bar text (str or FormattedText)."""
+    def status_text(self, value: Any) -> None:
+        """Set the status bar text: plain or formatted text (FormattedText,
+        HTML, ANSI, a callable), or a Rich renderable."""
+        if _is_rich_renderable(value):
+            value = self._display.to_ansi(value)
         self._status_text = value
-        self._invalidate()
-
-    def set_status(self, text: Any) -> None:
-        """
-        Set the status bar text.
-
-        Accepts plain text, FormattedText, or Rich renderables.
-        """
-        if _is_rich_renderable(text):
-            self._status_text = self._display.to_ansi(text)
-        else:
-            self._status_text = text
         self._invalidate()
 
     # =========================================================================

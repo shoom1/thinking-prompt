@@ -90,5 +90,15 @@ def test_styles_convert_to_a_prompt_toolkit_style_only():
     assert not hasattr(ThinkingPromptStyles, "to_rich_theme_dict")
 
 
+@pytest.mark.parametrize(
+    ("owner", "member"),
+    [
+        (ThinkingPromptSession, "set_status"),  # status_text takes all kinds of text
+    ],
+)
+def test_one_name_per_thing(owner: type, member: str):
+    assert not hasattr(owner, member)
+
+
 def test_the_welcome_stays_a_customization_point():
     assert AppInfo(name="app", welcome_message="hi").get_welcome_content() == "hi"
