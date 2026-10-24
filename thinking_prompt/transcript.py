@@ -15,26 +15,7 @@ from typing import Callable, Optional
 from prompt_toolkit.formatted_text import ANSI, FormattedText, to_formatted_text
 from prompt_toolkit.formatted_text.base import OneStyleAndTextTuple
 
-
-def _coalesce(fragments: list[OneStyleAndTextTuple]) -> list[OneStyleAndTextTuple]:
-    """Merge adjacent fragments with identical style; drop empty text.
-
-    ANSI parsing produces ~one fragment per character; coalescing keeps
-    memory and repaint cost proportional to styled runs instead.
-    """
-    out: list[OneStyleAndTextTuple] = []
-    for frag in fragments:  # tolerate 3-tuples (mouse handlers)
-        style, text = frag[0], frag[1]
-        has_handler = len(frag) > 2
-        if not text:
-            continue
-        if out and len(out[-1]) == 2 and out[-1][0] == style and not has_handler:
-            out[-1] = (style, out[-1][1] + text)
-        elif has_handler:
-            out.append((style, text, frag[2]))  # type: ignore[misc]
-        else:
-            out.append((style, text))
-    return out
+from ._text import coalesce
 
 
 @dataclass
@@ -149,7 +130,7 @@ class Transcript:
             )
         else:  # ansi
             ansi = entry.source
-        entry.cache = _coalesce(list(to_formatted_text(ANSI(ansi))))
+        entry.cache = coalesce(list(to_formatted_text(ANSI(ansi))))
         return entry.cache
 
     def render_entry(self, entry: _Entry) -> list[OneStyleAndTextTuple]:
