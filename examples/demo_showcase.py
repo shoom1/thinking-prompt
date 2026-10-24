@@ -375,7 +375,7 @@ async def main():
                     label="Username",
                     description="Your display name",
                     default="Guest",
-                    edit_width=20,
+                    width=20,
                 ),
                 TextField(
                     key="api_key",
@@ -383,7 +383,7 @@ async def main():
                     description="Your secret API key",
                     default="",
                     password=True,
-                    edit_width=20,
+                    width=20,
                 ),
                 CheckboxField(
                     key="notifications",

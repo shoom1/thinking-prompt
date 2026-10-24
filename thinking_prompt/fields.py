@@ -62,7 +62,7 @@ class Field(ABC):
 class SelectField(Field):
     """One of ``options``, stepped through in place with ←/→ (``◀ medium ▶``)."""
     options: list[str] = field(default_factory=list)
-    default: Any = None
+    default: str | None = None
 
 
 @dataclass(frozen=True)
@@ -71,7 +71,7 @@ class DropdownField(Field):
     row, in a box and inline alike. ``height``: the menu's rows; ``width``:
     its columns (None: the widest option's, at most ``max_width``)."""
     options: list[str] = field(default_factory=list)
-    default: Any = None
+    default: str | None = None
     height: int = 4
     width: int | None = 15
     max_width: int | None = None
@@ -91,13 +91,13 @@ class CheckboxField(Field):
 @dataclass(frozen=True)
 class TextField(Field):
     """Free text, edited in place with Enter; ``password`` shows it as dots.
-    ``edit_width``: the edit field's columns."""
+    ``width``: the edit field's columns."""
     default: str = ""
     password: bool = False
-    edit_width: int = 15
+    width: int = 15
 
     def __post_init__(self) -> None:
-        _check_size(self, "edit_width", self.edit_width)
+        _check_size(self, "width", self.width)
 
 
 @dataclass(frozen=True)
@@ -865,10 +865,10 @@ class TextFieldControl(FieldControl[TextField]):
         return self._row_value("").columns()
 
     def _row_value(self, style: str) -> _RowValue:
-        """The value within edit_width: left-justified at a value column,
+        """The value within the field's width: left-justified at a value column,
         else right-justified."""
         return _RowValue(
-            self._shown_value(), style, self._item.edit_width, left=self._value_column is not None
+            self._shown_value(), style, self._item.width, left=self._value_column is not None
         )
 
     def get_container(self) -> Container:
@@ -920,7 +920,7 @@ class _EditRow(Container):
     "…" to fit, then the input field where the row draws the value
     (_layout_row), at the width it gives. Laid out from the row's width at
     each redraw, so a row too narrow for the column keeps the field, as it
-    keeps the value. The field keeps min(8, edit_width) columns: the label
+    keeps the value. The field keeps min(8, its width) columns: the label
     is cut further to keep them."""
 
     def __init__(self, control: TextFieldControl, editor: Window) -> None:
@@ -935,7 +935,7 @@ class _EditRow(Container):
 
     def preferred_width(self, max_available_width: int) -> Dimension:
         # The view row's width, so the box keeps its width as the edit
-        # starts, though a value wider than edit_width is wider than the
+        # starts, though a value wider than the field's width is wider than the
         # input field.
         return Dimension(min=0, preferred=self._control.row_width())
 
@@ -953,15 +953,15 @@ class _EditRow(Container):
     ) -> None:
         width = write_position.width
         control = self._control
-        edit_width = control.item.edit_width
+        field_width = control.item.width
         layout = _layout_row(
             width,
             control.item.label,
             control._column(width),
-            # The field doesn't depend on the buffer: edit_width, scrolling
+            # The field doesn't depend on the buffer: its width, scrolling
             # long text, whatever the text (or password) is.
-            _RowValue("", "", edit_width, left=control._value_column is not None),
-            min_field=min(8, edit_width),
+            _RowValue("", "", field_width, left=control._value_column is not None),
+            min_field=min(8, field_width),
         )
         start = max(0, min(layout.column, width))
         editor_width = min(layout.field, width - start)

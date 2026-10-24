@@ -11,7 +11,17 @@ import pytest
 from prompt_toolkit.application import Application
 
 import thinking_prompt
-from thinking_prompt import AppInfo, ThinkingBox, ThinkingPromptSession, ThinkingPromptStyles
+from thinking_prompt import (
+    AppInfo,
+    ChoiceField,
+    DropdownField,
+    RadioField,
+    SelectField,
+    TextField,
+    ThinkingBox,
+    ThinkingPromptSession,
+    ThinkingPromptStyles,
+)
 
 PUBLIC = {
     "ThinkingPromptSession",
@@ -159,6 +169,27 @@ def test_parameter_names(func: Callable[..., object], names: list[str]):
     """One name per meaning: a session default for boxes is ``thinking_`` +
     the box's parameter, and the dialog helpers all take ``options``."""
     assert _parameters(func) == names
+
+
+@pytest.mark.parametrize(
+    ("field_class", "names"),
+    [
+        (TextField, ["key", "label", "description", "default", "password", "width"]),
+        (
+            DropdownField,
+            ["key", "label", "description", "default", "options", "height", "width", "max_width"],
+        ),
+    ],
+    ids=["TextField", "DropdownField"],
+)
+def test_a_fields_width_is_named_width(field_class: type, names: list[str]):
+    assert [field.name for field in dataclasses.fields(field_class)] == names
+
+
+@pytest.mark.parametrize("field_class", [SelectField, DropdownField, RadioField, ChoiceField])
+def test_a_single_choice_fields_default_is_an_option_or_none(field_class: type):
+    (default,) = [field for field in dataclasses.fields(field_class) if field.name == "default"]
+    assert default.type == "str | None"
 
 
 def test_the_welcome_stays_a_customization_point():

@@ -72,7 +72,7 @@ class TestFieldClasses:
 
     def test_defaults(self):
         assert TextField("k", "L") == TextField(
-            "k", "L", description="", default="", password=False, edit_width=15
+            "k", "L", description="", default="", password=False, width=15
         )
         assert CheckboxField("k", "L").default is False
         assert (DropdownField("k", "L").height, DropdownField("k", "L").width) == (4, 15)
@@ -93,11 +93,12 @@ class TestFieldClasses:
          r"DropdownField 'k': max_width must be at least 1 \(or None\), got 0"),
         (lambda: DropdownField("k", "L", options=["a"], height=0),
          r"DropdownField 'k': height must be at least 1, got 0"),
-        (lambda: TextField("k", "L", edit_width=0),
-         r"TextField 'k': edit_width must be at least 1, got 0"),
-        (lambda: TextField("k", "L", edit_width=-5),
-         r"TextField 'k': edit_width must be at least 1, got -5"),
-    ], ids=["width<0", "width=0", "max_width<0", "max_width=0", "height=0", "edit_width=0", "edit_width<0"])
+        (lambda: TextField("k", "L", width=0),
+         r"TextField 'k': width must be at least 1, got 0"),
+        (lambda: TextField("k", "L", width=-5),
+         r"TextField 'k': width must be at least 1, got -5"),
+    ], ids=["dropdown width<0", "dropdown width=0", "max_width<0", "max_width=0", "height=0",
+            "text width=0", "text width<0"])
     def test_sizes_below_one_are_refused(self, make, message):
         """Refused when the field is made, not when its menu or edit field
         is first drawn (a negative width failed inside prompt_toolkit)."""
@@ -107,7 +108,7 @@ class TestFieldClasses:
     def test_sizes_of_one_are_fine(self):
         DropdownField("k", "L", options=["a"], width=1, max_width=1, height=1)
         DropdownField("k", "L", options=["a"], width=None)
-        TextField("k", "L", edit_width=1)
+        TextField("k", "L", width=1)
 
     def test_the_field_classes_are_exported(self):
         for name in FIELD_NAMES:
@@ -689,10 +690,10 @@ class TestOptionLists:
             ),
             len("◀ Not an option ▶"),
         ),
-        (lambda: TextFieldControl(TextField(key="a", label="A", edit_width=12)), 12),
-        (lambda: TextFieldControl(TextField(key="a", label="A", edit_width=5)), len("(empty)")),
+        (lambda: TextFieldControl(TextField(key="a", label="A", width=12)), 12),
+        (lambda: TextFieldControl(TextField(key="a", label="A", width=5)), len("(empty)")),
         (
-            lambda: TextFieldControl(TextField(key="a", label="A", default="a long default", edit_width=5)),
+            lambda: TextFieldControl(TextField(key="a", label="A", default="a long default", width=5)),
             len("a long default"),
         ),
         (lambda: OptionsFieldControl(ChecklistField(key="a", label="A", options=["x"])), 0),
@@ -775,7 +776,7 @@ class TestValueColumn:
 
     def test_fields_are_padded_in_terminal_columns(self):
         """Wide characters take two columns: a dropdown's ▼ lines up whatever
-        its value, and a text value takes its edit_width."""
+        its value, and a text value takes its width."""
 
         def mark(value: str) -> int:
             item = DropdownField(key="d", label="Model", options=["日本語モデル", "beta"], default=value)
@@ -971,7 +972,7 @@ class TestRowsShortOfWidth:
         assert _row(control, 22, width=12) == "  Mo… gp… ▼"
         assert _row(control, None, width=12) == "  Mo… gp… ▼"
 
-    # Text field: padded to edit_width, no decoration.
+    # Text field: padded to width, no decoration.
     def test_text_in_full_at_the_column(self):
         assert _row(_text_field(), 16, width=40) == "  Display name  " + "bob".ljust(15)
 
@@ -1061,7 +1062,7 @@ class TestRowsShortOfWidth:
         assert _field(row) == list(range(5, 13))
 
     @pytest.mark.parametrize("password", [False, True])
-    async def test_a_long_value_gets_exactly_edit_width_in_a_wide_row(self, password):
+    async def test_a_long_value_gets_exactly_its_width_in_a_wide_row(self, password):
         control = TextFieldControl(
             TextField(key="t", label="Name", default="a value of nineteen", password=password)
         )
@@ -1070,8 +1071,8 @@ class TestRowsShortOfWidth:
         (row,) = _drawn(control.get_container(), 60)
         assert _field(row) == list(range(10, 25))
 
-    async def test_a_small_edit_width_is_its_own_minimum(self):
-        control = TextFieldControl(TextField(key="t", label="Display name", default="bob", edit_width=5))
+    async def test_a_small_width_is_its_own_minimum(self):
+        control = TextFieldControl(TextField(key="t", label="Display name", default="bob", width=5))
         control.set_value_column(None)
         control.enter_edit_mode()
         (row,) = _drawn(control.get_container(), 12)
@@ -1107,14 +1108,14 @@ class TestAlignValues:
     def test_values_clear_the_longest_description(self):
         items = [
             CheckboxField(key="a", label="Stream", description="Show tokens as they arrive"),
-            TextField(key="b", label="API key", edit_width=10),
+            TextField(key="b", label="API key", width=10),
         ]
         assert self._column(items).at(80) == 2 + len("Show tokens as they arrive") + 2
 
     def test_a_description_too_long_for_the_values_runs_under_them(self):
         items = [
             CheckboxField(key="a", label="Stream", description="x" * 50),
-            TextField(key="b", label="API key", edit_width=20),
+            TextField(key="b", label="API key", width=20),
         ]
         column = self._column(items)
         # As far right as the widest value (the 20-column field) still fits
@@ -1263,8 +1264,8 @@ class TestAutoWidth:
     @pytest.mark.parametrize("default", ["bob", "a value of twenty-three"])
     def test_a_box_keeps_its_width_as_a_text_edit_starts(self, align, default):
         """The edit row is as wide as the view row, a value wider than
-        edit_width too (the input field keeps edit_width)."""
-        d = Dialog("S", fields=[TextField("n", "Name", default=default, edit_width=10)], align_values=align)
+        width too (the input field keeps width)."""
+        d = Dialog("S", fields=[TextField("n", "Name", default=default, width=10)], align_values=align)
         d._placement = "box"
         box = to_container(build_box(d).widget)
         viewing = box.preferred_width(200).preferred

@@ -2449,7 +2449,7 @@ class TestFormFields:
                 key="theme", label="Theme", description="Application color scheme",
                 options=["Light", "System"], default="System", width=20,
             ),
-            TextField(key="name", label="Username", description="Your display name", default="Guest", edit_width=20),
+            TextField(key="name", label="Username", description="Your display name", default="Guest", width=20),
             CheckboxField(
                 key="notify", label="Enable Notifications", description="Show desktop notifications", default=True,
             ),
