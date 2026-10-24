@@ -98,3 +98,16 @@ class TestCoalesce:
 
         handler = lambda e: None  # noqa: E731
         assert coalesce([("x", "", handler), ("x", "a")]) == [("x", "a")]
+
+    def test_a_long_run_is_joined_once(self):
+        """A line a million characters long, in one style, as the ANSI
+        parser makes it: adding to the run a fragment at a time copies it
+        each time (seconds at this length), joining it once doesn't."""
+        import time
+
+        from thinking_prompt._text import coalesce
+
+        started = time.perf_counter()
+        result = coalesce([("x", "a")] * 1_000_000)
+        assert time.perf_counter() - started < 2
+        assert result == [("x", "a" * 1_000_000)]
