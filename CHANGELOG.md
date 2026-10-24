@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-10-24
+
+### Added
+
+- `examples/claude_chat.py`: a chat with Claude whose thinking streams into a thinking box and whose answer prints as markdown (needs `anthropic` and an API key). The README's new "Use with a model" section shows its handler.
+- `examples/shell_jobs.py`: shell commands run as background jobs, each streaming into its own numbered thinking box while the prompt takes the next; `/stop N` stops one, `rm` asks first, and Ctrl+C at the prompt leaves the jobs running. No API key needed.
+
+### Changed
+
+- Rich output is laid out at the width of the session's terminal: `add_rich()`, markdown responses, the welcome banner, and a `Panel` or `Table` in a thinking box. Rich used to find a width on its own, from the process's terminal (80 columns without one), which needn't be the one the session prints to. After the terminal shrinks, its repaint lays markdown out again at the new width; Rich output keeps the width it was printed at. `StreamingContent.append_rich()` and `set_line_rich()` take `width=`.
+- The README opens with what the library is for, badges, and a Features list that covers 0.4: dialogs, form fields and themes.
+- CI runs the tests on macOS and Windows as well as Linux, and on Python 3.14; the package lists 3.14 among its supported versions. The tests run on Windows CI, which gives them no console.
+- **Ctrl+C at an idle prompt leaves a live task's box to that task.** It used to end every box, so a background job's box vanished while the job ran on and its writes were dropped. It now ends only the boxes nobody else will end: those whose task ended, those opened outside asyncio, and those the app's own task opened (the task running `run_async()`, e.g. a startup status box). With only live tasks' boxes open it doesn't exit, and the status bar says `Background work is running — Ctrl+D exits` until no box is open or the next input is accepted.
+- The app's last frame, drawn as it exits, leaves out the thinking boxes and the status bar, as prompt_toolkit's `PromptSession` leaves out its toolbar. A background job's box no longer stays in the scrollback above its own echo: it's echoed once, when its task ends it, or else when the task ends.
+
+### Fixed
+
+- Boxes nobody else will end (opened by the app's own task, or outside asyncio) that are still open when the session ends are echoed below its last frame. They were never ended, so their content was lost.
+- Exiting (Ctrl+D) while a handler that Ctrl+C cancelled was still cleaning up left `run_async()` blocked for good: the app stopped, but the input loop went back to wait for input.
+- `append_rich()` dropped the text's trailing whitespace, the newline that ends a line included: three `append_rich("…\n")` calls made one line, so the README's task list, `demo_multi_box.py` and `demo_task_progress.py` showed one line, and updating line 0 replaced it all. Streamed words lost the space between them. `rich_to_ansi()` keeps the text's whitespace too; `set_line_rich()` still takes markup that ends with a newline.
+- A `Panel` in a thinking box (`append_rich()`) was laid out 9999 columns wide, so each of its lines wrapped into over a hundred rows, and a `Table` didn't wrap its cells to the terminal.
+- A thinking box whose last line was longer than the box (a streamed paragraph) showed that line's start under `+0 earlier lines`, so new words never appeared; in head mode the hint was cut off. The box now fits by screen rows: the newest rows show (the first, in head mode), and the hint counts a line shown in part. Rows are counted as the window draws them: a wide character that doesn't fit at a row's end starts the next row, and a tab, drawn as `^I`, takes two columns.
+- In a terminal too narrow for the overflow hint (under about 37 columns), the hint wrapped onto a second row the box hadn't reserved, pushing the newest row out of view. The hint now gets the rows it wraps to; a box left with no row for content beside it shows content only, as a one-row box does.
+- A thinking box parsed its whole text six times a frame (five height checks and the draw), so streaming slowed as the box grew: a frame of a 10,000-line ANSI box took about 730 ms. The text is now parsed once, and text streamed in only from its last line on, after one color code that sets the style in force there; each line's rows are counted once per width. That frame now takes under a millisecond, and the first draw about 120 ms. Lines are kept as style runs, not a fragment a character. Text changed before its last line (`set_line()` on an earlier line, `clear()`), or ANSI text after an escape other than a color code, is parsed whole again.
+
+### Removed
+
+- `ThinkingBoxManager.finish_all()` (the manager isn't exported): idle Ctrl+C ends only the boxes nobody else will end (`finish_owned_by()`).
+
 ## [0.4.0] - 2026-10-17
 
 Many changes here are breaking: entries marked **Breaking** need code changes, and the README's "Upgrading from 0.3" notes show the replacements.
