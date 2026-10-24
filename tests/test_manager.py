@@ -301,7 +301,7 @@ class TestEcho:
         assert transcript_texts(display) == []
         assert echoed(display) == []
 
-    def test_echo_thinking_off_keeps_the_console_quiet_by_default(self):
+    def test_thinking_echo_off_keeps_the_console_quiet_by_default(self):
         display = make_display()
         mgr = make_manager(display, thinking_echo=False)
         mgr.finish(mgr.create_box(lambda: "x\n"))
@@ -506,6 +506,52 @@ class TestBoxSizing:
     def test_overflow_head_reaches_the_control(self):
         m = make_manager()
         assert self._box(m, 1, overflow="head")._control.overflow == "head"
+
+
+class TestTitleOnly:
+    """max_lines=0: a box that's its title line only, a processing indicator."""
+
+    STEPS = "step 1\nstep 2\n"
+
+    def test_collapsed_it_is_its_title_line(self):
+        m = make_manager(spinner=None)
+        m.create_box(lambda: self.STEPS, title="Loading", max_lines=0)
+        assert m.get_container().preferred_height(40, 100).preferred == 1
+        rows = _render_rows(m.get_container(), 40, 3)
+        assert rows[0].strip("─") == " Loading "
+        assert rows[1:] == ["", ""]
+
+    def test_expanded_it_shows_its_text(self):
+        m = make_manager(spinner=None)
+        m.create_box(lambda: self.STEPS, title="Loading", max_lines=0)
+        m.expand_all()
+        assert _render_rows(m.get_container(), 40, 3)[1:] == ["step 1", "step 2"]
+
+    def test_with_no_text_it_stays_its_title_line_expanded_too(self):
+        m = make_manager(spinner=None)
+        m.create_box(lambda: "", title="Loading", max_lines=0)
+        m.expand_all()
+        assert m.get_container().preferred_height(40, 100).preferred == 1
+
+    def test_ctrl_t_is_offered_when_it_has_text(self):
+        m = make_manager()
+        m.create_box(lambda: "", title="Idle", max_lines=0)
+        assert not m.can_toggle()
+        m.create_box(lambda: self.STEPS, title="Loading", max_lines=0)
+        assert m.can_toggle()
+
+    @pytest.mark.parametrize("overflow", ["tail", "head"])
+    def test_finished_it_echoes_nothing(self, overflow):
+        """Its echo is cut to the rows it showed: none."""
+        display = make_display()
+        m = make_manager(display)
+        m.finish(m.create_box(lambda: self.STEPS, title="T", max_lines=0, overflow=overflow))
+        assert echoed(display) == []
+        assert transcript_texts(display) == []
+
+    def test_without_a_header_it_would_draw_nothing(self):
+        with pytest.raises(ValueError, match="no title and no rows"):
+            make_manager().create_box(lambda: "", title=None, max_lines=0)
 
 
 class TestHeaderLayout:

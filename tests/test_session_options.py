@@ -62,7 +62,7 @@ class TestOptions:
         assert header.spinner is spinner
         assert header.position == "after"
 
-    def test_echo_thinking_off_keeps_boxes_off_the_console(self):
+    def test_thinking_echo_off_keeps_boxes_off_the_console(self):
         session = ThinkingPromptSession(thinking_echo=False)
         keep_console(session._display)
         box = session.start_thinking()
@@ -77,9 +77,13 @@ class TestOptions:
 
 
 class TestThinkingMaxLines:
-    def test_below_one_is_refused(self):
-        with pytest.raises(ValueError, match="thinking_max_lines must be at least 1"):
-            ThinkingPromptSession(thinking_max_lines=0)
+    def test_below_zero_is_refused(self):
+        with pytest.raises(ValueError, match="thinking_max_lines must be at least 0"):
+            ThinkingPromptSession(thinking_max_lines=-1)
+
+    def test_zero_makes_every_box_its_title_line(self):
+        session = ThinkingPromptSession(thinking_max_lines=0)
+        assert session.start_thinking()._control.max_collapsed_lines == 0
 
     def test_one_row_is_enough(self):
         session = ThinkingPromptSession(thinking_max_lines=1)

@@ -247,8 +247,8 @@ idle prompt costs no CPU:
 
 ### Long Content
 
-A collapsed box shows at most `max_lines` rows (at least 1; session
-default: `thinking_max_lines`). When content overflows, the
+A collapsed box shows at most `max_lines` rows (session default:
+`thinking_max_lines`). When content overflows, the
 box keeps the **newest** rows under a `+N earlier lines... ctrl-t to
 expand` hint, so a stream stays visibly live, even mid-paragraph: a line
 longer than the box shows its end, and the hint counts it. A box with no
@@ -264,6 +264,21 @@ head instead:
 tasks = session.start_thinking(title="Tasks", max_lines=10, overflow="head")
 # or: async with session.thinking(overflow="head") as box: ...
 ```
+
+### Processing Indicators
+
+`max_lines=0` makes a box its title line only: the spinner and the title,
+no rows under them. It says something is running without taking the
+screen. Text written to it shows when the boxes are expanded (Ctrl+T), and
+isn't echoed when it finishes: the echo keeps what the box showed.
+
+```python
+async with session.thinking(title="Loading models", max_lines=0):
+    await load_models()
+```
+
+`thinking_max_lines=0` makes every box an indicator unless it sets its own
+`max_lines`.
 
 ### Multiple Thinking Boxes
 

@@ -128,7 +128,8 @@ class ThinkingBoxManager:
             title: Title for a header line (with the spinner) above the box.
                 None: no header.
             order: Sort key (higher = closer to the prompt).
-            max_lines: Max collapsed lines (default: the manager's).
+            max_lines: Max collapsed lines (default: the manager's); 0: the
+                title line only.
             content_format: Content format ("plain" or "ansi").
             overflow: Which end of overflowing content stays visible:
                 "tail" (newest lines) or "head" (first lines).
@@ -140,6 +141,8 @@ class ThinkingBoxManager:
             effective_max_lines = (
                 max_lines if max_lines is not None else self._default_max_lines
             )
+            if title is None and not effective_max_lines:
+                raise ValueError("a box with no title and no rows would draw nothing")
 
             frames = self._frames
             # Content written through the box's handle redraws on each
@@ -200,7 +203,12 @@ class ThinkingBoxManager:
         def get_height() -> D:
             # Wrap-count at the real terminal width — a hardcoded 80
             # clips wrapped content on narrow terminals.
-            rows = max(1, control.get_line_count(_terminal_width()))
+            lines = control.get_line_count(_terminal_width())
+            if not max_lines and not (lines and control.is_expanded):
+                # The title line only (a processing indicator); its text,
+                # if any, shows expanded.
+                return D.exact(0)
+            rows = max(1, lines)
             if control.is_expanded:
                 # Fit the content; with no max, the layout squeezes the box
                 # on a short screen, and the control then keeps the
@@ -358,6 +366,8 @@ class ThinkingBoxManager:
         echoed = self._thinking_echo if echo is None else echo
         for box in ended if echoed else []:
             control = box._control
+            if not control.max_collapsed_lines:
+                continue  # the title line only: it showed no text to echo
             self._display.thinking(
                 box.text,
                 truncate_lines=control.max_collapsed_lines,
