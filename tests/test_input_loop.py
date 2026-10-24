@@ -16,6 +16,7 @@ from tests.test_end_to_end import (
     CTRL_D,
     ENTER,
     UP,
+    done_frame,
     echoed_inputs,
     piped_session,
     screen_lines,
@@ -400,6 +401,50 @@ class TestQuery:
         assert results == [None, "next"]
 
 
+class TestCtrlDAtAFollowUp:
+    """Ctrl+D while a query asks a follow-up ends the query as the app
+    stopping does: it's cancelled, not given an EOFError to raise."""
+
+    async def test_the_query_returns_none_and_the_loop_ends(self):
+        results: list[object] = []
+        with piped_session() as (session, inp):
+
+            async def respond() -> str:
+                return await session.prompt_async()
+
+            async def body() -> None:
+                await session.prompt_async()
+                results.append(await session.query(respond()))
+                with pytest.raises(EOFError):
+                    await session.prompt_async()
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("question" + ENTER)
+                await wait_until(lambda: session._foreground is not None and waiting_for_input(session))
+                inp.send_text(CTRL_D)
+                await finished(run)
+
+            await run_loop(session, body, script)
+        assert results == [None]
+
+    async def test_a_handler_asking_ends_without_an_error(self):
+        from tests.test_end_to_end import run_with
+
+        async def handler(text: str) -> None:
+            await session.prompt_async()
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("question" + ENTER)
+                await wait_until(lambda: session._foreground is not None and waiting_for_input(session))
+                inp.send_text(CTRL_D)
+                await finished(run)
+                assert not any("Handler error" in text for text in transcript_texts(session._display))
+
+            await run_with(session, handler, script)
+
+
 class TestRunAsyncHandlers:
     async def test_a_handler_can_ask_a_follow_up(self):
         from tests.test_end_to_end import run_with
@@ -572,6 +617,56 @@ class TestQueue:
                 await wait_until(lambda: list(session._queued) == ["two"])
                 inp.send_text(CTRL_C)
                 await wait_until(lambda: ran == ["two"])
+
+            await run_loop(session, self._loop(session, ran, started, release), script)
+
+    async def test_exit_from_a_query_drops_the_lines_queued_behind_it(self):
+        """The user typed "quit", then more: what follows quit doesn't run."""
+        ran: list[str] = []
+        release = asyncio.Event()
+        with piped_session(input_while_busy="queue") as (session, inp):
+
+            async def respond(text: str) -> None:
+                ran.append(text)
+                if text == "slow":
+                    await release.wait()
+                if text == "quit":
+                    session.exit()
+
+            async def body() -> None:
+                while True:
+                    try:
+                        text = await session.prompt_async()
+                    except (EOFError, KeyboardInterrupt):
+                        return
+                    await session.query(respond(text))
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("slow" + ENTER)
+                await wait_until(lambda: ran == ["slow"])
+                inp.send_text("quit" + ENTER + "after" + ENTER)
+                await wait_until(lambda: list(session._queued) == ["quit", "after"])
+                release.set()
+                await finished(run)
+                assert ran == ["slow", "quit"]
+                assert echoed_inputs(session) == ["slow", "quit"]
+
+            await run_loop(session, body, script)
+
+    async def test_the_last_frame_leaves_out_the_queued_rows(self):
+        """They're dropped at exit, so the scrollback doesn't keep them."""
+        ran: list[str] = []
+        started: list[str] = []
+        release = asyncio.Event()
+        with piped_session(input_while_busy="queue") as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("slow" + ENTER)
+                await wait_until(lambda: started == ["slow"])
+                inp.send_text("two" + ENTER)
+                await wait_until(lambda: any("queued: two" in line for line in screen_lines(session)))
+                assert not any("queued:" in line for line in done_frame(session))
+                release.set()
 
             await run_loop(session, self._loop(session, ran, started, release), script)
 

@@ -34,7 +34,7 @@ from prompt_toolkit.completion import Completer
 from prompt_toolkit.data_structures import Point
 from prompt_toolkit.document import Document
 from prompt_toolkit.enums import DEFAULT_BUFFER, EditingMode
-from prompt_toolkit.filters import Condition, has_focus
+from prompt_toolkit.filters import Condition, has_focus, is_done
 from prompt_toolkit.formatted_text import (
     AnyFormattedText,
     FormattedText,
@@ -441,7 +441,9 @@ class ThinkingPromptSession:
                 height=lambda: Dimension.exact(len(self._queued)),
                 wrap_lines=False,
             ),
-            filter=Condition(lambda: bool(self._queued)),
+            # Left out of the app's last frame: lines still queued at exit
+            # are dropped, so the scrollback shouldn't keep them.
+            filter=Condition(lambda: bool(self._queued)) & ~is_done,
         )
 
     def _polled(self, text: AnyFormattedText) -> AnyFormattedText:
@@ -549,9 +551,14 @@ class ThinkingPromptSession:
         )
         def exit_app(event: KeyPressEvent) -> None:
             """Exit the application."""
-            # Resolve the pending future so direct prompt_async() callers
-            # observe the documented EOFError instead of hanging forever.
-            if self._pending_input is not None and not self._pending_input.done():
+            # A running query is cancelled, as when the app stops: if it
+            # was asking a follow-up, its prompt ends with it and query()
+            # returns None. Otherwise a waiting prompt_async() gets the
+            # documented EOFError instead of hanging forever.
+            foreground = self._foreground
+            if foreground is not None and not foreground.done():
+                foreground.cancel()
+            elif self._pending_input is not None and not self._pending_input.done():
                 self._pending_input.set_exception(EOFError())
             event.app.exit()
 
@@ -1183,7 +1190,9 @@ class ThinkingPromptSession:
                 "prompt_async() reads the input of a running session: "
                 "call it inside `async with session:`"
             )
-        if run.done():
+        if run.done() or self.app.is_done:
+            # Stopped, or told to stop (exit() takes the app a few loop
+            # turns): queued lines don't run after a quit.
             raise EOFError
         pending = self._pending_input
         if pending is not None and not pending.done():

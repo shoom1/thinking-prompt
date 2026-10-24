@@ -304,6 +304,7 @@ class TestCtrlCKeyBinding:
         app.run_async = fake_run_async
         app.exit = MagicMock(side_effect=exited.set)
         app.is_running = True
+        app.is_done = False
         session.app = app
 
         async def handler(text: str) -> None:
