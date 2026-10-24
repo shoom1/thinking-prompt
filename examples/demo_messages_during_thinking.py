@@ -20,7 +20,7 @@ async def main():
     session = ThinkingPromptSession(
         app_info=app_info,
         message=">>> ",
-        max_thinking_height=8,
+        thinking_max_lines=8,
     )
 
     @session.on_input
@@ -36,7 +36,7 @@ async def main():
             await asyncio.sleep(0.5)
 
             # Output a system message - appears above the thinking box
-            session.add_message("system", "Connecting to backend service...")
+            session.add_system("Connecting to backend service...")
             await asyncio.sleep(0.3)
 
             content.append("Phase 1: Parsing input\n")
@@ -69,7 +69,7 @@ async def main():
 
             # Show progress with multiple messages
             for i in range(1, 4):
-                session.add_message("system", f"Processing chunk {i}/3...")
+                session.add_system(f"Processing chunk {i}/3...")
                 content.append(f"  Chunk {i} processed\n")
                 await asyncio.sleep(0.3)
 

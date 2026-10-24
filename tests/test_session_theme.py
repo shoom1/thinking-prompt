@@ -368,8 +368,8 @@ class TestRepaintedContent:
 
     @pytest.mark.parametrize(
         "session_kwargs, finish_kwargs",
-        [({"echo_thinking": False}, {}), ({}, {"echo_to_console": False})],
-        ids=["echo_thinking", "echo_to_console"],
+        [({"thinking_echo": False}, {}), ({}, {"echo": False})],
+        ids=["thinking_echo", "echo"],
     )
     def test_a_box_not_echoed_is_not_repainted(self, session_kwargs, finish_kwargs):
         """A repaint prints what was printed: a box finished without its

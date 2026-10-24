@@ -22,7 +22,7 @@ async def main():
     session = ThinkingPromptSession(
         app_info=app_info,
         message="You: ",
-        max_thinking_height=5,
+        thinking_max_lines=5,
         status_text="Ctrl+C: cancel | Ctrl+D: exit",
     )
 
@@ -49,7 +49,7 @@ async def main():
         chunks.append(f"Received: \"{user_input}\"\n")
         await asyncio.sleep(0.3)
 
-        # Phase 3: Simulated reasoning steps (more than max_thinking_height to show truncation)
+        # Phase 3: Simulated reasoning steps (more than thinking_max_lines to show truncation)
         steps = [
             "Step 1: Parsing input...",
             "Step 2: Tokenizing text...",

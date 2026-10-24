@@ -21,11 +21,11 @@ async def main():
     session = ThinkingPromptSession(
         app_info=app_info,
         message=">>> ",
-        max_thinking_height=12,
+        thinking_max_lines=12,
         thinking_title="Working",
         spinner=Spinner.DOTS,
         spinner_position="before",
-        echo_thinking=False,
+        thinking_echo=False,
     )
 
     @session.on_input

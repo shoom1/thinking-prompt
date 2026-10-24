@@ -80,8 +80,8 @@ async def main():
     session = ThinkingPromptSession(
         app_info=app_info,
         message=">>> ",
-        max_thinking_height=10,
-        echo_thinking=False,  # Don't echo thinking to console after completion
+        thinking_max_lines=10,
+        thinking_echo=False,  # Don't echo thinking to console after completion
     )
 
     @session.on_input

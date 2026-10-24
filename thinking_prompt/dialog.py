@@ -43,6 +43,7 @@ from typing import (
     TYPE_CHECKING,
     Any,
     Callable,
+    Literal,
     cast,
 )
 
@@ -145,8 +146,9 @@ class Dialog:
             row's right edge) or a column number (longer labels cut with "…").
         escape_result: What Escape and cancel() return (default None).
         escapable: If False, Escape does nothing (default True).
-        width: None/0 = auto, >0 = preferred width (never narrower than
-            the buttons), -1 = full width (box only).
+        width: The box's columns, never fewer than its buttons take; "full"
+            for all the terminal's columns; None (default) to fit its
+            content. Box dialogs only.
         max_height: The most rows the dialog takes, all of it counted (a
             box's border, title and buttons; an inline dialog's title,
             body, actions and hint); content that doesn't fit scrolls.
@@ -201,7 +203,7 @@ class Dialog:
     align_values: AlignValues = "labels"
     escape_result: Any = None
     escapable: bool = True
-    width: int | None = None
+    width: int | Literal["full"] | None = None
     # The most rows the dialog takes; what doesn't fit scrolls. None: the
     # terminal's rows less the prompt's.
     max_height: int | None = None
@@ -216,7 +218,7 @@ class Dialog:
         *,
         escape_result: Any = _NOT_PASSED,
         escapable: bool | _NotPassed = _NOT_PASSED,
-        width: int | None | _NotPassed = _NOT_PASSED,
+        width: int | Literal["full"] | None | _NotPassed = _NOT_PASSED,
         max_height: int | None | _NotPassed = _NOT_PASSED,
         placement: Placement | None | _NotPassed = _NOT_PASSED,
         fields: Sequence[Field] | _NotPassed = _NOT_PASSED,
@@ -243,6 +245,12 @@ class Dialog:
                 setattr(self, name, value)
         if self.max_height is not None and self.max_height < 1:
             raise ValueError(f"max_height must be at least 1, got {self.max_height!r}")
+        if not (
+            self.width is None
+            or self.width == "full"
+            or (isinstance(self.width, int) and self.width >= 1)
+        ):
+            raise ValueError(f'width must be at least 1, "full" or None, got {self.width!r}')
         _check_align_values(self.align_values)
         # Not an attribute: one named values would hide the values property.
         self._start_values = values
@@ -462,15 +470,15 @@ def _message_dialog(
 def _choice_dialog(
     title: str,
     text: str,
-    choices: Sequence[str],
+    options: Sequence[str],
     placement: Placement = "box",
     max_height: int | None = None,
 ) -> Dialog:
-    """One button per choice, returning its text; Escape returns None."""
+    """One button per option, returning its text; Escape returns None."""
     return Dialog(
         title,
         text,
-        [ButtonConfig(choice, result=choice) for choice in choices],
+        [ButtonConfig(option, result=option) for option in options],
         placement=placement,
         max_height=max_height,
     )

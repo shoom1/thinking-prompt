@@ -164,13 +164,13 @@ class Display:
         # the prefix has none of its own), splitting ">>> hello" across
         # lines. One input is also one transcript_limit entry this way.
         self._transcript.append_formatted([
-            ("class:history.user-prefix", prompt),
-            ("class:history.user-message", f"{text}\n"),
+            ("class:transcript.user-prefix", prompt),
+            ("class:transcript.user-message", f"{text}\n"),
         ])
         # Print as single formatted output
         self._print_to_console(FormattedText([
-            ("class:history.user-prefix", prompt),
-            ("class:history.user-message", f"{text}\n"),
+            ("class:transcript.user-prefix", prompt),
+            ("class:transcript.user-message", f"{text}\n"),
         ]))
 
     def thinking(
@@ -203,7 +203,7 @@ class Display:
             text = truncate_to_lines(content, truncate_lines, overflow=overflow) + "\n"
         else:
             text = content.rstrip() + "\n"
-        self._output_styled("class:history.thinking", text)
+        self._output_styled("class:transcript.thinking", text)
 
     def _thinking_ansi(
         self,
@@ -226,7 +226,7 @@ class Display:
         Args:
             content: The response content.
         """
-        self._output_styled("class:history.assistant-message", f"{content}\n")
+        self._output_styled("class:transcript.assistant-message", f"{content}\n")
 
     def system(self, content: str) -> None:
         """
@@ -235,7 +235,7 @@ class Display:
         Args:
             content: The system message content.
         """
-        self._output_styled("class:history.system", f"{content}\n")
+        self._output_styled("class:transcript.system", f"{content}\n")
 
     def error(self, content: str) -> None:
         """
@@ -244,7 +244,7 @@ class Display:
         Args:
             content: The error message content.
         """
-        self._output_styled("class:history.error", f"[ERROR] {content}\n")
+        self._output_styled("class:transcript.error", f"[ERROR] {content}\n")
 
     def warning(self, content: str) -> None:
         """
@@ -253,7 +253,7 @@ class Display:
         Args:
             content: The warning message content.
         """
-        self._output_styled("class:history.warning", f"[WARN] {content}\n")
+        self._output_styled("class:transcript.warning", f"[WARN] {content}\n")
 
     def success(self, content: str) -> None:
         """
@@ -262,7 +262,7 @@ class Display:
         Args:
             content: The success message content.
         """
-        self._output_styled("class:history.success", f"[OK] {content}\n")
+        self._output_styled("class:transcript.success", f"[OK] {content}\n")
 
     def markdown(self, content: str) -> None:
         """

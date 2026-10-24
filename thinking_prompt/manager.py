@@ -76,7 +76,7 @@ class ThinkingBoxManager:
         default_style: str = "class:thinking-box",
         expand_key: str = "c-t",
         frames: FrameScheduler | None = None,
-        echo_thinking: bool = True,
+        thinking_echo: bool = True,
         spinner: Spinner | None = Spinner.DOTS,
         spinner_position: Literal["before", "after"] = "before",
     ) -> None:
@@ -87,8 +87,8 @@ class ThinkingBoxManager:
             default_style: Style class of the box text.
             expand_key: The key named in the overflow hint.
             frames: Asks for redraws (None: nothing asks).
-            echo_thinking: Whether a finished box is printed to the console
-                when the finish call doesn't say (the session's echo_thinking).
+            thinking_echo: Whether a finished box is printed to the console
+                when the finish call doesn't say (the session's thinking_echo).
             spinner: The header spinner (None for none).
             spinner_position: The spinner "before" or "after" the title.
         """
@@ -97,7 +97,7 @@ class ThinkingBoxManager:
         self._default_style = default_style
         self._expand_key = expand_key
         self._frames = frames
-        self._echo_thinking = echo_thinking
+        self._thinking_echo = thinking_echo
         self._spinner = spinner
         self._spinner_position: Literal["before", "after"] = spinner_position
         self._boxes: list[ThinkingBox] = []  # in creation order
@@ -296,21 +296,21 @@ class ThinkingBoxManager:
         self,
         box: ThinkingBox,
         *,
-        echo_to_console: bool | None = None,
+        echo: bool | None = None,
     ) -> bool:
         """End ``box``: remove it from the screen and echo its text.
 
         Returns:
             False if the box had already ended (nothing is echoed again).
         """
-        ended = self._finish(lambda b: b is box, echo_to_console=echo_to_console)
+        ended = self._finish(lambda b: b is box, echo=echo)
         return bool(ended)
 
     def finish_owned_by(
         self,
         task: asyncio.Task[Any] | None,
         *,
-        echo_to_console: bool | None = None,
+        echo: bool | None = None,
     ) -> list[ThinkingBox]:
         """End the boxes nobody but ``task`` would end; return them.
 
@@ -324,7 +324,7 @@ class ThinkingBoxManager:
         def owned(box: ThinkingBox) -> bool:
             return box._owner is None or box._owner is task or box._owner.done()
 
-        return self._finish(owned, echo_to_console=echo_to_console)
+        return self._finish(owned, echo=echo)
 
     def finish_when_owners_end(self) -> None:
         """End each open box when its task ends, unless the task ends it
@@ -340,7 +340,7 @@ class ThinkingBoxManager:
         self,
         pick: Callable[[ThinkingBox], bool],
         *,
-        echo_to_console: bool | None,
+        echo: bool | None,
     ) -> list[ThinkingBox]:
         """End the boxes ``pick`` selects, in creation order, and echo them.
 
@@ -355,8 +355,8 @@ class ThinkingBoxManager:
                 self._boxes.remove(box)
                 box._close()
             self._reset_mode_if_empty()
-        echo = self._echo_thinking if echo_to_console is None else echo_to_console
-        for box in ended if echo else []:
+        echoed = self._thinking_echo if echo is None else echo
+        for box in ended if echoed else []:
             control = box._control
             self._display.thinking(
                 box.text,

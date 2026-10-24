@@ -78,7 +78,7 @@ async def run_config(index: int) -> int | None:
             welcome_message=f"Animation {index + 1}/{len(CONFIGS)}: {config['name']}",
         ),
         message=">>> ",
-        max_thinking_height=5,
+        thinking_max_lines=5,
         **config["options"],
     )
     switch_to: list[int | None] = [None]  # Use list for mutable closure
@@ -95,10 +95,10 @@ async def run_config(index: int) -> int | None:
             return
 
         if cmd == "list":
-            session.add_message("system", "Available animation configs:")
+            session.add_system("Available animation configs:")
             for i, cfg in enumerate(CONFIGS):
                 marker = "→ " if i == index else "  "
-                session.add_message("system", f"  {marker}{i+1}. {cfg['name']}")
+                session.add_system(f"  {marker}{i+1}. {cfg['name']}")
             return
 
         if not cmd:

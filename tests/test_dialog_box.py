@@ -136,6 +136,10 @@ class TestBuildBox:
         wide = build_box(Dialog("T", "B", [ButtonConfig("OK")], width=40))
         assert to_container(wide.widget).preferred_width(80).preferred == 40
 
+    def test_full_width_takes_all_the_columns_there_are(self):
+        view = build_box(Dialog("T", "B", [ButtonConfig("OK")], width="full"))
+        assert to_container(view.widget).preferred_width(80).preferred >= 80
+
 
 class TestBoxPresenter:
     @staticmethod

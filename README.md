@@ -144,7 +144,7 @@ The main class for creating a thinking-enabled prompt session.
 session = ThinkingPromptSession(
     message=">>> ",              # Prompt message
     app_info=AppInfo(...),       # Startup banner (none without it)
-    max_thinking_height=15,      # Max lines when collapsed
+    thinking_max_lines=15,       # Max lines when collapsed
     enable_status_bar=True,      # Show status bar
     echo_input=True,             # Echo user input to console
     complete_while_typing=True,  # Show completions as you type
@@ -173,7 +173,7 @@ box.append("Processing...\n")
 await asyncio.sleep(0.5)
 
 # Finish this box: its text is printed above the prompt
-# (echo_to_console=False drops it instead)
+# (echo=False drops it instead)
 box.finish()
 ```
 
@@ -248,7 +248,7 @@ idle prompt costs no CPU:
 ### Long Content
 
 A collapsed box shows at most `max_lines` rows (at least 1; session
-default: `max_thinking_height`, at least 2). When content overflows, the
+default: `thinking_max_lines`). When content overflows, the
 box keeps the **newest** rows under a `+N earlier lines... ctrl-t to
 expand` hint, so a stream stays visibly live, even mid-paragraph: a line
 longer than the box shows its end, and the hint counts it. A box with no
@@ -282,7 +282,7 @@ dl = session.start_thinking(title="Download", max_lines=2)
 for pct in range(0, 101, 20):
     dl.set_line(0, f"  {pct}% complete")
     await asyncio.sleep(0.3)
-dl.finish(echo_to_console=False)
+dl.finish(echo=False)
 tasks.set_line_rich(0, "[green]  ✓ Download[/green]")
 
 # Step 2: another detail box
@@ -291,11 +291,11 @@ proc = session.start_thinking(title="Process", max_lines=2)
 for i in range(5):
     proc.set_line(0, f"  Batch {i+1}/5...")
     await asyncio.sleep(0.4)
-proc.finish(echo_to_console=False)
+proc.finish(echo=False)
 tasks.set_line_rich(1, "[green]  ✓ Process[/green]")
 
 # Finish task list
-tasks.finish(echo_to_console=False)
+tasks.finish(echo=False)
 ```
 
 ### Rich/ANSI Content in Thinking Box
@@ -355,15 +355,15 @@ session.add_response("# Title\n- Item 1\n- Item 2", markdown=True)
 session.add_code("def hello(): return 'world'", language="python")
 
 # Status bar text
-session.set_status("Ready")                    # Plain text
+session.status_text = "Ready"                  # Plain text
 from rich.text import Text
-session.set_status(Text.from_markup("[bold]Processing[/bold]"))  # Rich renderable
+session.status_text = Text.from_markup("[bold]Processing[/bold]")  # Rich renderable
 
 # Status messages
 session.add_success("Operation completed")
 session.add_warning("Rate limit approaching")
 session.add_error("Connection failed")
-session.add_message("system", "Connecting to server...")
+session.add_system("Connecting to server...")
 ```
 
 The session sometimes puts a hint in the status bar in place of your
@@ -442,7 +442,8 @@ A `Dialog` has no buttons unless you give it some, and it needs something
 to take keyboard focus: at least one button, fields, or a focusable body (e.g. a
 `TextArea`, closed with Escape). Otherwise `show_dialog()` raises
 `ValueError`. Other options: `escape_result`, `escapable`, `width` (box
-only; never narrower than the buttons), `max_height`, `fields`, `align_values`.
+only: columns, never fewer than the buttons take, or `"full"`), `max_height`,
+`fields`, `align_values`.
 
 **Where a box sits.** Under the prompt, above the status bar: where an inline
 dialog would be. When the rest of the screen takes rows (a thinking box, a
@@ -616,7 +617,7 @@ session = ThinkingPromptSession(
     thinking_title="Thinking",   # Header title of boxes started without one
     spinner=Spinner.DOTS,        # Spinner.LINE, Spinner.ELLIPSIS, your own, or None
     spinner_position="before",   # "before" or "after" the title
-    echo_thinking=True,          # Echo a finished box to the console (False: drop it)
+    thinking_echo=True,          # Echo a finished box to the console (False: drop it)
 )
 ```
 

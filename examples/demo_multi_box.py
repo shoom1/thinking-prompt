@@ -40,7 +40,7 @@ async def main():
         for pct in range(0, 101, 20):
             dl.set_line(0, f"  {pct}% complete")
             await asyncio.sleep(0.3)
-        dl.finish(echo_to_console=False)
+        dl.finish(echo=False)
         tasks.set_line_rich(0, "[green]  ✓ Download data[/green]")
 
         # Step 2: Process
@@ -49,7 +49,7 @@ async def main():
         for i in range(5):
             proc.set_line(0, f"  Processing batch {i+1}/5...")
             await asyncio.sleep(0.4)
-        proc.finish(echo_to_console=False)
+        proc.finish(echo=False)
         tasks.set_line_rich(1, "[green]  ✓ Process data[/green]")
 
         # Step 3: Report
@@ -58,7 +58,7 @@ async def main():
         tasks.set_line_rich(2, "[green]  ✓ Generate report[/green]")
 
         await asyncio.sleep(0.5)
-        tasks.finish(echo_to_console=False)
+        tasks.finish(echo=False)
 
         session.add_success("All tasks complete!")
 

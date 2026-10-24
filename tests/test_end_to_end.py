@@ -531,7 +531,7 @@ class TestThinkingBoxesOnScreen:
     """Thinking boxes as drawn above the prompt."""
 
     async def test_ctrl_t_shows_the_lines_a_long_box_hides(self):
-        """A box longer than max_thinking_height (15) keeps its newest lines
+        """A box longer than thinking_max_lines (15) keeps its newest lines
         under a hint naming the rest; Ctrl+T shows them all."""
         with piped_session() as (session, inp):
 
@@ -838,7 +838,7 @@ class TestBusyHint:
 
         async def handler(text: str) -> None:
             await release.wait()
-            session.set_status("DONE")
+            session.status_text = "DONE"
 
         with piped_session(status_text="READY") as (session, inp):
 
@@ -944,7 +944,7 @@ class TestBackgroundHint:
                 await asyncio.wait_for(opened.wait(), 2)
                 inp.send_text(CTRL_C)
                 await wait_until(lambda: session.status_text == BACKGROUND_HINT)
-                session.set_status("INDEXING 50%")
+                session.status_text = "INDEXING 50%"
                 gate.set()
                 await asyncio.wait_for(task, 2)
                 await wait_until(lambda: on_screen(session, "INDEXING 50%"))
@@ -2449,7 +2449,7 @@ class TestFormFields:
                 key="theme", label="Theme", description="Application color scheme",
                 options=["Light", "System"], default="System", width=20,
             ),
-            TextField(key="name", label="Username", description="Your display name", default="Guest", edit_width=20),
+            TextField(key="name", label="Username", description="Your display name", default="Guest", width=20),
             CheckboxField(
                 key="notify", label="Enable Notifications", description="Show desktop notifications", default=True,
             ),

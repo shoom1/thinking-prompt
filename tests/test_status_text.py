@@ -1,5 +1,5 @@
 """
-Tests for set_status() method and status bar type handling.
+The status bar: session.status_text, and the kinds of text it shows.
 """
 from __future__ import annotations
 
@@ -93,12 +93,12 @@ class TestCreateStatusBarTypeDispatch:
 
 
 # =============================================================================
-# ThinkingPromptSession.set_status() and status_text Tests
+# ThinkingPromptSession.status_text Tests
 # =============================================================================
 
 
-class TestSessionSetStatus:
-    """Test set_status() and status_text property on ThinkingPromptSession."""
+class TestSessionStatusText:
+    """The status_text property on ThinkingPromptSession."""
 
     @pytest.fixture
     def session(self):
@@ -124,21 +124,10 @@ class TestSessionSetStatus:
         session.status_text = ft
         assert session.status_text is ft
 
-    def test_set_status_plain_string(self, session):
-        """set_status() with plain string should store it directly."""
-        session.set_status("plain")
-        assert session.status_text == "plain"
-
-    def test_set_status_formatted_text(self, session):
-        """set_status() with FormattedText should store it directly."""
-        ft = FormattedText([("", "formatted")])
-        session.set_status(ft)
-        assert session.status_text is ft
-
-    def test_set_status_rich_renderable(self, session):
-        """set_status() with a Rich renderable should convert to ANSI."""
+    def test_status_text_setter_rich_renderable(self, session):
+        """A Rich renderable is converted to ANSI."""
         pytest.importorskip("rich")
         from rich.text import Text
-        session.set_status(Text("Rich status", style="bold"))
+        session.status_text = Text("Rich status", style="bold")
         assert isinstance(session.status_text, ANSI)
         assert "Rich status" in session.status_text.value

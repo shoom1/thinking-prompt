@@ -303,11 +303,11 @@ class TestEcho:
 
     def test_echo_thinking_off_keeps_the_console_quiet_by_default(self):
         display = make_display()
-        mgr = make_manager(display, echo_thinking=False)
+        mgr = make_manager(display, thinking_echo=False)
         mgr.finish(mgr.create_box(lambda: "x\n"))
         assert echoed(display) == []
         assert transcript_texts(display) == []  # nor kept for a repaint
-        mgr.finish(mgr.create_box(lambda: "y\n"), echo_to_console=True)
+        mgr.finish(mgr.create_box(lambda: "y\n"), echo=True)
         assert echoed(display) == ["y\n"]
         assert transcript_texts(display) == ["y\n"]
 

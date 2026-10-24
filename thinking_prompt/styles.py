@@ -77,7 +77,7 @@ class ThinkingPromptStyles:
     color_bg_dark: str = "#333333"  # Dark - menus, dropdowns
     color_bg_dialog: str = "#2a2a2a"  # Darker - dialog background
     color_bg_input: str = "#3a3a3a"  # Medium - input fields, highlights
-    color_thinking: str = "#a0a0a0"  # Thinking box + history thinking text
+    color_thinking: str = "#a0a0a0"  # Thinking box + echoed thinking text
     color_thinking_border: str = "#606060"  # Thinking box border
     color_thinking_hint: str = "#707070"  # "+N lines..." expand hint
     color_bg_status: str = "#202040"  # Status bar background
@@ -110,9 +110,9 @@ class ThinkingPromptStyles:
     status_bar: str = ""
 
     # ==========================================================================
-    # Chat history
+    # The transcript: what the session prints
     # ==========================================================================
-    history: str = ""
+    transcript: str = ""
     user_prefix: str = ""  # Defaults to color_accent on color_bg_input
     user_message: str = ""  # Defaults to color_text_bright on color_bg_input italic
     assistant_message: str = ""  # Defaults to color_text_bright
@@ -308,7 +308,7 @@ class ThinkingPromptStyles:
             "menu_meta_selected": _style_str(
                 _fg(self.color_accent), _bg(self.color_bg_selected), "noreverse"
             ),
-            # Chat history
+            # The transcript
             "user_prefix": _style_str(_fg(self.color_accent), _bg(self.color_bg_input)),
             "user_message": _style_str(
                 _fg(self.color_text_bright), _bg(self.color_bg_input), "italic"
@@ -373,15 +373,15 @@ class ThinkingPromptStyles:
             'thinking-box.border': r("thinking_box_border"),
             'thinking-box.hint': r("thinking_box_hint"),
             'status': r("status_bar"),
-            'history': r("history"),
-            'history.user-prefix': r("user_prefix"),
-            'history.user-message': r("user_message"),
-            'history.assistant-message': r("assistant_message"),
-            'history.thinking': r("thinking_message"),
-            'history.system': r("system_message"),
-            'history.error': r("error_message"),
-            'history.warning': r("warning_message"),
-            'history.success': r("success_message"),
+            'transcript': r("transcript"),
+            'transcript.user-prefix': r("user_prefix"),
+            'transcript.user-message': r("user_message"),
+            'transcript.assistant-message': r("assistant_message"),
+            'transcript.thinking': r("thinking_message"),
+            'transcript.system': r("system_message"),
+            'transcript.error': r("error_message"),
+            'transcript.warning': r("warning_message"),
+            'transcript.success': r("success_message"),
             'prompt': r("prompt"),
             'input-separator': r("input_separator"),
             # Dialog styles
