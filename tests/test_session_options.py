@@ -63,7 +63,7 @@ class TestOptions:
         assert header.position == "after"
 
     def test_echo_thinking_off_keeps_boxes_off_the_console(self):
-        session = ThinkingPromptSession(echo_thinking=False)
+        session = ThinkingPromptSession(thinking_echo=False)
         keep_console(session._display)
         box = session.start_thinking()
         box.append("x\n")
@@ -76,14 +76,17 @@ class TestOptions:
             ThinkingPromptSession(">>> ", AppInfo(name="t"))  # type: ignore[misc]
 
 
-class TestMaxThinkingHeight:
-    @pytest.mark.parametrize("height", [1, 0])
-    def test_below_two_is_refused(self, height):
-        with pytest.raises(ValueError, match="max_thinking_height must be at least 2"):
-            ThinkingPromptSession(max_thinking_height=height)
+class TestThinkingMaxLines:
+    def test_below_one_is_refused(self):
+        with pytest.raises(ValueError, match="thinking_max_lines must be at least 1"):
+            ThinkingPromptSession(thinking_max_lines=0)
+
+    def test_one_row_is_enough(self):
+        session = ThinkingPromptSession(thinking_max_lines=1)
+        assert session.start_thinking()._control.max_collapsed_lines == 1
 
     def test_new_boxes_collapse_to_it_unless_they_set_their_own(self):
-        session = ThinkingPromptSession(max_thinking_height=3)
+        session = ThinkingPromptSession(thinking_max_lines=3)
         assert session.start_thinking()._control.max_collapsed_lines == 3
         assert session.start_thinking(max_lines=7)._control.max_collapsed_lines == 7
 

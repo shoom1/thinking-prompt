@@ -235,17 +235,17 @@ class ThinkingBox:
 
     # -- finishing -------------------------------------------------------------
 
-    def finish(self, echo_to_console: bool | None = None) -> str:
+    def finish(self, echo: bool | None = None) -> str:
         """Finish the box: remove it from the screen and echo its text.
 
         Args:
-            echo_to_console: If True, print the text to the console (and keep
+            echo: If True, print the text to the console (and keep
                 it for repaints); if False, drop it. None follows the
-                session's ``echo_thinking``.
+                session's ``thinking_echo``.
 
         Returns:
             The box's final text. Finishing again (or after the session
             finished the box) returns it again and echoes nothing.
         """
-        self._manager.finish(self, echo_to_console=echo_to_console)
+        self._manager.finish(self, echo=echo)
         return self._final_text

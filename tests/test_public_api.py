@@ -4,6 +4,8 @@ on purpose."""
 from __future__ import annotations
 
 import dataclasses
+import inspect
+from typing import Callable
 
 import pytest
 from prompt_toolkit.application import Application
@@ -99,6 +101,40 @@ def test_styles_convert_to_a_prompt_toolkit_style_only():
 )
 def test_one_name_per_thing(owner: type, member: str):
     assert not hasattr(owner, member)
+
+
+def _parameters(func: Callable[..., object]) -> list[str]:
+    return [name for name in inspect.signature(func).parameters if name != "self"]
+
+
+@pytest.mark.parametrize(
+    ("func", "names"),
+    [
+        (
+            ThinkingPromptSession.__init__,
+            [
+                "message", "app_info", "theme", "history", "completer",
+                "complete_while_typing", "completions_menu_height", "editing_mode",
+                "enable_status_bar", "status_text", "expand_key", "thinking_max_lines",
+                "thinking_title", "spinner", "spinner_position", "echo_input",
+                "thinking_echo", "transcript_limit", "dialog_placement",
+            ],
+        ),
+        (
+            ThinkingPromptSession.start_thinking,
+            ["content_callback", "title", "order", "max_lines", "content_format", "overflow"],
+        ),
+        (
+            ThinkingPromptSession.thinking,
+            ["title", "content_format", "echo", "order", "max_lines", "overflow"],
+        ),
+        (ThinkingBox.finish, ["echo"]),
+    ],
+    ids=["session", "start_thinking", "thinking", "finish"],
+)
+def test_parameter_names(func: Callable[..., object], names: list[str]):
+    """A session default for boxes is ``thinking_`` + the box's parameter."""
+    assert _parameters(func) == names
 
 
 def test_the_welcome_stays_a_customization_point():

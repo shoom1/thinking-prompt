@@ -34,14 +34,14 @@ class TestMultiBoxLifecycle:
 
         async with session.thinking(
             title="Outer",
-            echo_to_console=False,
+            echo=False,
         ) as outer_ctx:
             assert session._manager.active_count == 1
             outer_ctx.append("outer content\n")
 
             async with session.thinking(
                 title="Inner",
-                    echo_to_console=False,
+                    echo=False,
             ) as inner_ctx:
                 assert session._manager.active_count == 2
                 inner_ctx.append("inner content\n")
@@ -60,7 +60,7 @@ class TestMultiBoxLifecycle:
         ctx = session.start_thinking(lambda: "")
         assert session.is_thinking
 
-        ctx.finish(echo_to_console=False)
+        ctx.finish(echo=False)
         assert not session.is_thinking
 
 
@@ -84,10 +84,10 @@ class TestMultiBoxOrdering:
         titles = [b._header.text for b in sorted_boxes]
         assert titles == ["B", "D", "A", "C"]
 
-        ctx_a.finish(echo_to_console=False)
-        ctx_b.finish(echo_to_console=False)
-        ctx_c.finish(echo_to_console=False)
-        ctx_d.finish(echo_to_console=False)
+        ctx_a.finish(echo=False)
+        ctx_b.finish(echo=False)
+        ctx_c.finish(echo=False)
+        ctx_d.finish(echo=False)
 
 
 # =============================================================================
@@ -110,8 +110,8 @@ class TestMultiBoxExpandCollapse:
         new_box = [b for b in boxes if b._control.content == "b"][0]
         assert not new_box._control.is_expanded
 
-        ctx1.finish(echo_to_console=False)
-        ctx2.finish(echo_to_console=False)
+        ctx1.finish(echo=False)
+        ctx2.finish(echo=False)
 
 
 class TestSessionOverflow:
@@ -138,12 +138,12 @@ class TestSessionOverflow:
         s = self._session()
         ctx = s.start_thinking(max_lines=3)
         ctx.append(self._lines(10))
-        ctx.finish(echo_to_console=True)
+        ctx.finish(echo=True)
         assert self._echoed(s) == ["...\nline 7\nline 8\nline 9\n"]
 
     async def test_thinking_head_echo_keeps_first_lines(self):
         s = self._session()
-        async with s.thinking(max_lines=3, overflow="head", echo_to_console=True) as ctx:
+        async with s.thinking(max_lines=3, overflow="head", echo=True) as ctx:
             ctx.append(self._lines(10))
             assert s._manager.get_sorted_boxes()[0]._control.overflow == "head"
         assert self._echoed(s) == ["line 0\nline 1\nline 2\n...\n"]

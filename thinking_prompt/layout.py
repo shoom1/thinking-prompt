@@ -203,7 +203,7 @@ def create_status_bar(
 def create_layout(
     default_buffer: Buffer,
     message: Callable[[], AnyFormattedText],
-    max_thinking_height: int,
+    thinking_max_lines: int,
     get_status_text: Callable[[], AnyFormattedText],
     is_status_bar_enabled: Callable[[], bool],
     thinking_manager: ThinkingBoxManager | None = None,
@@ -216,7 +216,7 @@ def create_layout(
     Args:
         default_buffer: The main input buffer.
         message: Callable that returns the prompt message.
-        max_thinking_height: Maximum height for collapsed thinking box.
+        thinking_max_lines: Maximum height for collapsed thinking box.
         get_status_text: Callable that returns status bar text.
         is_status_bar_enabled: Callable that returns status bar visibility.
         thinking_manager: ThinkingBoxManager instance for managing thinking boxes.

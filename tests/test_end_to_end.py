@@ -531,7 +531,7 @@ class TestThinkingBoxesOnScreen:
     """Thinking boxes as drawn above the prompt."""
 
     async def test_ctrl_t_shows_the_lines_a_long_box_hides(self):
-        """A box longer than max_thinking_height (15) keeps its newest lines
+        """A box longer than thinking_max_lines (15) keeps its newest lines
         under a hint naming the rest; Ctrl+T shows them all."""
         with piped_session() as (session, inp):
 

@@ -78,7 +78,7 @@ async def run_config(index: int) -> int | None:
             welcome_message=f"Animation {index + 1}/{len(CONFIGS)}: {config['name']}",
         ),
         message=">>> ",
-        max_thinking_height=5,
+        thinking_max_lines=5,
         **config["options"],
     )
     switch_to: list[int | None] = [None]  # Use list for mutable closure

@@ -140,12 +140,12 @@ class ThinkingPromptSession:
         enable_status_bar: bool = True,
         status_text: AnyFormattedText = "Ctrl+C: cancel | Ctrl+D: exit",
         expand_key: str = "c-t",
-        max_thinking_height: int = 15,
+        thinking_max_lines: int = 15,
         thinking_title: str = "Thinking",
         spinner: Spinner | None = Spinner.DOTS,
         spinner_position: Literal["before", "after"] = "before",
         echo_input: bool = True,
-        echo_thinking: bool = True,
+        thinking_echo: bool = True,
         transcript_limit: int | None = None,
         dialog_placement: Placement = "box",
     ) -> None:
@@ -168,7 +168,8 @@ class ThinkingPromptSession:
             status_text: Text to display in status bar.
             expand_key: Expands/collapses thinking boxes.
                 Default: "c-t" (Ctrl+T).
-            max_thinking_height: Max lines for collapsed thinking box (must be >= 2).
+            thinking_max_lines: The rows a box shows collapsed, below its title,
+                unless the box sets its own ``max_lines`` (at least 1).
             thinking_title: Header title of boxes started without one.
                 "" for none.
             spinner: The thinking header's spinner: a preset such as
@@ -177,7 +178,7 @@ class ThinkingPromptSession:
             spinner_position: The spinner "before" (default) or "after" the
                 title.
             echo_input: Whether to echo user input to console before thinking.
-            echo_thinking: Whether a finished box's text is printed to the
+            thinking_echo: Whether a finished box's text is printed to the
                 console (and kept for repaints) or dropped, when its finish
                 call doesn't say. Default: True.
             transcript_limit: Max transcript entries kept for repaints;
@@ -187,12 +188,12 @@ class ThinkingPromptSession:
                 "inline" draws rows between the prompt and the status bar.
 
         Raises:
-            ValueError: If max_thinking_height is less than 2, or theme= names
+            ValueError: If thinking_max_lines is less than 1, or theme= names
                        an unknown theme, or if dialog_placement isn't 'box'
                        or 'inline'.
         """
-        if max_thinking_height < 2:
-            raise ValueError("max_thinking_height must be at least 2")
+        if thinking_max_lines < 1:
+            raise ValueError("thinking_max_lines must be at least 1")
 
         self._message = message
         self._app_info = app_info
@@ -207,7 +208,7 @@ class ThinkingPromptSession:
         # NO_COLOR is read once at construction (no-color.org: non-empty).
         self._no_color = bool(os.environ.get("NO_COLOR"))
 
-        self._max_thinking_height = max_thinking_height
+        self._thinking_max_lines = thinking_max_lines
         self._enable_status_bar = enable_status_bar
         self._status_text = status_text
         # A status hint ("Busy", "Background work") replaces the status
@@ -246,10 +247,10 @@ class ThinkingPromptSession:
         # hint matches the key bound below in _create_key_bindings.
         self._manager = ThinkingBoxManager(
             self._display,
-            default_max_lines=max_thinking_height,
+            default_max_lines=thinking_max_lines,
             expand_key=self._expand_key,
             frames=self._frames,
-            echo_thinking=echo_thinking,
+            thinking_echo=thinking_echo,
             spinner=spinner,
             spinner_position=spinner_position,
         )
@@ -386,7 +387,7 @@ class ThinkingPromptSession:
         return create_layout(
             default_buffer=self._default_buffer,
             message=lambda: self._polled(self._message),
-            max_thinking_height=self._max_thinking_height,
+            thinking_max_lines=self._thinking_max_lines,
             get_status_text=lambda: self._polled(self._status_now()),
             is_status_bar_enabled=lambda: self._enable_status_bar,
             thinking_manager=self._manager,
@@ -707,7 +708,7 @@ class ThinkingPromptSession:
         *,
         title: str | None = None,
         content_format: ContentFormat = "plain",
-        echo_to_console: bool | None = None,
+        echo: bool | None = None,
         order: int = 0,
         max_lines: int | None = None,
         overflow: Overflow = "tail",
@@ -719,10 +720,10 @@ class ThinkingPromptSession:
         Args:
             title: Optional title for the thinking separator.
             content_format: Format for rendering ("plain" or "ansi").
-            echo_to_console: If True, print the box's text to the console
+            echo: If True, print the box's text to the console
                 (and keep it for repaints) when the block ends; if False,
                 drop it. None (default) follows the session's
-                echo_thinking.
+                thinking_echo.
             order: Sort key for multiple boxes (higher = closer to prompt).
             max_lines: Max collapsed lines (overrides session default).
             overflow: Which end of overflowing content stays visible, in
@@ -772,14 +773,14 @@ class ThinkingPromptSession:
         try:
             yield box
         except asyncio.CancelledError:
-            ended = self._manager.finish(box, echo_to_console=echo_to_console)
+            ended = self._manager.finish(box, echo=echo)
             self._announce_cancel(ended)
             raise
         except BaseException:
-            box.finish(echo_to_console=echo_to_console)
+            box.finish(echo=echo)
             raise
         else:
-            box.finish(echo_to_console=echo_to_console)
+            box.finish(echo=echo)
 
     # =========================================================================
     # Output API

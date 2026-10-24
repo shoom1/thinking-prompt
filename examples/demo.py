@@ -19,7 +19,7 @@ async def main():
     session = ThinkingPromptSession(
         app_info=app_info,
         message="You: ",
-        max_thinking_height=12,
+        thinking_max_lines=12,
     )
 
     @session.on_input

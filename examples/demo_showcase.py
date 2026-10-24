@@ -132,7 +132,7 @@ async def main():
     session = ThinkingPromptSession(
         app_info=app_info,
         message=">>> ",
-        max_thinking_height=12,
+        thinking_max_lines=12,
         thinking_title="Processing",
         spinner=Spinner.DOTS,
         spinner_position="before",
@@ -255,7 +255,7 @@ async def main():
             for pct in range(0, 101, 25):
                 scan.set_line(0, f"  {pct}% scanned")
                 await asyncio.sleep(0.3)
-            scan.finish(echo_to_console=False)
+            scan.finish(echo=False)
             tasks.set_line_rich(0, "[green]  ✓ Scanning files[/green]")
 
             # Step 2: Parse
@@ -264,7 +264,7 @@ async def main():
             for i in range(4):
                 parse.set_line(0, f"  Parsing module {i+1}/4...")
                 await asyncio.sleep(0.4)
-            parse.finish(echo_to_console=False)
+            parse.finish(echo=False)
             tasks.set_line_rich(1, "[green]  ✓ Parsing AST[/green]")
 
             # Step 3: Checks
@@ -273,7 +273,7 @@ async def main():
             for name in ["lint", "types", "security"]:
                 checks.set_line(0, f"  Running {name}...")
                 await asyncio.sleep(0.4)
-            checks.finish(echo_to_console=False)
+            checks.finish(echo=False)
             tasks.set_line_rich(2, "[green]  ✓ Running checks[/green]")
 
             # Step 4: Report
@@ -282,7 +282,7 @@ async def main():
             tasks.set_line_rich(3, "[green]  ✓ Generating report[/green]")
 
             await asyncio.sleep(0.5)
-            tasks.finish(echo_to_console=False)
+            tasks.finish(echo=False)
 
             session.add_response(
                 "**Demo complete** — used multiple thinking boxes: a task list "
