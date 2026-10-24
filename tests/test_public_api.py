@@ -162,10 +162,11 @@ def _parameters(func: Callable[..., object]) -> list[str]:
             ThinkingPromptSession.checklist_dialog,
             ["title", "text", "options", "defaults", "placement", "max_height"],
         ),
+        (ThinkingPromptSession.query, ["coro"]),
     ],
     ids=[
         "session", "start_thinking", "thinking", "finish", "message_dialog",
-        "yes_no_dialog", "choice_dialog", "dropdown_dialog", "checklist_dialog",
+        "yes_no_dialog", "choice_dialog", "dropdown_dialog", "checklist_dialog", "query",
     ],
 )
 def test_parameter_names(func: Callable[..., object], names: list[str]):

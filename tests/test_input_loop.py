@@ -214,3 +214,247 @@ class TestPromptAsync:
                 await finished(run)
 
             await run_loop(session, body, script)
+
+
+async def forever(session: ThinkingPromptSession, text: str, started: list[str]) -> str:
+    """A query that opens a box, writes to it, and waits until cancelled."""
+    box = session.start_thinking(title=text)
+    box.append(f"{text} working\n")
+    started.append(text)
+    await asyncio.Event().wait()
+    return text
+
+
+class TestQuery:
+    async def test_returns_the_coroutines_result(self):
+        results: list[object] = []
+        with piped_session() as (session, inp):
+
+            async def respond(text: str) -> str:
+                return text.upper()
+
+            async def body() -> None:
+                results.append(await session.query(respond(await session.prompt_async())))
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("hi" + ENTER)
+                await finished(run)
+
+            await run_loop(session, body, script)
+        assert results == ["HI"]
+
+    async def test_boxes_it_leaves_open_end_with_it(self):
+        with piped_session() as (session, inp):
+
+            async def respond() -> None:
+                session.start_thinking(title="T").append("working\n")
+
+            async def body() -> None:
+                await session.query(respond())
+                assert not session._manager.has_active_boxes
+
+            async def script(run: asyncio.Task[None]) -> None:
+                await finished(run)
+
+            await run_loop(session, body, script)
+            assert "working\n" in transcript_texts(session._display)
+
+    async def test_ctrl_c_cancels_the_query_and_the_loop_goes_on(self):
+        results: list[object] = []
+        started: list[str] = []
+        with piped_session() as (session, inp):
+
+            async def body() -> None:
+                while True:
+                    try:
+                        text = await session.prompt_async()
+                    except (EOFError, KeyboardInterrupt):
+                        return
+                    results.append(await session.query(forever(session, text, started)))
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("first" + ENTER)
+                await wait_until(lambda: started == ["first"])
+                inp.send_text(CTRL_C)
+                await wait_until(lambda: results == [None] and waiting_for_input(session))
+                texts = transcript_texts(session._display)
+                assert texts[-2:] == ["first working\n", "Operation cancelled...\n"]
+
+            await run_loop(session, body, script)
+
+    async def test_an_error_propagates_after_its_boxes_are_echoed(self):
+        with piped_session() as (session, inp):
+
+            async def respond() -> None:
+                session.start_thinking(title="T").append("partial\n")
+                raise KeyError("x")
+
+            async def body() -> None:
+                with pytest.raises(KeyError):
+                    await session.query(respond())
+                assert "partial\n" in transcript_texts(session._display)
+
+            async def script(run: asyncio.Task[None]) -> None:
+                await finished(run)
+
+            await run_loop(session, body, script)
+
+    async def test_one_query_at_a_time(self):
+        with piped_session() as (session, inp):
+
+            async def inner() -> None:
+                return None
+
+            async def outer() -> None:
+                coro = inner()
+                with pytest.raises(RuntimeError, match="already running"):
+                    await session.query(coro)
+
+            async def body() -> None:
+                await session.query(outer())
+
+            async def script(run: asyncio.Task[None]) -> None:
+                await finished(run)
+
+            await run_loop(session, body, script)
+
+    async def test_it_takes_a_coroutine_not_a_function(self):
+        with piped_session() as (session, inp):
+
+            async def respond() -> None:
+                return None
+
+            async with session:
+                with pytest.raises(TypeError, match=r"query\(respond\(text\)\)"):
+                    await session.query(respond)  # type: ignore[arg-type]
+
+    async def test_outside_the_block_it_is_refused(self):
+        with piped_session() as (session, inp):
+            coro = asyncio.sleep(0)
+            with pytest.raises(RuntimeError, match="async with session"):
+                await session.query(coro)
+
+    async def test_ctrl_d_cancels_the_query_and_the_loop_ends(self):
+        results: list[object] = []
+        started: list[str] = []
+        with piped_session() as (session, inp):
+
+            async def body() -> None:
+                text = await session.prompt_async()
+                results.append(await session.query(forever(session, text, started)))
+                with pytest.raises(EOFError):
+                    await session.prompt_async()
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: started == ["go"])
+                inp.send_text(CTRL_D)
+                await finished(run)
+
+            await run_loop(session, body, script)
+        assert results == [None]
+
+    async def test_a_query_can_ask_a_follow_up(self):
+        results: list[object] = []
+        with piped_session() as (session, inp):
+
+            async def respond() -> str:
+                return await session.prompt_async()
+
+            async def body() -> None:
+                await session.prompt_async()
+                results.append(await session.query(respond()))
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("question" + ENTER)
+                await wait_until(lambda: session._foreground is not None and waiting_for_input(session))
+                inp.send_text("answer" + ENTER)
+                await finished(run)
+
+            await run_loop(session, body, script)
+        assert results == ["answer"]
+
+    async def test_ctrl_c_during_a_follow_up_ends_the_whole_query(self):
+        results: list[object] = []
+        with piped_session() as (session, inp):
+
+            async def respond() -> str:
+                return await session.prompt_async()
+
+            async def body() -> None:
+                await session.prompt_async()
+                results.append(await session.query(respond()))
+                results.append(await session.prompt_async())
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("question" + ENTER)
+                await wait_until(lambda: session._foreground is not None and waiting_for_input(session))
+                inp.send_text(CTRL_C)
+                await wait_until(lambda: results == [None] and waiting_for_input(session))
+                inp.send_text("next" + ENTER)
+                await finished(run)
+
+            await run_loop(session, body, script)
+        assert results == [None, "next"]
+
+
+class TestRunAsyncHandlers:
+    async def test_a_handler_can_ask_a_follow_up(self):
+        from tests.test_end_to_end import run_with
+
+        answers: list[str] = []
+
+        async def handler(text: str) -> None:
+            answers.append(await session.prompt_async())
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("question" + ENTER)
+                await wait_until(lambda: session._foreground is not None and waiting_for_input(session))
+                inp.send_text("answer" + ENTER)
+                await wait_until(lambda: answers == ["answer"])
+
+            await run_with(session, handler, script)
+
+
+class TestConcurrent:
+    async def test_tasks_run_beside_the_next_input(self):
+        started: list[str] = []
+        release = asyncio.Event()
+        with piped_session() as (session, inp):
+
+            async def respond(text: str) -> None:
+                async with session.thinking(title=text) as box:
+                    box.append(f"{text} working\n")
+                    started.append(text)
+                    await release.wait()
+
+            async def body() -> None:
+                jobs: set[asyncio.Task[None]] = set()
+                while True:
+                    try:
+                        text = await session.prompt_async()
+                    except (EOFError, KeyboardInterrupt):
+                        break
+                    job = asyncio.ensure_future(respond(text))
+                    jobs.add(job)
+                    job.add_done_callback(jobs.discard)
+                for job in list(jobs):
+                    job.cancel()
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("a" + ENTER)
+                await wait_until(lambda: started == ["a"] and waiting_for_input(session))
+                inp.send_text("b" + ENTER)
+                await wait_until(lambda: started == ["a", "b"])
+                assert session._manager.active_count == 2
+                inp.send_text(CTRL_C)  # an idle prompt with live tasks' boxes
+                await wait_until(lambda: session.status_text == session._BACKGROUND_STATUS)
+                assert session._manager.active_count == 2
+                release.set()
+                await wait_until(lambda: session._manager.active_count == 0)
+                texts = transcript_texts(session._display)
+                assert "a working\n" in texts and "b working\n" in texts
+
+            await run_loop(session, body, script)
