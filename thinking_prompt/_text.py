@@ -5,6 +5,7 @@ error lines (internal).
 from __future__ import annotations
 
 import re
+from itertools import groupby
 
 from prompt_toolkit.formatted_text.base import OneStyleAndTextTuple
 
@@ -19,20 +20,20 @@ def coalesce(fragments: list[OneStyleAndTextTuple]) -> list[OneStyleAndTextTuple
     """Merge adjacent fragments with identical style; drop empty text.
 
     ANSI parsing produces ~one fragment per character; coalescing keeps
-    memory and repaint cost proportional to styled runs instead.
+    memory and repaint cost proportional to styled runs instead. A run's
+    text is joined once (added to a fragment at a time, it's copied each
+    time).
     """
     out: list[OneStyleAndTextTuple] = []
-    for frag in fragments:  # tolerate 3-tuples (mouse handlers)
-        style, text = frag[0], frag[1]
-        has_handler = len(frag) > 2
-        if not text:
-            continue
-        if out and len(out[-1]) == 2 and out[-1][0] == style and not has_handler:
-            out[-1] = (style, out[-1][1] + text)
-        elif has_handler:
-            out.append((style, text, frag[2]))  # type: ignore[misc]
+    # A run of fragments in one style; 3-tuples (mouse handlers) aren't merged.
+    for style, run in groupby(
+        (frag for frag in fragments if frag[1]),
+        lambda frag: frag[0] if len(frag) == 2 else None,
+    ):
+        if style is None:
+            out.extend(run)
         else:
-            out.append((style, text))
+            out.append((style, "".join(frag[1] for frag in run)))
     return out
 
 
