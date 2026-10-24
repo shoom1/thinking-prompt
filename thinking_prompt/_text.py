@@ -6,11 +6,34 @@ from __future__ import annotations
 
 import re
 
+from prompt_toolkit.formatted_text.base import OneStyleAndTextTuple
+
 from .types import Overflow
 
 # SGR (color/style) escape sequences — the only escapes thinking content is
 # expected to carry. Used to measure/replay styling without the text.
 ANSI_SGR_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def coalesce(fragments: list[OneStyleAndTextTuple]) -> list[OneStyleAndTextTuple]:
+    """Merge adjacent fragments with identical style; drop empty text.
+
+    ANSI parsing produces ~one fragment per character; coalescing keeps
+    memory and repaint cost proportional to styled runs instead.
+    """
+    out: list[OneStyleAndTextTuple] = []
+    for frag in fragments:  # tolerate 3-tuples (mouse handlers)
+        style, text = frag[0], frag[1]
+        has_handler = len(frag) > 2
+        if not text:
+            continue
+        if out and len(out[-1]) == 2 and out[-1][0] == style and not has_handler:
+            out[-1] = (style, out[-1][1] + text)
+        elif has_handler:
+            out.append((style, text, frag[2]))  # type: ignore[misc]
+        else:
+            out.append((style, text))
+    return out
 
 
 def split_content_lines(content: str) -> list[str]:

@@ -4,6 +4,7 @@ Thinking box control: draws one box's text (a FormattedTextControl).
 from __future__ import annotations
 
 import logging
+import re
 import threading
 from functools import lru_cache
 from typing import Callable
@@ -19,6 +20,7 @@ from prompt_toolkit.formatted_text.utils import split_lines
 from prompt_toolkit.layout.controls import FormattedTextControl, UIContent
 from prompt_toolkit.layout.screen import Char
 
+from ._text import ANSI_SGR_RE, coalesce
 from .types import ContentCallback, ContentFormat, Overflow
 
 logger = logging.getLogger(__name__)
@@ -72,6 +74,121 @@ def _wrap(line: StyleAndTextTuples, width: int) -> list[StyleAndTextTuples]:
     return rows
 
 
+# An escape other than a color code. One can swallow the newline after it
+# (e.g. "\x1b\n", or zero-width text "\x01...\x02"), so in ANSI text after
+# one, a line can't be found by its newline.
+_OTHER_ESCAPE_RE = re.compile(r"\x1b(?!\[[0-9;]*m)|[\x01\x9b]")
+
+# Widths whose rows are kept. A box's height is counted at the terminal's
+# width and it's drawn at its window's: one width, unless the window is
+# narrower (or the terminal was resized).
+_WIDTHS_KEPT = 4
+
+
+def _resets(code: str) -> bool:
+    """Whether a color code starts by resetting every style (its first
+    parameter is 0 or empty, as in "\\x1b[0;32m" or "\\x1b[m")."""
+    return not code[2:-1].split(";", 1)[0].strip("0")
+
+
+def _in_force(replay: str, codes: list[str]) -> str:
+    """The color codes that set the styles ``replay`` and then ``codes``
+    leave in force: from the last one that resets every style."""
+    for i in range(len(codes) - 1, -1, -1):
+        if _resets(codes[i]):
+            return "".join(codes[i:])
+    return replay + "".join(codes)
+
+
+class _ParsedLines:
+    """The lines a box's text shows, parsed once per text.
+
+    Streamed text grows at its end, so a text that starts as the last one
+    did, up to its last line, is parsed from that line on: the lines before
+    it are kept, and for ANSI text the color codes in force there are
+    replayed before it. Any other text is parsed whole, as is ANSI text
+    after an escape other than a color code. A line's rows are counted once
+    for each width.
+    """
+
+    def __init__(self, style: str) -> None:
+        self._style = style  # plain text's
+        self._format: ContentFormat | None = None
+        self._text = ""
+        self._lines: list[StyleAndTextTuples] = []
+        self._rows: dict[int, list[int]] = {}  # width -> each line's rows
+        self._shown = 0  # lines but the trailing blank ones
+        # Where the last line starts, whether the lines before it can be
+        # kept, and the color codes in force there (ANSI).
+        self._last_start = 0
+        self._keepable = True
+        self._replay = ""
+
+    def update(self, text: str, content_format: ContentFormat) -> None:
+        """Parse ``text``: from the last line on, when it can."""
+        if content_format == self._format and text == self._text:
+            return
+        start = self._last_start
+        if not (
+            content_format == self._format
+            and self._keepable
+            and text.startswith(self._text[:start])
+        ):
+            self._format = content_format
+            self._lines.clear()
+            self._rows.clear()
+            self._keepable = True
+            self._replay = ""
+            start = 0
+        self._parse_from(text, start)
+
+    def _parse_from(self, text: str, start: int) -> None:
+        """Parse ``text`` from ``start``, where the last line starts."""
+        keep = max(len(self._lines) - 1, 0)
+        tail = text[start:]
+        new: list[StyleAndTextTuples]
+        if self._format == "ansi":
+            fragments = to_formatted_text(ANSI(self._replay + tail))
+            new = [coalesce(line) for line in split_lines(fragments)]
+        else:
+            new = [[(self._style, line)] for line in tail.split("\n")]
+        del self._lines[keep:]
+        self._lines.extend(new)
+        for width, rows in self._rows.items():
+            del rows[keep:]
+            rows.extend(len(_wrap(line, width)) for line in new)
+
+        last_start = text.rfind("\n") + 1
+        if self._format == "ansi" and self._keepable:
+            if _OTHER_ESCAPE_RE.search(text, start, last_start):
+                self._keepable = False
+            else:
+                codes = ANSI_SGR_RE.findall(text, start, last_start)
+                self._replay = _in_force(self._replay, codes)
+        self._text = text
+        self._last_start = last_start
+        # Trailing blank lines aren't content (a trailing newline ends the
+        # last line), as in split_content_lines.
+        shown = len(self._lines)
+        while shown > 1 and not fragment_list_to_text(self._lines[shown - 1]).strip():
+            shown -= 1
+        self._shown = shown
+
+    @property
+    def lines(self) -> list[StyleAndTextTuples]:
+        """The lines shown, as fragments."""
+        return self._lines[: self._shown]
+
+    def rows(self, width: int) -> list[int]:
+        """The rows each line shown takes at ``width`` columns."""
+        rows = self._rows.get(width)
+        if rows is None:
+            if len(self._rows) == _WIDTHS_KEPT:
+                del self._rows[next(iter(self._rows))]
+            rows = self._rows[width] = [len(_wrap(line, width)) for line in self._lines]
+        return rows[: self._shown]
+
+
 def _format_key_for_display(key: str) -> str:
     """
     Format a prompt_toolkit key binding for display.
@@ -94,7 +211,8 @@ class ThinkingBoxControl(FormattedTextControl):
     """
     Draws one thinking box's text.
 
-    It reads the text from ``get_text`` each time it's drawn and fits it
+    It reads the text from ``get_text`` each time it's drawn, parses what
+    changed since (streamed text: from its last line on), and fits it
     to the rows it gets: when it overflows, one end is kept (``overflow``:
     "tail" = newest lines, "head" = first lines) and a hint names the
     hidden lines. Collapsed, the rows are capped at ``max_collapsed_lines``;
@@ -163,6 +281,7 @@ class ThinkingBoxControl(FormattedTextControl):
         self._content_format: ContentFormat = content_format
         # A raising get_text is logged once, not on every redraw.
         self._callback_failed = False
+        self._parsed = _ParsedLines(style)
         self._lock = threading.RLock()
 
         # Pass our formatting function to parent
@@ -222,42 +341,35 @@ class ThinkingBoxControl(FormattedTextControl):
                 limit = self._max_collapsed_lines
             else:
                 limit = min(height, self._max_collapsed_lines)
-            return self._fit(self._content_lines(content), width, limit)
+            parsed = self._parse(content)
+            return self._fit(parsed.lines, parsed.rows(width), width, limit)
 
-    def _content_lines(self, content: str) -> list[StyleAndTextTuples]:
-        """Split content into display lines of fragments.
+    def _parse(self, content: str) -> _ParsedLines:
+        """The content's lines, parsed only as far as the text changed.
 
-        ANSI content is parsed as a whole before splitting, so a style
-        opened on an earlier line still applies to later lines even when
-        the earlier ones are cut off. Trailing blank lines are not content
-        (a trailing newline ends the last line), as in split_content_lines.
+        ANSI content is parsed in order, so a style opened on an earlier
+        line still applies to later lines even when the earlier ones are
+        cut off.
         """
-        if self._content_format == "ansi":
-            fragments = to_formatted_text(ANSI(content))
-        else:
-            fragments = to_formatted_text([(self._box_style, content)])
-        lines = [list(line) for line in split_lines(fragments)]
-        while len(lines) > 1 and not fragment_list_to_text(lines[-1]).strip():
-            lines.pop()
-        return lines
-
-    @staticmethod
-    def _rows(line: StyleAndTextTuples, width: int) -> int:
-        """Rows a line occupies when wrapped at ``width`` columns."""
-        return len(_wrap(line, width))
+        self._parsed.update(content, self._content_format)
+        return self._parsed
 
     def _fit(
-        self, lines: list[StyleAndTextTuples], width: int, limit: int | None
+        self,
+        lines: list[StyleAndTextTuples],
+        rows: list[int],
+        width: int,
+        limit: int | None,
     ) -> FormattedText:
         """Keep the rows that fit in ``limit`` rows (None = no limit).
 
-        On overflow the hint takes the rows it wraps to and the rest go to
+        ``rows`` is the rows each line takes at ``width`` columns. On
+        overflow the hint takes the rows it wraps to and the rest go to
         the rows at the ``overflow`` end: whole lines, then as many rows of
         the next line as fit (its end in tail mode, its start in head mode).
         A line cut so is hidden in part, and the hint counts it. With no row
         left for content beside the hint, the box shows content only.
         """
-        rows = [self._rows(line, width) for line in lines]
         if limit is None or sum(rows) <= limit:
             return self._join(lines)
 
@@ -265,7 +377,7 @@ class ThinkingBoxControl(FormattedTextControl):
         order = range(len(lines) - 1, -1, -1) if tail else range(len(lines))
         # The hint's rows, counted at its longest (every line hidden): the
         # count it names can't make it wrap onto a row it wasn't given.
-        hint_rows = self._rows([("", self._hint(len(lines)))], width)
+        hint_rows = len(_wrap([("", self._hint(len(lines)))], width))
         show_hint = hint_rows < limit
         room = limit - hint_rows if show_hint else limit
         body: list[StyleAndTextTuples] = []  # from the overflow end
@@ -364,4 +476,4 @@ class ThinkingBoxControl(FormattedTextControl):
             return 0
 
         with self._lock:
-            return sum(self._rows(line, width) for line in self._content_lines(content))
+            return sum(self._parse(content).rows(width))
