@@ -45,7 +45,7 @@ def _renderable_to_ansi(renderable: Any, theme: Any = None, width: int | None = 
     their last line's newline.
 
     NO_COLOR is intentionally ignored here. The contract of this helper, and
-    of the public APIs that build on it (rich_to_ansi, StreamingContent's
+    of the public APIs that build on it (rich_to_ansi, a box's
     append_rich/set_line_rich), is to produce ANSI-styled output for the
     thinking box. Stripping styling at this layer would silently neuter that
     promise. NO_COLOR semantics belong at the terminal-output layer, not at

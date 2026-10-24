@@ -183,7 +183,8 @@ class ThinkingBox:
 
     @property
     def text(self) -> str:
-        """What the box shows; once finished, its final text.
+        """What the box shows; once finished, its final text. Read-only:
+        write with ``append``, ``set_line`` and ``clear``.
 
         For a box fed by a content callback: the callback's text ("" if it
         raises; logged once).
@@ -193,10 +194,6 @@ class ThinkingBox:
         if self._content is not None:
             return self._content.get_content()
         return self._control.content
-
-    def get_content(self) -> str:
-        """Same as ``text``."""
-        return self.text
 
     def __len__(self) -> int:
         """Number of lines (thread-safe).

@@ -72,15 +72,13 @@ class TestThemeParam:
     def test_default_styles_are_not_shared(self, monkeypatch):
         """Without theme=, each session gets its own default styles, so
         tweaking one session's styles doesn't restyle the next session or
-        the module-level DEFAULT_STYLES. (monkeypatch restores the field
+        a fresh ThinkingPromptStyles(). (monkeypatch restores the field
         even when the instance is shared.)"""
-        from thinking_prompt import DEFAULT_STYLES
-
         first = ThinkingPromptSession()
         monkeypatch.setattr(first.styles, "color_accent", "#ff0000")
 
         assert ThinkingPromptSession().styles.color_accent != "#ff0000"
-        assert DEFAULT_STYLES.color_accent != "#ff0000"
+        assert ThinkingPromptStyles().color_accent != "#ff0000"
 
 
 class TestEffectiveColorDepth:
@@ -466,7 +464,7 @@ class TestLayoutAppliesThemeClasses:
         width, height = 40, 20
         screen = Screen()
         with set_app(session.app):
-            session.layout.container.write_to_screen(
+            session.app.layout.container.write_to_screen(
                 screen, MouseHandlers(), WritePosition(0, 0, width, height), "", True, None
             )
         for y in range(height):

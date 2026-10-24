@@ -46,7 +46,6 @@ class TestWriting:
         box = make_manager().create_box()
         box.append("hello")
         assert box.text == "hello"
-        assert box.get_content() == "hello"
 
     def test_clear(self):
         box = make_manager().create_box()
@@ -133,7 +132,7 @@ class TestCallbackBox:
         box = make_manager().create_box(lambda: shown["line"])
         assert box.text == "one\n"
         shown["line"] = "two\n"
-        assert box.get_content() == "two\n"
+        assert box.text == "two\n"
         assert box.finish() == "two\n"
         shown["line"] = "three\n"
         assert box.text == "two\n"

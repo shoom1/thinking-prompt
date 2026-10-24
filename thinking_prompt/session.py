@@ -97,6 +97,11 @@ class ThinkingPromptSession:
     The handler decides whether to show a thinking box: start one with
     start_thinking() or the thinking() context manager, and write to it.
 
+    Attributes:
+        app: The prompt_toolkit Application the session runs, for what the
+            session doesn't cover (e.g. app.invalidate(), or key bindings
+            through app.key_bindings). Its layout is the session's own.
+
     Example:
         app_info = AppInfo(name="MyApp", version="1.0.0")
         session = ThinkingPromptSession(app_info=app_info)
@@ -195,8 +200,8 @@ class ThinkingPromptSession:
         check_placement(dialog_placement)
         self._dialog_placement: Placement = dialog_placement
 
-        # A fresh instance per session: sharing DEFAULT_STYLES would let a
-        # tweak to one session's styles restyle every other session.
+        # A fresh instance per session: a shared one would let a tweak to
+        # one session's styles restyle every other session.
         self._styles = resolve_theme(theme) if theme is not None else ThinkingPromptStyles()
 
         # NO_COLOR is read once at construction (no-color.org: non-empty).
@@ -285,8 +290,7 @@ class ThinkingPromptSession:
         self._box_dialog_room = Window(self._room_control, height=self._box_dialog_rows)
 
         # Create components
-        self.default_buffer = self._create_default_buffer()
-        self.layout = self._create_session_layout()
+        self._default_buffer = self._create_default_buffer()
         self.app = self._create_application()
 
     def _get_prompt_string(self) -> str:
@@ -380,7 +384,7 @@ class ThinkingPromptSession:
     def _create_session_layout(self) -> Any:
         """Create the layout using the layout module."""
         return create_layout(
-            default_buffer=self.default_buffer,
+            default_buffer=self._default_buffer,
             message=lambda: self._polled(self._message),
             max_thinking_height=self._max_thinking_height,
             get_status_text=lambda: self._polled(self._status_now()),
@@ -404,7 +408,7 @@ class ThinkingPromptSession:
         kb = self._create_key_bindings()
 
         app: Application = Application(
-            layout=self.layout,
+            layout=self._create_session_layout(),
             style=DynamicStyle(lambda: self._style),
             key_bindings=kb,
             editing_mode=self._editing_mode,
@@ -491,7 +495,7 @@ class ThinkingPromptSession:
         @kb.add(
             "c-d",
             filter=has_focus(DEFAULT_BUFFER)
-            & Condition(lambda: not self.default_buffer.text),
+            & Condition(lambda: not self._default_buffer.text),
         )
         def exit_app(event: KeyPressEvent) -> None:
             """Exit the application."""
@@ -513,7 +517,7 @@ class ThinkingPromptSession:
             if not self._input_wanted():
                 self._show_hint(self._BUSY_STATUS)
                 return
-            self.default_buffer.validate_and_handle()
+            self._default_buffer.validate_and_handle()
 
         # Expand/collapse — toggle all via manager
         @kb.add(self._expand_key, filter=Condition(self._manager.can_toggle))

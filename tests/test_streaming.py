@@ -8,7 +8,7 @@ import random
 import pytest
 from prompt_toolkit.formatted_text import ANSI, fragment_list_to_text, to_formatted_text
 
-from thinking_prompt import StreamingContent
+from thinking_prompt.streaming import StreamingContent
 
 
 def _plain(text: str) -> str:

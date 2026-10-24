@@ -775,7 +775,7 @@ class DialogManager:
             self._current_dialog = None
             self._box.close()
             self._inline.close()
-            self._session.app.layout.focus(self._session.default_buffer)
+            self._session.app.layout.focus(self._session._default_buffer)
             self._session.app.invalidate()
 
         return result

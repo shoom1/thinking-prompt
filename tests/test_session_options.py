@@ -96,7 +96,7 @@ def _drawn(session: ThinkingPromptSession, width: int = 40, height: int = 10) ->
 
     screen = Screen()
     with set_app(session.app):
-        session.layout.container.write_to_screen(
+        session.app.layout.container.write_to_screen(
             screen, MouseHandlers(), WritePosition(0, 0, width, height), "", True, None
         )
     return [

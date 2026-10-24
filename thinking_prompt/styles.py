@@ -149,10 +149,6 @@ class ThinkingPromptStyles:
     # ==========================================================================
     # Form controls
     # ==========================================================================
-    radio_list: str = ""  # Defaults to color_text on color_bg_dialog
-    radio_selected: str = ""  # Defaults to color_accent bold
-    checkbox_list: str = ""  # Defaults to color_text on color_bg_dialog
-    checkbox_selected: str = ""  # Defaults to color_accent bold
     text_area: str = ""  # Defaults to color_text_bright on color_bg_input
     select_arrow: str = ""  # Defaults to color_text_muted
     checkbox_mark: str = ""  # [x] / (•) marks of check and radio lists. Defaults to color_accent
@@ -253,8 +249,6 @@ class ThinkingPromptStyles:
             menu_item_selected="reverse",
             menu_meta_selected="reverse",
             dialog_button_focused="bold reverse",
-            radio_selected="bold",
-            checkbox_selected="bold",
             field_label_selected="bold",
             field_value_selected="italic",
             field_desc_selected="italic",
@@ -338,10 +332,6 @@ class ThinkingPromptStyles:
             "dialog_choice_selected": _style_str(_fg(self.color_accent), "bold"),
             "dialog_hint": _style_str(_fg(self.color_text_muted), "italic"),
             # Form controls
-            "radio_list": _style_str(_bg(self.color_bg_dialog), _fg(self.color_text)),
-            "radio_selected": _style_str(_fg(self.color_accent), "bold"),
-            "checkbox_list": _style_str(_bg(self.color_bg_dialog), _fg(self.color_text)),
-            "checkbox_selected": _style_str(_fg(self.color_accent), "bold"),
             "text_area": _style_str(_bg(self.color_bg_input), _fg(self.color_text_bright)),
             "select_arrow": _fg(self.color_text_muted),
             "checkbox_mark": _fg(self.color_accent),
@@ -407,10 +397,6 @@ class ThinkingPromptStyles:
             'dialog-choice-selected': r("dialog_choice_selected"),
             'dialog-hint': r("dialog_hint"),
             # Form controls
-            'radio-list': r("radio_list"),
-            'radio-selected': r("radio_selected"),
-            'checkbox-list': r("checkbox_list"),
-            'checkbox-selected': r("checkbox_selected"),
             'text-area': r("text_area"),
             'select-arrow': r("select_arrow"),
             'checkbox-mark': r("checkbox_mark"),
@@ -451,7 +437,7 @@ class ThinkingPromptStyles:
         """
         return Style.from_dict(self.to_style_dict())
 
-    def to_rich_theme_dict(self) -> dict[str, str]:
+    def _rich_theme_dict(self) -> dict[str, str]:
         """
         Convert markdown styles to a Rich Theme dict.
 
@@ -526,7 +512,3 @@ def resolve_theme(theme: str | ThinkingPromptStyles) -> ThinkingPromptStyles:
     except KeyError:
         valid = ", ".join([*sorted(THEMES), "auto"])
         raise ValueError(f"Unknown theme {theme!r}. Valid themes: {valid}") from None
-
-
-# Default styles instance
-DEFAULT_STYLES = ThinkingPromptStyles()

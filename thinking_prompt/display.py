@@ -92,11 +92,10 @@ class Display:
         """Create a Rich Theme from ThinkingPromptStyles."""
         try:
             from rich.theme import Theme
-            if thinking_styles:
-                return Theme(thinking_styles.to_rich_theme_dict())
-            # Default simple theme with no colors
-            from .styles import DEFAULT_STYLES
-            return Theme(DEFAULT_STYLES.to_rich_theme_dict())
+
+            from .styles import ThinkingPromptStyles
+            styles = thinking_styles or ThinkingPromptStyles()
+            return Theme(styles._rich_theme_dict())
         except ImportError:
             return None
 
