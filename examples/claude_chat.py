@@ -10,7 +10,9 @@ key out of your shell history, put ANTHROPIC_API_KEY=... in a .env file
     pip install anthropic "thinking-prompt[all]" "python-dotenv[cli]"
     dotenv run -- python examples/claude_chat.py
 
-Ctrl+T shows all of the thinking, Ctrl+C cancels a reply, Ctrl+D exits.
+A message typed while Claude answers waits under the prompt and goes next
+(Up takes it back). Ctrl+T shows all of the thinking, Ctrl+C cancels a
+reply, Ctrl+D exits.
 """
 import asyncio
 
@@ -31,6 +33,7 @@ async def main() -> None:
             welcome_message=f"Chatting with {MODEL}. Ctrl+D exits.",
         ),
         message="> ",
+        input_while_busy="queue",
     )
 
     @session.on_input

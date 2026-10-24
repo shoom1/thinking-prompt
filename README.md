@@ -224,6 +224,39 @@ warning to the `thinking_prompt` logger.
 Ctrl+T expands or collapses all open boxes together, and boxes start
 collapsed again once the last one finishes.
 
+### Your Own Loop
+
+`run_async(handler)` owns the loop and calls your handler for each input.
+To own the loop yourself, with the conversation's state in its variables,
+run the session with `async with` and ask it for each input:
+
+```python
+async with session:                        # the app runs until the block ends
+    while True:
+        try:
+            text = await session.prompt_async()
+        except (EOFError, KeyboardInterrupt):  # Ctrl+D; Ctrl+C at an idle prompt
+            break
+        await session.query(respond(text))     # Ctrl+C cancels this, not the loop
+```
+
+`query()` runs one input's work as the query Ctrl+C cancels. Boxes it
+leaves open end with it. It returns the coroutine's result, or `None`
+after Ctrl+C, and lets its errors through. Inside a query (or a handler),
+`prompt_async()` asks a follow-up question.
+
+A line typed while a query runs is refused by default (`Busy`). With
+`ThinkingPromptSession(input_while_busy="queue")` it waits under the
+prompt and runs next; Up on an empty prompt takes it back to edit.
+
+To run queries side by side, start a task per input instead of calling
+`query()`. Each is background work: Ctrl+C at the prompt leaves it, and
+its boxes end when it does.
+
+```python
+job = asyncio.create_task(respond(text))   # keep a reference to it
+```
+
 ### Redraws
 
 The screen is redrawn only when something changes, never on a timer, so an
@@ -639,6 +672,9 @@ session = ThinkingPromptSession(
     spinner=Spinner.DOTS,        # Spinner.LINE, Spinner.ELLIPSIS, your own, or None
     spinner_position="before",   # "before" or "after" the title
     thinking_echo=True,          # Echo a finished box to the console (False: drop it)
+
+    # Input
+    input_while_busy="refuse",   # Enter while a query runs: "refuse" or "queue" it
 )
 ```
 
@@ -759,6 +795,7 @@ See the `examples/` directory for complete demos:
 - `demo_themes.py` - Built-in themes and runtime theme switching
 - `inline_dialogs.py` - Dialogs drawn inline under the prompt (and the same ones as boxes)
 - `shell_jobs.py` - Shell commands as background jobs, each streaming into its own numbered box while you type the next; `/stop N` stops one, `rm` asks first
+- `own_loop.py` - Your own input loop (`async with session`, `prompt_async()`, `query()`): lines typed during a reply queue up and run next; `/bg TEXT` runs a reply beside the next input
 
 ## License
 
