@@ -277,6 +277,9 @@ class ThinkingPromptSession:
         # The task running run_async() (None otherwise). Its boxes count as
         # nobody's: it's busy running the app, so the session ends them.
         self._app_task: asyncio.Task[Any] | None = None
+        # The task running the Application while `async with session:` (or
+        # run_async()) runs it; None outside.
+        self._app_run: asyncio.Task[Any] | None = None
         # Set to True by the Ctrl+C binding when it cancels the handler task.
         # _run_handler reads this to distinguish a user-initiated cancel
         # (swallow CancelledError, continue the input loop) from an outer
@@ -1035,27 +1038,112 @@ class ThinkingPromptSession:
     # Running the Application
     # =========================================================================
 
-    async def prompt_async(self) -> str:
-        """
-        Wait for the next user input.
-
-        This should be called in a loop to handle multiple inputs.
-
-        Returns:
-            The user's input string.
+    async def __aenter__(self) -> ThinkingPromptSession:
+        """Run the session until the block ends: print the welcome, then
+        start the Application. Inputs are read with prompt_async(), and
+        query() runs one input's work.
 
         Raises:
-            EOFError: When Ctrl+D is pressed on an empty input line.
-            KeyboardInterrupt: When Ctrl+C exits: no handler is running and
-                no box is open.
+            RuntimeError: If the session is already running.
         """
-        self._pending_input = asyncio.get_running_loop().create_future()
+        if self._app_run is not None:
+            raise RuntimeError("The session is already running")
+        self._print_welcome()
+        self._app_task = asyncio.current_task()
+        started = asyncio.Event()
+        run = asyncio.ensure_future(self.app.run_async(pre_run=started.set))
+        run.add_done_callback(self._app_stopped)
+        self._app_run = run
+        waiting = asyncio.ensure_future(started.wait())
+        try:
+            await asyncio.wait({waiting, run}, return_when=asyncio.FIRST_COMPLETED)
+        except BaseException:
+            run.cancel()
+            self._app_run = None
+            self._app_task = None
+            raise
+        finally:
+            waiting.cancel()
+        if not started.is_set():
+            # The app ended before it started (e.g. no terminal): its error.
+            self._app_run = None
+            self._app_task = None
+            run.result()
+        return self
+
+    async def __aexit__(self, *exc_info: object) -> None:
+        """Stop the app, then end the boxes as any exit does."""
+        run = self._app_run
+        if run is None:
+            return
+        try:
+            self._exit_app()
+            await asyncio.wait({run})
+        finally:
+            self._app_run = None
+            # The UI is gone. End the boxes nobody else will end, echoing
+            # them below its last frame; a live task's box is left to it,
+            # and ended when that task ends if the task doesn't end it.
+            self._manager.finish_owned_by(self._app_task)
+            self._manager.finish_when_owners_end()
+            self._app_task = None
+            self._frames.cancel()
+            self._shrinks.cancel()
+        error = None if run.cancelled() else run.exception()
+        if error is not None and exc_info[1] is None:
+            raise error
+
+    def _app_stopped(self, run: asyncio.Future[Any]) -> None:
+        """The app has stopped (Ctrl+D, exit(), the block ending): a waiting
+        prompt_async() raises EOFError."""
+        pending = self._pending_input
+        if pending is not None and not pending.done():
+            pending.set_exception(EOFError())
+
+    async def prompt_async(self) -> str:
+        """
+        Wait for the next input line.
+
+        Call it inside ``async with session:`` (a handler of run_async() is
+        inside too, e.g. to ask a follow-up). The app runs for the whole
+        block; this only waits for the next line it accepts.
+
+        Returns:
+            The input line.
+
+        Raises:
+            EOFError: On Ctrl+D at an empty prompt, and on any call once the
+                app has stopped (Ctrl+D, exit()).
+            KeyboardInterrupt: On Ctrl+C at an idle prompt (no query
+                running, no box open); the app exits.
+            RuntimeError: Outside ``async with session:``, or while another
+                task is already waiting here.
+        """
+        run = self._app_run
+        if run is None:
+            raise RuntimeError(
+                "prompt_async() reads the input of a running session: "
+                "call it inside `async with session:`"
+            )
+        if run.done():
+            raise EOFError
+        pending = self._pending_input
+        if pending is not None and not pending.done():
+            raise RuntimeError("Another task is already waiting in prompt_async()")
+        future: asyncio.Future[str] = asyncio.get_running_loop().create_future()
+        self._pending_input = future
         # Input is wanted again: a status hint no longer applies.
         self._clear_hint()
         try:
-            return await self._pending_input
-        except asyncio.CancelledError as exc:
-            raise KeyboardInterrupt() from exc
+            # wait() rather than await: this task's own cancellation stays a
+            # cancellation, and only the future's (Ctrl+C) is an interrupt.
+            await asyncio.wait({future})
+        except asyncio.CancelledError:
+            future.cancel()
+            raise
+        if future.cancelled():
+            raise KeyboardInterrupt
+        return future.result()  # EOFError after Ctrl+D or the app stopping
 
     async def run_async(
         self,
@@ -1097,54 +1185,38 @@ class ThinkingPromptSession:
 
             await session.run_async()  # Uses registered handler
         """
-        # Print welcome message once at startup
-        self._print_welcome()
-
-        # Use provided handler or previously registered one
         effective_handler = handler or self._input_handler
         if effective_handler is None:
             raise ValueError(
                 "No handler provided. Either pass a handler to run_async() "
                 "or register one with @session.on_input decorator."
             )
-        self._app_task = asyncio.current_task()
+        async with self:
+            # The input loop runs in a task of its own: boxes a sync handler
+            # opens are its own, not the app's (an app's startup box is).
+            loop = asyncio.ensure_future(self._input_loop(effective_handler))
+            # The loop must not outlive the app: when the app stops first
+            # (Ctrl+D, exit()), the loop goes too, a running handler with it.
+            assert self._app_run is not None
+            self._app_run.add_done_callback(lambda _run: loop.cancel())
+            try:
+                # wait() rather than await: the loop's cancellation ends the
+                # run quietly; run_async()'s own cancellation propagates.
+                await asyncio.wait({loop})
+            finally:
+                loop.cancel()
+                with suppress(asyncio.CancelledError):
+                    await loop
 
-        async def input_loop() -> None:
-            # The loop must not outlive the app: a stopped app reads no
-            # input, so waiting for some would block run_async() for good.
-            # The exit's cancellation alone doesn't ensure that: when it
-            # lands while a handler a Ctrl+C cancelled is still cleaning
-            # up, _run_handler swallows it as the Ctrl+C's.
-            while self.app.is_running:
-                try:
-                    text = await self.prompt_async()
-                    await self._run_handler(effective_handler, text)
-                except (EOFError, KeyboardInterrupt):
-                    break
-                except asyncio.CancelledError:
-                    break
-
-        # Run input loop as background task. The app must not outlive the
-        # loop: however the loop ends (EOF, KeyboardInterrupt escaping a
-        # handler, a cancelled pending future), a still-running app would
-        # echo typed input that nobody reads — a zombie session.
-        loop_task = asyncio.create_task(input_loop())
-        loop_task.add_done_callback(lambda _task: self._exit_app())
-
-        try:
-            await self.app.run_async()
-        finally:
-            loop_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await loop_task
-            # The UI is gone. End the boxes nobody else will end, echoing
-            # them below its last frame; a live task's box is left to it,
-            # and ended when that task ends if the task doesn't end it.
-            self._manager.finish_owned_by(self._app_task)
-            self._manager.finish_when_owners_end()
-            self._app_task = None
-            self._frames.cancel()
-            self._shrinks.cancel()
+    async def _input_loop(self, handler: InputHandler) -> None:
+        """run_async()'s loop: each input to the handler, until the app
+        stops (EOFError) or Ctrl+C exits at an idle prompt."""
+        while True:
+            try:
+                text = await self.prompt_async()
+                await self._run_handler(handler, text)
+            except (EOFError, KeyboardInterrupt):
+                return
 
     async def _run_handler(
         self,

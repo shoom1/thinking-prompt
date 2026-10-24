@@ -204,5 +204,10 @@ def test_printed_messages_are_styled_as_the_transcript():
     assert not [name for name in classes if name.split(".")[0] == "history"]
 
 
+def test_the_session_runs_as_an_async_context_manager():
+    assert hasattr(ThinkingPromptSession, "__aenter__")
+    assert hasattr(ThinkingPromptSession, "__aexit__")
+
+
 def test_the_welcome_stays_a_customization_point():
     assert AppInfo(name="app", welcome_message="hi").get_welcome_content() == "hi"

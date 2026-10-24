@@ -291,7 +291,9 @@ class TestCtrlCKeyBinding:
         # like the real one — but without a terminal.
         exited = asyncio.Event()
 
-        async def fake_run_async() -> None:
+        async def fake_run_async(pre_run=None, **kwargs) -> None:
+            if pre_run is not None:
+                pre_run()  # as the real one does, once it's running
             await exited.wait()
 
         app = MagicMock()
@@ -380,24 +382,17 @@ class TestCtrlDKeyBinding:
             session._default_buffer.reset()
             assert binding.filter()
 
-    async def test_prompt_async_raises_eoferror_end_to_end(self, session):
+    async def test_prompt_async_raises_eoferror_end_to_end(self):
         """await prompt_async() must raise EOFError after Ctrl+D."""
-        prompt_task = asyncio.create_task(session.prompt_async())
-        # Let prompt_async install its future.
-        for _ in range(20):
-            await asyncio.sleep(0)
-            if session._pending_input is not None and not session._pending_input.done():
-                break
+        from tests.test_end_to_end import CTRL_D, piped_session, wait_until, waiting_for_input
 
-        assert session._pending_input is not None
-        assert not session._pending_input.done()
-
-        binding = _get_ctrl_d_binding(session)
-        event = MagicMock()
-        binding.handler(event)
-
-        with pytest.raises(EOFError):
-            await prompt_task
+        with piped_session() as (session, inp):
+            async with session:
+                prompt_task = asyncio.create_task(session.prompt_async())
+                await wait_until(lambda: waiting_for_input(session))
+                inp.send_text(CTRL_D)
+                with pytest.raises(EOFError):
+                    await asyncio.wait_for(prompt_task, timeout=2)
 
 
 class TestSessionClear:
