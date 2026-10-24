@@ -33,11 +33,11 @@ class TestExpandMode:
 
     def test_mode_resets_when_the_last_box_finishes(self):
         manager = make_manager()
-        manager.create_box(lambda: LONG)
+        box = manager.create_box(lambda: LONG)
         manager.toggle_all()
         assert manager.is_expanded
 
-        manager.finish_all()
+        manager.finish(box)
 
         assert manager.is_expanded is False
         assert manager.can_toggle() is False
@@ -144,6 +144,100 @@ class TestOwnership:
         assert session._manager.active_count == 1  # the background box
         gate.set()
         await asyncio.wait_for(bg, 1)
+
+    async def test_idle_ctrl_c_leaves_a_live_background_box(self):
+        session = ThinkingPromptSession()
+        opened, gate = asyncio.Event(), asyncio.Event()
+
+        async def background() -> None:
+            async with session.thinking(title="Indexing") as ctx:
+                ctx.append("indexed 1\n")
+                opened.set()
+                await gate.wait()
+
+        task = asyncio.create_task(background())
+        await asyncio.wait_for(opened.wait(), 1)
+        event = MagicMock()
+
+        _ctrl_c(session)(event)
+
+        assert session._manager.active_count == 1  # the background box
+        assert CANCELLED not in _history(session)
+        event.app.exit.assert_not_called()
+        gate.set()
+        await asyncio.wait_for(task, 1)
+        assert sum("indexed 1" in text for text in _history(session)) == 1
+
+    async def test_idle_ctrl_c_ends_the_boxes_nobody_else_will(self):
+        """A box whose task ended, one with no known owner and one the
+        app's own task opened are ended; a live task's box stays."""
+        session = ThinkingPromptSession()
+        session._app_task = asyncio.current_task()  # this test plays the app's task
+        session.start_thinking().append("app's own\n")
+
+        async def open_and_return() -> None:
+            session.start_thinking().append("task ended\n")
+
+        await asyncio.create_task(open_and_return())
+        await asyncio.to_thread(lambda: session.start_thinking().append("from a thread\n"))
+
+        gate = asyncio.Event()
+
+        async def live() -> None:
+            async with session.thinking() as ctx:
+                ctx.append("still going\n")
+                await gate.wait()
+
+        task = asyncio.create_task(live())
+        await asyncio.sleep(0)
+        event = MagicMock()
+
+        _ctrl_c(session)(event)
+
+        history = _history(session)
+        for text in ("app's own", "task ended", "from a thread"):
+            assert sum(text in entry for entry in history) == 1
+        assert history[-1] == CANCELLED
+        assert not any("still going" in entry for entry in history)
+        assert session._manager.active_count == 1
+        event.app.exit.assert_not_called()
+        gate.set()
+        await asyncio.wait_for(task, 1)
+
+    async def test_without_run_async_idle_ctrl_c_leaves_the_loops_own_box(self):
+        """A session driven by prompt_async() alone has no app task: the
+        task driving it is a live owner like any other."""
+        session = ThinkingPromptSession()
+        session.start_thinking().append("mine\n")
+        await asyncio.to_thread(lambda: session.start_thinking().append("thread\n"))
+        event = MagicMock()
+
+        _ctrl_c(session)(event)
+
+        assert session._manager.active_count == 1  # this task's box
+        assert sum("thread" in text for text in _history(session)) == 1
+        event.app.exit.assert_not_called()
+
+    async def test_without_a_status_bar_idle_ctrl_c_still_does_not_exit(self):
+        """Guard: the exit decision doesn't depend on the status bar."""
+        session = ThinkingPromptSession(enable_status_bar=False)
+        opened, gate = asyncio.Event(), asyncio.Event()
+
+        async def background() -> None:
+            async with session.thinking():
+                opened.set()
+                await gate.wait()
+
+        task = asyncio.create_task(background())
+        await asyncio.wait_for(opened.wait(), 1)
+        event = MagicMock()
+
+        _ctrl_c(session)(event)
+
+        event.app.exit.assert_not_called()
+        assert session.is_thinking
+        gate.set()
+        await asyncio.wait_for(task, 1)
 
 
 class TestFinishedHandle:

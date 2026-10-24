@@ -1,18 +1,37 @@
 # thinking-prompt
 
-A prompt_toolkit extension that adds a "thinking box" above the prompt for displaying AI thinking/processing content with real-time streaming updates.
+[![PyPI](https://img.shields.io/pypi/v/thinking-prompt)](https://pypi.org/project/thinking-prompt/)
+[![Python](https://img.shields.io/pypi/pyversions/thinking-prompt)](https://pypi.org/project/thinking-prompt/)
+[![CI](https://github.com/shoom1/thinking-prompt/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/shoom1/thinking-prompt/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/pypi/l/thinking-prompt)](https://github.com/shoom1/thinking-prompt/blob/main/LICENSE)
+
+A prompt_toolkit extension that adds "thinking boxes" above the prompt, for
+streaming what an AI model is thinking or doing as it happens. Use it for your
+own agent CLI, or any CLI that runs long tasks: thinking boxes, dialogs and
+form fields on a prompt that stays inline, in the terminal's scrollback.
 
 ![Demo](img/demo.gif)
 
 ## Features
 
-- **Thinking Box**: A collapsible area above the prompt that shows processing/thinking content
-- **Multiple Thinking Boxes**: Run multiple independent boxes concurrently with ordering and per-box lifecycle control
-- **Real-time Streaming**: Content updates in real-time as your callback returns new content
-- **Animated Header**: Configurable animated indicator showing thinking is in progress
-- **Rich Output**: Support for markdown rendering and syntax-highlighted code blocks
-- **Rich/ANSI in Thinking Box**: Use Rich markup for styled, in-place-updating content inside the thinking box
-- **Customizable Styles**: Full control over colors and styling
+- **Thinking boxes**: stream text into a box above the prompt as it arrives.
+  It keeps the newest lines in view, Ctrl+T shows it all, and its content
+  stays in the transcript when it ends.
+- **Several at once**: boxes run side by side, each finished on its own,
+  ordered by `order=`.
+- **Animated header**: a spinner, and a title you can change while it runs.
+- **Dialogs**: yes/no, choice, dropdown, checklist or your own, drawn as a
+  box or inline under the prompt.
+- **Form fields**: text, checkbox, select, dropdown, checklist, radio and
+  choice fields on any dialog, so a settings dialog is a few lines.
+- **Rich output**: markdown, syntax-highlighted code and Rich renderables, in
+  the transcript or inside a box.
+- **Themes**: dark, light, mono, the terminal's own colors, or auto;
+  switchable at runtime, and `NO_COLOR` is honored.
+- **Light on the terminal**: no full screen, and the screen is redrawn only
+  when something changes, so an idle prompt costs no CPU.
+- **Typed, one dependency**: `prompt_toolkit`, plus optional `rich` and
+  `pygments`.
 
 ## Installation
 
@@ -24,6 +43,9 @@ For markdown and code highlighting support:
 ```bash
 pip install thinking-prompt[all]
 ```
+
+Requires Python 3.9–3.14. CI runs the tests on Linux, macOS and Windows;
+the UI is tested by hand in macOS terminals.
 
 ## Quick Start
 
@@ -67,12 +89,47 @@ if __name__ == "__main__":
 > would draw over the UI:
 > `logging.basicConfig(filename="app.log", level=logging.ERROR)`.
 
+## Use with a model
+
+Stream a model's thinking into a box and print its answer when it's done.
+With Claude (`pip install anthropic`), the Quick Start's handler becomes:
+
+```python
+from anthropic import AsyncAnthropic
+
+client = AsyncAnthropic()  # reads ANTHROPIC_API_KEY
+history = []
+
+@session.on_input
+async def handle(text: str):
+    turn = {"role": "user", "content": text}
+    async with session.thinking(title="Thinking") as box:
+        async with client.messages.stream(
+            model="claude-sonnet-5-5",
+            max_tokens=16000,
+            thinking={"type": "adaptive", "display": "summarized"},
+            messages=[*history, turn],
+        ) as stream:
+            async for event in stream:
+                if event.type == "thinking":
+                    box.append(event.thinking)
+            reply = await stream.get_final_message()
+    history.extend([turn, {"role": "assistant", "content": reply.content}])
+    answer = "".join(b.text for b in reply.content if b.type == "text")
+    session.add_response(answer, markdown=True)
+```
+
+When the reply is done the box closes, leaving the thinking (its last lines,
+if it's long) in the transcript above the answer. Ctrl+C cancels the handler,
+which closes the stream, and the unanswered turn stays out of `history`.
+`examples/claude_chat.py` is the whole program.
+
 ## Key Bindings
 
 | Key | Action |
 |-----|--------|
 | Ctrl+T | Expand/collapse all thinking boxes (while one is open) |
-| Ctrl+C | Cancel current operation or exit |
+| Ctrl+C | Cancel the running handler; at an idle prompt, end the boxes nobody else will (see [When a Box Ends](#when-a-box-ends)), or exit when no box is open |
 | Ctrl+D | Exit application (empty input line only) |
 
 Rebind Ctrl+T with `expand_key=` (see [Session Options](#session-options)).
@@ -141,10 +198,22 @@ as on a normal finish:
 - **The handler raises**: the content, then the `[ERROR] Handler error: ...` line.
 - **Left open** by a handler that returns: finished as `box.finish()` would.
 
-A box belongs to the task that opened it. When a handler ends, the session
-finishes the boxes it opened (and any whose task has already ended); a box
-opened by a background task stays until that task finishes it. Ctrl+C at
-an idle prompt clears every remaining box.
+A box belongs to the task that opened it. The session ends a box only when
+nobody else will: its task has ended, it was opened outside asyncio (from a
+thread), or the app's own task opened it (the task running `run_async()`,
+e.g. for a startup status box). A box a live task is feeding is that task's
+to end.
+
+- **A handler ends:** the session finishes the boxes the handler opened,
+  and those whose task has ended or that were opened outside asyncio.
+- **Ctrl+C at an idle prompt:** the session ends the boxes nobody else
+  will. If boxes that live tasks are feeding remain, Ctrl+C doesn't exit:
+  the status bar says `Background work is running — Ctrl+D exits` until
+  those boxes end or the next input is accepted.
+- **Exit:** the last frame leaves out the boxes and the status bar. The
+  boxes nobody else will end are echoed below it. A live task's box is
+  echoed when the task finishes it, or else when the task ends
+  (`asyncio.run` cancels leftover tasks at shutdown).
 
 `box.is_finished` tells whether a box is done. Calling `finish()` again
 returns the same text without echoing it twice. Writes to a finished box are
@@ -179,9 +248,11 @@ idle prompt costs no CPU:
 
 A collapsed box shows at most `max_lines` rows (at least 1; session
 default: `max_thinking_height`, at least 2). When content overflows, the
-box keeps the **newest** lines under a `+N earlier lines... ctrl-t to
-expand` hint, so a stream stays visibly live; a one-row box has no room
-for the hint and shows just the newest line. Ctrl+T expands the box to fit its content, up to
+box keeps the **newest** rows under a `+N earlier lines... ctrl-t to
+expand` hint, so a stream stays visibly live, even mid-paragraph: a line
+longer than the box shows its end, and the hint counts it. A box with no
+row to spare for the hint (one row, or a narrow terminal where the hint
+wraps) shows just its newest rows. Ctrl+T expands the box to fit its content, up to
 the space the terminal has. When the box finishes, the console echo keeps
 the same end the box showed.
 
@@ -246,6 +317,10 @@ async with session.thinking(title="Processing") as box:
     box.set_line_rich(1, "[green]  ✓ Transform[/green]")
 ```
 
+Markup keeps its whitespace, so the newline above ends each task's line, and
+text wraps in the box like plain text. A Rich renderable such as a `Panel` or
+`Table` is laid out at the terminal's width.
+
 ### Dynamic Titles & In-Place Updates
 
 Use `set_title()` to change the thinking header and `set_line()` to update lines in place:
@@ -289,6 +364,12 @@ session.add_warning("Rate limit approaching")
 session.add_error("Connection failed")
 session.add_message("system", "Connecting to server...")
 ```
+
+The session sometimes puts a hint in the status bar in place of your
+status: `Busy — press Ctrl+C to cancel` when Enter is pressed while a
+handler runs, and `Background work is running — Ctrl+D exits` (see
+[When a Box Ends](#when-a-box-ends)). Your status comes back once the hint
+no longer applies; a status you set meanwhile replaces the hint.
 
 ### Dialogs
 
@@ -639,6 +720,7 @@ See the `examples/` directory for complete demos:
 - `demo.py` - Interactive demo with simulated AI thinking
 - `streaming.py` - Character-by-character streaming
 - `chat_demo.py` - Chat-style conversation loop
+- `claude_chat.py` - Chat with Claude: its thinking streams into a box, its answer prints as markdown (needs `anthropic` and an API key)
 - `clear_demo.py` - Clearing the screen and history with `session.clear()`
 - `progress_demo.py` - Progress bar with callback
 - `demo_progress_line.py` - In-place progress updates
@@ -653,6 +735,7 @@ See the `examples/` directory for complete demos:
 - `completer_demo.py` - Slash-command autocompletion (like Claude Code)
 - `demo_themes.py` - Built-in themes and runtime theme switching
 - `inline_dialogs.py` - Dialogs drawn inline under the prompt (and the same ones as boxes)
+- `shell_jobs.py` - Shell commands as background jobs, each streaming into its own numbered box while you type the next; `/stop N` stops one, `rm` asks first
 
 ## License
 

@@ -8,11 +8,19 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    name: test (${{ matrix.os }}, ${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+        os: [ubuntu-latest]
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
+        # macOS and Windows: the oldest and newest Python only.
+        include:
+          - { os: macos-latest, python-version: "3.9" }
+          - { os: macos-latest, python-version: "3.14" }
+          - { os: windows-latest, python-version: "3.9" }
+          - { os: windows-latest, python-version: "3.14" }
 
     steps:
       - uses: actions/checkout@v4

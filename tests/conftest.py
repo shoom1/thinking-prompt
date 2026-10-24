@@ -4,16 +4,36 @@ Shared fixtures for thinking_prompt tests.
 from __future__ import annotations
 
 import asyncio
+import sys
 import pytest
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator, Callable
 
 from prompt_toolkit.application import create_app_session
 from prompt_toolkit.input import create_pipe_input
-from prompt_toolkit.output import DummyOutput
+from prompt_toolkit.output import DummyOutput, Output
+from prompt_toolkit.output import defaults as output_defaults
+from prompt_toolkit.output.plain_text import PlainTextOutput
 
 from thinking_prompt import ThinkingPromptSession
 from thinking_prompt.history import FormattedTextHistory
+
+
+@pytest.fixture(autouse=True)
+def _plain_text_when_stdout_is_not_a_terminal(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Sessions made without an output get prompt_toolkit's default one. When
+    stdout isn't a terminal, that's plain text on Linux and macOS, but on
+    Windows it raises NoConsoleScreenBufferError (a CI runner has no
+    console). Give Windows the plain text too."""
+    real = output_defaults.create_output
+
+    def create_output(stdout: Any = None, always_prefer_tty: bool = False) -> Output:
+        out = sys.stdout if stdout is None else stdout
+        if out is not None and not out.isatty():
+            return PlainTextOutput(out)
+        return real(stdout, always_prefer_tty)
+
+    monkeypatch.setattr(output_defaults, "create_output", create_output)
 
 
 @pytest.fixture

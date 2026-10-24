@@ -6,9 +6,16 @@ import re
 from typing import Any
 
 import pytest
-from prompt_toolkit.formatted_text import ANSI, FormattedText, to_formatted_text
+from prompt_toolkit.application import create_app_session
+from prompt_toolkit.formatted_text import (
+    ANSI,
+    FormattedText,
+    fragment_list_to_text,
+    to_formatted_text,
+)
 
 from tests.helpers import echoed, keep_console
+from tests.test_end_to_end import _ShortOutput
 from thinking_prompt import ThinkingPromptSession
 
 
@@ -135,7 +142,47 @@ class TestAddRich:
 
         (printed,) = session._display.kept
         assert isinstance(printed, ANSI)
-        assert "\x1b[32m╭" in printed.value
+        # The panel's green corner: ╭, or ┌ where Rich can't tell the console
+        # handles it (Windows without a console).
+        assert re.search("\x1b\\[32m[╭┌]", printed.value)
         assert "boxed" in echoed(session._display)[0]
         (entry,) = _entries(session)
         assert (entry.kind, entry.source) == ("ansi", printed.value)
+
+
+class TestRichWidth:
+    """Rich lays its output out at the width of the session's terminal,
+    which needn't be the process's (here there's none: Rich alone would
+    take 80 columns)."""
+
+    @staticmethod
+    def _session_at(columns: int) -> ThinkingPromptSession:
+        with create_app_session(output=_ShortOutput(24, columns=columns)):
+            return _session()
+
+    def test_add_rich_lays_a_panel_out_at_the_terminal_width(self):
+        pytest.importorskip("rich")
+        from rich.panel import Panel
+
+        session = self._session_at(40)
+        session.add_rich(Panel("boxed"))
+        (printed,) = echoed(session._display)
+        assert {len(line) for line in printed.splitlines()} == {40}
+
+    def test_markdown_wraps_at_the_terminal_width(self):
+        pytest.importorskip("rich")
+        session = self._session_at(40)
+        session.add_response(" ".join(["word"] * 30), markdown=True)
+        (printed,) = echoed(session._display)
+        assert max(len(line) for line in printed.splitlines()) <= 40
+
+    def test_a_panel_in_a_box_spans_the_terminal_width(self):
+        """Not 9999 columns, wrapped into hundreds of rows."""
+        pytest.importorskip("rich")
+        from rich.panel import Panel
+
+        session = self._session_at(40)
+        box = session.start_thinking()
+        box.append_rich(Panel("boxed"))
+        lines = fragment_list_to_text(to_formatted_text(ANSI(box.text))).splitlines()
+        assert {len(line) for line in lines} == {40}

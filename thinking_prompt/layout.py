@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Callable, Literal
 
 from prompt_toolkit.application.current import get_app
 from prompt_toolkit.buffer import Buffer
-from prompt_toolkit.filters import Condition
+from prompt_toolkit.filters import Condition, is_done
 from prompt_toolkit.formatted_text import AnyFormattedText, FormattedText
 from prompt_toolkit.layout import (
     AnyContainer,
@@ -192,9 +192,11 @@ def create_status_bar(
         dont_extend_height=True,
     )
 
+    # The app's last frame, drawn as it exits, leaves out the status bar,
+    # as prompt_toolkit's PromptSession leaves out its bottom toolbar.
     return ConditionalContainer(
         content=window,
-        filter=Condition(is_enabled),
+        filter=Condition(is_enabled) & ~is_done,
     )
 
 
@@ -291,7 +293,11 @@ def create_layout(
     # Thinking area (visible when thinking)
     if thinking_manager is None:
         raise ValueError("thinking_manager is required")
-    thinking_area = create_thinking_area(thinking_manager)
+    # Left out of the app's last frame: boxes still open then are echoed
+    # below it instead (see ThinkingPromptSession.run_async).
+    thinking_area = ConditionalContainer(
+        create_thinking_area(thinking_manager), filter=~is_done
+    )
 
     # Status bar
     status_bar = create_status_bar(

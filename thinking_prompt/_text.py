@@ -5,12 +5,36 @@ error lines (internal).
 from __future__ import annotations
 
 import re
+from itertools import groupby
+
+from prompt_toolkit.formatted_text.base import OneStyleAndTextTuple
 
 from .types import Overflow
 
 # SGR (color/style) escape sequences — the only escapes thinking content is
 # expected to carry. Used to measure/replay styling without the text.
 ANSI_SGR_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def coalesce(fragments: list[OneStyleAndTextTuple]) -> list[OneStyleAndTextTuple]:
+    """Merge adjacent fragments with identical style; drop empty text.
+
+    ANSI parsing produces ~one fragment per character; coalescing keeps
+    memory and repaint cost proportional to styled runs instead. A run's
+    text is joined once (added to a fragment at a time, it's copied each
+    time).
+    """
+    out: list[OneStyleAndTextTuple] = []
+    # A run of fragments in one style; 3-tuples (mouse handlers) aren't merged.
+    for style, run in groupby(
+        (frag for frag in fragments if frag[1]),
+        lambda frag: frag[0] if len(frag) == 2 else None,
+    ):
+        if style is None:
+            out.extend(run)
+        else:
+            out.append((style, "".join(frag[1] for frag in run)))
+    return out
 
 
 def split_content_lines(content: str) -> list[str]:

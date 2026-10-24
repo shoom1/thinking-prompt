@@ -212,26 +212,6 @@ class TestFinish:
         assert history_texts(display) == ["x\n\n"]
 
 
-class TestFinishAll:
-    def test_finish_all_returns_the_boxes_in_creation_order(self):
-        mgr = make_manager()
-        a = mgr.create_box(lambda: "a", order=5)
-        b = mgr.create_box(lambda: "b", order=1)
-        assert mgr.finish_all() == [a, b]
-        assert a.is_finished and b.is_finished
-
-    def test_finish_all_clears_boxes(self):
-        mgr = make_manager()
-        mgr.create_box(lambda: "a")
-        mgr.create_box(lambda: "b")
-        mgr.finish_all()
-        assert mgr.active_count == 0
-        assert not mgr.has_active_boxes
-
-    def test_finish_all_empty_manager(self):
-        assert make_manager().finish_all() == []
-
-
 class TestFinishOwnedBy:
     """A handler answers for its own boxes, for boxes whose task ended and
     for boxes with no task; another task's live box is left alone."""
@@ -262,6 +242,14 @@ class TestFinishOwnedBy:
         gate.set()
         await task
 
+    def test_returns_the_boxes_in_creation_order_not_display_order(self):
+        mgr = make_manager()
+        a = mgr.create_box(lambda: "a", order=5)
+        b = mgr.create_box(lambda: "b", order=1)
+        assert mgr.finish_owned_by(None) == [a, b]  # no task: no known owner
+        assert a.is_finished and b.is_finished
+        assert not mgr.has_active_boxes
+
 
 class TestEcho:
     """Ending a box echoes its text through the Display, as it was shown."""
@@ -269,9 +257,10 @@ class TestEcho:
     def test_echo_is_cut_to_each_boxs_lines_at_its_overflow_end(self):
         display = make_display()
         mgr = make_manager(display, default_max_lines=15)
-        mgr.create_box(lambda: "1\n2\n3\n4\n", max_lines=2)
-        mgr.create_box(lambda: "1\n2\n3\n4\n", max_lines=2, overflow="head")
-        mgr.finish_all()
+        a = mgr.create_box(lambda: "1\n2\n3\n4\n", max_lines=2)
+        b = mgr.create_box(lambda: "1\n2\n3\n4\n", max_lines=2, overflow="head")
+        mgr.finish(a)
+        mgr.finish(b)
         assert echoed(display) == ["...\n3\n4\n", "1\n2\n...\n"]
         assert history_texts(display) == ["1\n2\n3\n4\n\n", "1\n2\n3\n4\n\n"]
 

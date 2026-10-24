@@ -17,29 +17,32 @@ def _is_rich_renderable(obj: Any) -> bool:
     return hasattr(obj, '__rich_console__') or hasattr(obj, '__rich__')
 
 
-def _rich_to_ansi(renderable: Any, theme: Any = None) -> str:
-    """Convert a Rich renderable to an ANSI-formatted string.
-
-    Unlike ``_renderable_to_ansi``, this respects terminal width so that
-    layout-aware renderables (Panel, Table, etc.) size correctly.
+def _rich_to_ansi(renderable: Any, theme: Any = None, width: int | None = None) -> str:
+    """Convert a Rich renderable to an ANSI-formatted string, as printing
+    it to a console ``width`` columns wide would (None: the terminal's, as
+    Rich finds it): text wraps, and a Panel or Table spans the width.
     """
     try:
         from io import StringIO
 
         from rich.console import Console
         file = StringIO()
-        console = Console(file=file, force_terminal=True, theme=theme)
+        console = Console(file=file, force_terminal=True, theme=theme, width=width)
         console.print(renderable)
         return file.getvalue()
     except ImportError:
         return str(renderable)
 
 
-def _renderable_to_ansi(renderable: Any, theme: Any = None) -> str:
-    """Convert a Rich renderable or markup string to ANSI (no trailing newline/padding).
+def _renderable_to_ansi(renderable: Any, theme: Any = None, width: int | None = None) -> str:
+    """Convert a Rich renderable or markup string to ANSI.
 
-    Handles both markup strings like "[green]text[/green]" and Rich objects
-    like Text("text", style="green").
+    Text (a markup string like "[green]text[/green]", or a Text) isn't
+    wrapped: where it's shown wraps it. Its own whitespace is kept (a
+    newline that ends it, a space before the next streamed word) and none
+    is added. Other renderables (Panel, Table) are laid out ``width``
+    columns wide (None: the terminal's, as Rich finds it), ending with
+    their last line's newline.
 
     NO_COLOR is intentionally ignored here. The contract of this helper, and
     of the public APIs that build on it (rich_to_ansi, StreamingContent's
@@ -52,16 +55,18 @@ def _renderable_to_ansi(renderable: Any, theme: Any = None) -> str:
         from io import StringIO
 
         from rich.console import Console
+        from rich.text import Text
         f = StringIO()
         console = Console(
             file=f,
             force_terminal=True,
             no_color=False,
-            width=9999,
+            width=width,
             theme=theme,
         )
-        console.print(renderable, end="", highlight=False, soft_wrap=True)
-        return f.getvalue().rstrip()
+        is_text = isinstance(renderable, (str, Text))
+        console.print(renderable, end="", highlight=False, soft_wrap=is_text)
+        return f.getvalue()
     except ImportError:
         return str(renderable)
 
@@ -105,8 +110,11 @@ def _get_markdown_cls() -> Any:
     return _LeftAlignedMarkdown
 
 
-def _markdown_to_ansi(content: str, theme: Any = None, code_theme: str = "monokai") -> str:
-    """Convert markdown to ANSI-formatted string using Rich."""
+def _markdown_to_ansi(
+    content: str, theme: Any = None, code_theme: str = "monokai", width: int | None = None
+) -> str:
+    """Convert markdown to ANSI-formatted string using Rich, laid out
+    ``width`` columns wide (None: the terminal's, as Rich finds it)."""
     try:
         from io import StringIO
 
@@ -114,7 +122,7 @@ def _markdown_to_ansi(content: str, theme: Any = None, code_theme: str = "monoka
 
         markdown_cls = _get_markdown_cls()
         file = StringIO()
-        console = Console(file=file, force_terminal=True, theme=theme)
+        console = Console(file=file, force_terminal=True, theme=theme, width=width)
         console.print(markdown_cls(content, code_theme=code_theme))
         return file.getvalue()
     except ImportError:

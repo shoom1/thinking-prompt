@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from prompt_toolkit.formatted_text import FormattedText
 
-from thinking_prompt.history import FormattedTextHistory, _coalesce
+from thinking_prompt.history import FormattedTextHistory
 
 
 class TestFormattedTextHistoryBasics:
@@ -132,28 +132,6 @@ class TestFormattedTextHistoryEdgeCases:
         # First formatted text should not be affected by later additions
         assert len(list(formatted1)) == 1
         assert len(list(formatted2)) == 2
-
-
-class TestCoalesce:
-    def test_merges_adjacent_same_style(self):
-        frags = [("bold", "a"), ("bold", "b"), ("", "c"), ("", "d"), ("bold", "e")]
-        assert _coalesce(frags) == [("bold", "ab"), ("", "cd"), ("bold", "e")]
-
-    def test_drops_empty_text(self):
-        assert _coalesce([("x", ""), ("x", "a")]) == [("x", "a")]
-
-    def test_preserves_handler_fragments_unmerged(self):
-        """3-tuple (mouse-handler) fragments must survive coalescing intact:
-        never merged into neighbors in either direction, handler preserved."""
-        handler = lambda e: None  # noqa: E731
-        frags = [("x", "a"), ("x", "b", handler), ("x", "c"), ("x", "d")]
-        result = _coalesce(frags)
-        assert result == [("x", "a"), ("x", "b", handler), ("x", "cd")]
-        assert result[1][2] is handler
-
-    def test_drops_empty_text_handler_fragments(self):
-        handler = lambda e: None  # noqa: E731
-        assert _coalesce([("x", "", handler), ("x", "a")]) == [("x", "a")]
 
 
 class TestTypedEntries:

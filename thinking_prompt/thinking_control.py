@@ -4,7 +4,9 @@ Thinking box control: draws one box's text (a FormattedTextControl).
 from __future__ import annotations
 
 import logging
+import re
 import threading
+from functools import lru_cache
 from typing import Callable
 
 from prompt_toolkit.formatted_text import (
@@ -14,15 +16,198 @@ from prompt_toolkit.formatted_text import (
     fragment_list_to_text,
     to_formatted_text,
 )
-from prompt_toolkit.formatted_text.utils import fragment_list_width, split_lines
+from prompt_toolkit.formatted_text.utils import split_lines
 from prompt_toolkit.layout.controls import FormattedTextControl, UIContent
+from prompt_toolkit.layout.screen import Char
+from prompt_toolkit.output.vt100 import BG_ANSI_COLORS, FG_ANSI_COLORS
 
+from ._text import coalesce
 from .types import ContentCallback, ContentFormat, Overflow
 
 logger = logging.getLogger(__name__)
 
 # Width assumed when formatting before the first render (size unknown).
 _DEFAULT_WIDTH = 80
+
+
+@lru_cache(maxsize=4096)
+def _char_width(char: str) -> int:
+    """Columns the window draws ``char`` in (a tab, drawn as ^I, takes 2)."""
+    return Char(char).width
+
+
+def _wrap(line: StyleAndTextTuples, width: int) -> list[StyleAndTextTuples]:
+    """``line`` cut into the rows it takes at ``width`` columns, as the
+    window wraps it: a character wider than what's left of a row starts
+    the next one, even at the start of a row (one wider than the window
+    leaves an empty row before it)."""
+    if width <= 0:
+        return [line]
+    rows: list[StyleAndTextTuples] = [[]]
+    used = 0
+    for fragment in line:
+        style, text = fragment[0], fragment[1]
+        if "[ZeroWidthEscape]" in style:
+            rows[-1].append((style, text))
+            continue
+        if text.isascii() and text.isprintable():  # a column a character
+            while text:
+                if used >= width:
+                    rows.append([])
+                    used = 0
+                piece = text[: width - used]
+                rows[-1].append((style, piece))
+                used += len(piece)
+                text = text[len(piece):]
+            continue
+        start = 0
+        for i, char in enumerate(text):
+            char_width = _char_width(char)
+            if used + char_width > width:
+                if i > start:
+                    rows[-1].append((style, text[start:i]))
+                rows.append([])
+                used = 0
+                start = i
+            used += char_width
+        if start < len(text):
+            rows[-1].append((style, text[start:]))
+    return rows
+
+
+# An escape other than a color code. One can swallow the newline after it
+# (e.g. "\x1b\n", or zero-width text "\x01...\x02"), so in ANSI text after
+# one, a line can't be found by its newline.
+_OTHER_ESCAPE_RE = re.compile(r"\x1b(?!\[[0-9;]*m)|[\x01\x9b]")
+
+# Widths whose rows are kept. A box's height is counted at the terminal's
+# width and it's drawn at its window's: one width, unless the window is
+# narrower (or the terminal was resized).
+_WIDTHS_KEPT = 4
+
+
+# The color code parameters that set the styles an ANSI parse names, colors
+# aside.
+_ATTRIBUTE_CODES = {
+    "bold": "1", "dim": "2", "italic": "3", "underline": "4",
+    "blink": "5", "reverse": "7", "hidden": "8", "strike": "9",
+}
+_HEX_COLOR_RE = re.compile(r"#[0-9a-f]{6}")
+
+
+def _code_for(style: str) -> str | None:
+    """A color code that sets ``style``, a style an ANSI parse makes
+    ("ansigreen bg:#102030 bold"), where no style is in force; None when
+    no code does (as for "#12c0000", which a true color over 255 makes)."""
+    params = []
+    for name in style.split():
+        background = name.startswith("bg:")
+        color = name[3:] if background else name
+        names = BG_ANSI_COLORS if background else FG_ANSI_COLORS
+        if name in _ATTRIBUTE_CODES:
+            params.append(_ATTRIBUTE_CODES[name])
+        elif color in names:
+            params.append(str(names[color]))
+        elif _HEX_COLOR_RE.fullmatch(color):
+            rgb = ";".join(str(int(color[i:i + 2], 16)) for i in (1, 3, 5))
+            params.append(f"{48 if background else 38};2;{rgb}")
+        else:
+            return None
+    return f"\x1b[{';'.join(params)}m" if params else ""
+
+
+class _ParsedLines:
+    """The lines a box's text shows, parsed once per text.
+
+    Streamed text grows at its end, so a text that starts as the last one
+    did, up to its last line, is parsed from that line on: the lines before
+    it are kept, and ANSI text is parsed after a code that sets the style in
+    force there. Any other text is parsed whole, as is ANSI text after an
+    escape other than a color code or in a style no code sets. A line's
+    rows are counted once for each width.
+    """
+
+    def __init__(self, style: str) -> None:
+        self._style = style  # plain text's
+        self._format: ContentFormat | None = None
+        self._text = ""
+        self._lines: list[StyleAndTextTuples] = []
+        self._rows: dict[int, list[int]] = {}  # width -> each line's rows
+        self._shown = 0  # lines but the trailing blank ones
+        # Where the last line starts, whether the lines before it can be
+        # kept, and a code that sets the style in force there (ANSI).
+        self._last_start = 0
+        self._keepable = True
+        self._style_code = ""
+
+    def update(self, text: str, content_format: ContentFormat) -> None:
+        """Parse ``text``: from the last line on, when it can."""
+        if content_format == self._format and text == self._text:
+            return
+        start = self._last_start
+        if not (
+            content_format == self._format
+            and self._keepable
+            and text.startswith(self._text[:start])
+        ):
+            self._format = content_format
+            self._lines.clear()
+            self._rows.clear()
+            self._keepable = True
+            self._style_code = ""
+            start = 0
+        self._parse_from(text, start)
+
+    def _parse_from(self, text: str, start: int) -> None:
+        """Parse ``text`` from ``start``, where the last line starts."""
+        keep = max(len(self._lines) - 1, 0)
+        tail = text[start:]
+        last_start = text.rfind("\n") + 1
+        new: list[StyleAndTextTuples]
+        if self._format == "ansi":
+            fragments = to_formatted_text(ANSI(self._style_code + tail))
+            new = [coalesce(line) for line in split_lines(fragments)]
+            if self._keepable and last_start > start:
+                # The style in force where the last line starts: its
+                # newline's, unless another escape came before it.
+                code = None
+                if not _OTHER_ESCAPE_RE.search(text, start, last_start):
+                    newline = next(f for f in reversed(fragments) if f[1] == "\n")
+                    code = _code_for(newline[0])
+                if code is None:
+                    self._keepable = False
+                else:
+                    self._style_code = code
+        else:
+            new = [[(self._style, line)] for line in tail.split("\n")]
+        del self._lines[keep:]
+        self._lines.extend(new)
+        for width, rows in self._rows.items():
+            del rows[keep:]
+            rows.extend(len(_wrap(line, width)) for line in new)
+
+        self._text = text
+        self._last_start = last_start
+        # Trailing blank lines aren't content (a trailing newline ends the
+        # last line), as in split_content_lines.
+        shown = len(self._lines)
+        while shown > 1 and not fragment_list_to_text(self._lines[shown - 1]).strip():
+            shown -= 1
+        self._shown = shown
+
+    @property
+    def lines(self) -> list[StyleAndTextTuples]:
+        """The lines shown, as fragments."""
+        return self._lines[: self._shown]
+
+    def rows(self, width: int) -> list[int]:
+        """The rows each line shown takes at ``width`` columns."""
+        rows = self._rows.get(width)
+        if rows is None:
+            if len(self._rows) == _WIDTHS_KEPT:
+                del self._rows[next(iter(self._rows))]
+            rows = self._rows[width] = [len(_wrap(line, width)) for line in self._lines]
+        return rows[: self._shown]
 
 
 def _format_key_for_display(key: str) -> str:
@@ -47,7 +232,8 @@ class ThinkingBoxControl(FormattedTextControl):
     """
     Draws one thinking box's text.
 
-    It reads the text from ``get_text`` each time it's drawn and fits it
+    It reads the text from ``get_text`` each time it's drawn, parses what
+    changed since (streamed text: from its last line on), and fits it
     to the rows it gets: when it overflows, one end is kept (``overflow``:
     "tail" = newest lines, "head" = first lines) and a hint names the
     hidden lines. Collapsed, the rows are capped at ``max_collapsed_lines``;
@@ -116,6 +302,7 @@ class ThinkingBoxControl(FormattedTextControl):
         self._content_format: ContentFormat = content_format
         # A raising get_text is logged once, not on every redraw.
         self._callback_failed = False
+        self._parsed = _ParsedLines(style)
         self._lock = threading.RLock()
 
         # Pass our formatting function to parent
@@ -175,60 +362,64 @@ class ThinkingBoxControl(FormattedTextControl):
                 limit = self._max_collapsed_lines
             else:
                 limit = min(height, self._max_collapsed_lines)
-            return self._fit(self._content_lines(content), width, limit)
+            parsed = self._parse(content)
+            return self._fit(parsed.lines, parsed.rows(width), width, limit)
 
-    def _content_lines(self, content: str) -> list[StyleAndTextTuples]:
-        """Split content into display lines of fragments.
+    def _parse(self, content: str) -> _ParsedLines:
+        """The content's lines, parsed only as far as the text changed.
 
-        ANSI content is parsed as a whole before splitting, so a style
-        opened on an earlier line still applies to later lines even when
-        the earlier ones are cut off. Trailing blank lines are not content
-        (a trailing newline ends the last line), as in split_content_lines.
+        ANSI content is parsed in order, so a style opened on an earlier
+        line still applies to later lines even when the earlier ones are
+        cut off.
         """
-        if self._content_format == "ansi":
-            fragments = to_formatted_text(ANSI(content))
-        else:
-            fragments = to_formatted_text([(self._box_style, content)])
-        lines = [list(line) for line in split_lines(fragments)]
-        while len(lines) > 1 and not fragment_list_to_text(lines[-1]).strip():
-            lines.pop()
-        return lines
-
-    @staticmethod
-    def _rows(line: StyleAndTextTuples, width: int) -> int:
-        """Rows a line occupies when wrapped at ``width`` columns."""
-        if width <= 0:
-            return 1
-        return max(1, -(-fragment_list_width(line) // width))
+        self._parsed.update(content, self._content_format)
+        return self._parsed
 
     def _fit(
-        self, lines: list[StyleAndTextTuples], width: int, limit: int | None
+        self,
+        lines: list[StyleAndTextTuples],
+        rows: list[int],
+        width: int,
+        limit: int | None,
     ) -> FormattedText:
-        """Keep the lines that fit in ``limit`` rows (None = no limit).
+        """Keep the rows that fit in ``limit`` rows (None = no limit).
 
-        On overflow one row goes to the hint and the rest to lines from the
-        ``overflow`` end — at least one line, even if it alone overflows.
+        ``rows`` is the rows each line takes at ``width`` columns. On
+        overflow the hint takes the rows it wraps to and the rest go to
+        the rows at the ``overflow`` end: whole lines, then as many rows of
+        the next line as fit (its end in tail mode, its start in head mode).
+        A line cut so is hidden in part, and the hint counts it. With no row
+        left for content beside the hint, the box shows content only.
         """
-        rows = [self._rows(line, width) for line in lines]
         if limit is None or sum(rows) <= limit:
             return self._join(lines)
 
         tail = self._overflow == "tail"
         order = range(len(lines) - 1, -1, -1) if tail else range(len(lines))
-        budget = max(1, limit - 1)
-        kept: list[int] = []
-        used = 0
+        # The hint's rows, counted at its longest (every line hidden): the
+        # count it names can't make it wrap onto a row it wasn't given.
+        hint_rows = len(_wrap([("", self._hint(len(lines)))], width))
+        show_hint = hint_rows < limit
+        room = limit - hint_rows if show_hint else limit
+        body: list[StyleAndTextTuples] = []  # from the overflow end
+        whole = 0
         for i in order:
-            if kept and used + rows[i] > budget:
-                break
-            kept.append(i)
-            used += rows[i]
-        body = [lines[i] for i in sorted(kept)]
-        if limit < 2:
-            return self._join(body)  # no room for a hint
+            if rows[i] <= room:
+                body.append(lines[i])
+                whole += 1
+                room -= rows[i]
+                continue
+            if room:
+                wrapped = _wrap(lines[i], width)
+                body.extend(reversed(wrapped[-room:]) if tail else wrapped[:room])
+            break
+        if tail:
+            body.reverse()
+        if not show_hint:
+            return self._join(body)
 
         hint: StyleAndTextTuples = [
-            ("class:thinking-box.hint", self._hint(len(lines) - len(kept)))
+            ("class:thinking-box.hint", self._hint(len(lines) - whole))
         ]
         return self._join([hint, *body] if tail else [*body, hint])
 
@@ -306,4 +497,4 @@ class ThinkingBoxControl(FormattedTextControl):
             return 0
 
         with self._lock:
-            return sum(self._rows(line, width) for line in self._content_lines(content))
+            return sum(self._parse(content).rows(width))

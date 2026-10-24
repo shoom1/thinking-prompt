@@ -352,7 +352,9 @@ class TestRepaintedContent:
                 session = ThinkingPromptSession(theme="dark")
                 printed = _written_by(terminal, lambda: session.add_rich(panel))
             repainted = _repainted(session, terminal)
-        assert "\x1b[0;32m╭" in printed
+        # The panel's green corner: ╭, or ┌ where Rich can't tell the console
+        # handles it (Windows without a console).
+        assert re.search("\x1b\\[0;32m[╭┌]", printed)
         assert printed in repainted
 
 
@@ -387,6 +389,35 @@ class TestRepaintAfterShrinking:
                 assert "Title" in plain and "# Title" not in plain
                 assert "def hello():" in plain
                 assert re.search(r"\x1b\[[0-9;]*mhello", repainted)
+
+            await run_with(session, handler, script)
+
+    async def test_markdown_is_repainted_at_the_new_width(self):
+        """After the terminal narrows, markdown is laid out again at the
+        new width, not as rendered for an earlier repaint."""
+        pytest.importorskip("rich")
+        terminal = _ColorTerminal(columns=80)
+
+        async def handler(text: str) -> None:
+            pass
+
+        with create_pipe_input() as inp, create_app_session(input=inp, output=terminal):
+            session = ThinkingPromptSession()
+
+            async def script(run: asyncio.Task[None]) -> None:
+                session.add_response(" ".join(["word"] * 30), markdown=True)
+                await wait_until(lambda: "word" in terminal.text())
+                # Shorter first, then narrower: two repaints.
+                for size in (Size(rows=12, columns=80), Size(rows=12, columns=40)):
+                    start = len(terminal.text())
+                    terminal.size = size
+                    session.app.invalidate()
+                    await wait_until(lambda start=start: "\x1b[3J" in terminal.text()[start:])
+
+                repainted = _plain(terminal.text()[start:])
+                assert "word" in repainted
+                # 16 words fit a line 80 columns wide; 8 fit 40.
+                assert not re.search(r"(word ){8}word", repainted)
 
             await run_with(session, handler, script)
 
