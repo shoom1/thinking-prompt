@@ -480,8 +480,9 @@ def _whole_rows(text: str, content_format: str, width: int) -> int:
 
 _CODES = [
     "\x1b[0m", "\x1b[m", "\x1b[;1m", "\x1b[00m", "\x1b[1m", "\x1b[2m", "\x1b[3m",
-    "\x1b[22m", "\x1b[32m", "\x1b[41m", "\x1b[39m", "\x1b[0;33m", "\x1b[38;5;200m",
-    "\x1b[38;2;10;20;30m",
+    "\x1b[4m", "\x1b[7m", "\x1b[9m", "\x1b[22m", "\x1b[24m", "\x1b[27m", "\x1b[32m",
+    "\x1b[41m", "\x1b[39m", "\x1b[49m", "\x1b[96m", "\x1b[0;33m", "\x1b[1;0;35m",
+    "\x1b[38;5;200m", "\x1b[48;5;17m", "\x1b[38;2;10;20;30m", "\x1b[48;2;1;2;3m",
 ]
 _WORDS = ["a", "bc", "def ", "  ", "\n", "\n", "\n\n", "世界", "x" * 30]
 # Escapes other than color codes: a cursor move, a line erase, an escape
@@ -597,6 +598,49 @@ class TestParsedOnce:
             ("ansigreen", c) for c in "more"
         }
 
+    @pytest.mark.parametrize(
+        "code",
+        [
+            *(
+                f"\x1b[{n}m"
+                for n in (
+                    *range(1, 10), *range(30, 38), 39, *range(40, 48), 49,
+                    *range(90, 98), *range(100, 108),
+                )
+            ),
+            "\x1b[38;5;17m", "\x1b[48;5;200m", "\x1b[38;2;1;2;3m", "\x1b[48;2;250;0;9m",
+            "\x1b[1;2;3;4;5;7;8;9;35;46m",
+        ],
+    )
+    def test_one_code_sets_a_style_again(self, code: str):
+        """The style in force where the last line starts is kept as one
+        code that sets it, not as the codes that led to it."""
+        from prompt_toolkit.formatted_text import ANSI, to_formatted_text
+
+        from thinking_prompt.thinking_control import _code_for
+
+        def style_after(codes: str) -> str:
+            return to_formatted_text(ANSI(codes + "x"))[0][0]
+
+        style = style_after(code)
+        if not style:
+            pytest.skip("this prompt_toolkit gives the code no style (3.0.36: dim)")
+        code_again = _code_for(style)
+        assert code_again is not None
+        assert style_after(code_again) == style
+
+    def test_a_style_no_code_sets_shows_what_a_whole_parse_shows(self):
+        """A true color over 255 gives a color name ("#12c0000") no code
+        sets, so the lines after it are parsed whole."""
+        state, control = self._streamed("ansi")
+        for text in (
+            "\x1b[38;2;300;0;0mred\n",
+            "\x1b[38;2;300;0;0mred\nmore\n",
+            "\x1b[38;2;300;0;0mred\nmore\n\x1b[0mplain\nend",
+        ):
+            state["text"] = text
+            self._assert_shows_whole_parse(control, text, "ansi")
+
     @staticmethod
     def _counting_parses(monkeypatch: pytest.MonkeyPatch) -> list[int]:
         """The length of each text the control parses as ANSI from now on."""
@@ -629,10 +673,16 @@ class TestParsedOnce:
         self._draw(control)
         assert parsed == []
 
-    def test_an_append_parses_from_the_last_line(self, monkeypatch: pytest.MonkeyPatch):
+    @pytest.mark.parametrize(
+        "ending", ["\x1b[0m", "\x1b[39m", "\x1b[22;24m"], ids=["reset", "fg", "weight"]
+    )
+    def test_an_append_parses_from_the_last_line(
+        self, monkeypatch: pytest.MonkeyPatch, ending: str
+    ):
+        """However many codes came before it without a reset of every style."""
         parsed = self._counting_parses(monkeypatch)
         state, control = self._streamed("ansi")
-        state["text"] = "".join(f"\x1b[32mline {i}\x1b[0m words\n" for i in range(1000))
+        state["text"] = "".join(f"\x1b[32;1;4mline {i}{ending} words\n" for i in range(1000))
         self._draw(control)
         parsed.clear()
         appended = "\x1b[1mnew\x1b[0m line\n"
