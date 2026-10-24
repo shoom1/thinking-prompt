@@ -15,7 +15,7 @@ class TestTokenCompletion:
     def test_dark_defaults_byte_identical(self):
         d = ThinkingPromptStyles().to_style_dict()
         assert d["thinking-box"] == "fg:#a0a0a0 italic"
-        assert d["history.thinking"] == "fg:#a0a0a0 italic"
+        assert d["transcript.thinking"] == "fg:#a0a0a0 italic"
         assert d["thinking-box.border"] == "fg:#606060"
         assert d["thinking-box.hint"] == "fg:#707070 italic"
         assert d["status"] == "bg:#202040 fg:#808090"
@@ -32,13 +32,13 @@ class TestTokenCompletion:
             color_text_status="#222222",
         ).to_style_dict()
         assert d["thinking-box"] == "fg:#123456 italic"
-        assert d["history.thinking"] == "fg:#123456 italic"
+        assert d["transcript.thinking"] == "fg:#123456 italic"
         assert d["status"] == "bg:#111111 fg:#222222"
 
     def test_empty_tokens_yield_attribute_only_styles(self):
         d = ThinkingPromptStyles(color_thinking="", color_error="").to_style_dict()
         assert d["thinking-box"] == "italic"
-        assert d["history.error"] == "bold"
+        assert d["transcript.error"] == "bold"
 
     def test_new_fields_defaults(self):
         s = ThinkingPromptStyles()
@@ -59,7 +59,7 @@ class TestTokensResolveAtRender:
 
     def test_replace_token_restyles_derived_elements(self):
         s = dataclasses.replace(ThinkingPromptStyles.light(), color_error="#ff00ff")
-        assert _rules(s)["history.error"] == "fg:#ff00ff bold"
+        assert _rules(s)["transcript.error"] == "fg:#ff00ff bold"
 
     def test_mutating_token_restyles_derived_elements(self):
         s = ThinkingPromptStyles.light()
@@ -71,7 +71,7 @@ class TestTokensResolveAtRender:
             ThinkingPromptStyles(thinking_box="fg:red"), color_thinking="#000000"
         )
         assert _rules(s)["thinking-box"] == "fg:red"
-        assert _rules(s)["history.thinking"] == "fg:#000000 italic"
+        assert _rules(s)["transcript.thinking"] == "fg:#000000 italic"
 
     def test_to_style_dict_matches_to_style(self):
         s = ThinkingPromptStyles.light()

@@ -192,5 +192,14 @@ def test_a_single_choice_fields_default_is_an_option_or_none(field_class: type):
     assert default.type == "str | None"
 
 
+def test_printed_messages_are_styled_as_the_transcript():
+    """The transcript is what the session printed; its styles say so."""
+    assert "transcript" in {field.name for field in dataclasses.fields(ThinkingPromptStyles)}
+    assert "history" not in {field.name for field in dataclasses.fields(ThinkingPromptStyles)}
+    classes = set(ThinkingPromptStyles().to_style_dict())
+    assert {"transcript", "transcript.error", "transcript.user-message"} <= classes
+    assert not [name for name in classes if name.split(".")[0] == "history"]
+
+
 def test_the_welcome_stays_a_customization_point():
     assert AppInfo(name="app", welcome_message="hi").get_welcome_content() == "hi"

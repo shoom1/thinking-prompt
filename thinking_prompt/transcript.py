@@ -81,7 +81,7 @@ class Transcript:
         Append a styled text fragment (re-themes via live Style).
 
         Args:
-            style: Style class (e.g., "class:history.user-message").
+            style: Style class (e.g., "class:transcript.user-message").
             text: Text content.
         """
         self._append_entry(_Entry(kind="styled", style=style, text=text))

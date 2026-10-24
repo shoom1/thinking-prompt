@@ -37,11 +37,11 @@ class TestStyledLines:
     @pytest.mark.parametrize(
         "method, args, style, text",
         [
-            ("add_response", ("x",), "class:history.assistant-message", "x\n"),
-            ("add_success", ("x",), "class:history.success", "[OK] x\n"),
-            ("add_warning", ("x",), "class:history.warning", "[WARN] x\n"),
-            ("add_error", ("x",), "class:history.error", "[ERROR] x\n"),
-            ("add_system", ("x",), "class:history.system", "x\n"),
+            ("add_response", ("x",), "class:transcript.assistant-message", "x\n"),
+            ("add_success", ("x",), "class:transcript.success", "[OK] x\n"),
+            ("add_warning", ("x",), "class:transcript.warning", "[WARN] x\n"),
+            ("add_error", ("x",), "class:transcript.error", "[ERROR] x\n"),
+            ("add_system", ("x",), "class:transcript.system", "x\n"),
         ],
         ids=[
             "add_response",
@@ -67,8 +67,8 @@ class TestInputEcho:
         session._display.user_input(session._get_prompt_string(), "hello")
 
         fragments = [
-            ("class:history.user-prefix", "you> "),
-            ("class:history.user-message", "hello\n"),
+            ("class:transcript.user-prefix", "you> "),
+            ("class:transcript.user-message", "hello\n"),
         ]
         (entry,) = _entries(session)
         assert (entry.kind, entry.fragments) == ("formatted", fragments)

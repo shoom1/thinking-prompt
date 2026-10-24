@@ -242,7 +242,7 @@ class TestDisplayInit:
         display = Display(get_style=lambda: default_style)
         assert display._get_style() is default_style
 
-    def test_creates_empty_history(self, display: Display):
+    def test_creates_empty_transcript(self, display: Display):
         """Should start with an empty transcript."""
         assert display.transcript.is_empty
 
@@ -250,7 +250,7 @@ class TestDisplayInit:
 class TestDisplayUserInput:
     """Test Display.user_input method."""
 
-    def test_adds_to_history(self, display: Display):
+    def test_adds_to_transcript(self, display: Display):
         """Should add prompt and text to the transcript."""
         display.user_input(">>> ", "hello")
         formatted = display.transcript.get_formatted_text()
@@ -258,13 +258,13 @@ class TestDisplayUserInput:
         assert ">>> " in text
         assert "hello" in text
 
-    def test_history_has_correct_styles(self, display: Display):
+    def test_transcript_has_correct_styles(self, display: Display):
         """Should use correct style classes in the transcript."""
         display.user_input(">>> ", "hello")
         formatted = display.transcript.get_formatted_text()
         styles = [s for s, _ in formatted]
-        assert "class:history.user-prefix" in styles
-        assert "class:history.user-message" in styles
+        assert "class:transcript.user-prefix" in styles
+        assert "class:transcript.user-message" in styles
 
     def test_prints_formatted_text(self, kept_display: Display):
         kept_display.user_input(">>> ", "hello")
@@ -275,7 +275,7 @@ class TestDisplayUserInput:
 class TestDisplayThinking:
     """Test Display.thinking method."""
 
-    def test_adds_to_history(self, display: Display):
+    def test_adds_to_transcript(self, display: Display):
         """Should add thinking content to the transcript."""
         display.thinking("Processing...")
         formatted = display.transcript.get_formatted_text()
@@ -305,7 +305,7 @@ class TestDisplayThinking:
 class TestDisplayResponse:
     """Test Display.response method."""
 
-    def test_adds_to_history(self, display: Display):
+    def test_adds_to_transcript(self, display: Display):
         """Should add response to the transcript."""
         display.response("Hello, world!")
         formatted = display.transcript.get_formatted_text()
@@ -317,7 +317,7 @@ class TestDisplayResponse:
         display.response("Hello")
         formatted = display.transcript.get_formatted_text()
         styles = [s for s, _ in formatted]
-        assert "class:history.assistant-message" in styles
+        assert "class:transcript.assistant-message" in styles
 
     def test_empty_content_is_added_and_printed(self, kept_display: Display):
         """Empty content still goes to the transcript and to the console."""
@@ -329,7 +329,7 @@ class TestDisplayResponse:
 class TestDisplaySystemMessages:
     """Test Display system, error, warning, success methods."""
 
-    def test_system_adds_to_history(self, display: Display):
+    def test_system_adds_to_transcript(self, display: Display):
         """System message should be added to the transcript."""
         display.system("System message")
         text = "".join(t for _, t in display.transcript.get_formatted_text())
@@ -382,7 +382,7 @@ class TestDisplayMarkdownAndCode:
 class TestDisplayWelcome:
     """Test Display.welcome method."""
 
-    def test_plain_text_adds_to_history(self, display: Display):
+    def test_plain_text_adds_to_transcript(self, display: Display):
         """Plain text welcome should be added to the transcript."""
         display.welcome("Welcome!")
         text = "".join(t for _, t in display.transcript.get_formatted_text())
@@ -412,7 +412,7 @@ class TestDisplayWelcome:
 class TestDisplayFormatted:
     """Test Display.formatted method."""
 
-    def test_adds_to_history(self, display: Display):
+    def test_adds_to_transcript(self, display: Display):
         """FormattedText should be added to the transcript."""
         ft = FormattedText([("bold", "Hello")])
         display.formatted(ft)
@@ -429,7 +429,7 @@ class TestDisplayFormatted:
 class TestDisplayRaw:
     """Test Display.raw method."""
 
-    def test_adds_to_history(self, display: Display):
+    def test_adds_to_transcript(self, display: Display):
         """Raw content should be added to the transcript."""
         display.raw("Raw content")
         text = "".join(t for _, t in display.transcript.get_formatted_text())
@@ -457,7 +457,7 @@ class TestDisplayRaw:
 class TestDisplayClear:
     """Test Display.clear method."""
 
-    def test_clears_history(self, display: Display):
+    def test_clears_transcript(self, display: Display):
         """Should clear the transcript."""
         display.response("Hello")
         assert not display.transcript.is_empty
@@ -473,7 +473,7 @@ class TestDisplayClear:
 class TestDisplayThinkingAnsi:
     """Test Display.thinking() with ANSI format."""
 
-    def test_ansi_adds_to_history(self, display: Display):
+    def test_ansi_adds_to_transcript(self, display: Display):
         """ANSI thinking content should be added to the transcript as fragments."""
         content = "\033[32m✓ Done\033[0m"
         display.thinking(content, content_format="ansi")
@@ -482,14 +482,14 @@ class TestDisplayThinkingAnsi:
         text = "".join(t for _, t in formatted)
         assert "✓ Done" in text
 
-    def test_ansi_history_has_no_thinking_style(self, display: Display):
-        """ANSI content in the transcript should NOT use class:history.thinking style."""
+    def test_ansi_transcript_has_no_thinking_style(self, display: Display):
+        """ANSI content in the transcript should NOT use class:transcript.thinking style."""
         content = "\033[32m✓ Done\033[0m"
         display.thinking(content, content_format="ansi")
         formatted = display.transcript.get_formatted_text()
         styles = [s for s, _ in formatted]
         # Should not use the plain thinking style
-        assert "class:history.thinking" not in styles
+        assert "class:transcript.thinking" not in styles
 
     def test_ansi_skips_empty_content(self, display: Display):
         """ANSI thinking should skip empty content."""
@@ -518,7 +518,7 @@ class TestDisplayThinkingAnsi:
         display.thinking("Processing...", content_format="plain")
         formatted = display.transcript.get_formatted_text()
         styles = [s for s, _ in formatted]
-        assert "class:history.thinking" in styles
+        assert "class:transcript.thinking" in styles
 
 
 class TestRenderableToAnsi:
