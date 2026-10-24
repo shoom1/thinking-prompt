@@ -142,6 +142,7 @@ class ThinkingPromptSession:
         expand_key: str = "c-t",
         thinking_max_lines: int = 15,
         thinking_title: str = "Thinking",
+        thinking_border: bool = True,
         spinner: Spinner | None = Spinner.DOTS,
         spinner_position: Literal["before", "after"] = "before",
         echo_input: bool = True,
@@ -169,9 +170,13 @@ class ThinkingPromptSession:
             expand_key: Expands/collapses thinking boxes.
                 Default: "c-t" (Ctrl+T).
             thinking_max_lines: The rows a box shows collapsed, below its title,
-                unless the box sets its own ``max_lines`` (at least 1).
+                unless the box sets its own ``max_lines``. 0: its title line
+                only, a processing indicator.
             thinking_title: Header title of boxes started without one.
                 "" for none.
+            thinking_border: Whether a box's header line has its border
+                ("── ⠋ Thinking ───") or is just the spinner and the title
+                ("⠋ Thinking"), unless the box says. Default: True.
             spinner: The thinking header's spinner: a preset such as
                 ``Spinner.LINE``, your own ``Spinner(frames, interval)``,
                 or None for none. Default: ``Spinner.DOTS``.
@@ -188,12 +193,12 @@ class ThinkingPromptSession:
                 "inline" draws rows between the prompt and the status bar.
 
         Raises:
-            ValueError: If thinking_max_lines is less than 1, or theme= names
+            ValueError: If thinking_max_lines is less than 0, or theme= names
                        an unknown theme, or if dialog_placement isn't 'box'
                        or 'inline'.
         """
-        if thinking_max_lines < 1:
-            raise ValueError("thinking_max_lines must be at least 1")
+        if thinking_max_lines < 0:
+            raise ValueError("thinking_max_lines must be at least 0")
 
         self._message = message
         self._app_info = app_info
@@ -253,6 +258,7 @@ class ThinkingPromptSession:
             thinking_echo=thinking_echo,
             spinner=spinner,
             spinner_position=spinner_position,
+            border=thinking_border,
         )
 
         # Input history (for up/down arrow)
@@ -628,6 +634,7 @@ class ThinkingPromptSession:
         content_callback: ContentCallback | None = None,
         *,
         title: str | None = None,
+        border: bool | None = None,
         order: int = 0,
         max_lines: int | None = None,
         content_format: ContentFormat = "plain",
@@ -646,8 +653,13 @@ class ThinkingPromptSession:
                 holds its own text, which you write.
             title: Title on the box's header line (default: the session's
                 ``thinking_title``).
+            border: False: the header line is just the spinner and the
+                title, with no line (default: the session's
+                ``thinking_border``).
             order: Sort key for multiple boxes (higher = closer to prompt).
-            max_lines: Max collapsed lines (overrides session default).
+            max_lines: Max collapsed lines (overrides session default). 0:
+                the title line only, a processing indicator: its text
+                shows expanded (Ctrl+T) and isn't echoed.
             content_format: Format for rendering ("plain" or "ansi").
             overflow: Which end of content that overflows the box stays
                 visible — in the box and in the echo when it finishes:
@@ -660,7 +672,7 @@ class ThinkingPromptSession:
             ended by the session (see the README's "When a Box Ends").
 
         Raises:
-            ValueError: If max_lines is less than 1.
+            ValueError: If max_lines is less than 0.
 
         Example:
             box = session.start_thinking(title="Processing")
@@ -670,12 +682,13 @@ class ThinkingPromptSession:
             box.append("Done!\\n")
             box.finish()
         """
-        # One row is enough (the newest line, no hint); none can't be drawn.
-        if max_lines is not None and max_lines < 1:
-            raise ValueError(f"max_lines must be at least 1 (or None), got {max_lines!r}")
+        # 0: the title line only; 1: the newest row, no hint.
+        if max_lines is not None and max_lines < 0:
+            raise ValueError(f"max_lines must be at least 0 (or None), got {max_lines!r}")
         return self._manager.create_box(
             content_callback,
             title=title if title is not None else self._thinking_title,
+            border=border,
             order=order,
             max_lines=max_lines,
             content_format=content_format,
@@ -707,6 +720,7 @@ class ThinkingPromptSession:
         self,
         *,
         title: str | None = None,
+        border: bool | None = None,
         content_format: ContentFormat = "plain",
         echo: bool | None = None,
         order: int = 0,
@@ -719,13 +733,16 @@ class ThinkingPromptSession:
 
         Args:
             title: Optional title for the thinking separator.
+            border: False: the header line is just the spinner and the
+                title (default: the session's ``thinking_border``).
             content_format: Format for rendering ("plain" or "ansi").
             echo: If True, print the box's text to the console
                 (and keep it for repaints) when the block ends; if False,
                 drop it. None (default) follows the session's
                 thinking_echo.
             order: Sort key for multiple boxes (higher = closer to prompt).
-            max_lines: Max collapsed lines (overrides session default).
+            max_lines: Max collapsed lines (overrides session default); 0:
+                the title line only.
             overflow: Which end of overflowing content stays visible, in
                 the box and the finish echo: "tail" (newest lines, default)
                 or "head" (first lines).
@@ -734,7 +751,7 @@ class ThinkingPromptSession:
             ThinkingBox: the box, to write to and retitle.
 
         Raises:
-            ValueError: If max_lines is less than 1 (before the block runs).
+            ValueError: If max_lines is less than 0 (before the block runs).
 
         Example:
             async with session.thinking(title="Processing") as box:
@@ -765,6 +782,7 @@ class ThinkingPromptSession:
         """
         box = self.start_thinking(
             title=title,
+            border=border,
             content_format=content_format,
             order=order,
             max_lines=max_lines,

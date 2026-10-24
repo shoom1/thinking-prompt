@@ -278,20 +278,22 @@ class TestSessionBoxes:
     def test_start_thinking_with_a_title(self):
         assert _session().start_thinking(title="Processing").title == "Processing"
 
-    @pytest.mark.parametrize("max_lines", [0, -1])
-    def test_start_thinking_refuses_fewer_than_one_line(self, max_lines):
-        """A box with no rows for its text can't be drawn: refused when made."""
+    def test_start_thinking_refuses_fewer_than_no_lines(self):
+        """Refused when the box is made, not when it's first drawn."""
         session = _session()
-        with pytest.raises(ValueError, match=r"max_lines must be at least 1 \(or None\), got "):
-            session.start_thinking(max_lines=max_lines)
+        with pytest.raises(ValueError, match=r"max_lines must be at least 0 \(or None\), got -1"):
+            session.start_thinking(max_lines=-1)
         assert not session.is_thinking
 
-    async def test_thinking_refuses_fewer_than_one_line(self):
+    async def test_thinking_refuses_fewer_than_no_lines(self):
         session = _session()
-        with pytest.raises(ValueError, match="max_lines must be at least 1"):
-            async with session.thinking(max_lines=0):
+        with pytest.raises(ValueError, match="max_lines must be at least 0"):
+            async with session.thinking(max_lines=-1):
                 pass
         assert not session.is_thinking
+
+    def test_no_lines_is_a_title_line_only(self):
+        assert _session().start_thinking(max_lines=0)._control.max_collapsed_lines == 0
 
     async def test_thinking_yields_a_box_and_finishes_it(self):
         session = _session()

@@ -65,6 +65,7 @@ class ThinkingHeader:
         ─────── Processing... ───────  (dots after text)
         ─────── ⠋ ───────              (spinner only, no text)
         ───────────────────────────    (no animation, no text)
+        ⠋ Thinking                     (border=False)
     """
 
     def __init__(
@@ -74,6 +75,7 @@ class ThinkingHeader:
         position: Literal["before", "after"] = "before",
         border_char: str = "─",
         request_frame: Callable[[float], None] | None = None,
+        border: bool = True,
     ) -> None:
         """
         Initialize the thinking separator.
@@ -86,11 +88,14 @@ class ThinkingHeader:
             request_frame: Called with the seconds until the next frame each
                 time an animated header is drawn, to have it redrawn then
                 (the session passes its FrameScheduler.redraw_in).
+            border: False: the spinner and the text only, at the left
+                edge, with no line.
         """
         self.text = text
         self.spinner = spinner
         self.position = position
         self.border_char = border_char
+        self.border = border
         self._request_frame = request_frame
         self._first_tick: int | None = None
 
@@ -142,6 +147,9 @@ class ThinkingHeader:
             content = self.text
         else:
             content = ""
+
+        if not self.border:
+            return FormattedText([("class:thinking-box.border", content)])
 
         # Calculate padding for left-adjusted content
         content_with_spaces = f" {content} " if content else ""

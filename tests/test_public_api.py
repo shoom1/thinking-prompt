@@ -126,17 +126,20 @@ def _parameters(func: Callable[..., object]) -> list[str]:
                 "message", "app_info", "theme", "history", "completer",
                 "complete_while_typing", "completions_menu_height", "editing_mode",
                 "enable_status_bar", "status_text", "expand_key", "thinking_max_lines",
-                "thinking_title", "spinner", "spinner_position", "echo_input",
+                "thinking_title", "thinking_border", "spinner", "spinner_position", "echo_input",
                 "thinking_echo", "transcript_limit", "dialog_placement",
             ],
         ),
         (
             ThinkingPromptSession.start_thinking,
-            ["content_callback", "title", "order", "max_lines", "content_format", "overflow"],
+            [
+                "content_callback", "title", "border", "order", "max_lines",
+                "content_format", "overflow",
+            ],
         ),
         (
             ThinkingPromptSession.thinking,
-            ["title", "content_format", "echo", "order", "max_lines", "overflow"],
+            ["title", "border", "content_format", "echo", "order", "max_lines", "overflow"],
         ),
         (ThinkingBox.finish, ["echo"]),
         (

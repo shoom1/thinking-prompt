@@ -277,7 +277,7 @@ class ThinkingBoxControl(FormattedTextControl):
         Args:
             get_text: Returns the text to draw; read on every draw. If it
                 raises, the box draws nothing (logged once).
-            max_collapsed_lines: Max lines when collapsed (must be >= 2).
+            max_collapsed_lines: Max lines when collapsed (0: none).
             style: Style class for the content.
             expand_key: Key binding for expand/collapse (prompt_toolkit format).
             overflow: Which end of overflowing content stays visible:
