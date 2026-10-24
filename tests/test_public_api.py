@@ -94,6 +94,7 @@ def test_styles_convert_to_a_prompt_toolkit_style_only():
     ("owner", "member"),
     [
         (ThinkingPromptSession, "set_status"),  # status_text takes all kinds of text
+        (ThinkingPromptSession, "add_message"),  # add_system(); add_response()
     ],
 )
 def test_one_name_per_thing(owner: type, member: str):

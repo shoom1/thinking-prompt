@@ -363,7 +363,7 @@ session.status_text = Text.from_markup("[bold]Processing[/bold]")  # Rich render
 session.add_success("Operation completed")
 session.add_warning("Rate limit approaching")
 session.add_error("Connection failed")
-session.add_message("system", "Connecting to server...")
+session.add_system("Connecting to server...")
 ```
 
 The session sometimes puts a hint in the status bar in place of your

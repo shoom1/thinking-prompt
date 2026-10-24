@@ -456,7 +456,7 @@ async def main():
                 await asyncio.sleep(0.5)
 
             # Console message
-            session.add_message("system", "Initialization complete")
+            session.add_system("Initialization complete")
             await asyncio.sleep(0.5)
 
             # Phase 2: Processing with progress bar

@@ -41,18 +41,14 @@ class TestStyledLines:
             ("add_success", ("x",), "class:history.success", "[OK] x\n"),
             ("add_warning", ("x",), "class:history.warning", "[WARN] x\n"),
             ("add_error", ("x",), "class:history.error", "[ERROR] x\n"),
-            ("add_message", ("assistant", "x"), "class:history.assistant-message", "x\n"),
-            ("add_message", ("system", "x"), "class:history.system", "x\n"),
-            ("add_message", ("thinking", "x"), "class:history.thinking", "x\n"),
+            ("add_system", ("x",), "class:history.system", "x\n"),
         ],
         ids=[
             "add_response",
             "add_success",
             "add_warning",
             "add_error",
-            "add_message-assistant",
-            "add_message-system",
-            "add_message-thinking",
+            "add_system",
         ],
     )
     def test_prints_and_keeps_its_text_in_its_style(self, method, args, style, text):
@@ -65,10 +61,10 @@ class TestStyledLines:
         assert to_formatted_text(printed) == [(style, text)]
 
 
-class TestAddMessage:
-    def test_a_user_message_is_the_prompt_and_the_text_on_one_line(self):
+class TestInputEcho:
+    def test_an_echoed_input_is_the_prompt_and_the_text_on_one_line(self):
         session = _session(message="you> ")
-        session.add_message("user", "hello")
+        session._display.user_input(session._get_prompt_string(), "hello")
 
         fragments = [
             ("class:history.user-prefix", "you> "),

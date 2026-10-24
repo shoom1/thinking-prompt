@@ -528,7 +528,7 @@ class TestEchoedPrompt:
 
     @staticmethod
     def _echoed_prefix(session: ThinkingPromptSession) -> str:
-        session.add_message("user", "hi")
+        session._display.user_input(session._get_prompt_string(), "hi")
         entry = session._display.transcript.iter_entries()[-1]
         return entry.fragments[0][1]
 

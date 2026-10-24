@@ -826,34 +826,18 @@ class ThinkingPromptSession:
         # Plain text
         self._display.response(content)
 
-    def add_message(
-        self,
-        role: Literal["user", "assistant", "thinking", "system"],
-        content: str,
-    ) -> None:
+    def add_system(self, content: str) -> None:
         """
-        Print a styled message to the console and add it to the transcript.
+        Print a system message: a note from the app rather than an answer
+        (e.g. "Connecting..."), in the system style.
 
         Args:
-            role: The message role. Must be one of:
-                - "user": User input message
-                - "assistant": Assistant response
-                - "thinking": Thinking/reasoning content
-                - "system": System notification
-            content: The message content.
+            content: The message.
+
+        Example:
+            session.add_system("Connecting to server...")
         """
-        if role == "user":
-            prompt_str = self._get_prompt_string()
-            self._display.user_input(prompt_str, content)
-        elif role == "assistant":
-            self._display.response(content)
-        elif role == "thinking":
-            self._display.thinking(content)
-        elif role == "system":
-            self._display.system(content)
-        else:
-            # Unknown role - add as raw text
-            self._display.raw(f"{content}\n")
+        self._display.system(content)
 
     def add_error(self, content: str) -> None:
         """
