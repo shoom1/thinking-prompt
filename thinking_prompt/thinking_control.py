@@ -19,8 +19,9 @@ from prompt_toolkit.formatted_text import (
 from prompt_toolkit.formatted_text.utils import split_lines
 from prompt_toolkit.layout.controls import FormattedTextControl, UIContent
 from prompt_toolkit.layout.screen import Char
+from prompt_toolkit.output.vt100 import BG_ANSI_COLORS, FG_ANSI_COLORS
 
-from ._text import ANSI_SGR_RE, coalesce
+from ._text import coalesce
 from .types import ContentCallback, ContentFormat, Overflow
 
 logger = logging.getLogger(__name__)
@@ -85,19 +86,34 @@ _OTHER_ESCAPE_RE = re.compile(r"\x1b(?!\[[0-9;]*m)|[\x01\x9b]")
 _WIDTHS_KEPT = 4
 
 
-def _resets(code: str) -> bool:
-    """Whether a color code starts by resetting every style (its first
-    parameter is 0 or empty, as in "\\x1b[0;32m" or "\\x1b[m")."""
-    return not code[2:-1].split(";", 1)[0].strip("0")
+# The color code parameters that set the styles an ANSI parse names, colors
+# aside.
+_ATTRIBUTE_CODES = {
+    "bold": "1", "dim": "2", "italic": "3", "underline": "4",
+    "blink": "5", "reverse": "7", "hidden": "8", "strike": "9",
+}
+_HEX_COLOR_RE = re.compile(r"#[0-9a-f]{6}")
 
 
-def _in_force(replay: str, codes: list[str]) -> str:
-    """The color codes that set the styles ``replay`` and then ``codes``
-    leave in force: from the last one that resets every style."""
-    for i in range(len(codes) - 1, -1, -1):
-        if _resets(codes[i]):
-            return "".join(codes[i:])
-    return replay + "".join(codes)
+def _code_for(style: str) -> str | None:
+    """A color code that sets ``style``, a style an ANSI parse makes
+    ("ansigreen bg:#102030 bold"), where no style is in force; None when
+    no code does (as for "#12c0000", which a true color over 255 makes)."""
+    params = []
+    for name in style.split():
+        background = name.startswith("bg:")
+        color = name[3:] if background else name
+        names = BG_ANSI_COLORS if background else FG_ANSI_COLORS
+        if name in _ATTRIBUTE_CODES:
+            params.append(_ATTRIBUTE_CODES[name])
+        elif color in names:
+            params.append(str(names[color]))
+        elif _HEX_COLOR_RE.fullmatch(color):
+            rgb = ";".join(str(int(color[i:i + 2], 16)) for i in (1, 3, 5))
+            params.append(f"{48 if background else 38};2;{rgb}")
+        else:
+            return None
+    return f"\x1b[{';'.join(params)}m" if params else ""
 
 
 class _ParsedLines:
@@ -105,10 +121,10 @@ class _ParsedLines:
 
     Streamed text grows at its end, so a text that starts as the last one
     did, up to its last line, is parsed from that line on: the lines before
-    it are kept, and for ANSI text the color codes in force there are
-    replayed before it. Any other text is parsed whole, as is ANSI text
-    after an escape other than a color code. A line's rows are counted once
-    for each width.
+    it are kept, and ANSI text is parsed after a code that sets the style in
+    force there. Any other text is parsed whole, as is ANSI text after an
+    escape other than a color code or in a style no code sets. A line's
+    rows are counted once for each width.
     """
 
     def __init__(self, style: str) -> None:
@@ -119,10 +135,10 @@ class _ParsedLines:
         self._rows: dict[int, list[int]] = {}  # width -> each line's rows
         self._shown = 0  # lines but the trailing blank ones
         # Where the last line starts, whether the lines before it can be
-        # kept, and the color codes in force there (ANSI).
+        # kept, and a code that sets the style in force there (ANSI).
         self._last_start = 0
         self._keepable = True
-        self._replay = ""
+        self._style_code = ""
 
     def update(self, text: str, content_format: ContentFormat) -> None:
         """Parse ``text``: from the last line on, when it can."""
@@ -138,7 +154,7 @@ class _ParsedLines:
             self._lines.clear()
             self._rows.clear()
             self._keepable = True
-            self._replay = ""
+            self._style_code = ""
             start = 0
         self._parse_from(text, start)
 
@@ -146,10 +162,22 @@ class _ParsedLines:
         """Parse ``text`` from ``start``, where the last line starts."""
         keep = max(len(self._lines) - 1, 0)
         tail = text[start:]
+        last_start = text.rfind("\n") + 1
         new: list[StyleAndTextTuples]
         if self._format == "ansi":
-            fragments = to_formatted_text(ANSI(self._replay + tail))
+            fragments = to_formatted_text(ANSI(self._style_code + tail))
             new = [coalesce(line) for line in split_lines(fragments)]
+            if self._keepable and last_start > start:
+                # The style in force where the last line starts: its
+                # newline's, unless another escape came before it.
+                code = None
+                if not _OTHER_ESCAPE_RE.search(text, start, last_start):
+                    newline = next(f for f in reversed(fragments) if f[1] == "\n")
+                    code = _code_for(newline[0])
+                if code is None:
+                    self._keepable = False
+                else:
+                    self._style_code = code
         else:
             new = [[(self._style, line)] for line in tail.split("\n")]
         del self._lines[keep:]
@@ -158,13 +186,6 @@ class _ParsedLines:
             del rows[keep:]
             rows.extend(len(_wrap(line, width)) for line in new)
 
-        last_start = text.rfind("\n") + 1
-        if self._format == "ansi" and self._keepable:
-            if _OTHER_ESCAPE_RE.search(text, start, last_start):
-                self._keepable = False
-            else:
-                codes = ANSI_SGR_RE.findall(text, start, last_start)
-                self._replay = _in_force(self._replay, codes)
         self._text = text
         self._last_start = last_start
         # Trailing blank lines aren't content (a trailing newline ends the
