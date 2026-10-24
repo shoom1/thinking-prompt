@@ -442,7 +442,8 @@ A `Dialog` has no buttons unless you give it some, and it needs something
 to take keyboard focus: at least one button, fields, or a focusable body (e.g. a
 `TextArea`, closed with Escape). Otherwise `show_dialog()` raises
 `ValueError`. Other options: `escape_result`, `escapable`, `width` (box
-only; never narrower than the buttons), `max_height`, `fields`, `align_values`.
+only: columns, never fewer than the buttons take, or `"full"`), `max_height`,
+`fields`, `align_values`.
 
 **Where a box sits.** Under the prompt, above the status bar: where an inline
 dialog would be. When the rest of the screen takes rows (a thinking box, a

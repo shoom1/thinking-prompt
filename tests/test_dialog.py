@@ -619,6 +619,21 @@ class TestMaxHeight:
 
         assert Short().max_height == 8
 
+
+class TestWidth:
+    @pytest.mark.parametrize("width", [0, -1, "wide"])
+    def test_is_columns_full_or_none(self, width):
+        """None sizes the box to its content; there's no 0 or -1 for it."""
+        with pytest.raises(ValueError, match=r'width must be at least 1, "full" or None, got '):
+            Dialog(width=width)
+
+    def test_a_subclass_value_is_checked_too(self):
+        class Wide(Dialog):
+            width = -1
+
+        with pytest.raises(ValueError, match="width"):
+            Wide()
+
     def test_the_inline_dropdown_builder_passes_it_on(self):
         assert _dropdown_dialog("T", "B", ["a"], placement="inline", max_height=9).max_height == 9
 

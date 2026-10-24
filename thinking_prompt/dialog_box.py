@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import textwrap
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any, Callable, Literal
 
 from prompt_toolkit.application.current import get_app
 from prompt_toolkit.filters import Condition
@@ -137,13 +137,13 @@ def build_box(dialog: Dialog) -> BoxView:
     )
 
 
-def _width_dimension(width: int | None, least: int) -> Dimension | None:
-    """None/0 = auto-size, -1 = as wide as possible, >0 = preferred width,
-    at least ``least``."""
-    if width is None or width == 0:
+def _width_dimension(width: int | Literal["full"] | None, least: int) -> Dimension | None:
+    """None = sized to the content, "full" = as wide as possible, a number
+    = the preferred width, at least ``least``."""
+    if width is None:
         return None
-    if width == -1:
-        # Max width - use large preferred with no max constraint
+    if width == "full":
+        # As wide as the screen lets it: a large preferred width, no maximum.
         return Dimension(preferred=9999)
     # Preferred width (allows shrinking if terminal is smaller)
     return Dimension(preferred=max(width, least))
