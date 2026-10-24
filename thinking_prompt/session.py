@@ -1395,7 +1395,7 @@ class ThinkingPromptSession:
         self,
         title: str,
         text: str,
-        choices: Sequence[str],
+        options: Sequence[str],
         *,
         placement: Placement | None = None,
         max_height: int | None = None,
@@ -1406,7 +1406,7 @@ class ThinkingPromptSession:
         Args:
             title: Dialog title.
             text: Dialog body text.
-            choices: List of choice strings (each becomes a button).
+            options: The options, each a button.
             placement: "box" or "inline"; None (default) uses the session's
                 dialog_placement.
             max_height: The most rows the dialog takes; what doesn't fit
@@ -1414,7 +1414,7 @@ class ThinkingPromptSession:
                 terminal's rows less the prompt's.
 
         Returns:
-            The selected choice string, or None if Escape was pressed.
+            The option picked, or None if Escape was pressed.
 
         Example:
             action = await session.choice_dialog(
@@ -1426,7 +1426,7 @@ class ThinkingPromptSession:
                 save_file()
         """
         from .dialog import _choice_dialog
-        dialog = _choice_dialog(title, text, choices, self._resolve_placement(placement), max_height)
+        dialog = _choice_dialog(title, text, options, self._resolve_placement(placement), max_height)
         return cast(Optional[str], await self._dialogs.show(dialog))
 
     async def dropdown_dialog(

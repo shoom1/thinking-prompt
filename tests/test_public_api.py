@@ -129,11 +129,35 @@ def _parameters(func: Callable[..., object]) -> list[str]:
             ["title", "content_format", "echo", "order", "max_lines", "overflow"],
         ),
         (ThinkingBox.finish, ["echo"]),
+        (
+            ThinkingPromptSession.message_dialog,
+            ["title", "text", "ok_text", "placement", "max_height"],
+        ),
+        (
+            ThinkingPromptSession.yes_no_dialog,
+            ["title", "text", "yes_text", "no_text", "placement", "max_height"],
+        ),
+        (
+            ThinkingPromptSession.choice_dialog,
+            ["title", "text", "options", "placement", "max_height"],
+        ),
+        (
+            ThinkingPromptSession.dropdown_dialog,
+            ["title", "text", "options", "default", "placement", "max_height"],
+        ),
+        (
+            ThinkingPromptSession.checklist_dialog,
+            ["title", "text", "options", "defaults", "placement", "max_height"],
+        ),
     ],
-    ids=["session", "start_thinking", "thinking", "finish"],
+    ids=[
+        "session", "start_thinking", "thinking", "finish", "message_dialog",
+        "yes_no_dialog", "choice_dialog", "dropdown_dialog", "checklist_dialog",
+    ],
 )
 def test_parameter_names(func: Callable[..., object], names: list[str]):
-    """A session default for boxes is ``thinking_`` + the box's parameter."""
+    """One name per meaning: a session default for boxes is ``thinking_`` +
+    the box's parameter, and the dialog helpers all take ``options``."""
     assert _parameters(func) == names
 
 

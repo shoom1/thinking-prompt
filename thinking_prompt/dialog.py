@@ -462,15 +462,15 @@ def _message_dialog(
 def _choice_dialog(
     title: str,
     text: str,
-    choices: Sequence[str],
+    options: Sequence[str],
     placement: Placement = "box",
     max_height: int | None = None,
 ) -> Dialog:
-    """One button per choice, returning its text; Escape returns None."""
+    """One button per option, returning its text; Escape returns None."""
     return Dialog(
         title,
         text,
-        [ButtonConfig(choice, result=choice) for choice in choices],
+        [ButtonConfig(option, result=option) for option in options],
         placement=placement,
         max_height=max_height,
     )
