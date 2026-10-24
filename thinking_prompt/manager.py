@@ -79,6 +79,7 @@ class ThinkingBoxManager:
         thinking_echo: bool = True,
         spinner: Spinner | None = Spinner.DOTS,
         spinner_position: Literal["before", "after"] = "before",
+        border: bool = True,
     ) -> None:
         """
         Args:
@@ -91,6 +92,8 @@ class ThinkingBoxManager:
                 when the finish call doesn't say (the session's thinking_echo).
             spinner: The header spinner (None for none).
             spinner_position: The spinner "before" or "after" the title.
+            border: Whether a box's header line has its border, for boxes
+                that don't say (the session's thinking_border).
         """
         self._display = display
         self._default_max_lines = default_max_lines
@@ -100,6 +103,7 @@ class ThinkingBoxManager:
         self._thinking_echo = thinking_echo
         self._spinner = spinner
         self._spinner_position: Literal["before", "after"] = spinner_position
+        self._border = border
         self._boxes: list[ThinkingBox] = []  # in creation order
         self._expanded = False  # the user's choice (Ctrl+T)
         self._lock = threading.RLock()
@@ -113,6 +117,7 @@ class ThinkingBoxManager:
         content_callback: ContentCallback | None = None,
         *,
         title: str | None = None,
+        border: bool | None = None,
         order: int = 0,
         max_lines: int | None = None,
         content_format: ContentFormat = "plain",
@@ -127,6 +132,8 @@ class ThinkingBoxManager:
                 own to write to.
             title: Title for a header line (with the spinner) above the box.
                 None: no header.
+            border: Whether the header line has its border (None: the
+                manager's).
             order: Sort key (higher = closer to the prompt).
             max_lines: Max collapsed lines (default: the manager's); 0: the
                 title line only.
@@ -177,6 +184,7 @@ class ThinkingBoxManager:
                     spinner=self._spinner,
                     position=self._spinner_position,
                     request_frame=frames.redraw_in if frames is not None else None,
+                    border=self._border if border is None else border,
                 )
 
             box = ThinkingBox(

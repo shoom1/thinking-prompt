@@ -51,6 +51,12 @@ class TestOptions:
         assert (Keys.ControlT,) not in _bound_keys(session)
         assert session._manager._expand_key == "c-x"
 
+    def test_thinking_border_is_the_default_of_a_boxs_border(self):
+        session = ThinkingPromptSession(thinking_border=False)
+        assert session.start_thinking()._header.border is False
+        assert session.start_thinking(border=True)._header.border is True
+        assert ThinkingPromptSession().start_thinking()._header.border is True
+
     def test_thinking_title_titles_boxes_that_set_none(self):
         session = ThinkingPromptSession(thinking_title="Pondering")
         assert _header(session).text == "Pondering"

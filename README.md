@@ -280,6 +280,11 @@ async with session.thinking(title="Loading models", max_lines=0):
 `thinking_max_lines=0` makes every box an indicator unless it sets its own
 `max_lines`.
 
+`border=False` leaves out the header's line, for any box: just the spinner
+and the title, at the left edge (`⠋ Loading models`, not
+`── ⠋ Loading models ──────`). `thinking_border=False` does it for every box
+that doesn't say.
+
 ### Multiple Thinking Boxes
 
 Run multiple boxes concurrently with independent lifecycles. Use `order` to control positioning (higher = closer to prompt):
@@ -630,6 +635,7 @@ session = ThinkingPromptSession(
 
     # Thinking boxes
     thinking_title="Thinking",   # Header title of boxes started without one
+    thinking_border=True,        # The line in each box's header (False: title only)
     spinner=Spinner.DOTS,        # Spinner.LINE, Spinner.ELLIPSIS, your own, or None
     spinner_position="before",   # "before" or "after" the title
     thinking_echo=True,          # Echo a finished box to the console (False: drop it)

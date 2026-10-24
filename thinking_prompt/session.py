@@ -142,6 +142,7 @@ class ThinkingPromptSession:
         expand_key: str = "c-t",
         thinking_max_lines: int = 15,
         thinking_title: str = "Thinking",
+        thinking_border: bool = True,
         spinner: Spinner | None = Spinner.DOTS,
         spinner_position: Literal["before", "after"] = "before",
         echo_input: bool = True,
@@ -173,6 +174,9 @@ class ThinkingPromptSession:
                 only, a processing indicator.
             thinking_title: Header title of boxes started without one.
                 "" for none.
+            thinking_border: Whether a box's header line has its border
+                ("── ⠋ Thinking ───") or is just the spinner and the title
+                ("⠋ Thinking"), unless the box says. Default: True.
             spinner: The thinking header's spinner: a preset such as
                 ``Spinner.LINE``, your own ``Spinner(frames, interval)``,
                 or None for none. Default: ``Spinner.DOTS``.
@@ -254,6 +258,7 @@ class ThinkingPromptSession:
             thinking_echo=thinking_echo,
             spinner=spinner,
             spinner_position=spinner_position,
+            border=thinking_border,
         )
 
         # Input history (for up/down arrow)
@@ -629,6 +634,7 @@ class ThinkingPromptSession:
         content_callback: ContentCallback | None = None,
         *,
         title: str | None = None,
+        border: bool | None = None,
         order: int = 0,
         max_lines: int | None = None,
         content_format: ContentFormat = "plain",
@@ -647,6 +653,9 @@ class ThinkingPromptSession:
                 holds its own text, which you write.
             title: Title on the box's header line (default: the session's
                 ``thinking_title``).
+            border: False: the header line is just the spinner and the
+                title, with no line (default: the session's
+                ``thinking_border``).
             order: Sort key for multiple boxes (higher = closer to prompt).
             max_lines: Max collapsed lines (overrides session default). 0:
                 the title line only, a processing indicator: its text
@@ -679,6 +688,7 @@ class ThinkingPromptSession:
         return self._manager.create_box(
             content_callback,
             title=title if title is not None else self._thinking_title,
+            border=border,
             order=order,
             max_lines=max_lines,
             content_format=content_format,
@@ -710,6 +720,7 @@ class ThinkingPromptSession:
         self,
         *,
         title: str | None = None,
+        border: bool | None = None,
         content_format: ContentFormat = "plain",
         echo: bool | None = None,
         order: int = 0,
@@ -722,6 +733,8 @@ class ThinkingPromptSession:
 
         Args:
             title: Optional title for the thinking separator.
+            border: False: the header line is just the spinner and the
+                title (default: the session's ``thinking_border``).
             content_format: Format for rendering ("plain" or "ansi").
             echo: If True, print the box's text to the console
                 (and keep it for repaints) when the block ends; if False,
@@ -769,6 +782,7 @@ class ThinkingPromptSession:
         """
         box = self.start_thinking(
             title=title,
+            border=border,
             content_format=content_format,
             order=order,
             max_lines=max_lines,

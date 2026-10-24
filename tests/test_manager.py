@@ -573,3 +573,26 @@ class TestHeaderLayout:
         header_row = _render_rows(mgr.get_container(), 80, 2)[0]
         assert len(header_row) == 80
         assert header_row.strip("─") == shown
+
+    @pytest.mark.parametrize(
+        "spinner, position, title, shown",
+        [
+            (Spinner(("●",)), "before", "Loading", "● Loading"),
+            (Spinner(("●",)), "after", "Loading", "Loading ●"),
+            (Spinner(("●",)), "before", "", "●"),
+            (None, "before", "Loading", "Loading"),
+        ],
+    )
+    def test_without_a_border_the_row_is_the_spinner_and_title(self, spinner, position, title, shown):
+        """At the left edge, where the box's text starts."""
+        mgr = make_manager(spinner=spinner, spinner_position=position)
+        mgr.create_box(lambda: "x", title=title, border=False)
+        assert _render_rows(mgr.get_container(), 80, 2) == [shown, "x"]
+
+    def test_a_box_follows_the_managers_border_unless_it_sets_its_own(self):
+        mgr = make_manager(spinner=None, border=False)
+        mgr.create_box(lambda: "", title="A")
+        mgr.create_box(lambda: "", title="B", border=True)
+        rows = _render_rows(mgr.get_container(), 20, 4)
+        assert rows[0] == "A"
+        assert rows[2].strip("─") == " B "
