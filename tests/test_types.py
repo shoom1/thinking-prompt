@@ -66,3 +66,35 @@ class TestFormatExceptionDetail:
         from thinking_prompt._text import format_exception_detail
 
         assert format_exception_detail(RuntimeError()) == "RuntimeError"
+
+
+class TestCoalesce:
+    """Merging same-style fragments (the transcript's ANSI and a box's lines)."""
+
+    def test_merges_adjacent_same_style(self):
+        from thinking_prompt._text import coalesce
+
+        frags = [("bold", "a"), ("bold", "b"), ("", "c"), ("", "d"), ("bold", "e")]
+        assert coalesce(frags) == [("bold", "ab"), ("", "cd"), ("bold", "e")]
+
+    def test_drops_empty_text(self):
+        from thinking_prompt._text import coalesce
+
+        assert coalesce([("x", ""), ("x", "a")]) == [("x", "a")]
+
+    def test_preserves_handler_fragments_unmerged(self):
+        """3-tuple (mouse-handler) fragments must survive coalescing intact:
+        never merged into neighbors in either direction, handler preserved."""
+        from thinking_prompt._text import coalesce
+
+        handler = lambda e: None  # noqa: E731
+        frags = [("x", "a"), ("x", "b", handler), ("x", "c"), ("x", "d")]
+        result = coalesce(frags)
+        assert result == [("x", "a"), ("x", "b", handler), ("x", "cd")]
+        assert result[1][2] is handler
+
+    def test_drops_empty_text_handler_fragments(self):
+        from thinking_prompt._text import coalesce
+
+        handler = lambda e: None  # noqa: E731
+        assert coalesce([("x", "", handler), ("x", "a")]) == [("x", "a")]

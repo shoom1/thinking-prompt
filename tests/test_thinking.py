@@ -439,3 +439,242 @@ class TestOverflowHead:
         content = "a\nb\nc\nd\n" + "x" * 45 + "\n"
         control = ThinkingBoxControl(lambda: content, max_collapsed_lines=5, overflow="head")
         assert _rendered(control, 40, 5) == ["a", "b", "c", "d", "+1 line... ctrl-t to expand"]
+
+
+def _whole_lines(text: str, content_format: str) -> list[Any]:
+    """The lines a box shows for ``text``, as parsing the whole text at
+    once makes them (the trailing blank lines dropped)."""
+    from prompt_toolkit.formatted_text import ANSI, fragment_list_to_text, to_formatted_text
+    from prompt_toolkit.formatted_text.utils import split_lines
+
+    if content_format == "ansi":
+        fragments = to_formatted_text(ANSI(text))
+    else:
+        fragments = to_formatted_text([("class:thinking-box", text)])
+    lines = [list(line) for line in split_lines(fragments)]
+    while len(lines) > 1 and not fragment_list_to_text(lines[-1]).strip():
+        lines.pop()
+    return lines
+
+
+def _whole_parse(text: str, content_format: str) -> list[tuple[str, str]]:
+    """Each character those lines show, with its style, newlines between."""
+    joined: list[Any] = []
+    for i, line in enumerate(_whole_lines(text, content_format)):
+        if i:
+            joined.append(("", "\n"))
+        joined.extend(line)
+    return _chars(joined)
+
+
+def _chars(fragments: Any) -> list[tuple[str, str]]:
+    return [(style, char) for style, text, *_ in fragments for char in text]
+
+
+def _whole_rows(text: str, content_format: str, width: int) -> int:
+    """The rows those lines take at ``width`` columns."""
+    from thinking_prompt.thinking_control import _wrap
+
+    return sum(len(_wrap(line, width)) for line in _whole_lines(text, content_format))
+
+
+_CODES = [
+    "\x1b[0m", "\x1b[m", "\x1b[;1m", "\x1b[00m", "\x1b[1m", "\x1b[2m", "\x1b[3m",
+    "\x1b[22m", "\x1b[32m", "\x1b[41m", "\x1b[39m", "\x1b[0;33m", "\x1b[38;5;200m",
+    "\x1b[38;2;10;20;30m",
+]
+_WORDS = ["a", "bc", "def ", "  ", "\n", "\n", "\n\n", "世界", "x" * 30]
+# Escapes other than color codes: a cursor move, a line erase, an escape
+# that swallows the newline after it, zero-width text, an 8-bit CSI.
+_OTHER_ESCAPES = ["\x1b[3C", "\x1b[2K", "\x1b\n", "\x1b[3\n", "\x01zw\n\x02", "\x9b31m"]
+
+
+def _random_ansi(rng: Any, pieces: int, other_escapes: bool = False) -> str:
+    out = []
+    for _ in range(pieces):
+        roll = rng.random()
+        if other_escapes and roll < 0.05:
+            out.append(rng.choice(_OTHER_ESCAPES))
+        elif roll < 0.35:
+            out.append(rng.choice(_CODES))
+        else:
+            out.append(rng.choice(_WORDS))
+    return "".join(out)
+
+
+class TestParsedOnce:
+    """A box's text is parsed once, not on every draw: text streamed in is
+    parsed from its last line on, and a line's rows are counted once per
+    width. The box shows what parsing the whole text at once shows."""
+
+    @staticmethod
+    def _streamed(content_format: str) -> tuple[dict[str, str], ThinkingBoxControl]:
+        state = {"text": ""}
+        control = ThinkingBoxControl(
+            lambda: state["text"], content_format=content_format, expanded=lambda: True
+        )
+        return state, control
+
+    @staticmethod
+    def _assert_shows_whole_parse(control: ThinkingBoxControl, text: str, fmt: str) -> None:
+        if not text:
+            return
+        assert _chars(control._get_formatted_text()) == _whole_parse(text, fmt)
+        for width in (80, 7):
+            assert control.get_line_count(width) == _whole_rows(text, fmt, width)
+
+    @pytest.mark.parametrize("seed", range(20))
+    def test_streamed_ansi_shows_what_a_whole_parse_shows(self, seed: int):
+        """Chunks cut anywhere, mid-escape included."""
+        import random
+
+        rng = random.Random(seed)
+        text = _random_ansi(rng, 120)
+        state, control = self._streamed("ansi")
+        for cut in sorted(rng.sample(range(1, len(text) + 1), 40)):
+            state["text"] = text[:cut]
+            self._assert_shows_whole_parse(control, state["text"], "ansi")
+
+    @pytest.mark.parametrize("seed", range(10))
+    def test_streamed_text_with_other_escapes_shows_what_a_whole_parse_shows(self, seed: int):
+        import random
+
+        rng = random.Random(seed)
+        text = _random_ansi(rng, 120, other_escapes=True)
+        state, control = self._streamed("ansi")
+        for cut in sorted(rng.sample(range(1, len(text) + 1), 40)):
+            state["text"] = text[:cut]
+            self._assert_shows_whole_parse(control, state["text"], "ansi")
+
+    @pytest.mark.parametrize("escape", _OTHER_ESCAPES)
+    def test_lines_after_another_escape_show_what_a_whole_parse_shows(self, escape: str):
+        """An escape other than a color code can swallow a newline, so the
+        lines before it can't be kept by counting newlines."""
+        state, control = self._streamed("ansi")
+        for text in (f"a{escape}b\nc\n", f"a{escape}b\nc\nd", f"a{escape}b\nc\nd\ne\n"):
+            state["text"] = text
+            self._assert_shows_whole_parse(control, text, "ansi")
+
+    @pytest.mark.parametrize("content_format", ["plain", "ansi"])
+    @pytest.mark.parametrize("seed", range(10))
+    def test_edits_show_what_a_whole_parse_shows(self, content_format: str, seed: int):
+        """set_line() and clear() change text before the last line too."""
+        import random
+
+        from thinking_prompt.streaming import StreamingContent
+
+        rng = random.Random(seed)
+        content = StreamingContent()
+        control = ThinkingBoxControl(
+            content.get_content, content_format=content_format, expanded=lambda: True
+        )
+        for _ in range(60):
+            roll = rng.random()
+            if roll < 0.6:
+                content.append(_random_ansi(rng, 4))
+            elif roll < 0.95 and len(content):
+                index = rng.randrange(-len(content), len(content) + 2)
+                content.set_line(index, _random_ansi(rng, 3).replace("\n", ""))
+            elif roll >= 0.95:
+                content.clear()
+            self._assert_shows_whole_parse(control, content.get_content(), content_format)
+
+    def test_a_style_open_before_the_last_line_carries_over(self):
+        state, control = self._streamed("ansi")
+        state["text"] = "\x1b[1m\x1b[32mgreen\n"
+        control.get_line_count(80)
+        state["text"] += "still\n"
+        assert set(_chars(control._get_formatted_text())[-5:]) == {
+            ("ansigreen bold", c) for c in "still"
+        }
+
+    def test_a_reset_before_the_last_line_ends_the_styles(self):
+        state, control = self._streamed("ansi")
+        state["text"] = "\x1b[1mbold\x1b[0m\x1b[32mgreen\n"
+        control.get_line_count(80)
+        state["text"] += "more\n"
+        assert set(_chars(control._get_formatted_text())[-4:]) == {
+            ("ansigreen", c) for c in "more"
+        }
+
+    @staticmethod
+    def _counting_parses(monkeypatch: pytest.MonkeyPatch) -> list[int]:
+        """The length of each text the control parses as ANSI from now on."""
+        from prompt_toolkit.formatted_text import ANSI
+
+        from thinking_prompt import thinking_control
+
+        parsed: list[int] = []
+
+        class Counting(ANSI):
+            def __init__(self, value: str) -> None:
+                parsed.append(len(value))
+                super().__init__(value)
+
+        monkeypatch.setattr(thinking_control, "ANSI", Counting)
+        return parsed
+
+    @staticmethod
+    def _draw(control: ThinkingBoxControl) -> None:
+        """As a frame does: the height asked for, then the content."""
+        control.get_line_count(80)
+        control.create_content(80, 15)
+
+    def test_drawing_the_same_text_again_parses_nothing(self, monkeypatch: pytest.MonkeyPatch):
+        parsed = self._counting_parses(monkeypatch)
+        text = "".join(f"\x1b[32mline {i}\x1b[0m\n" for i in range(100))
+        control = _control(text, content_format="ansi")
+        self._draw(control)
+        parsed.clear()
+        self._draw(control)
+        assert parsed == []
+
+    def test_an_append_parses_from_the_last_line(self, monkeypatch: pytest.MonkeyPatch):
+        parsed = self._counting_parses(monkeypatch)
+        state, control = self._streamed("ansi")
+        state["text"] = "".join(f"\x1b[32mline {i}\x1b[0m words\n" for i in range(1000))
+        self._draw(control)
+        parsed.clear()
+        appended = "\x1b[1mnew\x1b[0m line\n"
+        state["text"] += appended
+        self._draw(control)
+        assert 0 < sum(parsed) < 2 * len(appended)
+
+    @pytest.mark.parametrize("content_format", ["plain", "ansi"])
+    def test_an_append_counts_the_rows_of_new_lines_only(
+        self, monkeypatch: pytest.MonkeyPatch, content_format: str
+    ):
+        from thinking_prompt import thinking_control
+
+        state, control = self._streamed(content_format)
+        state["text"] = "".join(f"line {i} words\n" for i in range(1000))
+        self._draw(control)
+        wrapped: list[int] = []
+        real_wrap = thinking_control._wrap
+
+        def counting_wrap(line: Any, width: int) -> Any:
+            wrapped.append(width)
+            return real_wrap(line, width)
+
+        monkeypatch.setattr(thinking_control, "_wrap", counting_wrap)
+        state["text"] += "new line\n"
+        self._draw(control)
+        assert len(wrapped) < 10
+
+    def test_a_new_width_counts_rows_again(self):
+        state, control = self._streamed("ansi")
+        state["text"] = "".join(f"\x1b[32m{'x' * (i % 30)}\x1b[0m\n" for i in range(50))
+        assert control.get_line_count(80) == 50
+        for width in range(5, 16):
+            assert control.get_line_count(width) == _whole_rows(state["text"], "ansi", width)
+        state["text"] += "y" * 40 + "\n"
+        for width in (80, *range(5, 16)):
+            assert control.get_line_count(width) == _whole_rows(state["text"], "ansi", width)
+
+    def test_an_ansi_line_is_kept_as_style_runs(self):
+        """Not a fragment a character, as the ANSI parser makes them."""
+        control = _control("\x1b[32m" + "x" * 50 + "\x1b[1m" + "y" * 50, content_format="ansi")
+        assert control.create_content(80, 5).get_line(0) == [
+            ("class:thinking-box ansigreen", "x" * 50),
+            ("class:thinking-box ansigreen bold", "y" * 50),
+        ]
