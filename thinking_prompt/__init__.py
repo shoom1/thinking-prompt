@@ -67,7 +67,7 @@ from .types import (
     Placement,
 )
 
-__version__ = "0.4.0"
+__version__ = "0.4.1"
 
 # Library logging convention: records go nowhere unless the application
 # configures logging. Without a handler, Python's last-resort handler
