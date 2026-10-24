@@ -250,7 +250,7 @@ class TestDialogManagerFailureRecovery:
         manager = session._dialogs
         assert manager._current_dialog is None
         assert manager._visible is False
-        assert session.app.layout.has_focus(session.default_buffer)
+        assert session.app.layout.has_focus(session._default_buffer)
 
     async def test_failing_build_body_does_not_block_next_dialog(self, running_session):
         class Broken(Dialog):

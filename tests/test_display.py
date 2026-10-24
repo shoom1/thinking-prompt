@@ -565,9 +565,10 @@ class TestRenderableToAnsi:
 class TestTranscriptWiring:
     def _display(self):
         from thinking_prompt.display import Display
-        from thinking_prompt.styles import DEFAULT_STYLES
-        style = DEFAULT_STYLES.to_style()
-        return Display(get_style=lambda: style, thinking_styles=DEFAULT_STYLES)
+        from thinking_prompt.styles import ThinkingPromptStyles
+        styles = ThinkingPromptStyles()
+        style = styles.to_style()
+        return Display(get_style=lambda: style, thinking_styles=styles)
 
     def test_markdown_stored_as_source(self, capsys):
         pytest.importorskip("rich")

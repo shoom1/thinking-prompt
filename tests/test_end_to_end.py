@@ -219,7 +219,7 @@ def prompt_and_status_rows(session: ThinkingPromptSession) -> tuple[int, int]:
     where = session.app.renderer.last_rendered_screen.visible_windows_to_write_positions
     prompt = next(
         w for w in where
-        if isinstance(w.content, BufferControl) and w.content.buffer is session.default_buffer
+        if isinstance(w.content, BufferControl) and w.content.buffer is session._default_buffer
     )
     status = next(w for w in where if w.style == "class:status")
     return where[prompt].ypos, where[status].ypos
@@ -313,9 +313,9 @@ class TestBoxLifecycle:
                 release.set()
                 await wait_until(lambda: waiting_for_input(session) and not session.is_thinking)
                 inp.send_text("ab")
-                await wait_until(lambda: session.default_buffer.text == "ab")
+                await wait_until(lambda: session._default_buffer.text == "ab")
                 inp.send_text(CTRL_T)
-                await wait_until(lambda: session.default_buffer.text == "ba")
+                await wait_until(lambda: session._default_buffer.text == "ba")
 
             await run_with(session, handler, script)
 
@@ -711,7 +711,7 @@ class TestWhatEnterRecords:
                 assert echoed_inputs(session) == ["first"]
                 await settled_renders(session)  # the prompt reloads its history as it's redrawn
                 inp.send_text(UP)  # the line before the blank one
-                await wait_until(lambda: session.default_buffer.text == "first")
+                await wait_until(lambda: session._default_buffer.text == "first")
 
             await run_with(session, delivered.append, script)
 
@@ -726,7 +726,7 @@ class TestWhatEnterRecords:
                 assert echoed_inputs(session) == []
                 await settled_renders(session)  # the prompt reloads its history as it's redrawn
                 inp.send_text(UP)
-                await wait_until(lambda: session.default_buffer.text == "secret")
+                await wait_until(lambda: session._default_buffer.text == "secret")
 
             await run_with(session, delivered.append, script)
 
@@ -747,7 +747,7 @@ class TestTypeAhead:
                 inp.send_text("first" + ENTER + "second" + ENTER)
                 await wait_until(lambda: delivered == ["first"] and waiting_for_input(session))
                 assert echoed_inputs(session) == delivered
-                assert session.default_buffer.text == "second"
+                assert session._default_buffer.text == "second"
 
                 inp.send_text(ENTER)
                 await wait_until(lambda: delivered == ["first", "second"])
@@ -774,7 +774,7 @@ class TestInputWhileBusy:
                 inp.send_text("slow" + ENTER)
                 await wait_until(lambda: delivered == ["slow"])
                 inp.send_text("next" + ENTER + "!")  # "!" goes on the draft Enter left
-                await wait_until(lambda: session.default_buffer.text == "next!")
+                await wait_until(lambda: session._default_buffer.text == "next!")
                 assert echoed_inputs(session) == ["slow"]
 
                 release.set()
@@ -824,7 +824,7 @@ class TestBusyHint:
                 inp.send_text("x" + ENTER)
                 await wait_until(lambda: on_screen(session, "Busy — press Ctrl+C to cancel"))
                 inp.send_text(ENTER + "!")  # "!" goes on the draft once Enter is refused again
-                await wait_until(lambda: session.default_buffer.text == "x!")
+                await wait_until(lambda: session._default_buffer.text == "x!")
 
                 release.set()
                 await wait_until(lambda: waiting_for_input(session))
@@ -901,7 +901,7 @@ class TestBackgroundHint:
                 inp.send_text(CTRL_C)
                 await wait_until(lambda: on_screen(session, BACKGROUND_HINT))
                 inp.send_text(CTRL_C + "x")  # "x" lands once the second Ctrl+C is handled
-                await wait_until(lambda: session.default_buffer.text == "x")
+                await wait_until(lambda: session._default_buffer.text == "x")
                 assert not run.done() and session.is_thinking
                 assert session.status_text == BACKGROUND_HINT
                 assert "Operation cancelled...\n" not in transcript_texts(session._display)
@@ -1149,7 +1149,7 @@ class TestCtrlDInDialog:
 
             async def script(run: asyncio.Task[None]) -> None:
                 inp.send_text(draft + CTRL_D + "!")  # "!" shows on the draft unless the app exited
-                await wait_until(lambda: run.done() or session.default_buffer.text == draft + "!")
+                await wait_until(lambda: run.done() or session._default_buffer.text == draft + "!")
                 assert run.done() is (draft == "")
 
             await run_with(session, handler, script)
@@ -1220,7 +1220,7 @@ class TestDialogsEndToEnd:
                 await wait_until(lambda: dialog_open(session))
                 inp.send_text("hi")
                 await wait_until(lambda: field.text == "hi")
-                assert session.default_buffer.text == ""
+                assert session._default_buffer.text == ""
                 inp.send_text(ESCAPE)
                 await wait_until(lambda: results == [None])
 
@@ -2089,13 +2089,13 @@ class TestInlineDialogs:
                 await wait_until(lambda: dialog_rendered(session))
                 inp.send_text("x")
                 await asyncio.sleep(0.1)
-                assert session.default_buffer.text == ""
+                assert session._default_buffer.text == ""
                 inp.send_text(ENTER)
                 await wait_until(lambda: results == ["delete"])
                 # Keys are handled in order: "x" was handled before Enter.
-                assert session.default_buffer.text == ""
+                assert session._default_buffer.text == ""
                 assert not inline_open(session)
-                assert session.app.layout.has_focus(session.default_buffer)
+                assert session.app.layout.has_focus(session._default_buffer)
 
             await run_with(session, handler, script)
 
@@ -2229,7 +2229,7 @@ class TestInlineDialogs:
                     prompt = next(
                         (w for w in where
                          if isinstance(w.content, BufferControl)
-                         and w.content.buffer is session.default_buffer),
+                         and w.content.buffer is session._default_buffer),
                         None,
                     )
                     status = next((w for w in where if w.style == "class:status"), None)

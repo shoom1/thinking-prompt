@@ -178,13 +178,13 @@ class TestAcceptHandlerWhileBusy:
         loop = asyncio.new_event_loop()
         try:
             session._pending_input = loop.create_future()
-            session.default_buffer.text = "hello"
+            session._default_buffer.text = "hello"
 
-            accepted = session.default_buffer.validation_state  # baseline access
-            ah = session.default_buffer.accept_handler
+            accepted = session._default_buffer.validation_state  # baseline access
+            ah = session._default_buffer.accept_handler
             assert ah is not None
 
-            result = ah(session.default_buffer)
+            result = ah(session._default_buffer)
             assert result is True
             assert session._pending_input.done()
             assert session._pending_input.result() == "hello"
@@ -207,13 +207,13 @@ class TestAcceptHandlerWhileBusy:
             session._current_handler_task = running
 
             session._pending_input = loop.create_future()
-            session.default_buffer.text = "queued"
+            session._default_buffer.text = "queued"
 
-            session.default_buffer.validate_and_handle()
+            session._default_buffer.validate_and_handle()
 
             # Don't deliver the text and don't clear the buffer.
             assert session._pending_input.done() is False
-            assert session.default_buffer.text == "queued"
+            assert session._default_buffer.text == "queued"
 
             running.cancel()
             try:
@@ -374,10 +374,10 @@ class TestCtrlDKeyBinding:
         # The filter also requires prompt focus, which is resolved via
         # the current app — evaluate it under the session's own app.
         with set_app(session.app):
-            session.default_buffer.text = "draft in progress"
+            session._default_buffer.text = "draft in progress"
             assert not binding.filter()
 
-            session.default_buffer.reset()
+            session._default_buffer.reset()
             assert binding.filter()
 
     async def test_prompt_async_raises_eoferror_end_to_end(self, session):

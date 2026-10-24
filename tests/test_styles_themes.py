@@ -118,8 +118,6 @@ class TestThemeFactories:
             (d["field-label"], d["field-label-selected"]),
             (d["field-value"], d["field-value-selected"]),
             (d["field-desc"], d["field-desc-selected"]),
-            (d["radio-list"], d["radio-selected"]),
-            (d["checkbox-list"], d["checkbox-selected"]),
             (d["dialog-choice"], d["dialog-choice-selected"]),
         ]
         for unselected, selected in pairs:

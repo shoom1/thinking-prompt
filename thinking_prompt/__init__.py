@@ -40,6 +40,7 @@ from .dialog import (
     Dialog,
 )
 from .fields import (
+    AlignValues,
     CheckboxField,
     ChecklistField,
     ChoiceField,
@@ -49,15 +50,10 @@ from .fields import (
     SelectField,
     TextField,
 )
-from .layout import ThinkingHeader
 from .rich_utils import _renderable_to_ansi as rich_to_ansi
 from .session import ThinkingPromptSession
 from .spinner import Spinner
-from .streaming import StreamingContent
-from .styles import (
-    DEFAULT_STYLES,
-    ThinkingPromptStyles,
-)
+from .styles import ThinkingPromptStyles
 from .thinking_box import ThinkingBox
 from .types import (
     ContentCallback,
@@ -81,15 +77,14 @@ __all__ = [
     "AppInfo",
     # Styles
     "ThinkingPromptStyles",
-    "DEFAULT_STYLES",
-    # Type helpers
-    "StreamingContent",
+    # Thinking boxes and types
     "ThinkingBox",
     "ContentCallback",
     "ContentFormat",
     "Overflow",
     "Placement",
     "InputHandler",
+    "AlignValues",
     # Dialog
     "Dialog",
     "ButtonConfig",
@@ -102,8 +97,7 @@ __all__ = [
     "ChecklistField",
     "RadioField",
     "ChoiceField",
-    # Layout
-    "ThinkingHeader",
+    # Spinner
     "Spinner",
     # Utilities
     "rich_to_ansi",
