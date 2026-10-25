@@ -249,7 +249,9 @@ after Ctrl+C, and lets its errors through. Inside a query (or a handler),
 
 A line typed while a query runs is refused by default (`Busy`). With
 `ThinkingPromptSession(input_while_busy="queue")` it waits under the
-prompt and runs next; Up on an empty prompt takes it back to edit.
+prompt and runs next; Up on an empty prompt takes it back to edit. A
+follow-up question takes the oldest queued line as its answer, as a
+terminal's typed-ahead input would.
 
 To run queries side by side, start a task per input instead of calling
 `query()`. Each is background work: Ctrl+C at the prompt leaves it, and

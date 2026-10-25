@@ -617,6 +617,31 @@ class TestQueue:
 
             await run_loop(session, self._loop(session, ran, started, release), script)
 
+    async def test_a_follow_up_takes_the_oldest_queued_line(self):
+        answers: list[str] = []
+        release = asyncio.Event()
+        with piped_session(input_while_busy="queue") as (session, inp):
+
+            async def ask() -> None:
+                await release.wait()
+                answers.append(await session.prompt_async())
+
+            async def body() -> None:
+                await session.prompt_async()
+                await session.query(ask())
+                answers.append(await session.prompt_async())
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: session._foreground is not None)
+                inp.send_text("yes" + ENTER + "next" + ENTER)
+                await wait_until(lambda: list(session._queued) == ["yes", "next"])
+                release.set()
+                await wait_until(lambda: answers == ["yes", "next"])
+                assert echoed_inputs(session) == ["go", "yes", "next"]
+
+            await run_loop(session, body, script)
+
     async def test_blank_lines_are_not_queued(self):
         ran: list[str] = []
         started: list[str] = []
