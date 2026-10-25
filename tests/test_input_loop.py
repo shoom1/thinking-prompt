@@ -547,6 +547,35 @@ class TestQueue:
 
             await run_loop(session, self._loop(session, ran, started, release), script)
 
+    async def test_busy_outside_a_query_doesnt_offer_ctrl_c(self):
+        # The loop awaits its work itself, not in query(): Ctrl+C has no
+        # query to cancel (it would exit), so the hint doesn't offer it.
+        started: list[str] = []
+        release = asyncio.Event()
+        with piped_session() as (session, inp):
+
+            async def body() -> None:
+                while True:
+                    try:
+                        text = await session.prompt_async()
+                    except (EOFError, KeyboardInterrupt):
+                        return
+                    started.append(text)
+                    await release.wait()
+
+            async def script(run: asyncio.Task[None]) -> None:
+                try:
+                    inp.send_text("slow" + ENTER)
+                    await wait_until(lambda: started == ["slow"])
+                    inp.send_text("next" + ENTER)
+                    await wait_until(lambda: session._hint is not None)
+                    assert session.status_text == "Busy"
+                    assert session._default_buffer.text == "next"
+                finally:
+                    release.set()  # the app stopping doesn't end the loop's own work
+
+            await run_loop(session, body, script)
+
     async def test_queued_lines_run_in_order_each_echoed_when_it_runs(self):
         ran: list[str] = []
         started: list[str] = []
@@ -587,6 +616,31 @@ class TestQueue:
                 assert session._default_buffer.text == "three"
 
             await run_loop(session, self._loop(session, ran, started, release), script)
+
+    async def test_a_follow_up_takes_the_oldest_queued_line(self):
+        answers: list[str] = []
+        release = asyncio.Event()
+        with piped_session(input_while_busy="queue") as (session, inp):
+
+            async def ask() -> None:
+                await release.wait()
+                answers.append(await session.prompt_async())
+
+            async def body() -> None:
+                await session.prompt_async()
+                await session.query(ask())
+                answers.append(await session.prompt_async())
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: session._foreground is not None)
+                inp.send_text("yes" + ENTER + "next" + ENTER)
+                await wait_until(lambda: list(session._queued) == ["yes", "next"])
+                release.set()
+                await wait_until(lambda: answers == ["yes", "next"])
+                assert echoed_inputs(session) == ["go", "yes", "next"]
+
+            await run_loop(session, body, script)
 
     async def test_blank_lines_are_not_queued(self):
         ran: list[str] = []

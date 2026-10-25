@@ -124,8 +124,11 @@ class ThinkingPromptSession:
         await session.run_async()
     """
 
-    # Status hint shown when Enter is refused because nobody awaits input.
+    # Status hints shown when Enter is refused because nobody awaits input:
+    # while a query runs, which Ctrl+C cancels, and while the loop is busy
+    # outside one, where Ctrl+C has no query to cancel (it would exit).
     _BUSY_STATUS = "Busy — press Ctrl+C to cancel"
+    _BUSY_NO_QUERY_STATUS = "Busy"
     # Status hint shown when Ctrl+C at an idle prompt leaves live tasks' boxes.
     _BACKGROUND_STATUS = "Background work is running — Ctrl+D exits"
 
@@ -288,16 +291,16 @@ class ThinkingPromptSession:
         # The foreground query (a run_async handler's, or query()'s): the
         # task Ctrl+C cancels.
         self._foreground: asyncio.Task[Any] | None = None
-        # The task running run_async() (None otherwise). Its boxes count as
-        # nobody's: it's busy running the app, so the session ends them.
+        # The task that entered `async with session:` (run_async()'s, too);
+        # None outside. Its boxes count as nobody's: the session ends them.
         self._app_task: asyncio.Task[Any] | None = None
         # The task running the Application while `async with session:` (or
         # run_async()) runs it; None outside.
         self._app_run: asyncio.Task[Any] | None = None
-        # Set to True by the Ctrl+C binding when it cancels the handler task.
-        # _run_handler reads this to distinguish a user-initiated cancel
-        # (swallow CancelledError, continue the input loop) from an outer
-        # cancellation (re-raise to let the input loop exit).
+        # Set to True by the Ctrl+C binding when it cancels the foreground
+        # query: the "Operation cancelled..." line for the boxes that cancel
+        # ends waits until the query is done (see _announce_cancel), and
+        # _run_query clears it.
         self._user_cancelled_handler: bool = False
         # Boxes were cancelled during a Ctrl+C of the handler: one
         # "Operation cancelled..." follows them once the handler ends.
@@ -352,7 +355,11 @@ class ThinkingPromptSession:
                 self._default_buffer.reset()
                 self._invalidate()
             return
-        self._show_hint(self._BUSY_STATUS)
+        foreground = self._foreground
+        if foreground is not None and not foreground.done():
+            self._show_hint(self._BUSY_STATUS)
+        else:
+            self._show_hint(self._BUSY_NO_QUERY_STATUS)
 
     def _show_hint(self, hint: str) -> None:
         """Show a status hint, keeping the status it replaces."""
@@ -501,11 +508,10 @@ class ThinkingPromptSession:
             )
 
             if handler_running:
-                # Mark before cancel so _run_handler treats this as a user
-                # cancellation and does not re-raise CancelledError.
-                # Its boxes are finished as it unwinds (and by
-                # _run_handler's cleanup); a background task's live box
-                # keeps going.
+                # Mark before cancel: the "Operation cancelled..." line
+                # waits until the query is done. Its boxes are finished as
+                # it unwinds (and by _run_query's cleanup); a background
+                # task's live box keeps going.
                 self._user_cancelled_handler = True
                 assert self._foreground is not None
                 self._foreground.cancel()
@@ -761,9 +767,9 @@ class ThinkingPromptSession:
     def _announce_cancel(self, ended: bool) -> None:
         """Say "Operation cancelled..." after the boxes a cancel ended.
 
-        While Ctrl+C is cancelling the handler, the line waits until the
-        handler is done, so one line follows every box that cancel ends
-        (see _run_handler). When nothing ended, there's nothing to say.
+        While Ctrl+C is cancelling the query, the line waits until the
+        query is done, so one line follows every box that cancel ends
+        (see _run_query). When nothing ended, there's nothing to say.
         """
         if not ended:
             return
