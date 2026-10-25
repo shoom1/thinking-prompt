@@ -1257,7 +1257,7 @@ class ThinkingPromptSession:
             The coroutine's result, or None when Ctrl+C (or the app
             stopping) cancelled it. Once the app has stopped, or been told
             to stop, the coroutine isn't run (it's closed) and the result
-            is None.
+            is None: a loop that calls only query() should stop on it.
 
         Raises:
             Whatever the coroutine raises, after its boxes are echoed.
@@ -1289,8 +1289,11 @@ class ThinkingPromptSession:
             )
         if run.done() or self.app.is_done:
             # Stopped, or told to stop: the query would be cancelled with
-            # the app, so it isn't started.
+            # the app, so it isn't started. One loop turn even so: a loop
+            # of queries that ignores the None must not keep the app from
+            # finishing its stop (Ctrl+C couldn't reach it either).
             coro.close()
+            await asyncio.sleep(0)
             return None
         return await self._run_query(coro)
 

@@ -391,6 +391,25 @@ class TestQuery:
         assert inspect.getcoroutinestate(told) == inspect.CORO_CLOSED
         assert inspect.getcoroutinestate(stopped) == inspect.CORO_CLOSED
 
+    async def test_a_loop_of_queries_ignoring_none_lets_the_app_finish_stopping(self):
+        # Refused at once, query() still gives the loop a turn: without it,
+        # a loop of queries that ignores the None never let the app stop,
+        # and Ctrl+C couldn't reach it.
+        async def step() -> None:
+            return None
+
+        with piped_session() as (session, inp):
+            async with session:
+                await wait_until(lambda: session.app.is_running)
+                run = session._app_run
+                assert run is not None
+                session.exit()
+                for _ in range(1000):
+                    await session.query(step())
+                    if run.done():
+                        break
+                assert run.done()
+
     async def test_ctrl_d_cancels_the_query_and_the_loop_ends(self):
         results: list[object] = []
         started: list[str] = []
