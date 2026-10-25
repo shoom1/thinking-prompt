@@ -651,6 +651,71 @@ class TestQueue:
 
             await run_loop(session, self._loop(session, ran, started, release), script)
 
+    @staticmethod
+    def _queued_rows(session: ThinkingPromptSession) -> list[str]:
+        return [line for line in screen_lines(session) if line.startswith(("queued:", "…"))]
+
+    async def test_past_three_queued_lines_the_oldest_two_show_and_a_count(self):
+        ran: list[str] = []
+        started: list[str] = []
+        release = asyncio.Event()
+        with piped_session(input_while_busy="queue") as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("slow" + ENTER)
+                await wait_until(lambda: started == ["slow"])
+                inp.send_text("".join(f"line {i}" + ENTER for i in range(3)))
+                await wait_until(lambda: len(self._queued_rows(session)) == 3)
+                assert self._queued_rows(session) == ["queued: line 0", "queued: line 1", "queued: line 2"]
+                inp.send_text("".join(f"line {i}" + ENTER for i in range(3, 5)))
+                await wait_until(lambda: len(session._queued) == 5)
+                await wait_until(lambda: "… 3 more queued" in self._queued_rows(session))
+                assert self._queued_rows(session) == ["queued: line 0", "queued: line 1", "… 3 more queued"]
+                release.set()
+
+            await run_loop(session, self._loop(session, ran, started, release), script)
+
+    async def test_a_long_queue_in_a_short_terminal_leaves_room_for_the_prompt(self):
+        ran: list[str] = []
+        started: list[str] = []
+        release = asyncio.Event()
+        with piped_session(rows=12, input_while_busy="queue") as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("slow" + ENTER)
+                await wait_until(lambda: started == ["slow"])
+                inp.send_text("".join(f"line {i}" + ENTER for i in range(20)))
+                await wait_until(lambda: len(session._queued) == 20)
+                session.app.invalidate()
+                await wait_until(lambda: any("Window too small" in line or "more queued" in line
+                                             for line in screen_lines(session)))
+                lines = screen_lines(session)
+                assert not any("Window too small" in line for line in lines), lines
+                assert any(line.startswith(">>>") for line in lines), lines
+                release.set()
+
+            await run_loop(session, self._loop(session, ran, started, release), script)
+
+    async def test_too_short_for_three_rows_the_queue_gives_way_to_the_prompt(self):
+        ran: list[str] = []
+        started: list[str] = []
+        release = asyncio.Event()
+        with piped_session(rows=5, input_while_busy="queue") as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("slow" + ENTER)
+                await wait_until(lambda: started == ["slow"])
+                inp.send_text("".join(f"line {i}" + ENTER for i in range(3)))
+                await wait_until(lambda: len(session._queued) == 3)
+                await wait_until(lambda: any(line.startswith(("queued:", "Window too small"))
+                                             for line in screen_lines(session)))
+                lines = screen_lines(session)
+                assert not any("Window too small" in line for line in lines), lines
+                assert any(line.startswith(">>>") for line in lines), lines
+                release.set()
+
+            await run_loop(session, self._loop(session, ran, started, release), script)
+
     async def test_up_recalls_the_newest_queued_line(self):
         ran: list[str] = []
         started: list[str] = []

@@ -253,7 +253,9 @@ isn't run), and lets its errors through. Inside a query (or a handler),
 
 A line typed while a query runs is refused by default (`Busy`). With
 `ThinkingPromptSession(input_while_busy="queue")` it waits under the
-prompt and runs next; Up on an empty prompt takes it back to edit. A
+prompt and runs next; Up on an empty prompt takes it back to edit. The
+queued lines take at most three rows: past that, the oldest two show
+with a count of the rest (`… 5 more queued`). A
 follow-up question takes the oldest queued line as its answer, as a
 terminal's typed-ahead input would.
 

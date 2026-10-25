@@ -131,6 +131,8 @@ class ThinkingPromptSession:
     _BUSY_NO_QUERY_STATUS = "Busy"
     # Status hint shown when Ctrl+C at an idle prompt leaves live tasks' boxes.
     _BACKGROUND_STATUS = "Background work is running — Ctrl+D exits"
+    # The most rows the queued lines take under the prompt.
+    _MAX_QUEUED_ROWS = 3
 
     def __init__(
         self,
@@ -437,15 +439,31 @@ class ThinkingPromptSession:
         )
 
     def _queued_rows(self) -> AnyContainer:
-        """The queued lines, one row each, under the input area."""
+        """The queued lines under the input area, one row each. Past
+        _MAX_QUEUED_ROWS, the oldest show (they run next) and the last row
+        counts the rest."""
+        def rows() -> list[str]:
+            queued = list(self._queued)
+            if len(queued) <= self._MAX_QUEUED_ROWS:
+                return [f"  queued: {line}" for line in queued]
+            shown = self._MAX_QUEUED_ROWS - 1
+            return [f"  queued: {line}" for line in queued[:shown]] + [
+                f"  … {len(queued) - shown} more queued"
+            ]
+
         def text() -> FormattedText:
-            rows = "\n".join(f"  queued: {line}" for line in self._queued)
-            return FormattedText([("class:queued-input", rows)])
+            return FormattedText([("class:queued-input", "\n".join(rows()))])
+
+        def height() -> Dimension:
+            # None of the rows is required: in a short terminal the prompt
+            # and the status bar keep theirs.
+            count = min(len(self._queued), self._MAX_QUEUED_ROWS)
+            return Dimension(min=0, preferred=count, max=count)
 
         return ConditionalContainer(
             Window(
                 FormattedTextControl(text),
-                height=lambda: Dimension.exact(len(self._queued)),
+                height=height,
                 wrap_lines=False,
             ),
             # Left out of the app's last frame: lines still queued at exit
