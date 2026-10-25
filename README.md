@@ -156,9 +156,10 @@ session = ThinkingPromptSession(
 Every argument after `message` is keyword-only. Keys and the thinking
 header are under [Session Options](#session-options). Options are checked
 when they're passed (the session's here, a box's in `start_thinking()`, a
-field's or a dialog's when it's made): a count that isn't an int, or is
-out of range, and a name that isn't one of the choices raise
-`ValueError`.
+field's or a dialog's when it's made): one of the wrong kind (a count
+that isn't an int, a `spinner` that isn't a `Spinner`, an `editing_mode`
+that isn't an `EditingMode`), out of range, or not one of its choices
+raises `ValueError`.
 
 ### Thinking API
 
@@ -678,9 +679,11 @@ be unique.
 
 Every field takes `key`, `label`, `description` and `default`. A check,
 radio or choice list with no label and no description shows just its options.
-A field keeps its `options` (and a checklist its `default`) as a tuple of
-its own, so changing the list you passed doesn't change the field; an
-option listed twice raises `ValueError`.
+A field keeps its `options` (and a checklist its `default`, a sequence of
+options: `()` for none) as a tuple of its own, so changing the list you
+passed doesn't change the field. An option listed twice raises
+`ValueError`, in a field and in `choice_dialog()`, `dropdown_dialog()` and
+`checklist_dialog()`.
 
 **Keys:** in a box, ↑↓ move a row at a time and Tab / Shift+Tab a field at a
 time (Tab on to the buttons after the last field, Shift+Tab from the buttons
@@ -856,6 +859,7 @@ removed:
 | `session.choice_dialog(..., choices=...)` | `options=...` |
 | `TextField(edit_width=N)` | `width=N` |
 | `Dialog(width=0)`, `Dialog(width=-1)` (or a subclass's `width`) | `width=None` (fit the content), `width="full"` |
+| A field's `options`: the list you passed | A tuple of the field's own (`list(field.options)` for a list) |
 | `session.layout` | `session.app.layout` |
 | `session.default_buffer` | `session.app.layout.get_buffer_by_name(DEFAULT_BUFFER)` (prompt_toolkit's, `from prompt_toolkit.enums import DEFAULT_BUFFER`) |
 | `StreamingContent`, `ThinkingHeader` | Drop them: write with a box's methods; the header comes from `thinking_title`, `spinner` and `spinner_position` |

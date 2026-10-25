@@ -114,6 +114,11 @@ class ChecklistField(Field):
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "options", _own_options(self, self.options))
+        if self.default is None or isinstance(self.default, str):
+            raise ValueError(
+                f"ChecklistField {self.key!r}: default must be a sequence of options "
+                f"(() for none), got {self.default!r}"
+            )
         object.__setattr__(self, "default", tuple(self.default))
 
 
@@ -148,12 +153,17 @@ def _own_options(item: Field, options: Iterable[str]) -> tuple[str, ...]:
     """``options`` as a tuple of the field's own, each option once: two rows
     of one option would be checked together, and its value returned twice."""
     kept = tuple(options)
-    seen: set[str] = set()
-    for option in kept:
-        if option in seen:
-            raise ValueError(f"{type(item).__name__} {item.key!r}: option {option!r} is listed twice")
-        seen.add(option)
+    _check_once(f"{type(item).__name__} {item.key!r}", kept)
     return kept
+
+
+def _check_once(owner: str, options: Iterable[str]) -> None:
+    """Raise ValueError if an option is listed twice, naming ``owner``."""
+    seen: set[str] = set()
+    for option in options:
+        if option in seen:
+            raise ValueError(f"{owner}: option {option!r} is listed twice")
+        seen.add(option)
 
 
 def _check_size(item: Field, name: str, value: int | None, optional: bool = False) -> None:

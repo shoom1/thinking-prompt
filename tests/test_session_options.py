@@ -94,8 +94,10 @@ class TestOptionChecks:
         ({"completions_menu_height": -1}, r"completions_menu_height must be at least 1, got -1"),
         ({"completions_menu_height": 2.5}, r"completions_menu_height must be an int, got 2\.5"),
         ({"spinner_position": "left"}, r"spinner_position must be 'before' or 'after', got 'left'"),
+        ({"spinner": ("a", "b")}, r"spinner must be a Spinner or None, got \('a', 'b'\)"),
+        ({"editing_mode": "vi"}, r"editing_mode must be EditingMode\.EMACS or EditingMode\.VI, got 'vi'"),
     ], ids=["max lines 1.5", "max lines True", "transcript -1", "transcript 2.5",
-            "menu 0", "menu -1", "menu 2.5", "spinner position"])
+            "menu 0", "menu -1", "menu 2.5", "spinner position", "spinner", "editing mode"])
     def test_a_bad_value_is_refused(self, kwargs, message):
         with pytest.raises(ValueError, match=message):
             ThinkingPromptSession(**kwargs)

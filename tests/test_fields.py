@@ -134,6 +134,12 @@ class TestFieldClasses:
         with pytest.raises(ValueError, match=rf"{cls.__name__} 'k': option 'a' is listed twice"):
             cls("k", "L", options=["a", "b", "a"])
 
+    @pytest.mark.parametrize("default", [None, "a"], ids=["None", "a str"])
+    def test_a_checklist_default_is_a_sequence_of_options(self, default):
+        """None failed with a bare TypeError; a str was taken letter by letter."""
+        with pytest.raises(ValueError, match=r"ChecklistField 'k': default must be a sequence of options \(\(\) for none\), got "):
+            ChecklistField("k", "L", options=["a", "b"], default=default)
+
     def test_a_checklist_keeps_a_tuple_of_its_default(self):
         default = ["a"]
         field = ChecklistField("k", "L", options=["a", "b"], default=default)

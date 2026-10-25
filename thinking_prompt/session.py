@@ -216,15 +216,20 @@ class ThinkingPromptSession:
             ValueError: If an option is out of range or of the wrong kind:
                 thinking_max_lines isn't an int of at least 0,
                 transcript_limit one of at least 0 (or None), or
-                completions_menu_height one of at least 1; spinner_position
-                isn't 'before' or 'after', dialog_placement 'box' or
-                'inline', or input_while_busy 'refuse' or 'queue'; or theme=
-                names an unknown theme.
+                completions_menu_height one of at least 1; spinner isn't a
+                Spinner or None, or editing_mode an EditingMode;
+                spinner_position isn't 'before' or 'after', dialog_placement
+                'box' or 'inline', or input_while_busy 'refuse' or 'queue';
+                or theme= names an unknown theme.
         """
         check_count("thinking_max_lines", thinking_max_lines, 0)
         check_count("transcript_limit", transcript_limit, 0, optional=True)
         check_count("completions_menu_height", completions_menu_height, 1)
         check_choice("spinner_position", spinner_position, ("before", "after"))
+        if spinner is not None and not isinstance(spinner, Spinner):
+            raise ValueError(f"spinner must be a Spinner or None, got {spinner!r}")
+        if not isinstance(editing_mode, EditingMode):
+            raise ValueError(f"editing_mode must be EditingMode.EMACS or EditingMode.VI, got {editing_mode!r}")
 
         self._message = message
         self._app_info = app_info
@@ -1657,6 +1662,9 @@ class ThinkingPromptSession:
         Returns:
             The option picked, or None if Escape was pressed.
 
+        Raises:
+            ValueError: If an option is listed twice.
+
         Example:
             action = await session.choice_dialog(
                 "Select Action",
@@ -1699,6 +1707,9 @@ class ThinkingPromptSession:
         Returns:
             The selected option string, or None if cancelled.
 
+        Raises:
+            ValueError: If ``options`` is empty, or an option is listed twice.
+
         Example:
             theme = await session.dropdown_dialog(
                 "Select Theme",
@@ -1739,7 +1750,7 @@ class ThinkingPromptSession:
             The checked options in option order, or None if cancelled.
 
         Raises:
-            ValueError: If ``options`` is empty.
+            ValueError: If ``options`` is empty, or an option is listed twice.
 
         Example:
             tools = await session.checklist_dialog(
