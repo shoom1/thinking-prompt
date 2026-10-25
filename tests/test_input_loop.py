@@ -4,6 +4,7 @@ cancels."""
 from __future__ import annotations
 
 import asyncio
+import inspect
 from collections.abc import Awaitable
 from contextlib import suppress
 from typing import Callable
@@ -368,6 +369,27 @@ class TestQuery:
             coro = asyncio.sleep(0)
             with pytest.raises(RuntimeError, match="async with session"):
                 await session.query(coro)
+
+    async def test_once_the_app_stops_it_runs_nothing_and_returns_none(self):
+        ran: list[str] = []
+        with piped_session() as (session, inp):
+
+            async def work(when: str) -> str:
+                ran.append(when)
+                return when
+
+            async with session:
+                await wait_until(lambda: session.app.is_running)
+                session.exit()  # told to stop: the app takes a few loop turns
+                told = work("told to stop")
+                assert await session.query(told) is None
+                await wait_until(lambda: session._app_run is not None and session._app_run.done())
+                stopped = work("stopped")
+                assert await session.query(stopped) is None
+        assert ran == []
+        # Closed, not left for a "never awaited" warning.
+        assert inspect.getcoroutinestate(told) == inspect.CORO_CLOSED
+        assert inspect.getcoroutinestate(stopped) == inspect.CORO_CLOSED
 
     async def test_ctrl_d_cancels_the_query_and_the_loop_ends(self):
         results: list[object] = []

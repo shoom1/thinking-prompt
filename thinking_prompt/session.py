@@ -1237,7 +1237,9 @@ class ThinkingPromptSession:
 
         Returns:
             The coroutine's result, or None when Ctrl+C (or the app
-            stopping) cancelled it.
+            stopping) cancelled it. Once the app has stopped, or been told
+            to stop, the coroutine isn't run (it's closed) and the result
+            is None.
 
         Raises:
             Whatever the coroutine raises, after its boxes are echoed.
@@ -1260,12 +1262,18 @@ class ThinkingPromptSession:
                 f"query() takes a coroutine: call the function, as in "
                 f"query(respond(text)); got {coro!r}"
             )
-        if self._app_run is None:
+        run = self._app_run
+        if run is None:
             coro.close()
             raise RuntimeError(
                 "query() runs a query of a running session: "
                 "call it inside `async with session:`"
             )
+        if run.done() or self.app.is_done:
+            # Stopped, or told to stop: the query would be cancelled with
+            # the app, so it isn't started.
+            coro.close()
+            return None
         return await self._run_query(coro)
 
     async def _run_query(self, coro: Coroutine[Any, Any, _T]) -> _T | None:

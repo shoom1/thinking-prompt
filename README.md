@@ -247,7 +247,8 @@ async with session:                        # the app runs until the block ends
 
 `query()` runs one input's work as the query Ctrl+C cancels. Boxes it
 leaves open end with it. It returns the coroutine's result, or `None`
-after Ctrl+C, and lets its errors through. Inside a query (or a handler),
+after Ctrl+C or the app stopping (once the app has stopped, the coroutine
+isn't run), and lets its errors through. Inside a query (or a handler),
 `prompt_async()` asks a follow-up question.
 
 A line typed while a query runs is refused by default (`Busy`). With
