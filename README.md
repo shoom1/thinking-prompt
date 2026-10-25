@@ -678,6 +678,9 @@ be unique.
 
 Every field takes `key`, `label`, `description` and `default`. A check,
 radio or choice list with no label and no description shows just its options.
+A field keeps its `options` (and a checklist its `default`) as a tuple of
+its own, so changing the list you passed doesn't change the field; an
+option listed twice raises `ValueError`.
 
 **Keys:** in a box, ↑↓ move a row at a time and Tab / Shift+Tab a field at a
 time (Tab on to the buttons after the last field, Shift+Tab from the buttons

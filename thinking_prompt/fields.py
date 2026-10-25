@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Generic, Literal, TypeVar, Union
 
 from prompt_toolkit.buffer import Buffer
@@ -44,6 +44,8 @@ from .types import Placement, check_count
 class Field(ABC):
     """A dialog's form field (Dialog.fields). Frozen: a list of fields can be
     shared by many dialogs (a class attribute), each keeping its own values.
+    A field's ``options`` (and a checklist's ``default``) are kept as a
+    tuple of its own, so a list passed in can change without reaching it.
 
     Attributes:
         key: The field's key in Dialog.values; unique within its dialog.
@@ -61,8 +63,11 @@ class Field(ABC):
 @dataclass(frozen=True)
 class SelectField(Field):
     """One of ``options``, stepped through in place with ←/→ (``◀ medium ▶``)."""
-    options: list[str] = field(default_factory=list)
+    options: Sequence[str] = ()
     default: str | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "options", _own_options(self, self.options))
 
 
 @dataclass(frozen=True)
@@ -70,13 +75,14 @@ class DropdownField(Field):
     """One of ``options``: Enter (or Space) opens a menu of them under the
     row, in a box and inline alike. ``height``: the menu's rows; ``width``:
     its columns (None: the widest option's, at most ``max_width``)."""
-    options: list[str] = field(default_factory=list)
+    options: Sequence[str] = ()
     default: str | None = None
     height: int = 4
     width: int | None = 15
     max_width: int | None = None
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "options", _own_options(self, self.options))
         _check_size(self, "height", self.height)
         _check_size(self, "width", self.width, optional=True)
         _check_size(self, "max_width", self.max_width, optional=True)
@@ -103,15 +109,22 @@ class TextField(Field):
 @dataclass(frozen=True)
 class ChecklistField(Field):
     """Any number of options, one per line; the value is the checked ones, in option order."""
-    options: list[str] = field(default_factory=list)
+    options: Sequence[str] = ()
     default: Sequence[str] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "options", _own_options(self, self.options))
+        object.__setattr__(self, "default", tuple(self.default))
 
 
 @dataclass(frozen=True)
 class RadioField(Field):
     """One of several options, one per line; with no default nothing is picked."""
-    options: list[str] = field(default_factory=list)
+    options: Sequence[str] = ()
     default: str | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "options", _own_options(self, self.options))
 
 
 @dataclass(frozen=True)
@@ -122,12 +135,25 @@ class ChoiceField(Field):
     Enter picks the option under it. As a dialog's only field, with nothing
     in the body taking focus, Enter then also presses the dialog's first
     button (with no buttons, the dialog closes with the pick)."""
-    options: list[str] = field(default_factory=list)
+    options: Sequence[str] = ()
     default: str | None = None
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "options", _own_options(self, self.options))
         if not self.options:
             raise ValueError(f"ChoiceField {self.key!r} needs at least one option")
+
+
+def _own_options(item: Field, options: Iterable[str]) -> tuple[str, ...]:
+    """``options`` as a tuple of the field's own, each option once: two rows
+    of one option would be checked together, and its value returned twice."""
+    kept = tuple(options)
+    seen: set[str] = set()
+    for option in kept:
+        if option in seen:
+            raise ValueError(f"{type(item).__name__} {item.key!r}: option {option!r} is listed twice")
+        seen.add(option)
+    return kept
 
 
 def _check_size(item: Field, name: str, value: int | None, optional: bool = False) -> None:
@@ -295,7 +321,7 @@ def _layout_row(
     return laid_out(label, start, max(1, left - kept), lead, trail)
 
 
-def _cycled(options: list[str], value: Any, delta: int) -> Any:
+def _cycled(options: Sequence[str], value: Any, delta: int) -> Any:
     """The option ``delta`` steps from ``value``, clamped to the ends.
 
     With no current selection (no default, or a default that isn't an
@@ -311,7 +337,7 @@ def _cycled(options: list[str], value: Any, delta: int) -> Any:
     return options[max(0, min(len(options) - 1, idx + delta))]
 
 
-def _selector_value(options: list[str], value: Any, value_style: str) -> _RowValue:
+def _selector_value(options: Sequence[str], value: Any, value_style: str) -> _RowValue:
     """``◀ value ▶``: the arrows layer class:select-arrow over the value
     style; at either end the missing arrow's place is kept blank, as
     padding that gives way before the option is cut."""
@@ -333,7 +359,7 @@ def _selector_value(options: list[str], value: Any, value_style: str) -> _RowVal
     )
 
 
-def _widest_selector(options: list[str], value: Any) -> int:
+def _widest_selector(options: Sequence[str], value: Any) -> int:
     """The most columns a ``◀ option ▶`` selector over ``options`` takes,
     showing any of them or ``value`` (a default can be none of them)."""
     return max(_selector_value(options, shown, "").columns() for shown in [*options, value])
@@ -1008,7 +1034,8 @@ class OptionsFieldControl(FieldControl[Any]):
             self._group = OptionGroup(item.options, multiple=True, selected=list(item.default), indent=indent)
         elif isinstance(item, ChoiceField):
             # Always a pick: the default, or the first option.
-            pick = item.default if item.default in item.options else item.options[0]
+            default = item.default
+            pick = default if default is not None and default in item.options else item.options[0]
             self._group = OptionGroup(
                 item.options, multiple=False, selected=[pick], indent=indent, marks=False
             )

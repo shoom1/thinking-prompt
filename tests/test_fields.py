@@ -116,6 +116,30 @@ class TestFieldClasses:
         DropdownField("k", "L", options=["a"], width=None)
         TextField("k", "L", width=1)
 
+    OPTION_FIELDS = [SelectField, DropdownField, ChecklistField, RadioField, ChoiceField]
+
+    @pytest.mark.parametrize("cls", OPTION_FIELDS, ids=lambda cls: cls.__name__)
+    def test_options_are_kept_as_a_tuple_of_their_own(self, cls):
+        """A change to the list passed doesn't reach the field: clearing it
+        made a dialog built from the field later raise IndexError."""
+        options = ["a", "b"]
+        field = cls("k", "L", options=options)
+        options.clear()
+        assert field.options == ("a", "b")
+        Dialog("T", fields=[field])
+
+    @pytest.mark.parametrize("cls", OPTION_FIELDS, ids=lambda cls: cls.__name__)
+    def test_an_option_listed_twice_is_refused(self, cls):
+        """Two rows of one option would be checked together, and its value returned twice."""
+        with pytest.raises(ValueError, match=rf"{cls.__name__} 'k': option 'a' is listed twice"):
+            cls("k", "L", options=["a", "b", "a"])
+
+    def test_a_checklist_keeps_a_tuple_of_its_default(self):
+        default = ["a"]
+        field = ChecklistField("k", "L", options=["a", "b"], default=default)
+        default.append("b")
+        assert field.default == ("a",)
+
     def test_the_field_classes_are_exported(self):
         for name in FIELD_NAMES:
             assert name in thinking_prompt.__all__
