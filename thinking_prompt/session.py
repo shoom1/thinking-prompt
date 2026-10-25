@@ -1271,8 +1271,9 @@ class ThinkingPromptSession:
     async def _run_query(self, coro: Coroutine[Any, Any, _T]) -> _T | None:
         """The foreground-query core, shared by query() and run_async's
         handlers (it doesn't check that the app runs)."""
-        foreground = self._foreground
-        if foreground is not None and not foreground.done():
+        # Taken until the cleanup below is done, not just while the task
+        # runs: the cleanup clears the slot, and another query's with it.
+        if self._foreground is not None:
             coro.close()
             raise RuntimeError(
                 "A query is already running: one at a time "

@@ -321,6 +321,38 @@ class TestQuery:
 
             await run_loop(session, body, script)
 
+    async def test_a_query_started_while_the_last_one_cleans_up_is_refused(self):
+        # The first query's work is done, but query() returns a loop turn
+        # later, after its cleanup. A second query accepted in that gap was
+        # unregistered by that cleanup: Ctrl+C then stopped the app and left
+        # the second query running.
+        outcome: list[str] = []
+        with piped_session() as (session, inp):
+
+            async def second() -> None:
+                return None
+
+            async def try_second() -> None:
+                try:
+                    await session.query(second())
+                    outcome.append("ran")
+                except RuntimeError as error:
+                    outcome.append(str(error))
+
+            async def first() -> None:
+                # Runs after this task is done, before query() resumes.
+                asyncio.get_running_loop().call_soon(lambda: asyncio.ensure_future(try_second()))
+
+            async def body() -> None:
+                await session.query(first())
+                await wait_until(lambda: bool(outcome))
+
+            async def script(run: asyncio.Task[None]) -> None:
+                await finished(run)
+
+            await run_loop(session, body, script)
+        assert len(outcome) == 1 and "already running" in outcome[0], outcome
+
     async def test_it_takes_a_coroutine_not_a_function(self):
         with piped_session() as (session, inp):
 
