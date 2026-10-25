@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import dataclasses
+import math
 
 import pytest
 
@@ -33,9 +34,9 @@ class TestSpinner:
         with pytest.raises(ValueError, match="spinner=None"):
             Spinner(())
 
-    @pytest.mark.parametrize("interval", [0, -0.1])
-    def test_an_interval_that_is_not_positive_raises(self, interval):
-        with pytest.raises(ValueError, match="interval"):
+    @pytest.mark.parametrize("interval", [0, -0.1, math.nan, math.inf])
+    def test_an_interval_that_is_not_positive_and_finite_raises(self, interval):
+        with pytest.raises(ValueError, match="interval must be positive and finite"):
             Spinner(("a", "b"), interval)
 
 

@@ -292,6 +292,25 @@ class TestSessionBoxes:
                 pass
         assert not session.is_thinking
 
+    @pytest.mark.parametrize("kwargs,message", [
+        ({"max_lines": 1.5}, r"max_lines must be an int \(or None\), got 1\.5"),
+        ({"max_lines": True}, r"max_lines must be an int \(or None\), got True"),
+        ({"overflow": "Tail"}, r"overflow must be 'tail' or 'head', got 'Tail'"),
+        ({"content_format": "markdown"}, r"content_format must be 'plain' or 'ansi', got 'markdown'"),
+    ], ids=["max lines 1.5", "max lines True", "overflow", "content format"])
+    def test_start_thinking_refuses_a_bad_option(self, kwargs, message):
+        session = _session()
+        with pytest.raises(ValueError, match=message):
+            session.start_thinking(**kwargs)
+        assert not session.is_thinking
+
+    async def test_thinking_refuses_a_bad_option(self):
+        session = _session()
+        with pytest.raises(ValueError, match="overflow must be 'tail' or 'head'"):
+            async with session.thinking(overflow="Tail"):  # type: ignore[arg-type]
+                pass
+        assert not session.is_thinking
+
     def test_no_lines_is_a_title_line_only(self):
         assert _session().start_thinking(max_lines=0)._control.max_collapsed_lines == 0
 

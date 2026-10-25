@@ -613,6 +613,10 @@ class TestMaxHeight:
         with pytest.raises(ValueError, match="max_height"):
             Dialog(max_height=rows)
 
+    def test_must_be_an_int(self):
+        with pytest.raises(ValueError, match=r"max_height must be an int \(or None\), got 2\.5"):
+            Dialog(max_height=2.5)  # type: ignore[arg-type]
+
     def test_a_subclass_can_set_it(self):
         class Short(Dialog):
             max_height = 8
@@ -621,7 +625,7 @@ class TestMaxHeight:
 
 
 class TestWidth:
-    @pytest.mark.parametrize("width", [0, -1, "wide"])
+    @pytest.mark.parametrize("width", [0, -1, "wide", 1.5, True])
     def test_is_columns_full_or_none(self, width):
         """None sizes the box to its content; there's no 0 or -1 for it."""
         with pytest.raises(ValueError, match=r'width must be at least 1, "full" or None, got '):

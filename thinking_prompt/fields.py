@@ -37,7 +37,7 @@ from prompt_toolkit.utils import get_cwidth
 from prompt_toolkit.widgets import Frame
 
 from .rows import MARKER, NO_MARKER, OptionGroup, RowControl, RowNavigator, has_focus
-from .types import Placement
+from .types import Placement, check_count
 
 
 @dataclass(frozen=True)
@@ -131,12 +131,8 @@ class ChoiceField(Field):
 
 
 def _check_size(item: Field, name: str, value: int | None, optional: bool = False) -> None:
-    """A field's size (rows or columns) is at least 1; None too if ``optional``."""
-    if optional and value is None:
-        return
-    if value is None or value < 1:
-        none = " (or None)" if optional else ""
-        raise ValueError(f"{type(item).__name__} {item.key!r}: {name} must be at least 1{none}, got {value!r}")
+    """A field's size (rows or columns) is an int of at least 1; None too if ``optional``."""
+    check_count(f"{type(item).__name__} {item.key!r}: {name}", value, 1, optional=optional)
 
 
 T = TypeVar("T", bound=Field)

@@ -60,7 +60,14 @@ from .resize import ShrinkRepaint
 from .rich_utils import _is_rich_renderable
 from .spinner import Spinner
 from .styles import ThinkingPromptStyles, resolve_theme
-from .types import InputWhileBusy, Placement, check_input_while_busy, check_placement
+from .types import (
+    InputWhileBusy,
+    Placement,
+    check_choice,
+    check_count,
+    check_input_while_busy,
+    check_placement,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -206,13 +213,18 @@ class ThinkingPromptSession:
                 takes the newest queued line back to edit.
 
         Raises:
-            ValueError: If thinking_max_lines is less than 0, or theme= names
-                       an unknown theme, or if dialog_placement isn't 'box'
-                       or 'inline', or if input_while_busy isn't 'refuse' or
-                       'queue'.
+            ValueError: If an option is out of range or of the wrong kind:
+                thinking_max_lines isn't an int of at least 0,
+                transcript_limit one of at least 0 (or None), or
+                completions_menu_height one of at least 1; spinner_position
+                isn't 'before' or 'after', dialog_placement 'box' or
+                'inline', or input_while_busy 'refuse' or 'queue'; or theme=
+                names an unknown theme.
         """
-        if thinking_max_lines < 0:
-            raise ValueError("thinking_max_lines must be at least 0")
+        check_count("thinking_max_lines", thinking_max_lines, 0)
+        check_count("transcript_limit", transcript_limit, 0, optional=True)
+        check_count("completions_menu_height", completions_menu_height, 1)
+        check_choice("spinner_position", spinner_position, ("before", "after"))
 
         self._message = message
         self._app_info = app_info
@@ -741,7 +753,9 @@ class ThinkingPromptSession:
             ended by the session (see the README's "When a Box Ends").
 
         Raises:
-            ValueError: If max_lines is less than 0.
+            ValueError: If max_lines isn't an int of at least 0 (or
+                None), content_format 'plain' or 'ansi', or overflow
+                'tail' or 'head'.
 
         Example:
             box = session.start_thinking(title="Processing")
@@ -752,8 +766,9 @@ class ThinkingPromptSession:
             box.finish()
         """
         # 0: the title line only; 1: the newest row, no hint.
-        if max_lines is not None and max_lines < 0:
-            raise ValueError(f"max_lines must be at least 0 (or None), got {max_lines!r}")
+        check_count("max_lines", max_lines, 0, optional=True)
+        check_choice("content_format", content_format, ("plain", "ansi"))
+        check_choice("overflow", overflow, ("tail", "head"))
         return self._manager.create_box(
             content_callback,
             title=title if title is not None else self._thinking_title,
@@ -821,7 +836,8 @@ class ThinkingPromptSession:
             ThinkingBox: the box, to write to and retitle.
 
         Raises:
-            ValueError: If max_lines is less than 0 (before the block runs).
+            ValueError: As start_thinking() raises it (before the block
+                runs).
 
         Example:
             async with session.thinking(title="Processing") as box:

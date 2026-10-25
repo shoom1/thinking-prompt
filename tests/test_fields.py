@@ -97,9 +97,15 @@ class TestFieldClasses:
          r"TextField 'k': width must be at least 1, got 0"),
         (lambda: TextField("k", "L", width=-5),
          r"TextField 'k': width must be at least 1, got -5"),
+        (lambda: DropdownField("k", "L", options=["a"], height=2.5),
+         r"DropdownField 'k': height must be an int, got 2\.5"),
+        (lambda: DropdownField("k", "L", options=["a"], width=1.5),
+         r"DropdownField 'k': width must be an int \(or None\), got 1\.5"),
+        (lambda: TextField("k", "L", width=True),
+         r"TextField 'k': width must be an int, got True"),
     ], ids=["dropdown width<0", "dropdown width=0", "max_width<0", "max_width=0", "height=0",
-            "text width=0", "text width<0"])
-    def test_sizes_below_one_are_refused(self, make, message):
+            "text width=0", "text width<0", "height 2.5", "dropdown width 1.5", "text width True"])
+    def test_sizes_below_one_or_not_ints_are_refused(self, make, message):
         """Refused when the field is made, not when its menu or edit field
         is first drawn (a negative width failed inside prompt_toolkit)."""
         with pytest.raises(ValueError, match=message):

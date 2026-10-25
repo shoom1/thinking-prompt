@@ -3,6 +3,7 @@ Spinner: the animation on a thinking box's header line.
 """
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import ClassVar
@@ -27,7 +28,8 @@ class Spinner:
         interval: Seconds each frame is shown.
 
     Raises:
-        ValueError: If there are no frames, or ``interval`` isn't positive.
+        ValueError: If there are no frames, or ``interval`` isn't a
+            positive, finite number.
     """
 
     frames: Sequence[str]
@@ -42,8 +44,9 @@ class Spinner:
         object.__setattr__(self, "frames", tuple(self.frames))
         if not self.frames:
             raise ValueError("a Spinner needs frames; pass spinner=None for no spinner")
-        if self.interval <= 0:
-            raise ValueError(f"a Spinner's interval must be positive, got {self.interval!r}")
+        # Not just > 0: NaN compares false both ways, and infinity never redraws.
+        if not (math.isfinite(self.interval) and self.interval > 0):
+            raise ValueError(f"a Spinner's interval must be positive and finite, got {self.interval!r}")
 
 
 Spinner.DOTS = Spinner(("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"), 0.1)

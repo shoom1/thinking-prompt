@@ -154,7 +154,11 @@ session = ThinkingPromptSession(
 ```
 
 Every argument after `message` is keyword-only. Keys and the thinking
-header are under [Session Options](#session-options).
+header are under [Session Options](#session-options). Options are checked
+when they're passed (the session's here, a box's in `start_thinking()`, a
+field's or a dialog's when it's made): a count that isn't an int, or is
+out of range, and a name that isn't one of the choices raise
+`ValueError`.
 
 ### Thinking API
 
