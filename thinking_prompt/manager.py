@@ -332,9 +332,10 @@ class ThinkingBoxManager:
 
         Those ``task`` created, those whose task has already ended, and those
         with no known owner (created outside asyncio, e.g. from a thread). A
-        live task's box is left to that task. A handler's cleanup passes the
-        handler's task; idle Ctrl+C and the end of run_async() pass the
-        app's task (the one running run_async()).
+        live task's box is left to that task. A query's cleanup passes the
+        query's task, and a sync handler's the task it ran in; idle Ctrl+C
+        and the end of ``async with session:`` pass the app's task (the one
+        that entered the block).
         """
 
         def owned(box: ThinkingBox) -> bool:

@@ -196,16 +196,18 @@ normal finish:
 - **Cancelled** (Ctrl+C, or the task running a `thinking()` block is
   cancelled): the content, then one `Operation cancelled...` line after all
   the boxes that the cancel ended.
-- **The handler raises**: the content, then the `[ERROR] Handler error: ...` line.
-- **Left open** by a handler that returns: finished as `box.finish()` would.
+- **The handler raises**: the content, then the `[ERROR] Handler error: ...`
+  line. A query's error is raised by `query()`, after the content.
+- **Left open** by a handler or a query that returns: finished as
+  `box.finish()` would.
 
 A box belongs to the task that opened it. The session ends a box only when
 nobody else will: its task has ended, it was opened outside asyncio (from a
-thread), or the app's own task opened it (the task running `run_async()`,
-e.g. for a startup status box). A box a live task is feeding is that task's
-to end.
+thread), or the app's own task opened it (the task running the
+`async with session:` block, or `run_async()`, e.g. for a startup status
+box). A box a live task is feeding is that task's to end.
 
-- **A handler ends:** the session finishes the boxes the handler opened,
+- **A handler or a query ends:** the session finishes the boxes it opened,
   and those whose task has ended or that were opened outside asyncio.
 - **Ctrl+C at an idle prompt:** the session ends the boxes nobody else
   will. If boxes that live tasks are feeding remain, Ctrl+C doesn't exit:
@@ -421,9 +423,11 @@ session.add_system("Connecting to server...")
 
 The session sometimes puts a hint in the status bar in place of your
 status: `Busy — press Ctrl+C to cancel` when Enter is pressed while a
-handler runs, and `Background work is running — Ctrl+D exits` (see
-[When a Box Ends](#when-a-box-ends)). Your status comes back once the hint
-no longer applies; a status you set meanwhile replaces the hint.
+query runs (`Busy` alone while your loop is busy outside `query()`, where
+Ctrl+C has no query to cancel), and `Background work is running — Ctrl+D
+exits` (see [When a Box Ends](#when-a-box-ends)). Your status comes back
+once the hint no longer applies; a status you set meanwhile replaces the
+hint.
 
 ### Dialogs
 
