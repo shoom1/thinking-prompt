@@ -603,7 +603,9 @@ class ThinkingPromptSession:
 
     @property
     def styles(self) -> ThinkingPromptStyles:
-        """The active theme's styles instance."""
+        """The theme in use: the instance passed as ``theme=`` (not a copy),
+        or a built-in one. A field changed on it shows once it's passed to
+        set_theme() again; dataclasses.replace() makes a tweaked copy."""
         return self._styles
 
     def set_theme(
@@ -773,7 +775,8 @@ class ThinkingPromptSession:
 
     @property
     def is_thinking(self) -> bool:
-        """Check if currently in thinking state."""
+        """True while any thinking box is open, a background task's too (so
+        it can be True at an idle prompt)."""
         return self._manager.has_active_boxes
 
     @asynccontextmanager

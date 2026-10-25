@@ -80,7 +80,8 @@ if __name__ == "__main__":
 > blocks the UI for its entire duration: the screen freezes, the spinner
 > stops, and Ctrl+C is not processed until it returns. Use an `async`
 > handler for anything that takes time, and wrap blocking calls with
-> `await asyncio.to_thread(...)` so the UI stays responsive.
+> `await asyncio.to_thread(...)` so the UI stays responsive (see
+> [Threads](#threads) for what a thread may call).
 
 > **Note — handler errors.** An exception in a handler is shown as
 > `[ERROR] Handler error: KeyError: 'x'` and logged, with its traceback,
@@ -219,7 +220,9 @@ to end.
 `box.is_finished` tells whether a box is done. Calling `finish()` again
 returns the same text without echoing it twice. Writes to a finished box are
 dropped, so `box.text` stays what `finish()` returned; the first one logs a
-warning to the `thinking_prompt` logger.
+warning to the `thinking_prompt` logger. `session.is_thinking` is True while
+any box is open, a background task's too, so it can be True at an idle
+prompt.
 
 Ctrl+T expands or collapses all open boxes together, and boxes start
 collapsed again once the last one finishes.
@@ -277,6 +280,31 @@ idle prompt costs no CPU:
   into scrollback, so the old frame can't be erased row by row. Shell
   output from before the session, anything printed outside it (plain
   `print()`) and entries `transcript_limit` dropped don't come back.
+
+### Threads
+
+The session runs on its asyncio event loop, and its calls belong there,
+with one exception: a box's writes work from any thread. A worker thread
+can stream into a box the loop opened (`append`, `set_line`, `clear`,
+`append_rich`, `set_line_rich`, `set_title`) and read it (`text`,
+`len(box)`, `is_finished`). Opening and finishing boxes, the `add_*`
+methods, `status_text`, dialogs, `prompt_async()` and `query()` run on
+the loop: `finish()` and `add_*` print, and printed from another thread
+their text would draw over the UI.
+
+Run the blocking part in a thread, and the rest after it, on the loop:
+
+```python
+async with session.thinking(title="Indexing") as box:
+    await asyncio.to_thread(index_files, box)   # index_files calls box.append()
+session.add_success("Indexed")
+```
+
+A thread of your own can tell the loop it's done, with
+`loop.call_soon_threadsafe(done.set)` on an `asyncio.Event` the loop
+awaits, and the loop finishes the box. Handing it `box.finish` itself
+doesn't work: the call runs outside the session's prompt_toolkit context,
+so its echo still prints past the UI.
 
 ### Long Content
 
@@ -752,6 +780,12 @@ session.set_theme("light", repaint=True)  # also clears and re-prints the transc
 With `repaint=True`, markdown and code blocks re-render from source in the
 new theme; output from `add_rich()` and raw ANSI keeps its original colors.
 
+`session.styles` is the theme in use: the instance you passed (not a
+copy), or the built-in one. Changing a field on it shows nothing until
+`session.set_theme(session.styles)`; to tweak the theme, make a new one
+with `dataclasses.replace(session.styles, ...)` and pass it to
+`set_theme()`.
+
 `NO_COLOR` (non-empty, checked at startup — see no-color.org) forces
 colorless rendering regardless of theme, while keeping bold/italic.
 
@@ -770,6 +804,56 @@ Bound transcript growth for long sessions:
 ```python
 session = ThinkingPromptSession(transcript_limit=1000)  # max transcript entries
 ```
+
+## Stability
+
+From 0.5.0 on:
+
+- **No breaking changes within a minor series.** Code written for 0.5.0
+  runs on every 0.5.x release; patch releases fix bugs and can add things.
+- **Breaking changes only in a new minor release** (0.6.0), each marked
+  **Breaking** in the
+  [changelog](https://github.com/shoom1/thinking-prompt/blob/main/CHANGELOG.md),
+  with an upgrade note here.
+
+The API is what `thinking_prompt` exports (its `__all__`), with the
+parameters, attributes and style classes this README documents. It
+doesn't cover names that start with `_`, the modules inside the package
+(import from `thinking_prompt` itself), or what's inside `session.app`:
+that's prompt_toolkit's `Application`, and the layout the session builds
+in it can change in any release.
+
+## Upgrading from 0.4
+
+0.5 settles the API before the stability promise above. Renamed and
+removed:
+
+| 0.4 | 0.5 |
+|---|---|
+| `ThinkingPromptSession(max_thinking_height=N)` | `thinking_max_lines=N` |
+| `ThinkingPromptSession(echo_thinking=...)` | `thinking_echo=...` |
+| `ThinkingPromptSession(history_limit=N)` | `transcript_limit=N` |
+| `box.finish(echo_to_console=...)`, `session.thinking(echo_to_console=...)` | `echo=...` |
+| `add_to_history=` on `finish()` or `thinking()` | Drop it: `echo` alone decides (printed and kept for repaints, or neither) |
+| `box.get_content()` | `box.text` |
+| `session.set_status(x)` | `session.status_text = x` (a Rich renderable too) |
+| `session.add_message("system", x)` | `session.add_system(x)` |
+| `session.add_message("assistant", x)` | `session.add_response(x)` |
+| `session.add_message("user", x)`, `add_message("thinking", x)` | Drop it: the session echoes input and finished boxes itself |
+| `session.choice_dialog(..., choices=...)` | `options=...` |
+| `TextField(edit_width=N)` | `width=N` |
+| `Dialog(width=0)`, `Dialog(width=-1)` (or a subclass's `width`) | `width=None` (fit the content), `width="full"` |
+| `session.layout` | `session.app.layout` |
+| `session.default_buffer` | `session.app.layout.get_buffer_by_name(DEFAULT_BUFFER)` (prompt_toolkit's, `from prompt_toolkit.enums import DEFAULT_BUFFER`) |
+| `StreamingContent`, `ThinkingHeader` | Drop them: write with a box's methods; the header comes from `thinking_title`, `spinner` and `spinner_position` |
+| `DEFAULT_STYLES` | `ThinkingPromptStyles()`, a fresh default theme |
+| `styles.to_rich_theme_dict()` | Drop it: the session's Rich output uses its theme already |
+| Style field `history`, classes `history.*` (`history.user-message`, ...) | `transcript`, `transcript.*` (`transcript.user-message`, ...) |
+| Style fields `radio_list`, `radio_selected`, `checkbox_list`, `checkbox_selected` (classes `radio-*`, `checkbox-*`) | Drop them: the dialog fields use the `field_*` styles |
+
+`prompt_async()` reads input inside `async with session:` (see
+[Your Own Loop](#your-own-loop)); outside it, it raises `RuntimeError`,
+where it used to wait forever.
 
 ## Examples
 

@@ -30,7 +30,9 @@ class ThinkingBox:
     """One thinking box: what ``start_thinking()`` returns and ``thinking()`` yields.
 
     Write to it (``append``, ``set_line``, the ``_rich`` variants,
-    ``clear``), retitle it, and finish it. A box started with a content
+    ``clear``), retitle it, and finish it. Writes, the title and reads work
+    from any thread; ``finish()`` runs on the event loop (it prints the
+    echo; see the README's "Threads"). A box started with a content
     callback (``start_thinking(callback)``) shows that callback's text: you
     can read it (``text``), but writing raises TypeError.
 
@@ -140,7 +142,8 @@ class ThinkingBox:
             content.clear()
 
     def append_rich(self, renderable: Any, *, theme: Any = None) -> None:
-        """Append a Rich renderable or markup string; the box switches to ANSI.
+        """Append a Rich renderable or markup string; the box switches to ANSI
+        (thread-safe).
 
         Text keeps its whitespace and wraps in the box like plain text; a
         Panel or Table is laid out at the session's width.
@@ -160,7 +163,8 @@ class ThinkingBox:
             )
 
     def set_line_rich(self, index: int, renderable: Any, *, theme: Any = None) -> None:
-        """Replace one line with a Rich renderable; the box switches to ANSI.
+        """Replace one line with a Rich renderable; the box switches to ANSI
+        (thread-safe).
 
         Args:
             index: Line index (negative counts from the end).
@@ -225,7 +229,7 @@ class ThinkingBox:
         return self._header.text if self._header is not None else ""
 
     def set_title(self, text: str) -> None:
-        """Set the title on the box's header line."""
+        """Set the title on the box's header line (thread-safe)."""
         if self._finished:
             self._warn_finished("set_title")
             return
@@ -236,7 +240,8 @@ class ThinkingBox:
     # -- finishing -------------------------------------------------------------
 
     def finish(self, echo: bool | None = None) -> str:
-        """Finish the box: remove it from the screen and echo its text.
+        """Finish the box: remove it from the screen and echo its text. Call
+        it on the event loop: the echo prints above the UI from there.
 
         Args:
             echo: If True, print the text to the console (and keep
