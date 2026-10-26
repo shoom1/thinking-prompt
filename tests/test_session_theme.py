@@ -65,9 +65,9 @@ class TestThemeParam:
         with pytest.raises(ValueError, match="Valid themes"):
             ThinkingPromptSession(theme="solarized")
 
-    def test_default_is_dark(self):
+    def test_default_follows_the_terminal(self):
         s = ThinkingPromptSession()
-        assert s.styles == ThinkingPromptStyles.dark()
+        assert s.styles == ThinkingPromptStyles.terminal()
 
     def test_default_styles_are_not_shared(self, monkeypatch):
         """Without theme=, each session gets its own default styles, so

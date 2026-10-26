@@ -5,7 +5,6 @@ Provides ThinkingPromptStyles dataclass for clean style customization.
 """
 from __future__ import annotations
 
-import os
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -63,39 +62,44 @@ class ThinkingPromptStyles:
     """
 
     # ==========================================================================
-    # Base theme colors - customize these to change colors throughout
+    # Base theme colors - customize these to change colors throughout.
+    # The defaults are the terminal theme's: named ANSI colors, which the
+    # terminal maps to its own palette, and no backgrounds ("": the
+    # terminal's own). dark() and light() set fixed palettes instead.
     # ==========================================================================
-    color_accent: str = "#88c0d0"  # Cyan - primary accent (selection, indicators)
-    color_accent_button: str = "#0066cc"  # Blue - button/menu selection highlight
-    color_success: str = "#a3be8c"  # Green - success states
-    color_warning: str = "#ebcb8b"  # Amber - warnings, system messages
-    color_error: str = "#bf616a"  # Red - errors
-    color_text: str = "#e0e0e0"  # Light grey - primary text
-    color_text_bright: str = "#ffffff"  # White - emphasized text
-    color_text_muted: str = "#888888"  # Grey - secondary/muted text
-    color_text_dim: str = "#666666"  # Dark grey - very dim text
-    color_bg_dark: str = "#333333"  # Dark - menus, dropdowns
-    color_bg_dialog: str = "#2a2a2a"  # Darker - dialog background
-    color_bg_input: str = "#3a3a3a"  # Medium - input fields, highlights
-    color_thinking: str = "#a0a0a0"  # Thinking box + echoed thinking text
-    color_thinking_border: str = "#606060"  # Thinking box border
-    color_thinking_hint: str = "#707070"  # "+N lines..." expand hint
-    color_bg_status: str = "#202040"  # Status bar background
-    color_text_status: str = "#808090"  # Status bar text
-    color_separator: str = "#444444"  # Input separator line
-    color_bg_button: str = "#404040"  # Dialog button background
-    color_bg_selected: str = "#454545"  # Selected menu/completion item bg
-    color_shadow: str = "#000000"  # Dialog shadow
+    color_accent: str = "ansicyan"  # Primary accent (selection, indicators)
+    color_accent_button: str = "ansiblue"  # Button/menu selection highlight
+    color_success: str = "ansigreen"  # Success states
+    color_warning: str = "ansiyellow"  # Warnings, system messages
+    color_error: str = "ansired"  # Errors
+    color_text: str = ""  # Primary text
+    color_text_bright: str = ""  # Emphasized text
+    color_text_muted: str = "ansibrightblack"  # Secondary/muted text
+    color_text_dim: str = "ansibrightblack"  # Very dim text
+    color_bg_dark: str = ""  # Menus, dropdowns
+    color_bg_dialog: str = ""  # Dialog background
+    color_bg_input: str = ""  # Input fields, highlights
+    color_thinking: str = "ansibrightblack"  # Thinking box + echoed thinking text
+    color_thinking_border: str = "ansibrightblack"  # Thinking box border
+    color_thinking_hint: str = "ansibrightblack"  # "+N lines..." expand hint
+    color_bg_status: str = ""  # Status bar background
+    color_text_status: str = "ansiblue"  # Status bar text
+    color_separator: str = "ansibrightblack"  # Input separator line
+    color_bg_button: str = ""  # Dialog button background
+    color_bg_selected: str = ""  # Selected menu/completion item bg
+    color_shadow: str = ""  # Dialog shadow
 
     # ==========================================================================
     # Shared menu styles - used by both dropdown and completion menus
     # ==========================================================================
     menu_bg: str = ""  # Defaults to color_bg_dark
     menu_item: str = ""  # Defaults to color_text on color_bg_dark
-    menu_item_selected: str = ""  # Defaults to color_accent on color_bg_selected
+    # The default theme shows selections in reverse video (it has no
+    # background colors); "" derives color_accent on color_bg_selected.
+    menu_item_selected: str = "reverse"
     menu_border: str = ""  # Defaults to color_text_muted on color_bg_dark
     menu_meta: str = ""  # Defaults to color_text on color_bg_dark
-    menu_meta_selected: str = ""  # Defaults to color_accent on color_bg_selected
+    menu_meta_selected: str = "reverse"  # "": color_accent on color_bg_selected
 
     # ==========================================================================
     # Thinking box styles
@@ -142,7 +146,7 @@ class ThinkingPromptStyles:
     dialog_border: str = ""  # Defaults to color_text_muted
     dialog_shadow: str = ""
     dialog_button: str = ""  # Defaults to color_text on color_bg_button
-    dialog_button_focused: str = ""  # Defaults to color_text_bright on color_accent_button bold
+    dialog_button_focused: str = "bold reverse"  # "": color_text_bright on color_accent_button bold
     dialog_choice: str = ""  # Inline action rows. Defaults to color_text
     dialog_choice_selected: str = ""  # Highlighted action row, and a ChoiceField's pick. Defaults to color_accent bold
     dialog_hint: str = ""  # Inline dialog key hint. Defaults to color_text_muted italic
@@ -200,16 +204,45 @@ class ThinkingPromptStyles:
     color_depth: ColorDepth | None = None  # mono() sets DEPTH_1_BIT; None = terminal default.
     # Code highlighting for markdown fences and add_code(): a Pygments style
     # name, or "ansi_dark"/"ansi_light" for the terminal's own 16 colors.
-    code_theme: str = "monokai"
+    code_theme: str = "ansi_dark"
 
     @classmethod
     def dark(cls) -> ThinkingPromptStyles:
-        """The default dark theme (today's palette)."""
-        return cls()
+        """A fixed palette for dark terminal backgrounds (0.4's default):
+        hex colors, with backgrounds on the status bar, dialogs and menus."""
+        return cls(
+            color_accent="#88c0d0",
+            color_accent_button="#0066cc",
+            color_success="#a3be8c",
+            color_warning="#ebcb8b",
+            color_error="#bf616a",
+            color_text="#e0e0e0",
+            color_text_bright="#ffffff",
+            color_text_muted="#888888",
+            color_text_dim="#666666",
+            color_bg_dark="#333333",
+            color_bg_dialog="#2a2a2a",
+            color_bg_input="#3a3a3a",
+            color_thinking="#a0a0a0",
+            color_thinking_border="#606060",
+            color_thinking_hint="#707070",
+            color_bg_status="#202040",
+            color_text_status="#808090",
+            color_separator="#444444",
+            color_bg_button="#404040",
+            color_bg_selected="#454545",
+            color_shadow="#000000",
+            # Selections by background color: "" derives them from the
+            # tokens, in place of the default's reverse video.
+            menu_item_selected="",
+            menu_meta_selected="",
+            dialog_button_focused="",
+            code_theme="monokai",
+        )
 
     @classmethod
     def light(cls) -> ThinkingPromptStyles:
-        """Palette tuned for light terminal backgrounds."""
+        """A fixed palette for light terminal backgrounds."""
         return cls(
             color_accent="#0e7490",
             color_accent_button="#0066cc",
@@ -232,6 +265,11 @@ class ThinkingPromptStyles:
             color_bg_button="#d1d5db",
             color_bg_selected="#cbd5e1",
             color_shadow="#9ca3af",
+            # Selections by background color: "" derives them from the
+            # tokens, in place of the default's reverse video.
+            menu_item_selected="",
+            menu_meta_selected="",
+            dialog_button_focused="",
             code_theme="default",
         )
 
@@ -259,28 +297,9 @@ class ThinkingPromptStyles:
 
     @classmethod
     def terminal(cls) -> ThinkingPromptStyles:
-        """Named ANSI colors — inherits the terminal's own palette."""
-        return cls(
-            color_accent="ansicyan",
-            color_accent_button="ansiblue",
-            color_success="ansigreen",
-            color_warning="ansiyellow",
-            color_error="ansired",
-            color_text="", color_text_bright="",
-            color_text_muted="ansibrightblack",
-            color_text_dim="ansibrightblack",
-            color_bg_dark="", color_bg_dialog="", color_bg_input="",
-            color_thinking="ansibrightblack",
-            color_thinking_border="ansibrightblack",
-            color_thinking_hint="ansibrightblack",
-            color_bg_status="", color_text_status="ansiblue",
-            color_separator="ansibrightblack",
-            color_bg_button="", color_bg_selected="", color_shadow="",
-            menu_item_selected="reverse",
-            menu_meta_selected="reverse",
-            dialog_button_focused="bold reverse",
-            code_theme="ansi_dark",
-        )
+        """The default: named ANSI colors, so the terminal's own palette
+        (light or dark), with no backgrounds; selections in reverse video."""
+        return cls()
 
     def _derived(self) -> dict[str, str]:
         """Element styles derived from the color tokens (field name -> style).
@@ -481,25 +500,6 @@ THEMES: dict[str, Callable[[], ThinkingPromptStyles]] = {
 }
 
 
-def _resolve_auto() -> ThinkingPromptStyles:
-    """NO_COLOR -> mono; COLORFGBG -> light/dark; else terminal-native."""
-    if os.environ.get("NO_COLOR"):
-        return ThinkingPromptStyles.mono()
-    colorfgbg = os.environ.get("COLORFGBG", "")
-    parts = colorfgbg.split(";")
-    # A COLORFGBG without a fg;bg pair is not a value we trust.
-    if len(parts) >= 2:
-        try:
-            bg = int(parts[-1])
-        except ValueError:
-            pass
-        else:
-            if bg in (7, 15):
-                return ThinkingPromptStyles.light()
-            return ThinkingPromptStyles.dark()
-    return ThinkingPromptStyles.terminal()
-
-
 def resolve_theme(theme: str | ThinkingPromptStyles) -> ThinkingPromptStyles:
     """Resolve a theme name or instance to a ThinkingPromptStyles.
 
@@ -508,10 +508,8 @@ def resolve_theme(theme: str | ThinkingPromptStyles) -> ThinkingPromptStyles:
     """
     if isinstance(theme, ThinkingPromptStyles):
         return theme
-    if theme == "auto":
-        return _resolve_auto()
     try:
         return THEMES[theme]()
     except KeyError:
-        valid = ", ".join([*sorted(THEMES), "auto"])
+        valid = ", ".join(sorted(THEMES))
         raise ValueError(f"Unknown theme {theme!r}. Valid themes: {valid}") from None

@@ -174,8 +174,9 @@ class ThinkingPromptSession:
                 is keyword-only.
             app_info: The banner printed at startup (name, version, welcome
                 message). None (default): no banner.
-            theme: Theme name ('dark', 'light', 'mono', 'terminal', 'auto') or
-                   ThinkingPromptStyles instance. Default: 'dark'.
+            theme: Theme name ('terminal', 'dark', 'light', 'mono') or a
+                   ThinkingPromptStyles instance. Default: 'terminal', the
+                   terminal's own colors.
             history: History object for input history.
             completer: Completer for input autocompletion.
             complete_while_typing: Show completions automatically while typing.
@@ -663,8 +664,8 @@ class ThinkingPromptSession:
         ``repaint=True`` is passed.
 
         Args:
-            theme: Theme name ('dark', 'light', 'mono', 'terminal', 'auto')
-                or a ThinkingPromptStyles instance.
+            theme: Theme name ('terminal', 'dark', 'light', 'mono') or a
+                ThinkingPromptStyles instance.
             repaint: If True, clear the screen and scrollback and re-print
                 the transcript in the new theme. Markdown and code re-render
                 from source; rich/raw ANSI keeps its original colors.
