@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import re
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -142,6 +143,18 @@ class TestBuiltinDialogs:
     def test_checklist_needs_options(self):
         with pytest.raises(ValueError, match="at least one option"):
             _checklist_dialog("Tools", "Pick any", [])
+
+    @pytest.mark.parametrize("build,call", [
+        (lambda options: _choice_dialog("T", "B", options), "choice_dialog()"),
+        (lambda options: _dropdown_dialog("T", "B", options), "dropdown_dialog()"),
+        (lambda options: _dropdown_dialog("T", "B", options, placement="inline"), "dropdown_dialog()"),
+        (lambda options: _checklist_dialog("T", "B", options), "checklist_dialog()"),
+        (lambda options: _checklist_dialog("T", "B", options, placement="inline"), "checklist_dialog()"),
+    ], ids=["choice", "dropdown box", "dropdown inline", "checklist box", "checklist inline"])
+    def test_an_option_listed_twice_is_refused_naming_the_call(self, build, call):
+        """In both placements, and naming the call, not the field it builds."""
+        with pytest.raises(ValueError, match=rf"^{re.escape(call)}: option 'a' is listed twice"):
+            build(["a", "b", "a"])
 
     def test_box_dropdown_is_a_choice_list_starting_on_the_default(self):
         d = _dropdown_dialog("Theme", "Select:", ["Light", "Dark", "System"], default="Dark")
@@ -613,6 +626,10 @@ class TestMaxHeight:
         with pytest.raises(ValueError, match="max_height"):
             Dialog(max_height=rows)
 
+    def test_must_be_an_int(self):
+        with pytest.raises(ValueError, match=r"max_height must be an int \(or None\), got 2\.5"):
+            Dialog(max_height=2.5)  # type: ignore[arg-type]
+
     def test_a_subclass_can_set_it(self):
         class Short(Dialog):
             max_height = 8
@@ -621,7 +638,7 @@ class TestMaxHeight:
 
 
 class TestWidth:
-    @pytest.mark.parametrize("width", [0, -1, "wide"])
+    @pytest.mark.parametrize("width", [0, -1, "wide", 1.5, True])
     def test_is_columns_full_or_none(self, width):
         """None sizes the box to its content; there's no 0 or -1 for it."""
         with pytest.raises(ValueError, match=r'width must be at least 1, "full" or None, got '):

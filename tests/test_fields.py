@@ -97,9 +97,15 @@ class TestFieldClasses:
          r"TextField 'k': width must be at least 1, got 0"),
         (lambda: TextField("k", "L", width=-5),
          r"TextField 'k': width must be at least 1, got -5"),
+        (lambda: DropdownField("k", "L", options=["a"], height=2.5),
+         r"DropdownField 'k': height must be an int, got 2\.5"),
+        (lambda: DropdownField("k", "L", options=["a"], width=1.5),
+         r"DropdownField 'k': width must be an int \(or None\), got 1\.5"),
+        (lambda: TextField("k", "L", width=True),
+         r"TextField 'k': width must be an int, got True"),
     ], ids=["dropdown width<0", "dropdown width=0", "max_width<0", "max_width=0", "height=0",
-            "text width=0", "text width<0"])
-    def test_sizes_below_one_are_refused(self, make, message):
+            "text width=0", "text width<0", "height 2.5", "dropdown width 1.5", "text width True"])
+    def test_sizes_below_one_or_not_ints_are_refused(self, make, message):
         """Refused when the field is made, not when its menu or edit field
         is first drawn (a negative width failed inside prompt_toolkit)."""
         with pytest.raises(ValueError, match=message):
@@ -109,6 +115,36 @@ class TestFieldClasses:
         DropdownField("k", "L", options=["a"], width=1, max_width=1, height=1)
         DropdownField("k", "L", options=["a"], width=None)
         TextField("k", "L", width=1)
+
+    OPTION_FIELDS = [SelectField, DropdownField, ChecklistField, RadioField, ChoiceField]
+
+    @pytest.mark.parametrize("cls", OPTION_FIELDS, ids=lambda cls: cls.__name__)
+    def test_options_are_kept_as_a_tuple_of_their_own(self, cls):
+        """A change to the list passed doesn't reach the field: clearing it
+        made a dialog built from the field later raise IndexError."""
+        options = ["a", "b"]
+        field = cls("k", "L", options=options)
+        options.clear()
+        assert field.options == ("a", "b")
+        Dialog("T", fields=[field])
+
+    @pytest.mark.parametrize("cls", OPTION_FIELDS, ids=lambda cls: cls.__name__)
+    def test_an_option_listed_twice_is_refused(self, cls):
+        """Two rows of one option would be checked together, and its value returned twice."""
+        with pytest.raises(ValueError, match=rf"{cls.__name__} 'k': option 'a' is listed twice"):
+            cls("k", "L", options=["a", "b", "a"])
+
+    @pytest.mark.parametrize("default", [None, "a"], ids=["None", "a str"])
+    def test_a_checklist_default_is_a_sequence_of_options(self, default):
+        """None failed with a bare TypeError; a str was taken letter by letter."""
+        with pytest.raises(ValueError, match=r"ChecklistField 'k': default must be a sequence of options \(\(\) for none\), got "):
+            ChecklistField("k", "L", options=["a", "b"], default=default)
+
+    def test_a_checklist_keeps_a_tuple_of_its_default(self):
+        default = ["a"]
+        field = ChecklistField("k", "L", options=["a", "b"], default=default)
+        default.append("b")
+        assert field.default == ("a",)
 
     def test_the_field_classes_are_exported(self):
         for name in FIELD_NAMES:

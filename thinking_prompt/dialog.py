@@ -58,8 +58,16 @@ from ._text import format_exception_detail
 from .dialog_box import BoxPresenter
 from .dialog_inline import InlinePresenter, InlineView
 from .dialog_scroll import ScrollRegion, focusable_windows
-from .fields import AlignValues, ChecklistField, ChoiceField, Field, _check_align_values, _Form
-from .types import Placement, check_placement
+from .fields import (
+    AlignValues,
+    ChecklistField,
+    ChoiceField,
+    Field,
+    _check_align_values,
+    _check_once,
+    _Form,
+)
+from .types import Placement, check_count, check_placement
 
 if TYPE_CHECKING:
     from .session import ThinkingPromptSession
@@ -243,12 +251,11 @@ class Dialog:
         for name, value in passed.items():
             if not isinstance(value, _NotPassed):
                 setattr(self, name, value)
-        if self.max_height is not None and self.max_height < 1:
-            raise ValueError(f"max_height must be at least 1, got {self.max_height!r}")
+        check_count("max_height", self.max_height, 1, optional=True)
         if not (
             self.width is None
             or self.width == "full"
-            or (isinstance(self.width, int) and self.width >= 1)
+            or (isinstance(self.width, int) and not isinstance(self.width, bool) and self.width >= 1)
         ):
             raise ValueError(f'width must be at least 1, "full" or None, got {self.width!r}')
         _check_align_values(self.align_values)
@@ -475,6 +482,7 @@ def _choice_dialog(
     max_height: int | None = None,
 ) -> Dialog:
     """One button per option, returning its text; Escape returns None."""
+    _check_once("choice_dialog()", options)
     return Dialog(
         title,
         text,
@@ -501,6 +509,7 @@ def _dropdown_dialog(
     """
     if not options:
         raise ValueError("dropdown_dialog() needs at least one option")
+    _check_once("dropdown_dialog()", options)
     if placement == "inline":
         return Dialog(
             title,
@@ -538,6 +547,7 @@ def _checklist_dialog(
     (in option order), Cancel and Escape None."""
     if not options:
         raise ValueError("checklist_dialog() needs at least one option")
+    _check_once("checklist_dialog()", options)
     dialog = Dialog(
         title,
         text,

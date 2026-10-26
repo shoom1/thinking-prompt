@@ -82,6 +82,31 @@ class TestOptions:
             ThinkingPromptSession(">>> ", AppInfo(name="t"))  # type: ignore[misc]
 
 
+class TestOptionChecks:
+    """Refused when the session is made, not on the first output or draw."""
+
+    @pytest.mark.parametrize("kwargs,message", [
+        ({"thinking_max_lines": 1.5}, r"thinking_max_lines must be an int, got 1\.5"),
+        ({"thinking_max_lines": True}, r"thinking_max_lines must be an int, got True"),
+        ({"transcript_limit": -1}, r"transcript_limit must be at least 0 \(or None\), got -1"),
+        ({"transcript_limit": 2.5}, r"transcript_limit must be an int \(or None\), got 2\.5"),
+        ({"completions_menu_height": 0}, r"completions_menu_height must be at least 1, got 0"),
+        ({"completions_menu_height": -1}, r"completions_menu_height must be at least 1, got -1"),
+        ({"completions_menu_height": 2.5}, r"completions_menu_height must be an int, got 2\.5"),
+        ({"spinner_position": "left"}, r"spinner_position must be 'before' or 'after', got 'left'"),
+        ({"spinner": ("a", "b")}, r"spinner must be a Spinner or None, got \('a', 'b'\)"),
+        ({"editing_mode": "vi"}, r"editing_mode must be EditingMode\.EMACS or EditingMode\.VI, got 'vi'"),
+    ], ids=["max lines 1.5", "max lines True", "transcript -1", "transcript 2.5",
+            "menu 0", "menu -1", "menu 2.5", "spinner position", "spinner", "editing mode"])
+    def test_a_bad_value_is_refused(self, kwargs, message):
+        with pytest.raises(ValueError, match=message):
+            ThinkingPromptSession(**kwargs)
+
+    def test_the_least_values_are_fine(self):
+        ThinkingPromptSession(transcript_limit=0, completions_menu_height=1, thinking_max_lines=0)
+        ThinkingPromptSession(transcript_limit=None, spinner_position="after")
+
+
 class TestThinkingMaxLines:
     def test_below_zero_is_refused(self):
         with pytest.raises(ValueError, match="thinking_max_lines must be at least 0"):
