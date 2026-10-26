@@ -252,12 +252,17 @@ async with session:                        # the app runs until the block ends
 
 `query()` runs one input's work as the query Ctrl+C cancels. Boxes it
 leaves open end with it. It returns the coroutine's result, or `None`
-after Ctrl+C, and lets its errors through. Inside a query (or a handler),
+after Ctrl+C or the app stopping (once the app has stopped, the coroutine
+isn't run), and lets its errors through. A loop that calls only `query()`,
+never `prompt_async()`, should stop on that `None` (or once
+`session.app.is_done`). Inside a query (or a handler),
 `prompt_async()` asks a follow-up question.
 
 A line typed while a query runs is refused by default (`Busy`). With
 `ThinkingPromptSession(input_while_busy="queue")` it waits under the
-prompt and runs next; Up on an empty prompt takes it back to edit. A
+prompt and runs next; Up on an empty prompt takes it back to edit. The
+queued lines take at most three rows: past that, the oldest two show
+with a count of the rest (`… 5 more queued`). A
 follow-up question takes the oldest queued line as its answer, as a
 terminal's typed-ahead input would.
 

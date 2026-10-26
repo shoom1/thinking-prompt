@@ -4,6 +4,7 @@ cancels."""
 from __future__ import annotations
 
 import asyncio
+import inspect
 from collections.abc import Awaitable
 from contextlib import suppress
 from typing import Callable
@@ -321,6 +322,38 @@ class TestQuery:
 
             await run_loop(session, body, script)
 
+    async def test_a_query_started_while_the_last_one_cleans_up_is_refused(self):
+        # The first query's work is done, but query() returns a loop turn
+        # later, after its cleanup. A second query accepted in that gap was
+        # unregistered by that cleanup: Ctrl+C then stopped the app and left
+        # the second query running.
+        outcome: list[str] = []
+        with piped_session() as (session, inp):
+
+            async def second() -> None:
+                return None
+
+            async def try_second() -> None:
+                try:
+                    await session.query(second())
+                    outcome.append("ran")
+                except RuntimeError as error:
+                    outcome.append(str(error))
+
+            async def first() -> None:
+                # Runs after this task is done, before query() resumes.
+                asyncio.get_running_loop().call_soon(lambda: asyncio.ensure_future(try_second()))
+
+            async def body() -> None:
+                await session.query(first())
+                await wait_until(lambda: bool(outcome))
+
+            async def script(run: asyncio.Task[None]) -> None:
+                await finished(run)
+
+            await run_loop(session, body, script)
+        assert len(outcome) == 1 and "already running" in outcome[0], outcome
+
     async def test_it_takes_a_coroutine_not_a_function(self):
         with piped_session() as (session, inp):
 
@@ -336,6 +369,46 @@ class TestQuery:
             coro = asyncio.sleep(0)
             with pytest.raises(RuntimeError, match="async with session"):
                 await session.query(coro)
+
+    async def test_once_the_app_stops_it_runs_nothing_and_returns_none(self):
+        ran: list[str] = []
+        with piped_session() as (session, inp):
+
+            async def work(when: str) -> str:
+                ran.append(when)
+                return when
+
+            async with session:
+                await wait_until(lambda: session.app.is_running)
+                session.exit()  # told to stop: the app takes a few loop turns
+                told = work("told to stop")
+                assert await session.query(told) is None
+                await wait_until(lambda: session._app_run is not None and session._app_run.done())
+                stopped = work("stopped")
+                assert await session.query(stopped) is None
+        assert ran == []
+        # Closed, not left for a "never awaited" warning.
+        assert inspect.getcoroutinestate(told) == inspect.CORO_CLOSED
+        assert inspect.getcoroutinestate(stopped) == inspect.CORO_CLOSED
+
+    async def test_a_loop_of_queries_ignoring_none_lets_the_app_finish_stopping(self):
+        # Refused at once, query() still gives the loop a turn: without it,
+        # a loop of queries that ignores the None never let the app stop,
+        # and Ctrl+C couldn't reach it.
+        async def step() -> None:
+            return None
+
+        with piped_session() as (session, inp):
+            async with session:
+                await wait_until(lambda: session.app.is_running)
+                run = session._app_run
+                assert run is not None
+                session.exit()
+                for _ in range(1000):
+                    await session.query(step())
+                    if run.done():
+                        break
+                assert run.done()
 
     async def test_ctrl_d_cancels_the_query_and_the_loop_ends(self):
         results: list[object] = []
@@ -594,6 +667,71 @@ class TestQueue:
                 await wait_until(lambda: ran == ["slow", "two", "three"])
                 assert echoed_inputs(session) == ["slow", "two", "three"]
                 assert session._input_history.get_strings()[-3:] == ["slow", "two", "three"]
+
+            await run_loop(session, self._loop(session, ran, started, release), script)
+
+    @staticmethod
+    def _queued_rows(session: ThinkingPromptSession) -> list[str]:
+        return [line for line in screen_lines(session) if line.startswith(("queued:", "…"))]
+
+    async def test_past_three_queued_lines_the_oldest_two_show_and_a_count(self):
+        ran: list[str] = []
+        started: list[str] = []
+        release = asyncio.Event()
+        with piped_session(input_while_busy="queue") as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("slow" + ENTER)
+                await wait_until(lambda: started == ["slow"])
+                inp.send_text("".join(f"line {i}" + ENTER for i in range(3)))
+                await wait_until(lambda: len(self._queued_rows(session)) == 3)
+                assert self._queued_rows(session) == ["queued: line 0", "queued: line 1", "queued: line 2"]
+                inp.send_text("".join(f"line {i}" + ENTER for i in range(3, 5)))
+                await wait_until(lambda: len(session._queued) == 5)
+                await wait_until(lambda: "… 3 more queued" in self._queued_rows(session))
+                assert self._queued_rows(session) == ["queued: line 0", "queued: line 1", "… 3 more queued"]
+                release.set()
+
+            await run_loop(session, self._loop(session, ran, started, release), script)
+
+    async def test_a_long_queue_in_a_short_terminal_leaves_room_for_the_prompt(self):
+        ran: list[str] = []
+        started: list[str] = []
+        release = asyncio.Event()
+        with piped_session(rows=12, input_while_busy="queue") as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("slow" + ENTER)
+                await wait_until(lambda: started == ["slow"])
+                inp.send_text("".join(f"line {i}" + ENTER for i in range(20)))
+                await wait_until(lambda: len(session._queued) == 20)
+                session.app.invalidate()
+                await wait_until(lambda: any("Window too small" in line or "more queued" in line
+                                             for line in screen_lines(session)))
+                lines = screen_lines(session)
+                assert not any("Window too small" in line for line in lines), lines
+                assert any(line.startswith(">>>") for line in lines), lines
+                release.set()
+
+            await run_loop(session, self._loop(session, ran, started, release), script)
+
+    async def test_too_short_for_three_rows_the_queue_gives_way_to_the_prompt(self):
+        ran: list[str] = []
+        started: list[str] = []
+        release = asyncio.Event()
+        with piped_session(rows=5, input_while_busy="queue") as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("slow" + ENTER)
+                await wait_until(lambda: started == ["slow"])
+                inp.send_text("".join(f"line {i}" + ENTER for i in range(3)))
+                await wait_until(lambda: len(session._queued) == 3)
+                await wait_until(lambda: any(line.startswith(("queued:", "Window too small"))
+                                             for line in screen_lines(session)))
+                lines = screen_lines(session)
+                assert not any("Window too small" in line for line in lines), lines
+                assert any(line.startswith(">>>") for line in lines), lines
+                release.set()
 
             await run_loop(session, self._loop(session, ran, started, release), script)
 

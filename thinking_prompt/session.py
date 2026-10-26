@@ -138,6 +138,8 @@ class ThinkingPromptSession:
     _BUSY_NO_QUERY_STATUS = "Busy"
     # Status hint shown when Ctrl+C at an idle prompt leaves live tasks' boxes.
     _BACKGROUND_STATUS = "Background work is running — Ctrl+D exits"
+    # The most rows the queued lines take under the prompt.
+    _MAX_QUEUED_ROWS = 3
 
     def __init__(
         self,
@@ -454,15 +456,31 @@ class ThinkingPromptSession:
         )
 
     def _queued_rows(self) -> AnyContainer:
-        """The queued lines, one row each, under the input area."""
+        """The queued lines under the input area, one row each. Past
+        _MAX_QUEUED_ROWS, the oldest show (they run next) and the last row
+        counts the rest."""
+        def rows() -> list[str]:
+            queued = list(self._queued)
+            if len(queued) <= self._MAX_QUEUED_ROWS:
+                return [f"  queued: {line}" for line in queued]
+            shown = self._MAX_QUEUED_ROWS - 1
+            return [f"  queued: {line}" for line in queued[:shown]] + [
+                f"  … {len(queued) - shown} more queued"
+            ]
+
         def text() -> FormattedText:
-            rows = "\n".join(f"  queued: {line}" for line in self._queued)
-            return FormattedText([("class:queued-input", rows)])
+            return FormattedText([("class:queued-input", "\n".join(rows()))])
+
+        def height() -> Dimension:
+            # None of the rows is required: in a short terminal the prompt
+            # and the status bar keep theirs.
+            count = min(len(self._queued), self._MAX_QUEUED_ROWS)
+            return Dimension(min=0, preferred=count, max=count)
 
         return ConditionalContainer(
             Window(
                 FormattedTextControl(text),
-                height=lambda: Dimension.exact(len(self._queued)),
+                height=height,
                 wrap_lines=False,
             ),
             # Left out of the app's last frame: lines still queued at exit
@@ -1258,7 +1276,9 @@ class ThinkingPromptSession:
 
         Returns:
             The coroutine's result, or None when Ctrl+C (or the app
-            stopping) cancelled it.
+            stopping) cancelled it. Once the app has stopped, or been told
+            to stop, the coroutine isn't run (it's closed) and the result
+            is None: a loop that calls only query() should stop on it.
 
         Raises:
             Whatever the coroutine raises, after its boxes are echoed.
@@ -1281,19 +1301,29 @@ class ThinkingPromptSession:
                 f"query() takes a coroutine: call the function, as in "
                 f"query(respond(text)); got {coro!r}"
             )
-        if self._app_run is None:
+        run = self._app_run
+        if run is None:
             coro.close()
             raise RuntimeError(
                 "query() runs a query of a running session: "
                 "call it inside `async with session:`"
             )
+        if run.done() or self.app.is_done:
+            # Stopped, or told to stop: the query would be cancelled with
+            # the app, so it isn't started. One loop turn even so: a loop
+            # of queries that ignores the None must not keep the app from
+            # finishing its stop (Ctrl+C couldn't reach it either).
+            coro.close()
+            await asyncio.sleep(0)
+            return None
         return await self._run_query(coro)
 
     async def _run_query(self, coro: Coroutine[Any, Any, _T]) -> _T | None:
         """The foreground-query core, shared by query() and run_async's
         handlers (it doesn't check that the app runs)."""
-        foreground = self._foreground
-        if foreground is not None and not foreground.done():
+        # Taken until the cleanup below is done, not just while the task
+        # runs: the cleanup clears the slot, and another query's with it.
+        if self._foreground is not None:
             coro.close()
             raise RuntimeError(
                 "A query is already running: one at a time "
