@@ -673,12 +673,17 @@ class ThinkingPromptSession:
                 still repaints fully.
 
         Raises:
-            ValueError: For unknown theme names.
+            ValueError: For unknown theme names, or a colour prompt_toolkit
+                can't parse. Rich raises its own error for one it can't.
+                Either way the session keeps the theme it had.
         """
         resolved = resolve_theme(theme)
-        self._styles = resolved
-        self._style = resolved.to_style()
+        # Built before anything is switched, so a theme that can't be built
+        # leaves styles, the style and the Display as they were.
+        style = resolved.to_style()
         self._display.set_theme(resolved)
+        self._styles = resolved
+        self._style = style
         if repaint:
             self._repaint_console()
         self._invalidate()
