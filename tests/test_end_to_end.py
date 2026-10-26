@@ -3235,6 +3235,38 @@ class TestRepaintWhileRunning:
             await run_with(session, handler, script)
 
 
+class TestClearWhileRunning:
+    """clear() of a running session is queued with the prints, as a repaint
+    is: a print queued before it lands before the cleared screen, one after
+    it on it."""
+
+    async def test_the_screen_clears_between_the_prints_before_and_after_it(self):
+        output = _RecordingOutput(24)
+        # DummyOutput's erase_screen writes nothing: mark where it happens.
+        output.erase_screen = lambda: output.written.append("<ERASE>")  # type: ignore[method-assign]
+
+        async def handler(text: str) -> None:
+            pass
+
+        with create_pipe_input() as inp, create_app_session(input=inp, output=output):
+            session = ThinkingPromptSession()
+
+            async def script(run: asyncio.Task[None]) -> None:
+                session.add_response("before")
+                session.clear()
+                session.add_response("after")
+                await wait_until(lambda: "after\n" in output.text())
+
+                text = output.text()
+                cleared = text.rindex("<ERASE>")
+                assert "before\n" in text[:cleared]
+                assert "before\n" not in text[cleared:]
+                assert "after\n" in text[cleared:]
+                assert transcript_texts(session._display) == ["after\n"]
+
+            await run_with(session, handler, script)
+
+
 class TestDialogFields:
     """Fields on any Dialog, driven through a running session."""
 
