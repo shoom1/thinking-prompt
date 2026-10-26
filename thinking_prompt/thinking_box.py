@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -155,12 +156,11 @@ class ThinkingBox:
         """
         content = self._writable("append_rich")
         if content is not None:
-            self._control.set_content_format("ansi")
-            content.append_rich(
+            self._as_ansi(lambda: content.append_rich(
                 renderable,
                 theme=theme or self._manager.rich_theme,
                 width=self._manager.output_width,
-            )
+            ))
 
     def set_line_rich(self, index: int, renderable: Any, *, theme: Any = None) -> None:
         """Replace one line with a Rich renderable; the box switches to ANSI
@@ -174,16 +174,28 @@ class ThinkingBox:
 
         Raises:
             ValueError: If it renders to more than one line.
+            IndexError: If a negative index is before the first line.
         """
         content = self._writable("set_line_rich")
         if content is not None:
-            self._control.set_content_format("ansi")
-            content.set_line_rich(
+            self._as_ansi(lambda: content.set_line_rich(
                 index,
                 renderable,
                 theme=theme or self._manager.rich_theme,
                 width=self._manager.output_width,
-            )
+            ))
+
+    def _as_ansi(self, write: Callable[[], None]) -> None:
+        """Make a Rich write with the box in ANSI: switched before it, so
+        its line never shows its escapes as text, and back if it raises
+        (it raises before writing anything), so the box stays as it was."""
+        previous = self._control.content_format
+        self._control.set_content_format("ansi")
+        try:
+            write()
+        except BaseException:
+            self._control.set_content_format(previous)
+            raise
 
     @property
     def text(self) -> str:

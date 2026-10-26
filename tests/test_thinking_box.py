@@ -257,6 +257,22 @@ class TestRich:
         assert "REPLACED" in box.text
         assert "line1" in box.text
 
+    @pytest.mark.parametrize("write,error", [
+        (lambda box: box.set_line_rich(0, "first\nsecond"), ValueError),  # two lines
+        (lambda box: box.set_line_rich(-5, "x"), IndexError),  # before the first line
+        (lambda box: box.append_rich("[/bold]"), Exception),  # markup that doesn't parse
+    ], ids=["two lines", "index before the first", "bad markup"])
+    def test_a_rich_write_that_fails_leaves_the_box_as_it_was(self, write, error):
+        """It used to switch the box to ANSI first, so its plain text was
+        read as ANSI from then on."""
+        pytest.importorskip("rich")
+        box = make_manager().create_box()
+        box.append("plain\n")
+        with pytest.raises(error):
+            write(box)
+        assert box._control.content_format == "plain"
+        assert box.text == "plain\n"
+
     def test_rich_writes_use_the_sessions_theme_at_write_time(self):
         pytest.importorskip("rich")
         display = make_display()
