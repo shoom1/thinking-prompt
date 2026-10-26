@@ -823,6 +823,14 @@ class ThinkingPromptSession:
         it can be True at an idle prompt)."""
         return self._manager.has_active_boxes
 
+    @property
+    def has_queued_input(self) -> bool:
+        """True while a line typed while busy (input_while_busy="queue")
+        waits: prompt_async() returns it next, without waiting. Always
+        False with "refuse". A loop takes them all with
+        ``while session.has_queued_input: ... await session.prompt_async()``."""
+        return bool(self._queued)
+
     @asynccontextmanager
     async def thinking(
         self,

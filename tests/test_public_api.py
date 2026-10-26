@@ -216,5 +216,12 @@ def test_queued_input_has_its_style():
     assert "queued-input" in ThinkingPromptStyles().to_style_dict()
 
 
+def test_whether_input_is_queued_is_read_only():
+    session = ThinkingPromptSession()
+    assert session.has_queued_input is False
+    with pytest.raises(AttributeError):
+        session.has_queued_input = True  # type: ignore[misc]
+
+
 def test_the_welcome_stays_a_customization_point():
     assert AppInfo(name="app", welcome_message="hi").get_welcome_content() == "hi"

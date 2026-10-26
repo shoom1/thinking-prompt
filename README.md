@@ -266,6 +266,20 @@ with a count of the rest (`… 5 more queued`). A
 follow-up question takes the oldest queued line as its answer, as a
 terminal's typed-ahead input would.
 
+`session.has_queued_input` is True while a queued line waits;
+`prompt_async()` returns it next, without waiting. So a loop can take
+all of them as one request:
+
+```python
+text = await session.prompt_async()
+while session.has_queued_input:            # lines typed meanwhile, in order
+    text += "\n" + await session.prompt_async()
+await session.query(respond(text))
+```
+
+Which lines to merge is the app's call: a queued `/clear` followed by
+`hello` shouldn't go out as one message.
+
 To run queries side by side, start a task per input instead of calling
 `query()`. Each is background work: Ctrl+C at the prompt leaves it, and
 its boxes end when it does.
