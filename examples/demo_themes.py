@@ -3,7 +3,7 @@
 Demo: themes and runtime theme switching.
 
 Commands:
-    /theme <name>     Switch theme (dark, light, mono, terminal, auto)
+    /theme <name>     Switch theme (terminal, dark, light, mono)
     /theme <name> !   Switch and repaint the whole transcript
     /themes           List themes
     /code             Show code (add_code and a markdown fence); follow with
@@ -18,7 +18,7 @@ import asyncio
 
 from thinking_prompt import AppInfo, ThinkingPromptSession
 
-THEME_NAMES = ("dark", "light", "mono", "terminal", "auto")
+THEME_NAMES = ("terminal", "dark", "light", "mono")
 
 CODE_SAMPLE = """\
 def fib(n: int) -> int:
@@ -33,7 +33,6 @@ def fib(n: int) -> int:
 async def main() -> None:
     session = ThinkingPromptSession(
         app_info=AppInfo(name="ThemesDemo", version="1.0"),
-        theme="auto",
         message=">>> ",
     )
 

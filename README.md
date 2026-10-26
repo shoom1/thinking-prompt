@@ -26,7 +26,8 @@ form fields on a prompt that stays inline, in the terminal's scrollback.
   choice fields on any dialog, so a settings dialog is a few lines.
 - **Rich output**: markdown, syntax-highlighted code and Rich renderables, in
   the transcript or inside a box.
-- **Themes**: dark, light, mono, the terminal's own colors, or auto;
+- **Themes**: the terminal's own colors by default, so light and dark
+  terminals both look right; fixed dark and light palettes and mono too,
   switchable at runtime, and `NO_COLOR` is honored.
 - **Light on the terminal**: no full screen, and the screen is redrawn only
   when something changes, so an idle prompt costs no CPU.
@@ -771,18 +772,25 @@ callable returning `""` or `None`) prints nothing.
 
 ## Theming
 
-Four built-in themes, selectable by name:
+The default theme follows the terminal: it uses the 16 named ANSI colors,
+which the terminal maps to its own palette, and paints no backgrounds
+(selections show in reverse video). So it looks right on light and dark
+terminals alike, as git or ls do. Three more are built in, selectable by
+name:
 
 ```python
-session = ThinkingPromptSession(theme="light")   # or "dark", "mono", "terminal", "auto"
+session = ThinkingPromptSession(theme="dark")   # or "light", "mono", "terminal"
 ```
 
-- `dark` — the default (unchanged from previous versions)
-- `light` — palette tuned for light terminal backgrounds
+- `terminal` — the default: named ANSI colors, the terminal's own palette
+- `dark` — a fixed palette for dark terminals (0.4's default look), with
+  backgrounds on the status bar, dialogs and menus
+- `light` — a fixed palette for light terminals
 - `mono` — attributes only (bold/italic/reverse), rendered without color
-- `terminal` — named ANSI colors that inherit your terminal's own palette
-- `auto` — picks mono under `NO_COLOR`, light/dark from `COLORFGBG` when
-  available, otherwise `terminal`
+
+A fixed palette assumes the terminal's background: `light` on a dark
+terminal (or `dark` on a light one) is hard to read. `NO_COLOR` drops the
+colors of any theme.
 
 Custom themes are `ThinkingPromptStyles` instances (`theme=` accepts them
 too). All element styles derive from the `color_*` tokens, so overriding
@@ -801,15 +809,15 @@ Element fields you set explicitly (e.g. `error_message="fg:red"`) win over
 the tokens; `styles.to_style_dict()` shows the resolved result.
 
 Code highlighting — fenced code in markdown and `add_code()` alike —
-follows the theme's `code_theme`: a Pygments style name (`"monokai"` in
-dark, `"default"` in light), or `"ansi_dark"`/`"ansi_light"` to use the
-terminal's own 16 colors (the `terminal` theme's choice).
+follows the theme's `code_theme`: `"ansi_dark"` by default, the
+terminal's own 16 colors (`"ansi_light"` suits a light terminal better), or
+a Pygments style name (`"monokai"` in dark, `"default"` in light).
 
 Switch at runtime:
 
 ```python
-session.set_theme("light")                # live UI re-themes on next paint
-session.set_theme("light", repaint=True)  # also clears and re-prints the transcript
+session.set_theme("dark")                # live UI re-themes on next paint
+session.set_theme("dark", repaint=True)  # also clears and re-prints the transcript
 ```
 
 With `repaint=True`, markdown and code blocks re-render from source in the
@@ -882,7 +890,9 @@ removed:
 | `session.layout` | `session.app.layout` |
 | `session.default_buffer` | `session.app.layout.get_buffer_by_name(DEFAULT_BUFFER)` (prompt_toolkit's, `from prompt_toolkit.enums import DEFAULT_BUFFER`) |
 | `StreamingContent`, `ThinkingHeader` | Drop them: write with a box's methods; the header comes from `thinking_title`, `spinner` and `spinner_position` |
-| `DEFAULT_STYLES` | `ThinkingPromptStyles()`, a fresh default theme |
+| `DEFAULT_STYLES` | `ThinkingPromptStyles.dark()`, the palette it held |
+| The default theme, the dark palette | The terminal's own colors: `theme="dark"` keeps 0.4's look, and `ThinkingPromptStyles()` is now the terminal theme (`.dark()` is the dark palette) |
+| `theme="auto"` | Drop it: the default follows the terminal |
 | `styles.to_rich_theme_dict()` | Drop it: the session's Rich output uses its theme already |
 | Style field `history`, classes `history.*` (`history.user-message`, ...) | `transcript`, `transcript.*` (`transcript.user-message`, ...) |
 | Style fields `radio_list`, `radio_selected`, `checkbox_list`, `checkbox_selected` (classes `radio-*`, `checkbox-*`) | Drop them: the dialog fields use the `field_*` styles |

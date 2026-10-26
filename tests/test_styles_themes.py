@@ -8,12 +8,13 @@ from thinking_prompt.styles import ThinkingPromptStyles
 
 class TestTokenCompletion:
     """Every formerly-hardcoded element default must be token-derived,
-    with byte-identical dark values (backward-compat guarantee). Derived
-    styles are resolved when the Style is built, so read them from
-    to_style_dict() — the fields themselves hold only explicit overrides."""
+    with byte-identical dark values (the dark palette is 0.4's default
+    look). Derived styles are resolved when the Style is built, so read
+    them from to_style_dict() — the fields themselves hold only explicit
+    overrides."""
 
-    def test_dark_defaults_byte_identical(self):
-        d = ThinkingPromptStyles().to_style_dict()
+    def test_dark_values_byte_identical(self):
+        d = ThinkingPromptStyles.dark().to_style_dict()
         assert d["thinking-box"] == "fg:#a0a0a0 italic"
         assert d["transcript.thinking"] == "fg:#a0a0a0 italic"
         assert d["thinking-box.border"] == "fg:#606060"
@@ -43,7 +44,7 @@ class TestTokenCompletion:
     def test_new_fields_defaults(self):
         s = ThinkingPromptStyles()
         assert s.color_depth is None
-        assert s.code_theme == "monokai"
+        assert s.code_theme == "ansi_dark"
 
 
 
@@ -90,8 +91,17 @@ def _all_style_values(s: ThinkingPromptStyles) -> list[str]:
 
 
 class TestThemeFactories:
-    def test_dark_equals_default(self):
-        assert ThinkingPromptStyles.dark() == ThinkingPromptStyles()
+    def test_the_default_follows_the_terminal(self):
+        """A bare ThinkingPromptStyles() is the default theme, terminal: the
+        same as the session's when theme= isn't given."""
+        assert ThinkingPromptStyles() == ThinkingPromptStyles.terminal()
+
+    def test_dark_is_a_fixed_palette(self):
+        s = ThinkingPromptStyles.dark()
+        assert s.color_accent == "#88c0d0"
+        assert s.code_theme == "monokai"
+        # Selections show by background color, not the default's reverse.
+        assert s.to_style_dict()["completion-menu.completion.current"] == "fg:#88c0d0 bg:#454545 noreverse"
 
     def test_factories_return_fresh_instances(self):
         a = ThinkingPromptStyles.light()
@@ -148,37 +158,10 @@ class TestResolveTheme:
         with pytest.raises(ValueError, match="mono"):
             resolve_theme("solarized")
 
-    def test_auto_no_color_wins(self, monkeypatch):
-        monkeypatch.setenv("NO_COLOR", "1")
-        monkeypatch.setenv("COLORFGBG", "0;15")
-        assert resolve_theme("auto").color_depth is ColorDepth.DEPTH_1_BIT
-
-    def test_auto_colorfgbg_light(self, monkeypatch):
-        monkeypatch.delenv("NO_COLOR", raising=False)
-        monkeypatch.setenv("COLORFGBG", "0;15")
-        assert resolve_theme("auto").code_theme == "default"
-
-    def test_auto_colorfgbg_dark(self, monkeypatch):
-        monkeypatch.delenv("NO_COLOR", raising=False)
-        monkeypatch.setenv("COLORFGBG", "15;0")
-        assert resolve_theme("auto") == ThinkingPromptStyles.dark()
-
-    def test_auto_fallback_is_terminal(self, monkeypatch):
-        monkeypatch.delenv("NO_COLOR", raising=False)
-        monkeypatch.delenv("COLORFGBG", raising=False)
-        s = resolve_theme("auto")
-        assert "#" not in " ".join(_all_style_values(s))
-
-    def test_auto_malformed_colorfgbg_is_terminal(self, monkeypatch):
-        monkeypatch.delenv("NO_COLOR", raising=False)
-        monkeypatch.setenv("COLORFGBG", "default;default")
-        s = resolve_theme("auto")
-        assert "#" not in " ".join(_all_style_values(s))
-
-    def test_empty_no_color_does_not_trigger(self, monkeypatch):
-        monkeypatch.setenv("NO_COLOR", "")
-        monkeypatch.delenv("COLORFGBG", raising=False)
-        assert resolve_theme("auto").color_depth is None
+    def test_auto_is_not_a_theme(self):
+        """The default follows the terminal, so there's nothing to pick."""
+        with pytest.raises(ValueError, match="Valid themes: dark, light, mono, terminal$"):
+            resolve_theme("auto")
 
 
 class TestStyleClassesDefined:
@@ -240,7 +223,7 @@ class TestDialogRowStyles:
     """Inline dialog rows: numbered actions and check/radio marks."""
 
     def test_dark_values(self):
-        d = ThinkingPromptStyles().to_style_dict()
+        d = ThinkingPromptStyles.dark().to_style_dict()
         assert d["dialog-choice"] == "fg:#e0e0e0"
         assert d["dialog-choice-selected"] == "fg:#88c0d0 bold"
         assert d["checkbox-mark"] == "fg:#88c0d0"

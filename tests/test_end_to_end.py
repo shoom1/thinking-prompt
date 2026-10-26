@@ -2414,12 +2414,16 @@ class TestFormFields:
                 await wait_until(lambda: dialog_rendered(session))
                 inp.send_text(" " + TAB + TAB + ENTER)          # Cache on, Save
                 await wait_until(lambda: results == [{"c": True, "k": False}])
+                # The handler records its result a few loop turns before the
+                # prompt waits again: a line sent sooner is refused (Busy).
+                await wait_until(lambda: waiting_for_input(session))
                 inp.send_text("go" + ENTER)
                 await wait_until(lambda: dialog_rendered(session))
                 assert dialog.values == {"c": True, "k": False}
                 inp.send_text(DOWN + " " + TAB + TAB + ENTER)   # Keep on, Cancel
                 await wait_until(lambda: len(results) == 2)
                 assert results[1] is None
+                await wait_until(lambda: waiting_for_input(session))
                 inp.send_text("go" + ENTER)
                 await wait_until(lambda: dialog_rendered(session))
                 assert dialog.values == {"c": True, "k": False}

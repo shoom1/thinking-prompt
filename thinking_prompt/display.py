@@ -22,13 +22,12 @@ from .rich_utils import (
     _markdown_to_ansi,
     _rich_to_ansi,
 )
+from .styles import ThinkingPromptStyles
 from .transcript import Transcript
 from .types import ContentFormat, Overflow
 
 if TYPE_CHECKING:
     from prompt_toolkit.output import ColorDepth, Output
-
-    from .styles import ThinkingPromptStyles
 
 __all__ = ["Display"]
 
@@ -77,7 +76,7 @@ class Display:
         # below close over self._rich_theme/_code_theme so a later
         # set_theme() swap takes effect on the next render.
         self._rich_theme = self._create_rich_theme(thinking_styles)
-        self._code_theme = thinking_styles.code_theme if thinking_styles else "monokai"
+        self._code_theme = (thinking_styles or ThinkingPromptStyles()).code_theme
         self._transcript = Transcript(
             max_entries=transcript_limit,
             render_markdown=lambda src: _markdown_to_ansi(
@@ -93,7 +92,6 @@ class Display:
         try:
             from rich.theme import Theme
 
-            from .styles import ThinkingPromptStyles
             styles = thinking_styles or ThinkingPromptStyles()
             return Theme(styles._rich_theme_dict())
         except ImportError:
