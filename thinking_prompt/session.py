@@ -1296,7 +1296,10 @@ class ThinkingPromptSession:
             is None: a loop that calls only query() should stop on it.
 
         Raises:
-            Whatever the coroutine raises, after its boxes are echoed.
+            Whatever the coroutine raises, after its boxes are echoed. When
+                the caller itself is cancelled, query() raises
+                CancelledError, and an error the coroutine raises as it's
+                cancelled goes to the ``thinking_prompt`` logger.
             TypeError: If given something other than a coroutine (call the
                 function: query(respond(text))).
             RuntimeError: Outside ``async with session:``, or while another
@@ -1357,6 +1360,13 @@ class ThinkingPromptSession:
                 task.cancel()
                 await asyncio.wait({task})
                 self._cleanup_after_handler(task, cancelled=True)
+                if not task.cancelled() and task.exception() is not None:
+                    # Its caller is going, so its error has nowhere to go:
+                    # logged, not left for asyncio's "never retrieved".
+                    logger.error(
+                        "Query raised while its caller was cancelled",
+                        exc_info=task.exception(),
+                    )
                 raise
             if task.cancelled():
                 # Ctrl+C, or the app stopping: the query ends, the loop goes on.
