@@ -735,6 +735,56 @@ class TestQueue:
 
             await run_loop(session, self._loop(session, ran, started, release), script)
 
+    async def test_has_queued_input_says_whether_a_line_waits(self):
+        ran: list[str] = []
+        started: list[str] = []
+        release = asyncio.Event()
+        with piped_session(input_while_busy="queue") as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                assert not session.has_queued_input
+                inp.send_text("slow" + ENTER)
+                await wait_until(lambda: started == ["slow"])
+                inp.send_text("two" + ENTER + "three" + ENTER)
+                await wait_until(lambda: list(session._queued) == ["two", "three"])
+                assert session.has_queued_input
+                inp.send_text(UP)  # "three" back to edit
+                await wait_until(lambda: list(session._queued) == ["two"])
+                assert session.has_queued_input
+                release.set()
+                await wait_until(lambda: ran == ["slow", "two"])
+                assert not session.has_queued_input
+
+            await run_loop(session, self._loop(session, ran, started, release), script)
+
+    async def test_a_loop_can_take_every_queued_line_at_once(self):
+        taken: list[str] = []
+        release = asyncio.Event()
+        with piped_session(input_while_busy="queue") as (session, inp):
+
+            async def slow() -> None:
+                await release.wait()
+
+            async def body() -> None:
+                await session.prompt_async()
+                await session.query(slow())
+                text = await session.prompt_async()
+                while session.has_queued_input:
+                    text += "\n" + await session.prompt_async()
+                taken.append(text)
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: session._foreground is not None)
+                inp.send_text("a" + ENTER + "b" + ENTER + "c" + ENTER)
+                await wait_until(lambda: list(session._queued) == ["a", "b", "c"])
+                release.set()
+                await finished(run)
+                assert taken == ["a\nb\nc"]
+                assert echoed_inputs(session) == ["go", "a", "b", "c"]
+
+            await run_loop(session, body, script)
+
     async def test_up_recalls_the_newest_queued_line(self):
         ran: list[str] = []
         started: list[str] = []
