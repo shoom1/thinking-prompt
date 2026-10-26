@@ -113,9 +113,12 @@ class Display:
         return self._get_width()
 
     def set_theme(self, styles: ThinkingPromptStyles) -> None:
-        """Adopt a new theme: rebuild Rich theme, re-render markdown/code."""
+        """Adopt a new theme: rebuild Rich theme, re-render markdown/code.
+        The Rich theme is built first: a theme Rich can't parse is refused
+        with the Display unchanged."""
+        rich_theme = self._create_rich_theme(styles)
         self._thinking_styles = styles
-        self._rich_theme = self._create_rich_theme(styles)
+        self._rich_theme = rich_theme
         self._code_theme = styles.code_theme
         self._transcript.invalidate_render_caches()
 

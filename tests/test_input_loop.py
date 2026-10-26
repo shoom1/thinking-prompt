@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import logging
 from collections.abc import Awaitable
 from contextlib import suppress
 from typing import Callable
@@ -409,6 +410,33 @@ class TestQuery:
                     if run.done():
                         break
                 assert run.done()
+
+    async def test_an_error_as_the_caller_cancels_it_is_logged(self, caplog):
+        # The caller is cancelled, so the query's error has nowhere to go:
+        # it was left for asyncio's "Task exception was never retrieved".
+        with piped_session() as (session, inp):
+            started = asyncio.Event()
+
+            async def work() -> None:
+                try:
+                    started.set()
+                    await asyncio.Event().wait()
+                finally:
+                    raise ValueError("cleanup broke")
+
+            async with session:
+                await wait_until(lambda: session.app.is_running)
+                caller = asyncio.ensure_future(session.query(work()))
+                await started.wait()
+                child = session._foreground
+                assert child is not None
+                with caplog.at_level(logging.ERROR, logger="thinking_prompt"):
+                    caller.cancel()
+                    with pytest.raises(asyncio.CancelledError):
+                        await caller
+        errors = [r for r in caplog.records if r.exc_info and isinstance(r.exc_info[1], ValueError)]
+        assert [str(r.exc_info[1]) for r in errors] == ["cleanup broke"]  # type: ignore[index]
+        assert not child._log_traceback  # type: ignore[attr-defined]  # retrieved: asyncio won't report it
 
     async def test_ctrl_d_cancels_the_query_and_the_loop_ends(self):
         results: list[object] = []

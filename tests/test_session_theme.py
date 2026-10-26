@@ -81,6 +81,26 @@ class TestThemeParam:
         assert ThinkingPromptStyles().color_accent != "#ff0000"
 
 
+class TestSetThemeRefused:
+    """A theme set_theme() can't build is refused whole: the session keeps
+    the one it had, in its styles, its prompt_toolkit style and its
+    Display (which used to be switched in part before the error)."""
+
+    @pytest.mark.parametrize("field,value", [
+        ("color_accent", "not-a-colour"),  # prompt_toolkit's style refuses it
+        ("markdown_h1", "bold notacolour"),  # only Rich's theme does
+    ], ids=["prompt_toolkit", "rich"])
+    def test_the_session_keeps_its_theme(self, field, value):
+        if field.startswith("markdown"):
+            pytest.importorskip("rich")
+        session = ThinkingPromptSession(theme="dark")
+        display = session._display
+        before = (session.styles, session._style, display._thinking_styles, display.rich_theme)
+        with pytest.raises(Exception, match="notacolour|not-a-colour"):
+            session.set_theme(ThinkingPromptStyles(**{field: value}))
+        assert (session.styles, session._style, display._thinking_styles, display.rich_theme) == before
+
+
 class TestEffectiveColorDepth:
     def test_no_color_forces_1bit(self, monkeypatch):
         monkeypatch.setenv("NO_COLOR", "1")

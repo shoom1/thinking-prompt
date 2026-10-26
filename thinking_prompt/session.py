@@ -11,7 +11,7 @@ import asyncio
 import logging
 import os
 from collections import deque
-from collections.abc import AsyncIterator, Coroutine, Sequence
+from collections.abc import AsyncIterator, Callable, Coroutine, Sequence
 from contextlib import asynccontextmanager, suppress
 from typing import (
     TYPE_CHECKING,
@@ -674,12 +674,17 @@ class ThinkingPromptSession:
                 still repaints fully.
 
         Raises:
-            ValueError: For unknown theme names.
+            ValueError: For unknown theme names, or a colour prompt_toolkit
+                can't parse. Rich raises its own error for one it can't.
+                Either way the session keeps the theme it had.
         """
         resolved = resolve_theme(theme)
-        self._styles = resolved
-        self._style = resolved.to_style()
+        # Built before anything is switched, so a theme that can't be built
+        # leaves styles, the style and the Display as they were.
+        style = resolved.to_style()
         self._display.set_theme(resolved)
+        self._styles = resolved
+        self._style = style
         if repaint:
             self._repaint_console()
         self._invalidate()
@@ -701,11 +706,19 @@ class ThinkingPromptSession:
             self._display.print_now(output, contents)
             output.flush()
 
+        self._in_terminal(repaint)
+
+    def _in_terminal(self, job: Callable[[Output], None]) -> None:
+        """Run ``job`` on the terminal's output. While the app runs, it's a
+        run_in_terminal job (the UI erased, then redrawn after it), queued
+        in order with the prints print_formatted_text queues: one already
+        queued prints before it, a later one after it. Otherwise it runs
+        now."""
         app = self.app
         if app and app.is_running and app.loop is not None:
-            app.loop.call_soon_threadsafe(lambda: run_in_terminal(lambda: repaint(app.output)))
+            app.loop.call_soon_threadsafe(lambda: run_in_terminal(lambda: job(app.output)))
         else:
-            repaint(get_app_session().output)
+            job(get_app_session().output)
 
     def _repaint_after_shrink(self) -> None:
         """Repaint once the terminal stopped shrinking, which left rows of
@@ -1062,19 +1075,18 @@ class ThinkingPromptSession:
         Clear the display and reset to startup state.
 
         Clears the terminal screen and transcript, and re-prints the
-        welcome message.
+        welcome message. While the app runs, the screen clears in order
+        with output already on its way: what was printed before clear()
+        is cleared, what's printed after it stays.
         """
-        # Clear the terminal screen. While the app is running this must
-        # go through the renderer — a raw escape write behind its back
-        # leaves the renderer's notion of the screen stale and corrupts
-        # the next repaint.
-        if self.app and self.app.is_running:
-            self.app.renderer.clear()
-        else:
-            # \033[2J clears screen, \033[H homes the cursor.
-            print("\033[2J\033[H", end="", flush=True)
+        def clear_screen(output: Output) -> None:
+            output.erase_screen()
+            output.cursor_goto(0, 0)
+            output.flush()
 
-        # Clear the transcript and any pending output
+        self._in_terminal(clear_screen)
+        # The transcript goes now: what was added before this call is
+        # what the screen clear removes.
         self._display.clear()
 
         # Re-print welcome message
@@ -1290,7 +1302,10 @@ class ThinkingPromptSession:
             is None: a loop that calls only query() should stop on it.
 
         Raises:
-            Whatever the coroutine raises, after its boxes are echoed.
+            Whatever the coroutine raises, after its boxes are echoed. When
+                the caller itself is cancelled, query() raises
+                CancelledError, and an error the coroutine raises as it's
+                cancelled goes to the ``thinking_prompt`` logger.
             TypeError: If given something other than a coroutine (call the
                 function: query(respond(text))).
             RuntimeError: Outside ``async with session:``, or while another
@@ -1351,6 +1366,13 @@ class ThinkingPromptSession:
                 task.cancel()
                 await asyncio.wait({task})
                 self._cleanup_after_handler(task, cancelled=True)
+                if not task.cancelled() and task.exception() is not None:
+                    # Its caller is going, so its error has nowhere to go:
+                    # logged, not left for asyncio's "never retrieved".
+                    logger.error(
+                        "Query raised while its caller was cancelled",
+                        exc_info=task.exception(),
+                    )
                 raise
             if task.cancelled():
                 # Ctrl+C, or the app stopping: the query ends, the loop goes on.

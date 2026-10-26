@@ -401,32 +401,26 @@ class TestCtrlDKeyBinding:
 
 
 class TestSessionClear:
-    """clear() must clear the screen via the renderer while the app is
-    running — a raw escape write behind the renderer's back leaves its
-    notion of the screen stale and corrupts the next repaint."""
+    """clear() of a session that isn't running writes the escapes itself;
+    a running one's is queued with the prints (see test_end_to_end's
+    TestClearWhileRunning)."""
 
-    def test_clear_uses_renderer_when_app_running(self, session, capsys):
-        session.app = MagicMock()
-        session.app.is_running = True
-        session._display.response("hello")
-        capsys.readouterr()  # discard the echoed response
+    def test_clear_writes_the_escapes_when_not_running(self, session):
+        import io
 
-        session.clear()
+        from prompt_toolkit.application.current import create_app_session
+        from prompt_toolkit.data_structures import Size
+        from prompt_toolkit.output.vt100 import Vt100_Output
 
-        session.app.renderer.clear.assert_called_once()
-        assert "\033[2J" not in capsys.readouterr().out
-        assert session._display.transcript.is_empty
-
-    def test_clear_falls_back_to_escape_codes_when_not_running(
-        self, session, capsys
-    ):
         session.app = MagicMock()
         session.app.is_running = False
-
-        session.clear()
+        terminal = io.StringIO()
+        output = Vt100_Output(terminal, lambda: Size(rows=24, columns=80), term="xterm")
+        with create_app_session(output=output):
+            session.clear()
 
         session.app.renderer.clear.assert_not_called()
-        assert "\033[2J" in capsys.readouterr().out
+        assert "\033[2J" in terminal.getvalue()
 
 
 class TestUserCancelledFlagReset:
