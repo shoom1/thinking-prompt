@@ -820,3 +820,44 @@ class TestLongLines:
                         whole._format(width, height)
                     ), (cut, on, width)
                     assert control.get_line_count(width) == whole.get_line_count(width)
+
+
+class TestEchoLines:
+    """What a finished box echoes: its lines as it fits them collapsed, the
+    hint's rows given to the text, a "..." line where they're cut."""
+
+    @staticmethod
+    def _echo(text: str, max_lines: int, **kwargs: Any) -> list[list[tuple[str, str]]]:
+        width = kwargs.pop("width", 80)
+        control = ThinkingBoxControl(lambda: text, max_collapsed_lines=max_lines, **kwargs)
+        return [[(style, piece) for style, piece, *_ in line] for line in control.echo_lines(text, width)]
+
+    @classmethod
+    def _texts(cls, text: str, max_lines: int, **kwargs: Any) -> list[str]:
+        return ["".join(piece for _, piece in line) for line in cls._echo(text, max_lines, **kwargs)]
+
+    def test_a_trailing_newline_is_not_a_line(self):
+        assert self._texts("a\nb\nc\nd\n", 4) == ["a", "b", "c", "d"]
+
+    def test_cut_lines_are_marked_at_the_overflow_end(self):
+        assert self._texts("a\nb\nc\nd\ne\n", 4, overflow="head") == ["a", "b", "c", "d", "..."]
+        assert self._texts("a\nb\nc\nd\n", 2) == ["...", "c", "d"]
+
+    def test_blank_text_echoes_nothing(self):
+        assert self._echo("  \n\n", 3) == []
+
+    def test_a_color_opened_before_the_cut_still_applies(self):
+        """The marker itself is in no color."""
+        assert self._echo("\x1b[31ma\nb\nc\x1b[0m\n", 1, content_format="ansi") == [
+            [("", "...")],
+            [("ansired", "c")],
+        ]
+
+    def test_a_long_line_is_cut_to_rows_and_echoed_as_one_line(self):
+        paragraph = " ".join(f"w{i:03d}" for i in range(200))  # 13 rows of 80
+        assert self._texts(paragraph, 3) == ["...", paragraph[10 * 80:]]
+        assert self._texts(paragraph, 3, overflow="head") == [paragraph[:3 * 80], "..."]
+
+    def test_wide_characters_take_their_columns(self):
+        """Three of these a row of 7 columns: 20 take 7 rows."""
+        assert self._texts("世" * 20, 2, width=7) == ["...", "世" * 5]

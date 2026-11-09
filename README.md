@@ -352,7 +352,8 @@ longer than the box shows its end, and the hint counts it. A box with no
 row to spare for the hint (one row, or a narrow terminal where the hint
 wraps) shows just its newest rows. Ctrl+T expands the box to fit its content, up to
 the space the terminal has. When the box finishes, the console echo keeps
-the same end the box showed.
+what the box showed: the same end, cut to its rows at the terminal's
+width, with `...` in place of the hint.
 
 For content whose first lines matter most — a task list, a plan — keep the
 head instead:

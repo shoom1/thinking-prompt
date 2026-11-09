@@ -416,10 +416,10 @@ class ThinkingBoxManager:
     ) -> list[ThinkingBox]:
         """End the boxes ``pick`` selects, in creation order, and echo them.
 
-        The echo runs after the lock is released: each box's text cut to
-        its own lines at its overflow end (blank text echoes nothing),
-        printed and kept for repaints. Without the echo the text is
-        dropped.
+        The echo runs after the lock is released: each box's text as the box
+        fits it, cut to its own rows at the terminal's width at its overflow
+        end (blank text echoes nothing), printed and kept for repaints.
+        Without the echo the text is dropped.
         """
         with self._lock:
             ended = [box for box in self._boxes if pick(box)]
@@ -428,15 +428,16 @@ class ThinkingBoxManager:
                 box._close()
             self._reset_mode_if_empty()
         echoed = self._thinking_echo if echo is None else echo
+        # The output's own width: at exit the app is gone, and the running
+        # app's terminal is no longer found.
+        width = (self._display.width or _terminal_width()) if echoed else 0
         for box in ended if echoed else []:
             control = box._control
             if not control.max_collapsed_lines:
                 continue  # the title line only: it showed no text to echo
             self._display.thinking(
-                box.text,
-                truncate_lines=control.max_collapsed_lines,
+                control.echo_lines(box.text, width),
                 content_format=control.content_format,
-                overflow=control.overflow,
             )
         if ended:
             self.redraw()

@@ -354,7 +354,7 @@ class _ParsedLines:
 
     def _find_shown(self) -> None:
         # Trailing blank lines aren't content (a trailing newline ends the
-        # last line), as in split_content_lines.
+        # last line).
         shown = len(self._lines)
         while shown > 1 and self._blank[shown - 1]:
             shown -= 1
@@ -571,15 +571,36 @@ class ThinkingBoxControl(FormattedTextControl):
         if limit is None or sum(rows) <= limit:
             return self._join(lines)
 
-        tail = self._overflow == "tail"
-        order = range(len(lines) - 1, -1, -1) if tail else range(len(lines))
         # The hint's rows, counted at its longest (every line hidden): the
         # count it names can't make it wrap onto a row it wasn't given.
         hint_rows = len(_wrap([("", self._hint(len(lines)))], width))
         show_hint = hint_rows < limit
-        room = limit - hint_rows if show_hint else limit
+        body, whole, _ = self._keep(parsed, width, limit - hint_rows if show_hint else limit)
+        if not show_hint:
+            return self._join(body)
+
+        hint: StyleAndTextTuples = [
+            ("class:thinking-box.hint", self._hint(len(lines) - whole))
+        ]
+        return self._join([hint, *body] if self._overflow == "tail" else [*body, hint])
+
+    def _keep(
+        self, parsed: _ParsedLines, width: int, room: int
+    ) -> tuple[list[StyleAndTextTuples], int, int]:
+        """What of ``parsed`` fits in ``room`` rows of ``width`` columns at
+        the ``overflow`` end: whole lines, then as many rows of the next
+        line as fit (its end in tail mode, its start in head mode).
+
+        Returns:
+            The lines kept, in order, the rows of a cut line each a line of
+            its own; how many are whole lines; and how many are a cut
+            line's rows (0: no line is cut).
+        """
+        lines, rows = parsed.lines, parsed.rows(width)
+        tail = self._overflow == "tail"
+        order = range(len(lines) - 1, -1, -1) if tail else range(len(lines))
         body: list[StyleAndTextTuples] = []  # from the overflow end
-        whole = 0
+        whole = cut = 0
         for i in order:
             if rows[i] <= room:
                 body.append(lines[i])
@@ -587,22 +608,39 @@ class ThinkingBoxControl(FormattedTextControl):
                 room -= rows[i]
                 continue
             if room:
-                # Only the rows shown are cut out of the line.
+                # Only the rows kept are cut out of the line.
                 wrapped = parsed.wrapped(i, width)
                 if tail:
                     body.extend(reversed(wrapped.cut(lines[i], len(wrapped) - room, len(wrapped))))
                 else:
                     body.extend(wrapped.cut(lines[i], 0, room))
+                cut = room
             break
         if tail:
             body.reverse()
-        if not show_hint:
-            return self._join(body)
+        return body, whole, cut
 
-        hint: StyleAndTextTuples = [
-            ("class:thinking-box.hint", self._hint(len(lines) - whole))
-        ]
-        return self._join([hint, *body] if tail else [*body, hint])
+    def echo_lines(self, text: str, width: int) -> list[StyleAndTextTuples]:
+        """What a finished box echoes of ``text``: its lines as the box
+        fits them collapsed at ``width`` columns, with a "..." line where
+        they're cut, in place of the hint (its rows go to the text). A line
+        cut to some of its rows is one line again. Nothing for blank text.
+        """
+        if not text.strip():
+            return []
+        with self._lock:
+            parsed = self._parse(text)
+            limit = self._max_collapsed_lines
+            if sum(parsed.rows(width)) <= limit:
+                return parsed.lines
+            body, _, cut = self._keep(parsed, width, limit)
+            tail = self._overflow == "tail"
+            if cut:
+                rows = body[:cut] if tail else body[-cut:]
+                line = [fragment for row in rows for fragment in row]
+                body = [line, *body[cut:]] if tail else [*body[:-cut], line]
+            marker: StyleAndTextTuples = [("", "...")]
+            return [marker, *body] if tail else [*body, marker]
 
     def _hint(self, hidden: int) -> str:
         """The line naming how many lines are hidden, and the toggle key."""

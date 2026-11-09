@@ -1118,6 +1118,16 @@ class TestExit:
     """The app's last frame leaves out the boxes and the status bar; open
     boxes are echoed once, below it."""
 
+    async def test_a_box_echoed_at_exit_is_cut_at_the_terminals_width(self):
+        """The app is gone by then: the rows are still the terminal's."""
+        paragraph = " ".join(f"w{i:03d}" for i in range(200))
+        with piped_session(rows=20, columns=40) as (session, inp):
+            async with session:
+                await wait_until(lambda: session.app.is_running)
+                session.start_thinking(max_lines=3).append(paragraph)
+        rows = [paragraph[i:i + 40] for i in range(0, len(paragraph), 40)]
+        assert transcript_texts(session._display)[-1] == "...\n" + "".join(rows[-3:]) + "\n"
+
     async def test_the_last_frame_leaves_out_the_boxes_and_the_status_bar(self):
         opened, gate = asyncio.Event(), asyncio.Event()
         with piped_session(status_text="READY") as (session, inp):

@@ -12,7 +12,6 @@ import pytest
 from prompt_toolkit.keys import Keys
 
 from thinking_prompt import ThinkingBox, ThinkingPromptSession, ThinkingPromptStyles
-from thinking_prompt._text import truncate_to_lines
 from thinking_prompt.frames import FrameScheduler
 from tests.helpers import echoed, transcript_texts, keep_console, make_display, make_manager
 
@@ -231,11 +230,11 @@ class TestFinishedBox:
             assert returned == "".join(f"{i}\n" for i in range(n))  # no gaps
             assert box.text == returned
             if returned.strip():
-                control = box._control
-                kept = truncate_to_lines(
-                    returned, control.max_collapsed_lines, overflow=control.overflow
-                )
-                assert transcript_texts(display)[-1] == kept + "\n"
+                # Short lines, cut at the tail end: the last ones under "...".
+                lines = returned.splitlines()
+                most = box._control.max_collapsed_lines
+                kept = lines if len(lines) <= most else ["...", *lines[-most:]]
+                assert transcript_texts(display)[-1] == "\n".join(kept) + "\n"
 
 
 class TestRich:
