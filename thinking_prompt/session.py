@@ -316,6 +316,9 @@ class ThinkingPromptSession:
         # The foreground query has been cancelled (see _cancel_query): it's
         # unwinding, and the session doesn't cancel it again.
         self._query_cancelled: bool = False
+        # The tasks that opened boxes, each until it ends: its boxes end
+        # with it (see _box_owner_ended).
+        self._box_owners: set[asyncio.Task[Any]] = set()
         # The task that entered `async with session:` (run_async()'s, too);
         # None outside. Its boxes count as nobody's: the session ends them.
         self._app_task: asyncio.Task[Any] | None = None
@@ -814,7 +817,7 @@ class ThinkingPromptSession:
         check_count("max_lines", max_lines, 0, optional=True)
         check_choice("content_format", content_format, ("plain", "ansi"))
         check_choice("overflow", overflow, ("tail", "head"))
-        return self._manager.create_box(
+        box = self._manager.create_box(
             content_callback,
             title=title if title is not None else self._thinking_title,
             border=border,
@@ -823,6 +826,25 @@ class ThinkingPromptSession:
             content_format=content_format,
             overflow=overflow,
         )
+        owner = box._owner
+        if owner is not None and owner not in self._box_owners:
+            # Watched until it ends: the boxes it left open end then.
+            self._box_owners.add(owner)
+            owner.add_done_callback(self._box_owner_ended)
+        return box
+
+    def _box_owner_ended(self, task: asyncio.Task[Any]) -> None:
+        """A task that opened boxes has ended: the boxes it left open end
+        now, echoed as finish() would, and after a cancelled task's, one
+        "Operation cancelled..." (as a cancelled thinking() block says).
+        The foreground query's are left to its cleanup (_run_query), which
+        ends them the same way."""
+        self._box_owners.discard(task)
+        if task is self._foreground:
+            return
+        ended = self._manager.finish_opened_by(task)
+        if task.cancelled():
+            self._announce_cancel(bool(ended))
 
     def _announce_cancel(self, ended: bool) -> None:
         """Say "Operation cancelled..." after the boxes a cancel ended.
@@ -1219,9 +1241,9 @@ class ThinkingPromptSession:
             self._queued.clear()
             # The UI is gone. End the boxes nobody else will end, echoing
             # them below its last frame; a live task's box is left to it,
-            # and ended when that task ends if the task doesn't end it.
+            # and ended when that task ends if the task doesn't end it
+            # (_box_owner_ended).
             self._manager.finish_owned_by(self._app_task)
-            self._manager.finish_when_owners_end()
             self._app_task = None
             self._frames.cancel()
             self._shrinks.cancel()
