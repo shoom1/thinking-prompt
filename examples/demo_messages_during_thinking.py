@@ -104,5 +104,5 @@ if __name__ == "__main__":
     print("Type messages and watch status updates appear during thinking.")
     print("Includes markdown formatting, code blocks, and status messages.")
     print("Try both short and long (>50 char) messages to see warning behavior.")
-    print("Press Ctrl+C or Ctrl+D to exit.\n")
+    print("Press Ctrl+D to exit.\n")
     asyncio.run(main())

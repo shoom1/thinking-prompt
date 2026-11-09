@@ -6,7 +6,8 @@ each input, query() runs it as the query Ctrl+C cancels.
 Type while a reply is running: the line waits under the prompt and runs
 next (input_while_busy="queue"); Up on an empty prompt takes it back.
 "/bg TEXT" runs a reply as a background task beside the next input.
-Ctrl+C cancels the running reply, Ctrl+D exits.
+Ctrl+C cancels the running reply (and the lines queued behind it);
+/exit, /quit or Ctrl+D exits.
 """
 import asyncio
 
@@ -15,7 +16,7 @@ from thinking_prompt import AppInfo, ThinkingPromptSession
 
 async def main() -> None:
     session = ThinkingPromptSession(
-        app_info=AppInfo(name="Own loop", welcome_message="Type anything; /bg TEXT runs beside."),
+        app_info=AppInfo(name="Own loop", welcome_message="Type anything; /bg TEXT runs beside; /exit quits."),
         input_while_busy="queue",
     )
     jobs: set[asyncio.Task[None]] = set()
@@ -32,7 +33,9 @@ async def main() -> None:
         while True:
             try:
                 text = await session.prompt_async()
-            except (EOFError, KeyboardInterrupt):
+            except EOFError:  # Ctrl+D at an empty prompt
+                break
+            if text.strip() in ("/exit", "/quit"):
                 break
             count += 1
             if text.startswith("/bg "):

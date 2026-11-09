@@ -161,5 +161,5 @@ if __name__ == "__main__":
     print("==================")
     print("Type anything to see in-place progress updates in the thinking box.")
     print("Watch the progress bar and spinner update on the same line!")
-    print("Press Ctrl+C or Ctrl+D to exit.\n")
+    print("Press Ctrl+D to exit.\n")
     asyncio.run(main())

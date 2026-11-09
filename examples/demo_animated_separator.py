@@ -136,5 +136,5 @@ if __name__ == "__main__":
     print("  list - Show available animation configurations")
     print("  next - Switch to the next configuration")
     print(f"  1-{len(CONFIGS)}  - Switch to that configuration")
-    print("Press Ctrl+C or Ctrl+D to exit.\n")
+    print("Press Ctrl+D to exit.\n")
     asyncio.run(main())

@@ -131,10 +131,12 @@ which closes the stream, and the unanswered turn stays out of `history`.
 | Key | Action |
 |-----|--------|
 | Ctrl+T | Expand/collapse all thinking boxes (while one is open) |
-| Ctrl+C | Cancel the running handler; at an idle prompt, end the boxes nobody else will (see [When a Box Ends](#when-a-box-ends)), or exit when no box is open |
-| Ctrl+D | Exit application (empty input line only) |
+| Ctrl+C | Stop: cancel the running handler (lines queued behind it are dropped); at an idle prompt, clear the line and end the boxes nobody else will (see [When a Box Ends](#when-a-box-ends)). Never exits |
+| Ctrl+D | Exit, at an empty prompt with no handler running (Ctrl+C stops one first) |
 
 Rebind Ctrl+T with `expand_key=` (see [Session Options](#session-options)).
+An exit command such as `/exit` is your app's: end your loop on it (see
+[Your Own Loop](#your-own-loop)), or call `session.exit()` from a handler.
 
 ## API Reference
 
@@ -217,9 +219,9 @@ box). A box a live task is feeding is that task's to end.
 - **A handler or a query ends:** the session finishes the boxes it opened,
   and those whose task has ended or that were opened outside asyncio.
 - **Ctrl+C at an idle prompt:** the session ends the boxes nobody else
-  will. If boxes that live tasks are feeding remain, Ctrl+C doesn't exit:
-  the status bar says `Background work is running — Ctrl+D exits` until
-  those boxes end or the next input is accepted.
+  will. If boxes that live tasks are feeding remain, the status bar says
+  `Background work is running — Ctrl+D exits` until those boxes end or the
+  next input is accepted.
 - **Exit:** the last frame leaves out the boxes and the status bar. The
   boxes nobody else will end are echoed below it. A live task's box is
   echoed when the task finishes it, or else when the task ends
@@ -246,7 +248,9 @@ async with session:                        # the app runs until the block ends
     while True:
         try:
             text = await session.prompt_async()
-        except (EOFError, KeyboardInterrupt):  # Ctrl+D; Ctrl+C at an idle prompt
+        except EOFError:                       # Ctrl+D at an empty prompt
+            break
+        if text.strip() in ("/exit", "/quit"):
             break
         await session.query(respond(text))     # Ctrl+C cancels this, not the loop
 ```
@@ -261,7 +265,8 @@ never `prompt_async()`, should stop on that `None` (or once
 
 A line typed while a query runs is refused by default (`Busy`). With
 `ThinkingPromptSession(input_while_busy="queue")` it waits under the
-prompt and runs next; Up on an empty prompt takes it back to edit. The
+prompt and runs next; Up on an empty prompt takes it back to edit, and
+Ctrl+C drops the queued lines with the query it stops. The
 queued lines take at most three rows: past that, the oldest two show
 with a count of the rest (`… 5 more queued`). A
 follow-up question takes the oldest queued line as its answer, as a
@@ -477,10 +482,11 @@ session.add_system("Connecting to server...")
 ```
 
 The session sometimes puts a hint in the status bar in place of your
-status: `Busy — press Ctrl+C to cancel` when Enter is pressed while a
-query runs (`Busy` alone while your loop is busy outside `query()`, where
-Ctrl+C has no query to cancel), and `Background work is running — Ctrl+D
-exits` (see [When a Box Ends](#when-a-box-ends)). Your status comes back
+status: `Busy — press Ctrl+C to cancel` when Enter (or Ctrl+D) is pressed
+while a query runs (`Busy` alone while your loop is busy outside
+`query()`, where Ctrl+C has no query to cancel), `Nothing to stop — Ctrl+D
+exits` when Ctrl+C finds nothing to stop, and `Background work is running
+— Ctrl+D exits` (see [When a Box Ends](#when-a-box-ends)). Your status comes back
 once the hint no longer applies; a status you set meanwhile replaces the
 hint.
 
@@ -894,6 +900,8 @@ removed:
 | The default theme, the dark palette | The terminal's own colors: `theme="dark"` keeps 0.4's look, and `ThinkingPromptStyles()` is now the terminal theme (`.dark()` is the dark palette) |
 | `theme="auto"` | Drop it: the default follows the terminal |
 | `styles.to_rich_theme_dict()` | Drop it: the session's Rich output uses its theme already |
+| Ctrl+C at an idle prompt exits | Ctrl+C never exits (it clears the line): Ctrl+D exits, or your own `/exit` command |
+| Ctrl+D while a handler runs: exits | Stop the handler with Ctrl+C first: Ctrl+D exits at an idle prompt |
 | Style field `history`, classes `history.*` (`history.user-message`, ...) | `transcript`, `transcript.*` (`transcript.user-message`, ...) |
 | Style fields `radio_list`, `radio_selected`, `checkbox_list`, `checkbox_selected` (classes `radio-*`, `checkbox-*`) | Drop them: the dialog fields use the `field_*` styles |
 
