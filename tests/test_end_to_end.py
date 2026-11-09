@@ -394,6 +394,31 @@ class TestBoxLifecycle:
 
             await run_with(session, lambda text: None, script)
 
+    async def test_a_cancelled_task_says_so_once_for_all_its_boxes(self):
+        """A thinking() block and a start_thinking() box, one cancel: one
+        "Operation cancelled..." after both."""
+        opened = asyncio.Event()
+
+        async def background() -> None:
+            session.start_thinking(title="Other").append("other box\n")
+            async with session.thinking(title="Block") as box:
+                box.append("block box\n")
+                opened.set()
+                await asyncio.sleep(3600)
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                task = asyncio.create_task(background())
+                await asyncio.wait_for(opened.wait(), 2)
+                task.cancel()
+                await wait_until(lambda: not session.is_thinking)
+                transcript = transcript_texts(session._display)
+                assert transcript.count("Operation cancelled...\n") == 1, transcript
+                assert transcript[-1] == "Operation cancelled...\n"
+
+            await run_with(session, lambda text: None, script)
+
     async def test_ctrl_c_ends_a_querys_sub_task_boxes_under_one_line(self):
         """The query cancels its sub-task as it unwinds: the sub-task's box
         ends with it, and one "Operation cancelled..." follows all the boxes
@@ -682,6 +707,22 @@ class TestThinkingBoxesOnScreen:
                     assert on_screen(session, f"Box {i}") and on_screen(session, f"line {i}"), lines
                 for box in boxes:
                     box.finish(echo=False)
+
+            await run_with(session, lambda text: None, script)
+
+    @pytest.mark.parametrize("rows", [4, 5])
+    async def test_the_prompt_keeps_its_row_however_short_the_terminal(self, rows: int):
+        """Four rows: the separators, the prompt and the status bar, and
+        no room for a box; five: still none (a titled box takes two)."""
+        with piped_session(rows=rows, spinner=None, status_text="READY") as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                box = session.start_thinking(title="Work")
+                box.append("step 1\nstep 2\n")
+                inp.send_text("typed")
+                await wait_until(lambda: on_screen(session, "typed"))
+                assert on_screen(session, "READY"), screen_lines(session)
+                box.finish(echo=False)
 
             await run_with(session, lambda text: None, script)
 

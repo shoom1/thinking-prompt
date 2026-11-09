@@ -393,6 +393,11 @@ class ThinkingBoxManager:
 
         return self._finish(owned, echo=echo)
 
+    def has_boxes_opened_by(self, task: asyncio.Task[Any]) -> bool:
+        """True while a box ``task`` opened is open."""
+        with self._lock:
+            return any(box._owner is task for box in self._boxes)
+
     def finish_opened_by(
         self,
         task: asyncio.Task[Any],

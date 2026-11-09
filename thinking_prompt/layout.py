@@ -266,7 +266,8 @@ def create_layout(
             and default_buffer.complete_state is not None
         ):
             return D(min=completions_menu_height)
-        return D()
+        # The prompt's row is never given to the boxes above it.
+        return D(min=1)
 
     # Input window - sizes naturally, but reserves space for completions menu
     input_window = Window(
