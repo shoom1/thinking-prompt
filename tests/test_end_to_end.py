@@ -1727,7 +1727,7 @@ class TestBoxLongLists:
 
 class TestInlineMaxHeight:
     """An inline dialog fits its max_height (and its text body the
-    terminal); its text scrolls with PgUp/PgDn."""
+    terminal); its text scrolls with ↑↓ (and PgUp/PgDn)."""
 
     TEXT = "\n".join(f"line {i:02}" for i in range(40))
 
@@ -1765,15 +1765,26 @@ class TestInlineMaxHeight:
 
     async def test_pagedown_and_pageup_page_through_the_text(self):
         async def keys(session: ThinkingPromptSession, inp: PipeInput) -> None:
-            await wait_until(lambda: on_screen(session, "PgUp/PgDn scroll"))
+            await wait_until(lambda: on_screen(session, "↑↓ scroll"))
             inp.send_text(PGDN)
             await wait_until(lambda: (first_line_shown(session) or 0) > 1)
-            scrolled = first_line_shown(session)
-            inp.send_text(DOWN)  # inline, ↓ is the cursor's: one action, it stays
-            await asyncio.sleep(0.2)
-            assert first_line_shown(session) == scrolled
             inp.send_text(PGUP)
             await wait_until(lambda: first_line_shown(session) == 0)
+
+        await self._message(self.TEXT, 24, keys)
+
+    async def test_the_arrows_scroll_the_text_a_line_from_its_action(self):
+        """No other stop to go to: ↓ and ↑ read the text above the action,
+        which keeps the cursor."""
+
+        async def keys(session: ThinkingPromptSession, inp: PipeInput) -> None:
+            inp.send_text(DOWN)
+            await wait_until(lambda: first_line_shown(session) == 1)
+            inp.send_text(DOWN + DOWN)
+            await wait_until(lambda: first_line_shown(session) == 3)
+            inp.send_text(UP)
+            await wait_until(lambda: first_line_shown(session) == 2)
+            assert cursor_row(session) == "❯ 1. OK"
 
         await self._message(self.TEXT, 24, keys)
 
@@ -1786,7 +1797,7 @@ class TestInlineMaxHeight:
             prompt, status = prompt_and_status_rows(session)
             rows = screen_lines(session)[prompt + 2:status]
             assert rows[0] == "Long" and rows[1].startswith("line "), rows
-            assert rows[-2] == "❯ 1. OK" and "PgUp/PgDn scroll" in rows[-1], rows
+            assert rows[-2] == "❯ 1. OK" and "↑↓ scroll" in rows[-1], rows
             assert "" not in rows, rows
 
         await self._message(self.TEXT, 8, check)
@@ -3757,3 +3768,80 @@ class TestChoiceFieldAlone:
                 await wait_until(lambda: results == ["y"])
 
             await run_with(session, handler, script)
+
+
+class TestDialogTextAboveFields:
+    """A dialog's text above its fields can be read in full when it doesn't
+    fit: the body, text and fields alike, scrolls as one, and ↑ on the
+    first field reads up through the text, ↓ back down to the fields. In a
+    box and inline, however many fields follow it."""
+
+    TEXT = "\n".join(f"instruction {i:02}" for i in range(1, 21))
+    FIELDS: dict[str, Callable[[], list[Any]]] = {
+        "one text field": lambda: [TextField("name", "Name")],
+        "two text fields": lambda: [TextField("name", "Name"), TextField("city", "City")],
+        "a choice field": lambda: [ChoiceField("pick", "Pick", options=["xx", "yy", "zz"])],
+    }
+
+    @staticmethod
+    def _instructions(session: ThinkingPromptSession) -> set[int]:
+        return {
+            int(line.split("instruction ")[1][:2])
+            for line in screen_lines(session)
+            if "instruction " in line
+        }
+
+    @staticmethod
+    async def _keys(session: ThinkingPromptSession, inp: PipeInput, keys: list[str]) -> None:
+        """One at a time, each drawn before the next."""
+        for key in keys:
+            before = session.app.render_counter
+            inp.send_text(key)
+            await wait_until(lambda: session.app.render_counter > before)
+
+    @pytest.mark.parametrize("placement", ["box", "inline"])
+    @pytest.mark.parametrize("fields", list(FIELDS))
+    async def test_every_line_of_the_text_can_be_read_with_the_arrows(self, placement: str, fields: str):
+        made = self.FIELDS[fields]()
+        with piped_session(rows=40) as (session, inp):
+            async with session:
+                await wait_until(lambda: session.app.is_running)
+                dialog = Dialog(
+                    "Q", self.TEXT, [ButtonConfig("OK")], fields=made, max_height=10,
+                    placement=placement, width=40,
+                )
+                shown = asyncio.ensure_future(session.show_dialog(dialog))
+                await wait_until(lambda: dialog_rendered(session))
+                assert on_screen(session, made[0].label), screen_lines(session)  # the cursor's field
+                seen = self._instructions(session)
+                for key in [UP] * 25 + [DOWN] * 25:  # up through the text, and back down
+                    await self._keys(session, inp, [key])
+                    seen |= self._instructions(session)
+                    if key == UP and 1 in seen:
+                        # At the top, more ↑ leave it there.
+                        assert 1 in self._instructions(session), screen_lines(session)
+                assert seen == set(range(1, 21))
+                assert on_screen(session, made[-1].label), screen_lines(session)
+                dialog.set_result(None)
+                await shown
+
+    @pytest.mark.parametrize("placement", ["box", "inline"])
+    async def test_another_key_brings_the_field_back_into_view(self, placement: str):
+        """Scrolled up through the text, the field is out of view; Enter
+        (to edit it) shows it again, and what's typed lands in it."""
+        with piped_session(rows=40) as (session, inp):
+            async with session:
+                await wait_until(lambda: session.app.is_running)
+                dialog = Dialog(
+                    "Q", self.TEXT, [ButtonConfig("OK")], fields=[TextField("name", "Name")],
+                    max_height=10, placement=placement, width=40,
+                )
+                shown = asyncio.ensure_future(session.show_dialog(dialog))
+                await wait_until(lambda: dialog_rendered(session))
+                await self._keys(session, inp, [UP] * 12)
+                assert not on_screen(session, "Name"), screen_lines(session)
+                inp.send_text(ENTER + "bob" + ENTER)  # edit the field, keep it
+                await wait_until(lambda: dialog.values["name"] == "bob")
+                await wait_until(lambda: on_screen(session, "Name  bob"))
+                dialog.set_result(None)
+                await shown

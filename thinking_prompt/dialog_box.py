@@ -29,6 +29,7 @@ from prompt_toolkit.widgets import Button, Frame, Label
 from prompt_toolkit.widgets import Dialog as _DialogWidget
 
 from .dialog_scroll import AtMost, ScrollRegion, dialog_cap, focusable_windows
+from .rows import RowControl
 
 if TYPE_CHECKING:
     from prompt_toolkit.layout.mouse_handlers import MouseHandlers
@@ -47,7 +48,8 @@ class BoxView:
         buttons: Its Button widgets, one per ButtonConfig, in order.
         focused_button: The first ``ButtonConfig(focused=True)`` button, if any.
         max_height: The dialog's max_height (None: the terminal's).
-        text_region: The body's region when nothing in the body takes focus (a text body): it scrolls by keys.
+        region: The body's region: text and fields scroll in it as one.
+        text_only: Nothing in the body takes the cursor (a text body): ↑↓ scroll it.
         floats: Floats the body needs over the whole screen (Dialog._screen_floats), drawn over the box.
         start: Where the body's cursor starts when no button asks for focus (a radio list's picked option).
     """
@@ -56,7 +58,8 @@ class BoxView:
     buttons: list[Button]
     focused_button: Button | None = None
     max_height: int | None = None
-    text_region: ScrollRegion | None = None
+    region: ScrollRegion | None = None
+    text_only: bool = False
     floats: list[Float] = field(default_factory=list)
     start: Container | None = None
 
@@ -73,10 +76,11 @@ class BoxView:
 def build_box(dialog: Dialog) -> BoxView:
     """Build prompt_toolkit's Dialog widget for ``dialog``.
 
-    When the dialog is capped (BoxPresenter._cap), a body that is one window
-    taking the cursor (a radio list, a text field) is squeezed and scrolls
-    itself. Any other body sits in a ScrollRegion: it scrolls with the
-    cursor (form fields, a check list), or by keys for a text body.
+    The body, text and fields alike, sits in one ScrollRegion, which is
+    scrolled when the dialog is capped (BoxPresenter._cap): it follows the
+    cursor, and ↑↓ read what's around the fields (RowNavigator.step), as
+    they scroll a text body. A body that is one window of another kind
+    taking the cursor (a RadioList, a TextArea) scrolls itself, squeezed.
     """
     content, start = dialog._content()
     if content is None:
@@ -84,11 +88,11 @@ def build_box(dialog: Dialog) -> BoxView:
         content = to_container(Label(text=""))
     stops = focusable_windows(content)
     body: Container = content
-    text_region: ScrollRegion | None = None
-    # A body whose stops are one window stays out of a region: there, a
-    # focused window taller than the region fills it, and the text above
-    # it (a dropdown's question) never shows.
-    if len(stops) != 1:
+    region: ScrollRegion | None = None
+    scrolls_itself = len(stops) == 1 and not (
+        isinstance(stops[0], Window) and isinstance(stops[0].content, RowControl)
+    )
+    if not scrolls_itself:
 
         def at_first_stop() -> bool:
             # Back at the first stop, the region scrolls to its top: rows
@@ -96,9 +100,8 @@ def build_box(dialog: Dialog) -> BoxView:
             first = focusable_windows(content)[:1]
             return bool(first) and get_app().layout.has_focus(first[0])
 
-        body = ScrollRegion(content, at_first_stop, scrollbar=True)
-        # Nothing in it takes focus (a text body): it scrolls by keys.
-        text_region = body if not stops else None
+        region = ScrollRegion(content, at_first_stop, scrollbar=True)
+        body = region
 
     # Each ButtonConfig's style and focused flag apply however the dialog was made.
     buttons: list[Button] = []
@@ -131,7 +134,8 @@ def build_box(dialog: Dialog) -> BoxView:
         buttons=buttons,
         focused_button=focused,
         max_height=dialog.max_height,
-        text_region=text_region,
+        region=region,
+        text_only=not stops,
         floats=dialog._screen_floats(),
         start=start,
     )

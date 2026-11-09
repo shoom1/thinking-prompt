@@ -606,8 +606,9 @@ class DialogManager:
         return self._box.rows(width, max_rows)
 
     def _create_key_bindings(self) -> KeyBindings:
-        """Escape, and the keys that scroll a text body that doesn't fit:
-        PgUp/PgDn, and in a box also ↑↓ (its buttons use ←→ and Tab)."""
+        """Escape, and the keys that scroll a body that doesn't fit: PgUp/PgDn,
+        and in a box whose body is text also ↑↓ (its buttons use ←→ and Tab;
+        with fields, ↑↓ scroll on the way between them: RowNavigator.step)."""
         kb = KeyBindings()
 
         @kb.add("escape", filter=Condition(lambda: self._visible))
@@ -616,48 +617,56 @@ class DialogManager:
             if dialog and dialog.escapable:
                 dialog.set_result(dialog.escape_result)
 
-        text_overflows = Condition(self._text_overflows)
-        in_box = Condition(lambda: self._box.view is not None)
+        overflows = Condition(self._overflows)
+        text_box = Condition(lambda: self._box.view is not None and self._box.view.text_only)
 
-        @kb.add("pageup", filter=text_overflows)
+        @kb.add("pageup", filter=overflows)
         def page_up(event: Any) -> None:
-            self._scroll_text(pages=-1)
+            self._scroll(pages=-1)
 
-        @kb.add("pagedown", filter=text_overflows)
+        @kb.add("pagedown", filter=overflows)
         def page_down(event: Any) -> None:
-            self._scroll_text(pages=1)
+            self._scroll(pages=1)
 
-        # Inline, ↑↓ are the cursor's: RowNavigator's own up/down, bound on
-        # the dialog's container, outrank these app-level bindings anyway;
-        # in_box says the intent.
-        @kb.add("up", filter=text_overflows & in_box)
+        # A box's text body has no cursor to move: ↑↓ scroll it. Inline,
+        # ↑↓ are the cursor's: RowNavigator's own up/down, bound on the
+        # dialog's container, outrank these app-level bindings anyway.
+        @kb.add("up", filter=overflows & text_box)
         def line_up(event: Any) -> None:
-            self._scroll_text(lines=-1)
+            self._scroll(lines=-1)
 
-        @kb.add("down", filter=text_overflows & in_box)
+        @kb.add("down", filter=overflows & text_box)
         def line_down(event: Any) -> None:
-            self._scroll_text(lines=1)
+            self._scroll(lines=1)
 
         return kb
 
-    def _text_region(self) -> ScrollRegion | None:
-        """The open dialog's text body (box or inline), which scrolls by keys;
-        None when no dialog is open or its body has cursor stops."""
+    def _region(self) -> ScrollRegion | None:
+        """The open dialog's body region (box or inline); None when no
+        dialog is open."""
         if self._box.view is not None:
-            return self._box.view.text_region
+            return self._box.view.region
         if self._inline.view is not None:
-            return self._inline.view.text_region
+            return self._inline.view.region
         return None
 
-    def _text_overflows(self) -> bool:
-        region = self._text_region()
+    def _overflows(self) -> bool:
+        region = self._region()
         return self._visible and region is not None and region.overflows
 
-    def _scroll_text(self, *, lines: int = 0, pages: int = 0) -> None:
-        region = self._text_region()
+    def _scroll(self, *, lines: int = 0, pages: int = 0) -> None:
+        region = self._region()
         if region is not None:
             region.scroll(lines)
             region.page(pages)
+
+    def _key_pressed(self, key_processor: Any) -> None:
+        """After each key: unless it scrolled the body past the cursor
+        (PgUp/PgDn, ↑↓ on the way to a field), the body follows the cursor
+        again, so any other key brings the cursor back into view."""
+        region = self._region()
+        if region is not None:
+            region.settle()
 
     def _inject_float_container(self) -> None:
         """Install the session's float layer (box dialogs, and any open
@@ -763,6 +772,8 @@ class DialogManager:
                 target = self._inline.open(dialog, self._box.root).focus
 
             self._visible = True
+            key_processor = self._session.app.key_processor
+            key_processor.after_key_press += self._key_pressed
             if target is None:
                 raise ValueError(_nothing_to_focus(dialog))
             try:
@@ -789,6 +800,8 @@ class DialogManager:
                 app_done.remove_done_callback(abandon)
         finally:
             # Hide dialog and restore focus
+            # (Removing a handler that was never added does nothing.)
+            self._session.app.key_processor.after_key_press -= self._key_pressed
             self._visible = False
             self._current_dialog = None
             self._box.close()
