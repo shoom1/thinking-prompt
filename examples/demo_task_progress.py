@@ -68,5 +68,5 @@ if __name__ == "__main__":
     print("Task Progress Demo")
     print("=" * 40)
     print("Type anything to see Rich-styled task progress.")
-    print("Press Ctrl+C or Ctrl+D to exit.\n")
+    print("Press Ctrl+D to exit.\n")
     asyncio.run(main())

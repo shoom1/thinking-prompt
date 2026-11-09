@@ -18,6 +18,7 @@ from tests.test_end_to_end import (
     CTRL_D,
     ENTER,
     UP,
+    dialog_rendered,
     done_frame,
     echoed_inputs,
     piped_session,
@@ -169,22 +170,62 @@ class TestPromptAsync:
             await run_loop(session, body, script)
         assert raised == ["eof"]
 
-    async def test_ctrl_c_at_an_idle_prompt_raises_keyboard_interrupt(self):
-        raised: list[str] = []
+    async def test_ctrl_c_at_an_idle_prompt_says_how_to_exit(self):
+        lines: list[str] = []
         with piped_session() as (session, inp):
 
             async def body() -> None:
-                try:
-                    await session.prompt_async()
-                except KeyboardInterrupt:
-                    raised.append("interrupt")
+                lines.append(await session.prompt_async())
 
             async def script(run: asyncio.Task[None]) -> None:
                 inp.send_text(CTRL_C)
+                await wait_until(lambda: session.status_text == session._IDLE_STATUS)
+                assert session.app.is_running and waiting_for_input(session)
+                inp.send_text("hello" + ENTER)
                 await finished(run)
 
             await run_loop(session, body, script)
-        assert raised == ["interrupt"]
+        assert lines == ["hello"]
+
+    async def test_ctrl_c_clears_a_typed_line(self):
+        lines: list[str] = []
+        with piped_session(status_text="READY") as (session, inp):
+
+            async def body() -> None:
+                lines.append(await session.prompt_async())
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("draft")
+                await wait_until(lambda: session._default_buffer.text == "draft")
+                inp.send_text(CTRL_C + "x")  # "x" lands once the Ctrl+C is handled
+                await wait_until(lambda: session._default_buffer.text == "x")
+                assert session.status_text == "READY"
+                inp.send_text(ENTER)
+                await finished(run)
+
+            await run_loop(session, body, script)
+        assert lines == ["x"]
+
+    async def test_ctrl_c_under_a_background_dialog_keeps_the_draft_quietly(self):
+        """The dialog has the focus: Ctrl+C neither clears the prompt under
+        it nor says Ctrl+D exits (in the dialog, it doesn't)."""
+        with piped_session(status_text="READY") as (session, inp):
+
+            async def body() -> None:
+                with suppress(EOFError):
+                    await session.prompt_async()
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("draft")
+                await wait_until(lambda: session._default_buffer.text == "draft")
+                shown = asyncio.ensure_future(session.message_dialog("Note", "hello"))
+                await wait_until(lambda: dialog_rendered(session))
+                inp.send_text(CTRL_C + ENTER)  # Enter presses OK once the Ctrl+C is handled
+                await asyncio.wait_for(shown, 2)
+                assert session._default_buffer.text == "draft"
+                assert session.status_text == "READY"
+
+            await run_loop(session, body, script)
 
     async def test_a_second_waiter_is_refused(self):
         with piped_session() as (session, inp):
@@ -438,7 +479,7 @@ class TestQuery:
         assert [str(r.exc_info[1]) for r in errors] == ["cleanup broke"]  # type: ignore[index]
         assert not child._log_traceback  # type: ignore[attr-defined]  # retrieved: asyncio won't report it
 
-    async def test_ctrl_d_cancels_the_query_and_the_loop_ends(self):
+    async def test_ctrl_d_leaves_a_running_query_and_says_how_to_stop_it(self):
         results: list[object] = []
         started: list[str] = []
         with piped_session() as (session, inp):
@@ -446,13 +487,14 @@ class TestQuery:
             async def body() -> None:
                 text = await session.prompt_async()
                 results.append(await session.query(forever(session, text, started)))
-                with pytest.raises(EOFError):
-                    await session.prompt_async()
 
             async def script(run: asyncio.Task[None]) -> None:
                 inp.send_text("go" + ENTER)
                 await wait_until(lambda: started == ["go"])
                 inp.send_text(CTRL_D)
+                await wait_until(lambda: session.status_text == session._BUSY_STATUS)
+                assert session.app.is_running and not run.done()
+                inp.send_text(CTRL_C)
                 await finished(run)
 
             await run_loop(session, body, script)
@@ -503,10 +545,10 @@ class TestQuery:
 
 
 class TestCtrlDAtAFollowUp:
-    """Ctrl+D while a query asks a follow-up ends the query as the app
-    stopping does: it's cancelled, not given an EOFError to raise."""
+    """Ctrl+D while a query asks a follow-up does nothing: the query is
+    running, and Ctrl+C is what stops it."""
 
-    async def test_the_query_returns_none_and_the_loop_ends(self):
+    async def test_the_query_still_gets_its_answer(self):
         results: list[object] = []
         with piped_session() as (session, inp):
 
@@ -516,34 +558,163 @@ class TestCtrlDAtAFollowUp:
             async def body() -> None:
                 await session.prompt_async()
                 results.append(await session.query(respond()))
-                with pytest.raises(EOFError):
-                    await session.prompt_async()
 
             async def script(run: asyncio.Task[None]) -> None:
                 inp.send_text("question" + ENTER)
                 await wait_until(lambda: session._foreground is not None and waiting_for_input(session))
-                inp.send_text(CTRL_D)
+                inp.send_text(CTRL_D + "answer" + ENTER)
                 await finished(run)
 
             await run_loop(session, body, script)
-        assert results == [None]
+        assert results == ["answer"]
 
-    async def test_a_handler_asking_ends_without_an_error(self):
+    async def test_a_handler_asking_still_gets_its_answer(self):
         from tests.test_end_to_end import run_with
 
+        answers: list[str] = []
+
         async def handler(text: str) -> None:
-            await session.prompt_async()
+            answers.append(await session.prompt_async())
 
         with piped_session() as (session, inp):
 
             async def script(run: asyncio.Task[None]) -> None:
                 inp.send_text("question" + ENTER)
                 await wait_until(lambda: session._foreground is not None and waiting_for_input(session))
-                inp.send_text(CTRL_D)
-                await finished(run)
-                assert not any("Handler error" in text for text in transcript_texts(session._display))
+                inp.send_text(CTRL_D + "answer" + ENTER)
+                await wait_until(lambda: answers == ["answer"])
+                assert not run.done()
 
             await run_with(session, handler, script)
+
+
+class TestCancelOnce:
+    """The session cancels a query once: a query unwinding, its finally
+    blocks awaiting their cleanup, isn't cancelled again by the app stopping
+    or its caller being cancelled. Each Ctrl+C cancels again: the way out
+    of a cleanup that hangs."""
+
+    @staticmethod
+    def _work(log: list[str], started: asyncio.Event, cleaning: asyncio.Event) -> Callable[[], Awaitable[None]]:
+        async def work() -> None:
+            try:
+                started.set()
+                await asyncio.Event().wait()
+            finally:
+                cleaning.set()
+                try:
+                    await asyncio.sleep(0.2)
+                    log.append("cleaned up")
+                except asyncio.CancelledError:
+                    log.append("cleanup cancelled")
+                    raise
+
+        return work
+
+    async def test_exit_during_a_query_lets_its_cleanup_finish(self):
+        log: list[str] = []
+        started, cleaning = asyncio.Event(), asyncio.Event()
+        work = self._work(log, started, cleaning)
+        with piped_session() as (session, inp):
+
+            async def body() -> None:
+                await session.prompt_async()
+                assert await session.query(work()) is None
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await started.wait()
+                session.exit()
+                await finished(run)
+
+            await run_loop(session, body, script)
+        assert log == ["cleaned up"]
+
+    async def test_exit_during_a_handler_lets_its_cleanup_finish(self):
+        from tests.test_end_to_end import run_with
+
+        log: list[str] = []
+        started, cleaning = asyncio.Event(), asyncio.Event()
+        work = self._work(log, started, cleaning)
+
+        async def handler(text: str) -> None:
+            await work()
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await started.wait()
+                session.exit()
+                await finished(run)
+
+            await run_with(session, handler, script)
+        assert log == ["cleaned up"]
+
+    async def test_exit_after_ctrl_c_lets_the_cleanup_finish(self):
+        from tests.test_end_to_end import run_with
+
+        log: list[str] = []
+        started, cleaning = asyncio.Event(), asyncio.Event()
+        work = self._work(log, started, cleaning)
+
+        async def handler(text: str) -> None:
+            await work()
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await started.wait()
+                inp.send_text(CTRL_C)
+                await cleaning.wait()
+                session.exit()
+                await finished(run)
+
+            await run_with(session, handler, script)
+        assert log == ["cleaned up"]
+
+    async def test_cancelling_the_caller_after_ctrl_c_lets_the_cleanup_finish(self):
+        log: list[str] = []
+        started, cleaning = asyncio.Event(), asyncio.Event()
+        work = self._work(log, started, cleaning)
+        with piped_session() as (session, inp):
+
+            async def body() -> None:
+                caller = asyncio.ensure_future(session.query(work()))
+                await started.wait()
+                inp.send_text(CTRL_C)
+                await cleaning.wait()
+                caller.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await caller
+
+            async def script(run: asyncio.Task[None]) -> None:
+                await finished(run)
+
+            await run_loop(session, body, script)
+        assert log == ["cleaned up"]
+
+    async def test_a_second_ctrl_c_stops_the_cleanup(self):
+        log: list[str] = []
+        started, cleaning = asyncio.Event(), asyncio.Event()
+        work = self._work(log, started, cleaning)
+        with piped_session() as (session, inp):
+
+            async def body() -> None:
+                await session.prompt_async()
+                assert await session.query(work()) is None
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await started.wait()
+                inp.send_text(CTRL_C)
+                await cleaning.wait()
+                inp.send_text(CTRL_C)
+                await finished(run)
+
+            await run_loop(session, body, script)
+        assert log == ["cleanup cancelled"]
 
 
 class TestRunAsyncHandlers:
@@ -874,7 +1045,8 @@ class TestQueue:
 
             await run_loop(session, self._loop(session, ran, started, release), script)
 
-    async def test_ctrl_c_cancels_the_query_and_the_queue_runs(self):
+    async def test_ctrl_c_cancels_the_query_and_drops_the_queue(self):
+        """Stop means stop: the lines queued behind the query don't start."""
         ran: list[str] = []
         started: list[str] = []
         release = asyncio.Event()
@@ -884,9 +1056,13 @@ class TestQueue:
                 inp.send_text("slow" + ENTER)
                 await wait_until(lambda: started == ["slow"])
                 inp.send_text("two" + ENTER)
-                await wait_until(lambda: list(session._queued) == ["two"])
+                await wait_until(lambda: any("queued: two" in line for line in screen_lines(session)))
                 inp.send_text(CTRL_C)
-                await wait_until(lambda: ran == ["two"])
+                await wait_until(lambda: waiting_for_input(session))
+                assert not session._queued
+                assert started == ["slow"] and ran == []
+                assert echoed_inputs(session) == ["slow"]
+                await wait_until(lambda: not any("queued:" in line for line in screen_lines(session)))
 
             await run_loop(session, self._loop(session, ran, started, release), script)
 
@@ -951,7 +1127,7 @@ class TestQueue:
                 await wait_until(lambda: started == ["slow"])
                 inp.send_text("two" + ENTER)
                 await wait_until(lambda: list(session._queued) == ["two"])
-                inp.send_text(CTRL_D)
+                session.exit()
                 await finished(run)
                 assert not session._queued
                 assert echoed_inputs(session) == ["slow"]
