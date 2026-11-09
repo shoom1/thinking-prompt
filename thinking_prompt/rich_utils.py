@@ -64,7 +64,14 @@ def _renderable_to_ansi(renderable: Any, theme: Any = None, width: int | None = 
             width=width,
             theme=theme,
         )
-        is_text = isinstance(renderable, (str, Text))
+        if isinstance(renderable, str):
+            renderable = console.render_str(renderable, highlight=False)
+        is_text = isinstance(renderable, Text)
+        if is_text:
+            # Unwrapped, so any width that holds it all is the same: before
+            # Rich 14.3, text wider than the console lost a space that ended
+            # it, and words streamed a piece at a time ran together.
+            console.width = max(console.width, renderable.cell_len + 1)
         console.print(renderable, end="", highlight=False, soft_wrap=is_text)
         return f.getvalue()
     except ImportError:
