@@ -265,6 +265,12 @@ never `prompt_async()`, should stop on that `None` (or once
 `session.app.is_done`). Inside a query (or a handler),
 `prompt_async()` asks a follow-up question.
 
+To tell a finished query from a cancelled one, have the coroutine return
+a value (`None` then means cancelled), or do what depends on it finishing
+after its own `await`s: a cancelled coroutine never gets there.
+`examples/claude_chat.py` keeps a cancelled reply out of its history that
+way.
+
 A line typed while a query runs is refused by default (`Busy`). With
 `ThinkingPromptSession(input_while_busy="queue")` it waits under the
 prompt and runs next; Up on an empty prompt takes it back to edit, and
@@ -354,6 +360,11 @@ wraps) shows just its newest rows. Ctrl+T expands the box to fit its content, up
 the space the terminal has. When the box finishes, the console echo keeps
 what the box showed: the same end, cut to its rows at the terminal's
 width, with `...` in place of the hint.
+
+A box keeps everything written to it, whatever it shows: Ctrl+T shows it
+all, and `box.text` returns it. For output with no end (a log, a long
+stream), finish the box and start a new one now and then, or feed it from
+a content callback that keeps only what you want shown.
 
 For content whose first lines matter most — a task list, a plan — keep the
 head instead:
