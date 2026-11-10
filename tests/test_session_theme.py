@@ -276,27 +276,31 @@ class TestRepaint:
         s = ThinkingPromptSession(theme="dark")
         s.app = MagicMock()
         s.app.is_running = False
+        s.app.output.get_size.return_value = Size(rows=24, columns=80)
         with create_app_session(output=create_output()):
-            s._display.thinking("l1\nl2\nl3\nl4", truncate_lines=2)
+            box = s.start_thinking(max_lines=2, overflow="head")
+            box.append("l1\nl2\nl3\nl4")
+            box.finish()
             capsys.readouterr()
             s.set_theme("light", repaint=True)
             out = capsys.readouterr().out
         assert "l1" in out and "..." in out and "l4" not in out
 
     def test_thinking_exact_truncate_lines_no_ellipsis_on_repaint(self, capsys):
-        """A thinking entry whose content is exactly truncate_lines lines
-        must NOT grow a stray '...' marker on repaint. The stored entry
-        carries an extra trailing "\\n" on top of the content's own
-        newlines; feeding that raw into truncate_to_lines miscounts the
-        line total and falsely triggers truncation (off-by-one)."""
+        """A box's echo whose text is exactly its lines must NOT grow a
+        stray '...' marker on repaint: the repaint prints what was kept,
+        not the text cut again."""
         from prompt_toolkit.application.current import create_app_session
         from prompt_toolkit.output.defaults import create_output
 
         s = ThinkingPromptSession(theme="dark")
         s.app = MagicMock()
         s.app.is_running = False
+        s.app.output.get_size.return_value = Size(rows=24, columns=80)
         with create_app_session(output=create_output()):
-            s._display.thinking("l1\nl2", truncate_lines=2)
+            box = s.start_thinking(max_lines=2)
+            box.append("l1\nl2")
+            box.finish()
             capsys.readouterr()
             s.set_theme("light", repaint=True)
             out = capsys.readouterr().out

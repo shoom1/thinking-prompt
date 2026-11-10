@@ -272,33 +272,44 @@ class TestDisplayUserInput:
         assert isinstance(kept_display.kept[0], FormattedText)
 
 
+def _echo(content: str, fmt: str = "plain", max_lines: int = 1000, overflow: str = "tail") -> Any:
+    """The lines a finished box echoes of ``content`` at 80 columns (see
+    ThinkingBoxControl.echo_lines), for Display.thinking()."""
+    from thinking_prompt.thinking_control import ThinkingBoxControl
+
+    control = ThinkingBoxControl(
+        lambda: content, max_collapsed_lines=max_lines, content_format=fmt, overflow=overflow
+    )
+    return control.echo_lines(content, 80)
+
+
 class TestDisplayThinking:
-    """Test Display.thinking method."""
+    """Display.thinking() prints a finished box's lines, as it fitted them."""
 
     def test_adds_to_transcript(self, display: Display):
         """Should add thinking content to the transcript."""
-        display.thinking("Processing...")
+        display.thinking(_echo("Processing..."))
         formatted = display.transcript.get_formatted_text()
         text = "".join(t for _, t in formatted)
         assert "Processing..." in text
 
     def test_skips_empty_content(self, display: Display):
         """Should skip empty or whitespace-only content."""
-        display.thinking("")
-        display.thinking("   ")
+        display.thinking(_echo(""))
+        display.thinking(_echo("   "))
+        display.thinking([])
         assert display.transcript.is_empty
 
-    def test_truncates_when_requested(self, kept_display: Display):
-        """Should truncate console output when truncate_lines is set."""
+    def test_prints_lines_cut_as_given(self, kept_display: Display):
         content = "\n".join([f"Line {i}" for i in range(10)])
-        kept_display.thinking(content, truncate_lines=3)
+        kept_display.thinking(_echo(content, max_lines=3, overflow="head"))
         assert echoed(kept_display) == ["Line 0\nLine 1\nLine 2\n...\n"]
         # The transcript keeps it as printed
         formatted = kept_display.transcript.get_formatted_text()
         assert "".join(t for _, t in formatted) == "Line 0\nLine 1\nLine 2\n...\n"
 
     def test_prints_once(self, kept_display: Display):
-        kept_display.thinking("Processing...")
+        kept_display.thinking(_echo("Processing..."))
         assert len(kept_display.kept) == 1
 
 
@@ -476,7 +487,7 @@ class TestDisplayThinkingAnsi:
     def test_ansi_adds_to_transcript(self, display: Display):
         """ANSI thinking content should be added to the transcript as fragments."""
         content = "\033[32m✓ Done\033[0m"
-        display.thinking(content, content_format="ansi")
+        display.thinking(_echo(content, "ansi"), content_format="ansi")
         formatted = display.transcript.get_formatted_text()
         assert len(formatted) > 0
         text = "".join(t for _, t in formatted)
@@ -485,7 +496,7 @@ class TestDisplayThinkingAnsi:
     def test_ansi_transcript_has_no_thinking_style(self, display: Display):
         """ANSI content in the transcript should NOT use class:transcript.thinking style."""
         content = "\033[32m✓ Done\033[0m"
-        display.thinking(content, content_format="ansi")
+        display.thinking(_echo(content, "ansi"), content_format="ansi")
         formatted = display.transcript.get_formatted_text()
         styles = [s for s, _ in formatted]
         # Should not use the plain thinking style
@@ -493,29 +504,28 @@ class TestDisplayThinkingAnsi:
 
     def test_ansi_skips_empty_content(self, display: Display):
         """ANSI thinking should skip empty content."""
-        display.thinking("", content_format="ansi")
-        display.thinking("   ", content_format="ansi")
+        display.thinking(_echo("", "ansi"), content_format="ansi")
+        display.thinking(_echo("   ", "ansi"), content_format="ansi")
         assert display.transcript.is_empty
 
-    def test_ansi_truncates_when_requested(self, kept_display: Display):
-        """ANSI thinking should truncate console output when truncate_lines is set."""
+    def test_ansi_prints_lines_cut_as_given(self, kept_display: Display):
         lines = [f"\033[32mLine {i}\033[0m" for i in range(10)]
         content = "\n".join(lines)
-        kept_display.thinking(content, truncate_lines=3, content_format="ansi")
+        kept_display.thinking(_echo(content, "ansi", max_lines=3, overflow="head"), content_format="ansi")
         assert echoed(kept_display) == ["Line 0\nLine 1\nLine 2\n...\n"]
         # The transcript keeps it as printed
         formatted = kept_display.transcript.get_formatted_text()
         assert "".join(t for _, t in formatted) == "Line 0\nLine 1\nLine 2\n...\n"
 
-    def test_ansi_prints_ansi(self, kept_display: Display):
-        from prompt_toolkit.formatted_text import ANSI
-        kept_display.thinking("\033[32mtext\033[0m", content_format="ansi")
+    def test_ansi_prints_its_colors(self, kept_display: Display):
+        """Its own colors, not the theme's: never re-themed."""
+        kept_display.thinking(_echo("\033[32mtext\033[0m", "ansi"), content_format="ansi")
         assert len(kept_display.kept) == 1
-        assert isinstance(kept_display.kept[0], ANSI)
+        assert list(kept_display.kept[0]) == [("ansigreen", "text"), ("", "\n")]
 
     def test_plain_format_unchanged(self, display: Display):
         """Plain format should work the same as before."""
-        display.thinking("Processing...", content_format="plain")
+        display.thinking(_echo("Processing..."), content_format="plain")
         formatted = display.transcript.get_formatted_text()
         styles = [s for s, _ in formatted]
         assert "class:transcript.thinking" in styles
@@ -656,7 +666,7 @@ class TestThinkingEchoRepaintParity:
 
     @pytest.mark.parametrize("fmt", ["plain", "ansi"])
     def test_content_that_fits_is_not_marked_truncated(self, kept_display, fmt):
-        kept_display.thinking("a\nb\n", truncate_lines=2, content_format=fmt)
+        kept_display.thinking(_echo("a\nb\n", fmt, max_lines=2), content_format=fmt)
         echoed = self._printed(kept_display)
         repainted = _texts(kept_display.printed_contents())
 
@@ -671,15 +681,13 @@ class TestThinkingEchoTail:
 
     def test_tail_echo_keeps_last_lines(self, kept_display):
         content = "".join(f"line {i}\n" for i in range(10))
-        kept_display.thinking(content, truncate_lines=3, overflow="tail")
+        kept_display.thinking(_echo(content, max_lines=3, overflow="tail"))
         assert self._printed(kept_display) == ["...\nline 7\nline 8\nline 9\n"]
 
     @pytest.mark.parametrize("fmt", ["plain", "ansi"])
     def test_tail_repaint_matches_echo(self, kept_display, fmt):
         content = "".join(f"line {i}\n" for i in range(10))
-        kept_display.thinking(
-            content, truncate_lines=3, content_format=fmt, overflow="tail"
-        )
+        kept_display.thinking(_echo(content, fmt, max_lines=3, overflow="tail"), content_format=fmt)
         echoed = self._printed(kept_display)
         assert _texts(kept_display.printed_contents()) == echoed
         assert echoed == ["...\nline 7\nline 8\nline 9\n"]

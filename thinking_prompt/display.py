@@ -8,14 +8,21 @@ Pygments are used through rich_utils.
 """
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, Callable
 
 from prompt_toolkit import print_formatted_text
-from prompt_toolkit.formatted_text import ANSI, AnyFormattedText, FormattedText, to_formatted_text
+from prompt_toolkit.formatted_text import (
+    ANSI,
+    AnyFormattedText,
+    FormattedText,
+    StyleAndTextTuples,
+    fragment_list_to_text,
+    to_formatted_text,
+)
 from prompt_toolkit.renderer import print_formatted_text as print_to_output
 from prompt_toolkit.styles import Style, default_pygments_style, default_ui_style, merge_styles
 
-from ._text import truncate_ansi_to_lines, truncate_to_lines
 from .rich_utils import (
     _highlight_code,
     _is_rich_renderable,
@@ -24,7 +31,7 @@ from .rich_utils import (
 )
 from .styles import ThinkingPromptStyles
 from .transcript import Transcript
-from .types import ContentFormat, Overflow
+from .types import ContentFormat
 
 if TYPE_CHECKING:
     from prompt_toolkit.output import ColorDepth, Output
@@ -176,49 +183,35 @@ class Display:
 
     def thinking(
         self,
-        content: str,
+        lines: Sequence[StyleAndTextTuples],
         *,
-        truncate_lines: int | None = None,
         content_format: ContentFormat = "plain",
-        overflow: Overflow = "head",
     ) -> None:
         """
-        Output thinking content to console and transcript.
+        Output a finished box's lines to the console and the transcript.
 
         Args:
-            content: The thinking content.
-            truncate_lines: If set, cut the text to this many lines, at the
-                           ``overflow`` end, as printed and as kept.
-            content_format: Format of the content ("plain" or "ansi").
-            overflow: Which end truncation keeps: "head" (first lines) or
-                "tail" (last lines) — match the box it came from.
+            lines: The lines, as the box fitted them (a "..." line where
+                they were cut): see ThinkingBoxControl.echo_lines(). None
+                prints nothing.
+            content_format: The box's: plain text takes the transcript's
+                thinking style (re-themed); ANSI text keeps its own colors
+                (never re-themed).
         """
-        if not content.strip():
+        if not lines:
             return
-
-        if content_format == "ansi":
-            self._thinking_ansi(content, truncate_lines=truncate_lines, overflow=overflow)
+        if content_format == "plain":
+            text = "\n".join(fragment_list_to_text(line) for line in lines)
+            self._output_styled("class:transcript.thinking", text.rstrip() + "\n")
             return
-
-        if truncate_lines is not None:
-            text = truncate_to_lines(content, truncate_lines, overflow=overflow) + "\n"
-        else:
-            text = content.rstrip() + "\n"
-        self._output_styled("class:transcript.thinking", text)
-
-    def _thinking_ansi(
-        self,
-        content: str,
-        *,
-        truncate_lines: int | None = None,
-        overflow: Overflow = "head",
-    ) -> None:
-        """Output ANSI-formatted thinking content (baked: never re-themed)."""
-        if truncate_lines is not None:
-            text = truncate_ansi_to_lines(content, truncate_lines, overflow=overflow) + "\n"
-        else:
-            text = content.rstrip() + "\n"
-        self._output_ansi(text)
+        fragments: StyleAndTextTuples = []
+        for i, line in enumerate(lines):
+            if i:
+                fragments.append(("", "\n"))
+            fragments.extend((fragment[0], fragment[1]) for fragment in line)
+        fragments.append(("", "\n"))
+        self._transcript.append_formatted(fragments)
+        self._print_to_console(FormattedText(fragments))
 
     def response(self, content: str) -> None:
         """

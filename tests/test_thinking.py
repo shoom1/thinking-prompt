@@ -644,18 +644,16 @@ class TestParsedOnce:
     @staticmethod
     def _counting_parses(monkeypatch: pytest.MonkeyPatch) -> list[int]:
         """The length of each text the control parses as ANSI from now on."""
-        from prompt_toolkit.formatted_text import ANSI
-
         from thinking_prompt import thinking_control
 
         parsed: list[int] = []
+        feed = thinking_control._AnsiStream.feed
 
-        class Counting(ANSI):
-            def __init__(self, value: str) -> None:
-                parsed.append(len(value))
-                super().__init__(value)
+        def counting_feed(self: Any, text: str) -> Any:
+            parsed.append(len(text))
+            return feed(self, text)
 
-        monkeypatch.setattr(thinking_control, "ANSI", Counting)
+        monkeypatch.setattr(thinking_control._AnsiStream, "feed", counting_feed)
         return parsed
 
     @staticmethod
@@ -676,7 +674,7 @@ class TestParsedOnce:
     @pytest.mark.parametrize(
         "ending", ["\x1b[0m", "\x1b[39m", "\x1b[22;24m"], ids=["reset", "fg", "weight"]
     )
-    def test_an_append_parses_from_the_last_line(
+    def test_an_append_parses_what_it_adds(
         self, monkeypatch: pytest.MonkeyPatch, ending: str
     ):
         """However many codes came before it without a reset of every style."""
@@ -688,7 +686,20 @@ class TestParsedOnce:
         appended = "\x1b[1mnew\x1b[0m line\n"
         state["text"] += appended
         self._draw(control)
-        assert 0 < sum(parsed) < 2 * len(appended)
+        assert parsed == [len(appended)]
+
+    def test_an_edit_of_the_last_line_parses_from_that_line(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        parsed = self._counting_parses(monkeypatch)
+        state, control = self._streamed("ansi")
+        lines = "".join(f"\x1b[32mline {i}\x1b[0m\n" for i in range(1000))
+        state["text"] = lines + "\x1b[1mlast"
+        self._draw(control)
+        parsed.clear()
+        state["text"] = lines + "\x1b[1medited"
+        self._draw(control)
+        assert 0 < sum(parsed) < 2 * len("\x1b[1medited")
 
     @pytest.mark.parametrize("content_format", ["plain", "ansi"])
     def test_an_append_counts_the_rows_of_new_lines_only(
@@ -700,16 +711,16 @@ class TestParsedOnce:
         state["text"] = "".join(f"line {i} words\n" for i in range(1000))
         self._draw(control)
         wrapped: list[int] = []
-        real_wrap = thinking_control._wrap
+        extend = thinking_control._Rows.extend
 
-        def counting_wrap(line: Any, width: int) -> Any:
-            wrapped.append(width)
-            return real_wrap(line, width)
+        def counting_extend(self: Any, line: Any) -> None:
+            wrapped.append(self.width)
+            extend(self, line)
 
-        monkeypatch.setattr(thinking_control, "_wrap", counting_wrap)
+        monkeypatch.setattr(thinking_control._Rows, "extend", counting_extend)
         state["text"] += "new line\n"
         self._draw(control)
-        assert len(wrapped) < 10
+        assert 0 < len(wrapped) < 10
 
     def test_a_new_width_counts_rows_again(self):
         state, control = self._streamed("ansi")
@@ -728,3 +739,125 @@ class TestParsedOnce:
             ("class:thinking-box ansigreen", "x" * 50),
             ("class:thinking-box ansigreen bold", "y" * 50),
         ]
+
+
+def _random_long_lines(rng: Any, pieces: int, content_format: str) -> str:
+    """Text whose lines run long: words, wide characters, color codes (ANSI
+    only), and a newline now and then."""
+    out = []
+    for _ in range(pieces):
+        roll = rng.random()
+        if roll < 0.03:
+            out.append("\n")
+        elif roll < 0.25 and content_format == "ansi":
+            out.append(rng.choice(_CODES))
+        else:
+            out.append(rng.choice(["a", "bc", "def ", "  ", "世界", "x" * 30, "é"]))
+    return "".join(out)
+
+
+class TestLongLines:
+    """A line being streamed costs a draw what the appended text does, not
+    what the line does: it isn't parsed or wrapped again, and only the rows
+    drawn are built. It's drawn as if it were parsed whole."""
+
+    _CHUNKS = {"plain": "word " * 20, "ansi": "\x1b[32mword\x1b[0m " * 10}
+
+    @classmethod
+    def _append_cost(cls, content_format: str, length: int) -> float:
+        """The fastest of a few draws, each after one more chunk on a line
+        ``length`` characters long."""
+        import time
+
+        chunk = cls._CHUNKS[content_format]
+        state = {"text": chunk * (length // len(chunk))}
+        control = ThinkingBoxControl(
+            lambda: state["text"], max_collapsed_lines=3, content_format=content_format
+        )
+        TestParsedOnce._draw(control)
+        best = float("inf")
+        for _ in range(5):
+            state["text"] += chunk
+            start = time.perf_counter()
+            TestParsedOnce._draw(control)
+            best = min(best, time.perf_counter() - start)
+        return best
+
+    @pytest.mark.parametrize("content_format", ["plain", "ansi"])
+    def test_an_append_to_a_long_line_costs_what_the_append_does(self, content_format: str):
+        short = self._append_cost(content_format, 1_000)
+        long = self._append_cost(content_format, 1_000_000)
+        assert long < 10 * short + 0.005, (short, long)
+
+    @pytest.mark.parametrize("overflow", ["tail", "head"])
+    @pytest.mark.parametrize("content_format", ["plain", "ansi"])
+    @pytest.mark.parametrize("seed", range(8))
+    def test_a_streamed_long_line_fits_as_a_whole_parse_does(
+        self, seed: int, content_format: str, overflow: str
+    ):
+        """Collapsed (3 rows) and expanded (5), at two widths, chunks cut
+        anywhere: what's drawn is what a box given the whole text draws."""
+        import random
+
+        rng = random.Random(seed)
+        text = _random_long_lines(rng, 300, content_format)
+        expanded = {"on": False}
+        state = {"text": ""}
+        control = ThinkingBoxControl(
+            lambda: state["text"], max_collapsed_lines=3, content_format=content_format,
+            overflow=overflow, expanded=lambda: expanded["on"],
+        )
+        for cut in sorted(rng.sample(range(1, len(text) + 1), 30)):
+            state["text"] = text[:cut]
+            whole = ThinkingBoxControl(
+                lambda: text[:cut], max_collapsed_lines=3, content_format=content_format,
+                overflow=overflow, expanded=lambda: expanded["on"],
+            )
+            for on, height in ((False, None), (True, 5)):
+                expanded["on"] = on
+                for width in (80, 7):
+                    assert _chars(control._format(width, height)) == _chars(
+                        whole._format(width, height)
+                    ), (cut, on, width)
+                    assert control.get_line_count(width) == whole.get_line_count(width)
+
+
+class TestEchoLines:
+    """What a finished box echoes: its lines as it fits them collapsed, the
+    hint's rows given to the text, a "..." line where they're cut."""
+
+    @staticmethod
+    def _echo(text: str, max_lines: int, **kwargs: Any) -> list[list[tuple[str, str]]]:
+        width = kwargs.pop("width", 80)
+        control = ThinkingBoxControl(lambda: text, max_collapsed_lines=max_lines, **kwargs)
+        return [[(style, piece) for style, piece, *_ in line] for line in control.echo_lines(text, width)]
+
+    @classmethod
+    def _texts(cls, text: str, max_lines: int, **kwargs: Any) -> list[str]:
+        return ["".join(piece for _, piece in line) for line in cls._echo(text, max_lines, **kwargs)]
+
+    def test_a_trailing_newline_is_not_a_line(self):
+        assert self._texts("a\nb\nc\nd\n", 4) == ["a", "b", "c", "d"]
+
+    def test_cut_lines_are_marked_at_the_overflow_end(self):
+        assert self._texts("a\nb\nc\nd\ne\n", 4, overflow="head") == ["a", "b", "c", "d", "..."]
+        assert self._texts("a\nb\nc\nd\n", 2) == ["...", "c", "d"]
+
+    def test_blank_text_echoes_nothing(self):
+        assert self._echo("  \n\n", 3) == []
+
+    def test_a_color_opened_before_the_cut_still_applies(self):
+        """The marker itself is in no color."""
+        assert self._echo("\x1b[31ma\nb\nc\x1b[0m\n", 1, content_format="ansi") == [
+            [("", "...")],
+            [("ansired", "c")],
+        ]
+
+    def test_a_long_line_is_cut_to_rows_and_echoed_as_one_line(self):
+        paragraph = " ".join(f"w{i:03d}" for i in range(200))  # 13 rows of 80
+        assert self._texts(paragraph, 3) == ["...", paragraph[10 * 80:]]
+        assert self._texts(paragraph, 3, overflow="head") == [paragraph[:3 * 80], "..."]
+
+    def test_wide_characters_take_their_columns(self):
+        """Three of these a row of 7 columns: 20 take 7 rows."""
+        assert self._texts("世" * 20, 2, width=7) == ["...", "世" * 5]

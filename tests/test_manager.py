@@ -264,6 +264,37 @@ class TestEcho:
         assert echoed(display) == ["...\n3\n4\n", "1\n2\n...\n"]
         assert transcript_texts(display) == echoed(display)
 
+    def test_echo_is_cut_to_the_rows_the_box_shows(self):
+        """A 999-character paragraph in a three-row box: the echo is three
+        of its rows at the terminal's 80 columns, at the box's overflow
+        end, not the whole paragraph."""
+        paragraph = " ".join(f"w{i:03d}" for i in range(200))
+        rows = [paragraph[i:i + 80] for i in range(0, len(paragraph), 80)]
+        display = make_display()
+        mgr = make_manager(display)
+        mgr.finish(mgr.create_box(lambda: paragraph, max_lines=3))
+        mgr.finish(mgr.create_box(lambda: paragraph, max_lines=3, overflow="head"))
+        assert echoed(display) == [
+            "...\n" + "".join(rows[-3:]) + "\n",
+            "".join(rows[:3]) + "\n...\n",
+        ]
+        assert transcript_texts(display) == echoed(display)
+
+    def test_an_ansi_echo_is_cut_to_rows_in_its_colors(self):
+        paragraph = "\x1b[32m" + " ".join(f"w{i:03d}" for i in range(200)) + "\x1b[0m"
+        display = make_display()
+        mgr = make_manager(display)
+        mgr.finish(mgr.create_box(lambda: paragraph, max_lines=3, content_format="ansi"))
+        (entry,) = display.transcript.iter_entries()
+        fragments = display.transcript.render_entry(entry)
+        text = "".join(text for _, text, *_ in fragments)
+        words = " ".join(f"w{i:03d}" for i in range(200))
+        rows = [words[i:i + 80] for i in range(0, len(words), 80)]
+        assert text == "...\n" + "".join(rows[-3:]) + "\n"
+        assert {style for style, piece, *_ in fragments if piece.strip("\n") and piece != "..."} == {
+            "ansigreen"
+        }
+
     def test_the_echo_runs_outside_the_manager_lock(self):
         """The echo prints with the manager lock released: nothing that
         waits for the lock (a draw, a write from another thread) waits
@@ -287,12 +318,13 @@ class TestEcho:
         mgr.finish(mgr.create_box(lambda: "x\n"))
         assert got == [True]
 
-    def test_ansi_boxes_echo_as_ansi(self):
+    def test_ansi_boxes_echo_in_their_colors(self):
+        """Not the theme's: never re-themed."""
         display = make_display()
         mgr = make_manager(display)
         mgr.finish(mgr.create_box(lambda: "\x1b[31mred\x1b[0m\n", content_format="ansi"))
         (entry,) = display.transcript.iter_entries()
-        assert entry.kind == "ansi"
+        assert display.transcript.render_entry(entry) == [("ansired", "red"), ("", "\n")]
 
     def test_blank_boxes_echo_nothing(self):
         display = make_display()
