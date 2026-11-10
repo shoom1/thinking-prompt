@@ -17,6 +17,8 @@ from prompt_toolkit.layout import HSplit, Window
 from prompt_toolkit.layout.containers import Container
 from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.layout.dimension import Dimension as D
+from prompt_toolkit.layout.mouse_handlers import MouseHandlers
+from prompt_toolkit.layout.screen import Screen, WritePosition
 
 from .frames import POLL_INTERVAL, FrameScheduler
 from .layout import ThinkingHeader
@@ -48,6 +50,53 @@ def _current_task() -> asyncio.Task[Any] | None:
         return asyncio.current_task()
     except RuntimeError:  # no running event loop in this thread
         return None
+
+
+class _BoxStack(Container):
+    """The boxes, top to bottom, in the rows they're given. It asks for no
+    rows of its own, so the prompt and the status bar keep theirs; when
+    even the boxes' fewest rows don't fit, those farthest from the prompt
+    (the top ones) are left off, as if scrolled off the screen."""
+
+    def __init__(self, boxes: list[Container]) -> None:
+        self._boxes = boxes
+        self._all = HSplit(boxes)
+
+    def reset(self) -> None:
+        self._all.reset()
+
+    def preferred_width(self, max_available_width: int) -> D:
+        return self._all.preferred_width(max_available_width)
+
+    def preferred_height(self, width: int, max_available_height: int) -> D:
+        wanted = self._all.preferred_height(width, max_available_height)
+        return D(min=0, preferred=wanted.preferred, max=wanted.max)
+
+    def write_to_screen(
+        self,
+        screen: Screen,
+        mouse_handlers: MouseHandlers,
+        write_position: WritePosition,
+        parent_style: str,
+        erase_bg: bool,
+        z_index: int | None,
+    ) -> None:
+        rows = write_position.height
+        fewest = [
+            box.preferred_height(write_position.width, rows).min for box in self._boxes
+        ]
+        # The most boxes, from the prompt up, whose fewest rows fit.
+        first = 0
+        while first < len(self._boxes) and sum(fewest[first:]) > rows:
+            first += 1
+        shown = self._all if first == 0 else HSplit(self._boxes[first:])
+        if first < len(self._boxes):
+            shown.write_to_screen(
+                screen, mouse_handlers, write_position, parent_style, erase_bg, z_index
+            )
+
+    def get_children(self) -> list[Container]:
+        return list(self._boxes)
 
 
 class ThinkingBoxManager:
@@ -269,13 +318,14 @@ class ThinkingBoxManager:
         Get a container representing all sorted boxes.
 
         Returns:
-            HSplit of sorted box containers, or Window(height=0) if empty.
+            The sorted boxes' containers, top to bottom (see _BoxStack), or
+            Window(height=0) if empty.
         """
         with self._lock:
             sorted_boxes = self.get_sorted_boxes()
             if not sorted_boxes:
                 return Window(height=0)
-            return HSplit([b._container for b in sorted_boxes])
+            return _BoxStack([b._container for b in sorted_boxes])
 
     def toggle_all(self) -> None:
         """Toggle the user's expand/collapse choice for all boxes."""
@@ -343,15 +393,20 @@ class ThinkingBoxManager:
 
         return self._finish(owned, echo=echo)
 
-    def finish_when_owners_end(self) -> None:
-        """End each open box when its task ends, unless the task ends it
-        first. For the boxes left open once the session's UI is gone:
-        cancelling a task doesn't end a box it opened with start_thinking(),
-        and nothing else will look at the box again."""
+    def has_boxes_opened_by(self, task: asyncio.Task[Any]) -> bool:
+        """True while a box ``task`` opened is open."""
         with self._lock:
-            owners = {box._owner for box in self._boxes if box._owner is not None}
-        for owner in owners:
-            owner.add_done_callback(self.finish_owned_by)
+            return any(box._owner is task for box in self._boxes)
+
+    def finish_opened_by(
+        self,
+        task: asyncio.Task[Any],
+        *,
+        echo: bool | None = None,
+    ) -> list[ThinkingBox]:
+        """End the boxes ``task`` opened; return them. Once it has ended,
+        these are the boxes it left open."""
+        return self._finish(lambda box: box._owner is task, echo=echo)
 
     def _finish(
         self,

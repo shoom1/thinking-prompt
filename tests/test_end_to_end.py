@@ -350,6 +350,109 @@ class TestBoxLifecycle:
 
             await run_with(session, handler, script)
 
+    async def test_a_box_a_background_task_leaves_open_ends_with_the_task(self):
+        """start_thinking() in a task that returns: its box ends then, echoed
+        once, not at the next handler's end, Ctrl+C or exit."""
+        boxes: list[Any] = []
+
+        async def background() -> None:
+            box = session.start_thinking(title="Indexing")
+            box.append("indexed 1\n")
+            boxes.append(box)
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                await asyncio.create_task(background())
+                await wait_until(lambda: not session.is_thinking)
+                assert boxes[0].is_finished
+                transcript = transcript_texts(session._display)
+                assert sum("indexed 1" in text for text in transcript) == 1
+                assert "Operation cancelled...\n" not in transcript
+
+            await run_with(session, lambda text: None, script)
+
+    async def test_a_cancelled_background_tasks_box_ends_and_says_so(self):
+        """As a cancelled thinking() block does: the box's content, then
+        one "Operation cancelled..." line."""
+        opened = asyncio.Event()
+
+        async def background() -> None:
+            session.start_thinking(title="Watching").append("watched 1\n")
+            opened.set()
+            await asyncio.sleep(3600)
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                task = asyncio.create_task(background())
+                await asyncio.wait_for(opened.wait(), 2)
+                task.cancel()
+                await wait_until(lambda: not session.is_thinking)
+                transcript = transcript_texts(session._display)
+                assert transcript[-2:] == ["watched 1\n", "Operation cancelled...\n"]
+
+            await run_with(session, lambda text: None, script)
+
+    async def test_a_cancelled_task_says_so_once_for_all_its_boxes(self):
+        """A thinking() block and a start_thinking() box, one cancel: one
+        "Operation cancelled..." after both."""
+        opened = asyncio.Event()
+
+        async def background() -> None:
+            session.start_thinking(title="Other").append("other box\n")
+            async with session.thinking(title="Block") as box:
+                box.append("block box\n")
+                opened.set()
+                await asyncio.sleep(3600)
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                task = asyncio.create_task(background())
+                await asyncio.wait_for(opened.wait(), 2)
+                task.cancel()
+                await wait_until(lambda: not session.is_thinking)
+                transcript = transcript_texts(session._display)
+                assert transcript.count("Operation cancelled...\n") == 1, transcript
+                assert transcript[-1] == "Operation cancelled...\n"
+
+            await run_with(session, lambda text: None, script)
+
+    async def test_ctrl_c_ends_a_querys_sub_task_boxes_under_one_line(self):
+        """The query cancels its sub-task as it unwinds: the sub-task's box
+        ends with it, and one "Operation cancelled..." follows all the boxes
+        the Ctrl+C ended."""
+
+        async def child() -> None:
+            session.start_thinking(title="Child").append("child working\n")
+            await asyncio.sleep(3600)
+
+        async def handler(text: str) -> None:
+            sub = asyncio.create_task(child())
+            try:
+                async with session.thinking(title="Parent") as box:
+                    box.append("parent working\n")
+                    await asyncio.sleep(3600)
+            finally:
+                sub.cancel()
+                with suppress(asyncio.CancelledError):
+                    await sub
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: session._manager.active_count == 2)
+                inp.send_text(CTRL_C)
+                await wait_until(lambda: waiting_for_input(session) and not session.is_thinking)
+                transcript = transcript_texts(session._display)
+                assert transcript.count("Operation cancelled...\n") == 1
+                assert transcript[-1] == "Operation cancelled...\n"
+                assert "child working\n" in transcript and "parent working\n" in transcript
+
+            await run_with(session, handler, script)
+
     async def test_ctrl_c_during_a_handler_echoes_its_box_then_says_so(self):
         async def handler(text: str) -> None:
             async with session.thinking() as ctx:
@@ -581,6 +684,60 @@ class TestThinkingBoxesOnScreen:
 
                 box.append(" NEW")
                 await wait_until(lambda: on_screen(session, "NEW"))
+
+            await run_with(session, lambda text: None, script)
+
+    async def test_boxes_that_dont_fit_are_left_off_the_top(self):
+        """Five titled boxes take ten rows; a 12-row terminal has eight for
+        them. The prompt and the status bar keep their rows, and the box
+        farthest from the prompt is left off, as if scrolled off the screen."""
+        with piped_session(rows=12, spinner=None, status_text="READY") as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                boxes = [session.start_thinking(title=f"Box {i}") for i in range(5)]
+                for i, box in enumerate(boxes):
+                    box.append(f"line {i}\n")
+                await wait_until(lambda: on_screen(session, "line 4"))
+                lines = screen_lines(session)
+                assert not on_screen(session, "too small"), lines
+                prompt, status = prompt_and_status_rows(session)
+                assert lines[status] == "READY", lines
+                assert not on_screen(session, "Box 0"), lines
+                for i in range(1, 5):
+                    assert on_screen(session, f"Box {i}") and on_screen(session, f"line {i}"), lines
+                for box in boxes:
+                    box.finish(echo=False)
+
+            await run_with(session, lambda text: None, script)
+
+    @pytest.mark.parametrize("rows", [4, 5])
+    async def test_the_prompt_keeps_its_row_however_short_the_terminal(self, rows: int):
+        """Four rows: the separators, the prompt and the status bar, and
+        no room for a box; five: still none (a titled box takes two)."""
+        with piped_session(rows=rows, spinner=None, status_text="READY") as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                box = session.start_thinking(title="Work")
+                box.append("step 1\nstep 2\n")
+                inp.send_text("typed")
+                await wait_until(lambda: on_screen(session, "typed"))
+                assert on_screen(session, "READY"), screen_lines(session)
+                box.finish(echo=False)
+
+            await run_with(session, lambda text: None, script)
+
+    async def test_boxes_that_fit_all_show(self):
+        with piped_session(rows=40, spinner=None) as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                boxes = [session.start_thinking(title=f"Box {i}") for i in range(5)]
+                for i, box in enumerate(boxes):
+                    box.append(f"line {i}\n")
+                await wait_until(lambda: on_screen(session, "line 4"))
+                for i in range(5):
+                    assert on_screen(session, f"Box {i}") and on_screen(session, f"line {i}"), screen_lines(session)
+                for box in boxes:
+                    box.finish(echo=False)
 
             await run_with(session, lambda text: None, script)
 

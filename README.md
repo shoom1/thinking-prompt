@@ -202,13 +202,13 @@ box.finish()
 A box's content is kept however it ends, echoed to the console as on a
 normal finish:
 
-- **Cancelled** (Ctrl+C, or the task running a `thinking()` block is
-  cancelled): the content, then one `Operation cancelled...` line after all
-  the boxes that the cancel ended.
+- **Cancelled** (Ctrl+C, or the task that opened it is cancelled): the
+  content, then one `Operation cancelled...` line after all the boxes that
+  the cancel ended.
 - **The handler raises**: the content, then the `[ERROR] Handler error: ...`
   line. A query's error is raised by `query()`, after the content.
-- **Left open** by a handler or a query that returns: finished as
-  `box.finish()` would.
+- **Left open** by a task that returns (a handler, a query, a background
+  task): finished as `box.finish()` would, as it returns.
 
 A box belongs to the task that opened it. The session ends a box only when
 nobody else will: its task has ended, it was opened outside asyncio (from a
@@ -216,8 +216,9 @@ thread), or the app's own task opened it (the task running the
 `async with session:` block, or `run_async()`, e.g. for a startup status
 box). A box a live task is feeding is that task's to end.
 
-- **A handler or a query ends:** the session finishes the boxes it opened,
-  and those whose task has ended or that were opened outside asyncio.
+- **Its task ends:** the session finishes the boxes the task left open.
+- **A handler or a query ends:** the session also finishes the boxes opened
+  outside asyncio.
 - **Ctrl+C at an idle prompt:** the session ends the boxes nobody else
   will. If boxes that live tasks are feeding remain, the status bar says
   `Background work is running — Ctrl+D exits` until those boxes end or the
@@ -225,7 +226,8 @@ box). A box a live task is feeding is that task's to end.
 - **Exit:** the last frame leaves out the boxes and the status bar. The
   boxes nobody else will end are echoed below it. A live task's box is
   echoed when the task finishes it, or else when the task ends
-  (`asyncio.run` cancels leftover tasks at shutdown).
+  (`asyncio.run` cancels leftover tasks at shutdown, so `Operation
+  cancelled...` follows).
 
 `box.is_finished` tells whether a box is done. Calling `finish()` again
 returns the same text without echoing it twice. Writes to a finished box are
@@ -382,7 +384,12 @@ that doesn't say.
 
 ### Multiple Thinking Boxes
 
-Run multiple boxes concurrently with independent lifecycles. Use `order` to control positioning (higher = closer to prompt):
+Run multiple boxes concurrently with independent lifecycles. Use `order` to control positioning (higher = closer to prompt).
+The boxes share the rows above the prompt: on a short screen they shrink,
+and the boxes that still don't fit are left off the top, farthest from the
+prompt first, as if scrolled off the screen (the prompt and the status bar
+always keep their rows). Keep the boxes open at once to what a terminal
+shows.
 
 ```python
 # Task list pinned near the prompt
