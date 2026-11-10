@@ -39,11 +39,11 @@ def _texts(view) -> list[str]:
     return [text for _, text in _text_windows(view.container)]
 
 
-def _region(view) -> ScrollablePane:
-    """The inline dialog's scrolling region of cursor stops and actions."""
+def _actions(view) -> ScrollablePane:
+    """The inline dialog's region of actions, under the body's (view.region)."""
     (pane,) = [
         c for c in walk(view.container)
-        if isinstance(c, ScrollablePane) and c is not view.text_region
+        if isinstance(c, ScrollablePane) and c is not view.region
     ]
     return pane
 
@@ -161,36 +161,36 @@ class TestBuildInline:
 
 
 class TestScrollingRegion:
-    """Cursor stops and actions scroll in one region (within MAX_ROWS
-    without max_height); a body without cursor stops (text) is drawn above
-    it, in a region of its own (TestTextRegion)."""
+    """The body, text and cursor stops alike, scrolls in one region
+    (view.region); the actions in another under it (within MAX_ROWS
+    without max_height), as a box's buttons stay under its body."""
 
-    def test_a_text_body_is_drawn_above_the_scrolling_region(self):
+    def test_a_text_body_scrolls_in_the_body_region(self):
         view = build_inline(_yes_no())
-        region = list(walk(_region(view)))
         (body,) = [w for w, text in _text_windows(view.container) if text == "This can't be undone."]
-        assert body not in region
-        assert all(action.window in region for action in view.actions)
+        assert body in list(walk(view.region))
+        actions = list(walk(_actions(view)))
+        assert body not in actions
+        assert all(action.window in actions for action in view.actions)
 
-    def test_a_body_with_nothing_focusable_is_drawn_above_too(self):
+    def test_a_body_with_nothing_focusable_is_in_the_body_region_too(self):
         body = HSplit([Label("one"), Label("two")])
         view = build_inline(Dialog("T", body, [ButtonConfig("OK")]))
-        region = list(walk(_region(view)))
-        assert body not in region and body in list(walk(view.container))
+        assert body in list(walk(view.region))
 
-    def test_a_body_with_stops_scrolls_with_the_actions(self):
+    def test_a_body_with_stops_scrolls_in_the_body_region(self):
         group = OptionGroup(["a", "b"], multiple=True)
         view = build_inline(Dialog("T", HSplit([r.window for r in group.rows]), [ButtonConfig("OK")]))
-        region = list(walk(_region(view)))
+        region = list(walk(view.region))
         assert all(row.window in region for row in group.rows)
-        assert view.actions[0].window in region
+        assert view.actions[0].window not in region
 
     def test_the_first_stop_scrolls_the_region_back_to_its_top(self):
         """Back on the first option, the text above it in the region shows again."""
         group = OptionGroup([f"o{i}" for i in range(6)], multiple=True)
         body = HSplit([Label("line one\nline two"), *(r.window for r in group.rows)])
         view = build_inline(Dialog("T", body, [ButtonConfig("OK")]))
-        pane = _region(view)
+        pane = view.region
         layout = Layout(view.container)
         with set_app(_app(layout)):
             layout.focus(group.rows[5].window)
@@ -206,7 +206,7 @@ class TestScrollingRegion:
         group = OptionGroup([f"o{i}" for i in range(6)], multiple=True)
         body = HSplit([Label("line one\nline two"), *(r.window for r in group.rows)])
         view = build_inline(Dialog("T", body, [ButtonConfig("OK")]))
-        pane = _region(view)
+        pane = view.region
         layout = Layout(view.container)
         with set_app(_app(layout)):
             layout.focus(group.rows[0].window)
@@ -225,7 +225,7 @@ class TestScrollingRegion:
         field = TextArea(text="\n".join(f"line {i}" for i in range(1, 31)))
         field.buffer.cursor_position = field.document.translate_row_col_to_index(19, 0)
         view = build_inline(Dialog("T", field, [ButtonConfig("OK")]))
-        pane = _region(view)
+        pane = view.region
         layout = Layout(view.container)
         with set_app(_app(layout)):
             layout.focus(field)
@@ -237,10 +237,10 @@ class TestScrollingRegion:
             assert pane.vertical_scroll == opened  # line 17: three rows above the bottom
 
     def test_a_one_row_region_shows_the_cursor_row(self):
-        """Squeezed to one row (a short terminal), the region shows the
-        highlighted action, not the row above it."""
+        """Squeezed to one row (a short terminal), the actions' region shows
+        the highlighted action, not the row above it."""
         view = build_inline(Dialog("T", "", [ButtonConfig("A"), ButtonConfig("B"), ButtonConfig("C")]))
-        pane = _region(view)
+        pane = _actions(view)
         layout = Layout(view.container)
         with set_app(_app(layout)):
             layout.focus(view.actions[1].window)
@@ -256,18 +256,6 @@ LONG = "\n".join(f"line {i}" for i in range(30))
 
 
 class TestTextRegion:
-    def test_a_text_body_scrolls_in_its_own_region(self):
-        view = build_inline(_yes_no())
-        assert view.text_region is not None
-        (body,) = [w for w, text in _text_windows(view.container) if text == "This can't be undone."]
-        assert body in list(walk(view.text_region))
-        assert body not in list(walk(_region(view)))
-
-    def test_a_body_with_stops_has_no_text_region(self):
-        group = OptionGroup(["a", "b"], multiple=True)
-        view = build_inline(Dialog("T", HSplit([r.window for r in group.rows]), [ButtonConfig("OK")]))
-        assert view.text_region is None
-
     @pytest.mark.parametrize("text,offered", [(LONG, True), ("short", False)])
     def test_the_hint_offers_scrolling_only_while_the_text_overflows(self, text, offered):
         view = build_inline(Dialog("T", text, [ButtonConfig("OK")]))
@@ -275,7 +263,7 @@ class TestTextRegion:
         with set_app(_app(layout)):
             layout.focus(view.actions[0].window)
             _render(view.container, 10)
-        assert ("PgUp/PgDn scroll" in view.hint) is offered
+        assert ("↑↓ scroll" in view.hint) is offered
 
     def test_the_scroll_keys_sit_between_navigation_and_selection_in_the_hint(self):
         view = build_inline(Dialog("T", LONG, [ButtonConfig("A"), ButtonConfig("B")]))
@@ -283,7 +271,7 @@ class TestTextRegion:
         with set_app(_app(layout)):
             layout.focus(view.actions[0].window)
             _render(view.container, 10)
-        assert view.hint == "↑↓ navigate · PgUp/PgDn scroll · Enter select · Esc cancel"
+        assert view.hint == "↑↓ navigate/scroll · Enter select · Esc cancel"
 
 
 class TestHintWrapping:

@@ -9,6 +9,7 @@ cursor between them.
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from typing import TYPE_CHECKING
 
 from prompt_toolkit.application.current import get_app
 from prompt_toolkit.filters import Condition
@@ -17,6 +18,9 @@ from prompt_toolkit.key_binding import KeyBindings, KeyPressEvent
 from prompt_toolkit.layout import Container, Layout, Window
 from prompt_toolkit.layout.controls import UIContent, UIControl
 from prompt_toolkit.utils import get_cwidth
+
+if TYPE_CHECKING:
+    from .dialog_scroll import ScrollRegion
 
 # Drawn in front of the row under the cursor (as in prompt_toolkit's choice()).
 MARKER = "❯ "
@@ -207,8 +211,13 @@ class OptionRow(RowControl):
 class RowNavigator:
     """One cursor over an ordered list of focus stops.
 
-    ↑↓ move to the previous/next stop and stop at the first and last. They
-    act only while a RowControl has focus, so a body built from other widgets
+    ↑↓ move to the previous/next stop and stop at the first and last. In a
+    scrolled region they read what's around the stops first: while the
+    stop they'd move to is out of view, they scroll a line toward it, and
+    past the first and last stops, to the region's edge; scrolled away from
+    the cursor's stop, they scroll back to it before moving on
+    (ScrollRegion.toward).
+    They act only while a RowControl has focus, so a body built from other widgets
     (a TextArea) keeps its own arrow keys. With ``tab=True``, Tab and
     Shift+Tab move too, from any stop: the way into and out of such a body.
     With ``actions``, digits 1–9 run those actions directly while a row has
@@ -222,8 +231,13 @@ class RowNavigator:
         is_editing: Callable[[], bool] = lambda: False,
         tab: bool = False,
         actions: Sequence[ActionRow] = (),
+        region: Callable[[], ScrollRegion | None] | None = None,
     ) -> None:
+        """``region``: the region ↑↓ scroll on the way (default: the one the
+        focused stop is in); inline, the body's, which the actions are
+        under."""
         self._stops = stops
+        self._region = region
         self._is_editing = is_editing
         self._tab = tab
         self._actions = list(actions)
@@ -245,6 +259,26 @@ class RowNavigator:
         if target != current:
             layout.focus(stops[target])
 
+    def step(self, layout: Layout, delta: int) -> None:
+        """↑ (``delta`` -1) or ↓ (1): to the next stop that way once it's in
+        view, and till then a line toward it (scrolled away from the focused
+        stop, a line back to it first)."""
+        from .dialog_scroll import enclosing_region
+
+        stops = list(self._stops())
+        current = self.index(layout)
+        if current is None:
+            return
+        target = current + delta
+        region = (
+            self._region() if self._region is not None
+            else enclosing_region(layout, stops[current])
+        )
+        toward = stops[target] if 0 <= target < len(stops) else None
+        if region is not None and region.toward(stops[current], toward, delta):
+            return
+        self.move(layout, delta)
+
     def key_bindings(self) -> KeyBindings:
         kb = KeyBindings()
         idle = Condition(lambda: not self._is_editing())
@@ -252,11 +286,11 @@ class RowNavigator:
 
         @kb.add("up", filter=idle & on_row)
         def _up(event: KeyPressEvent) -> None:
-            self.move(event.app.layout, -1)
+            self.step(event.app.layout, -1)
 
         @kb.add("down", filter=idle & on_row)
         def _down(event: KeyPressEvent) -> None:
-            self.move(event.app.layout, 1)
+            self.step(event.app.layout, 1)
 
         if self._tab:
             @kb.add("tab", filter=idle)

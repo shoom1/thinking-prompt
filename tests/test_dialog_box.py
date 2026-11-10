@@ -53,16 +53,16 @@ class TestBuildBox:
         assert view.focused_button is None
         assert view.initial_focus is None
 
-    def test_a_text_body_is_the_text_region(self):
+    def test_a_text_body_is_the_region_and_text_only(self):
         view = build_box(Dialog("T", "Just text", [ButtonConfig("OK")]))
         regions = [c for c in walk(to_container(view.widget)) if isinstance(c, ScrollRegion)]
-        assert len(regions) == 1
-        assert view.text_region is regions[0]
+        assert regions == [view.region]
+        assert view.text_only
 
-    def test_a_body_with_a_cursor_stop_has_no_text_region(self):
+    def test_a_body_with_a_cursor_stop_is_not_text_only(self):
         body = Window(FormattedTextControl("pick", focusable=True))
         view = build_box(Dialog("T", body, [ButtonConfig("OK")]))
-        assert view.text_region is None
+        assert not view.text_only
 
     def test_button_style_is_added_to_the_button_window(self):
         view = build_box(Dialog("T", "B", [ButtonConfig("Danger", result=1, style="class:danger")]))
@@ -103,8 +103,7 @@ class TestBuildBox:
     def test_a_body_with_several_stops_scrolls_in_a_region(self):
         group = OptionGroup(["a", "b"], multiple=True)
         view = build_box(Dialog("T", HSplit([r.window for r in group.rows]), [ButtonConfig("OK")]))
-        assert any(isinstance(c, ScrollRegion) for c in walk(to_container(view.widget)))
-        assert view.text_region is None
+        assert view.region is not None and not view.text_only
 
     def test_a_lone_choice_list_scrolls_in_a_region(self):
         """Each of a choice list's options is a stop: the list scrolls in a
@@ -121,10 +120,12 @@ class TestBuildBox:
         lambda: ChecklistField("f", "", options=["a"]),
         lambda: ChoiceField("f", "", options=["a"]),
     ], ids=["checkbox", "text", "select", "one-option checklist", "one-option choice list"])
-    def test_text_and_a_one_stop_field_are_not_in_a_region(self, make):
-        """One stop: squeezed, so the text above it shows from its start."""
+    def test_text_and_a_one_stop_field_scroll_in_one_region(self, make):
+        """Text and field alike: ↑ on the field reads the text above it."""
         view = build_box(Dialog("T", "Pick:", [ButtonConfig("OK")], fields=[make()]))
-        assert not any(isinstance(c, ScrollRegion) for c in walk(to_container(view.widget)))
+        regions = [c for c in walk(to_container(view.widget)) if isinstance(c, ScrollRegion)]
+        assert regions == [view.region]
+        assert not view.text_only
 
     def test_the_view_keeps_the_max_height(self):
         assert build_box(Dialog("T", "B", [ButtonConfig("OK")], max_height=7)).max_height == 7

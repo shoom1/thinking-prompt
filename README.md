@@ -571,9 +571,15 @@ need is it centered over the screen.
 
 **Long content scrolls.** A dialog is never taller than the terminal (less
 the prompt's rows), nor than `max_height` rows if you pass it — counting the
-whole dialog: title, borders, buttons, hint. What doesn't fit scrolls: rows
-with a cursor (fields, lists, actions) follow the cursor, and a text body
-scrolls with PgUp/PgDn (and ↑↓ in a box). Every helper takes `max_height=`.
+whole dialog: title, borders, buttons, hint. What doesn't fit scrolls: the
+body, text and fields alike, scrolls as one (with one scrollbar in a box)
+and follows the cursor, the buttons under it. ↑↓ read what's around the
+fields on the way: on the first field, ↑ scrolls up through the text above
+it a line at a time, and ↓ back down to it before moving on; a field further
+away than the rows shown is reached a line at a time too, so nothing between
+is skipped. Any
+other key brings the cursor back into view. PgUp/PgDn page, where the
+keyboard has them. Every helper takes `max_height=`.
 
 **Small terminals.** A box dialog that can't fit the terminal at all
 (narrower than its buttons, or shorter than its frame, buttons and one body
@@ -646,9 +652,11 @@ await session.show_dialog(Dialog("Settings", fields=[
 ], buttons=[ButtonConfig("Done")]))
 ```
 
-A long text body scrolls with PgUp/PgDn, and the hint line says so while it
-overflows; rows and actions scroll within 12 rows, following the cursor,
-unless `max_height` says otherwise. `width` applies to box dialogs only.
+A body that doesn't fit scrolls with ↑↓ (and PgUp/PgDn), and the hint line
+says so while it overflows; the actions stay under it. A form's rows, and
+the actions, each scroll within 12 rows, following the cursor, unless
+`max_height` says otherwise (a text body takes the rows the terminal has).
+`width` applies to box dialogs only.
 
 Dialogs need a running session; to ask something before
 `run_async()` starts or after it ends, use prompt_toolkit's own `choice()`
