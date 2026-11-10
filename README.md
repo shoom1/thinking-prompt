@@ -575,8 +575,9 @@ whole dialog: title, borders, buttons, hint. What doesn't fit scrolls: the
 body, text and fields alike, scrolls as one (with one scrollbar in a box)
 and follows the cursor, the buttons under it. ↑↓ read what's around the
 fields on the way: on the first field, ↑ scrolls up through the text above
-it a line at a time, and ↓ back down; a field further away than the rows
-shown is reached a line at a time too, so nothing between is skipped. Any
+it a line at a time, and ↓ back down to it before moving on; a field further
+away than the rows shown is reached a line at a time too, so nothing between
+is skipped. Any
 other key brings the cursor back into view. PgUp/PgDn page, where the
 keyboard has them. Every helper takes `max_height=`.
 

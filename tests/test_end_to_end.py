@@ -3845,3 +3845,33 @@ class TestDialogTextAboveFields:
                 await wait_until(lambda: on_screen(session, "Name  bob"))
                 dialog.set_result(None)
                 await shown
+
+    @pytest.mark.parametrize("placement", ["box", "inline"])
+    async def test_down_scrolls_back_to_the_field_before_moving_on(self, placement: str):
+        """Scrolled up past the cursor's field, ↓ scrolls back down a line
+        at a time till the field shows; the cursor stays on it, though the
+        next field is near."""
+        with piped_session(rows=40) as (session, inp):
+            async with session:
+                await wait_until(lambda: session.app.is_running)
+                dialog = Dialog(
+                    "Q", self.TEXT, [ButtonConfig("OK")],
+                    fields=[TextField("name", "Name"), TextField("city", "City")],
+                    max_height=10, placement=placement, width=40,
+                )
+                shown = asyncio.ensure_future(session.show_dialog(dialog))
+                await wait_until(lambda: dialog_rendered(session))
+                await self._keys(session, inp, [UP] * 3)
+                assert not on_screen(session, "Name"), screen_lines(session)
+                top = min(self._instructions(session))
+                for _ in range(10):
+                    await self._keys(session, inp, [DOWN])
+                    top += 1
+                    assert min(self._instructions(session)) == top, screen_lines(session)
+                    if on_screen(session, "Name"):
+                        break
+                assert on_screen(session, "Name"), screen_lines(session)
+                inp.send_text(ENTER + "bob" + ENTER)  # the cursor is still on Name
+                await wait_until(lambda: dialog.values["name"] == "bob")
+                dialog.set_result(None)
+                await shown

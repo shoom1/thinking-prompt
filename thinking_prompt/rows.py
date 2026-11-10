@@ -214,7 +214,9 @@ class RowNavigator:
     ↑↓ move to the previous/next stop and stop at the first and last. In a
     scrolled region they read what's around the stops first: while the
     stop they'd move to is out of view, they scroll a line toward it, and
-    past the first and last stops, to the region's edge (ScrollRegion.toward).
+    past the first and last stops, to the region's edge; scrolled away from
+    the cursor's stop, they scroll back to it before moving on
+    (ScrollRegion.toward).
     They act only while a RowControl has focus, so a body built from other widgets
     (a TextArea) keeps its own arrow keys. With ``tab=True``, Tab and
     Shift+Tab move too, from any stop: the way into and out of such a body.
@@ -259,7 +261,8 @@ class RowNavigator:
 
     def step(self, layout: Layout, delta: int) -> None:
         """↑ (``delta`` -1) or ↓ (1): to the next stop that way once it's in
-        view, and till then a line toward it."""
+        view, and till then a line toward it (scrolled away from the focused
+        stop, a line back to it first)."""
         from .dialog_scroll import enclosing_region
 
         stops = list(self._stops())

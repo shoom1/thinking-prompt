@@ -142,7 +142,7 @@ class ScrollRegion(ScrollablePane):
         # window inside starts and how tall it is, in content rows.
         self._content_rows = 0
         self._visible_rows = 0
-        self._windows: dict[Container, tuple[int, int]] = {}
+        self._windows: dict[Window, tuple[int, int]] = {}
 
     @property
     def overflows(self) -> bool:
@@ -165,14 +165,22 @@ class ScrollRegion(ScrollablePane):
         self.vertical_scroll = max(0, min(last, self.vertical_scroll + lines))
 
     def toward(self, current: Container, target: Container | None, step: int) -> bool:
-        """Scroll one line toward ``target``, the stop ↑ (``step`` -1) or ↓
-        (1) moves to from ``current``, while moving there would skip rows
-        (it's further than the rows shown), so what's between shows on the
-        way; with no stop that way, toward the content's edge that way
-        (there already, nothing). False once the cursor can go: following
-        it then shows everything between."""
+        """Scroll one line for ↑ (``step`` -1) or ↓ (1) from ``current``:
+        back toward ``current`` while keys have scrolled it out of view that
+        way; else toward ``target``, the stop the key moves to, while moving
+        there would skip rows (it's further than the rows shown), so what's
+        between shows on the way; with no stop that way, toward the
+        content's edge that way (there already, nothing). False once the
+        cursor can go: following it then shows everything between."""
         top = self._view_top(current)
         bottom = top + self._visible_rows
+        here = self._span(current)
+        if self._manual and here is not None:
+            start, rows = here
+            if (start < top) if step < 0 else (start + rows > bottom):
+                self.vertical_scroll = top
+                self.scroll(step)
+                return True
         if target is None:
             if (top > 0) if step < 0 else (bottom < self._content_rows):
                 self.vertical_scroll = top
@@ -182,7 +190,7 @@ class ScrollRegion(ScrollablePane):
                 # view scrolled there where it is (settle()).
                 self._scrolled = True
             return True
-        where = self._windows.get(target)
+        where = self._span(target)
         if where is None:
             return False
         start, rows = where
@@ -200,11 +208,25 @@ class ScrollRegion(ScrollablePane):
         """The first row shown, once the next draw follows the cursor to
         ``current`` (keys can come faster than draws)."""
         top = self.vertical_scroll
-        where = self._windows.get(current)
+        where = self._span(current)
         if not self._manual and where is not None:
             start, rows = where
             top = max(min(top, start), start + rows - self._visible_rows)
         return max(0, min(top, self._content_rows - self._visible_rows))
+
+    def _span(self, container: Container) -> tuple[int, int] | None:
+        """Where ``container`` was last drawn, in content rows: its first row
+        and how many, across the windows in it (a stop can be a container,
+        such as a text field's, which swaps its row for an edit row). None
+        if it wasn't drawn."""
+        drawn = [
+            self._windows[w] for w in walk(container)
+            if isinstance(w, Window) and w in self._windows
+        ]
+        if not drawn:
+            return None
+        start = min(first for first, _ in drawn)
+        return start, max(first + rows for first, rows in drawn) - start
 
     def page(self, pages: int) -> None:
         """Scroll ``pages`` pages down (up if negative); a page is the
