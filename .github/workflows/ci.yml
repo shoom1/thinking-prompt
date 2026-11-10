@@ -70,3 +70,69 @@ jobs:
 
       - name: Run pytest
         run: pytest -v
+
+  test-floors:
+    name: Test the lowest supported versions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.9"
+          cache: pip
+
+      # The floors pyproject.toml declares: requires-python and each
+      # dependency's lowest version. Keep them in step with it.
+      - name: Install package with the lowest supported dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]" "prompt_toolkit==3.0.36" "rich==13.2.0" "pygments==2.15.0"
+          python -c "import importlib.metadata as m; print({d: m.version(d) for d in ('prompt_toolkit', 'rich', 'pygments')})"
+
+      - name: Run pytest
+        run: pytest -v
+
+  test-package:
+    name: Test the built wheel
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Build the sdist and the wheel
+        run: |
+          python -m pip install --upgrade pip build twine
+          python -m build
+          twine check dist/*
+
+      # The sdist is an allowlist (pyproject.toml): nothing untracked or
+      # local gets in.
+      - name: Check the sdist's contents
+        run: |
+          tar -tzf dist/*.tar.gz | sort
+          if tar -tzf dist/*.tar.gz | grep -E '/(AGENTS\.md|\.superpowers|docs|changes)(/|$)'; then
+            echo "the sdist holds files it shouldn't" >&2
+            exit 1
+          fi
+
+      # The wheel installed in a clean venv, and the tests run from outside
+      # the checkout, so the source tree can't stand in for the package.
+      - name: Install the wheel in a clean venv
+        run: |
+          python -m venv /tmp/venv
+          /tmp/venv/bin/pip install "$(ls dist/*.whl)[dev,all]"
+          mkdir /tmp/suite
+          cp -r tests pyproject.toml /tmp/suite/
+          cd /tmp/suite
+          /tmp/venv/bin/python -c "import thinking_prompt; print(thinking_prompt.__file__); assert 'site-packages' in thinking_prompt.__file__"
+
+      - name: Run pytest against the installed wheel
+        working-directory: /tmp/suite
+        run: /tmp/venv/bin/python -m pytest -v

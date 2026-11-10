@@ -45,9 +45,9 @@ dev = [
     "ruff>=0.1.0",
     "types-Pygments",
 ]
-rich = ["rich>=13.0,<16"]
+rich = ["rich>=13.2,<16"]
 pygments = ["pygments>=2.15.0"]
-all = ["rich>=13.0,<16", "pygments>=2.15.0"]
+all = ["rich>=13.2,<16", "pygments>=2.15.0"]
 
 [project.urls]
 Homepage = "https://github.com/shoom1/thinking-prompt"
