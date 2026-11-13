@@ -162,8 +162,8 @@ def inline_open(session: ThinkingPromptSession) -> bool:
     return dm is not None and dm.inline_view is not None
 
 
-def screen_lines(session: ThinkingPromptSession) -> list[str]:
-    """The last rendered frame as text, one stripped string per row."""
+def screen_rows(session: ThinkingPromptSession) -> list[str]:
+    """The last rendered frame as text, one string per row, its indent kept."""
     screen = session.app.renderer.last_rendered_screen
     if screen is None:
         return []
@@ -171,9 +171,14 @@ def screen_lines(session: ThinkingPromptSession) -> list[str]:
     # stay 0): read the terminal's full width.
     width = max(screen.width, session.app.output.get_size().columns)
     return [
-        "".join(screen.data_buffer[y][x].char for x in range(width)).strip()
+        "".join(screen.data_buffer[y][x].char for x in range(width)).rstrip()
         for y in range(screen.height)
     ]
+
+
+def screen_lines(session: ThinkingPromptSession) -> list[str]:
+    """The last rendered frame as text, one stripped string per row."""
+    return [row.strip() for row in screen_rows(session)]
 
 
 def record_dialog_frames(session: ThinkingPromptSession) -> list[list[str]]:
@@ -628,6 +633,52 @@ class TestRedraws:
                 assert renders <= elapsed * 30 + 3
 
             await run_with(session, lambda text: None, script)
+
+
+class TestPromptRows:
+    """The prompt's last line starts the input's row and wraps with it, as
+    a shell's prompt does; lines before it get rows of their own."""
+
+    @staticmethod
+    async def _rows_after_typing(text: str, **kwargs: Any) -> list[str]:
+        """The rows of the input area (between the separators) once ``text``
+        is typed, in an 80-column terminal."""
+        rows: list[list[str]] = []
+        with piped_session(rows=12, **kwargs) as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text(text)
+                await wait_until(lambda: session._default_buffer.text == text)
+                await settled_renders(session)
+                rows.append(screen_rows(session))
+
+            await run_with(session, lambda text: None, script)
+        top, bottom = [i for i, row in enumerate(rows[0]) if row.startswith("────")][:2]
+        return rows[0][top + 1:bottom]
+
+    async def test_input_shows_after_a_prompt_wider_than_the_terminal(self):
+        prompt = "/home/someone/projects/" + "a-long-directory-name/" * 3 + "and-a-deeper-one/src > "
+        rows = await self._rows_after_typing("typed-draft", message=prompt)
+        assert rows == [prompt[:80], prompt[80:] + "typed-draft"]
+
+    async def test_input_wraps_under_its_first_character_after_a_short_prompt(self):
+        rows = await self._rows_after_typing("x" * 100, message=">>> ")
+        assert rows == [">>> " + "x" * 76, " " * 4 + "x" * 24]
+
+    async def test_input_wraps_to_the_left_edge_after_a_prompt_over_half_the_width(self):
+        """Lined up under a prompt that long, the input would have little
+        room on each row: the rows it wraps onto start at the left edge."""
+        prompt = "p" * 39 + "> "
+        rows = await self._rows_after_typing("y" * 60, message=prompt)
+        assert rows == [prompt + "y" * 39, "y" * 21]
+
+    async def test_input_follows_the_last_line_of_a_multi_line_prompt(self):
+        rows = await self._rows_after_typing("draft", message="line one\nline two\n>>> ")
+        assert rows == ["line one", "line two", ">>> draft"]
+
+    async def test_a_prompt_line_wider_than_the_terminal_wraps_above_the_input(self):
+        rows = await self._rows_after_typing("draft", message="w" * 100 + "\n> ")
+        assert rows == ["w" * 80, "w" * 20, "> draft"]
 
 
 class TestThinkingBoxesOnScreen:

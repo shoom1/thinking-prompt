@@ -14,7 +14,14 @@ from typing import TYPE_CHECKING, Callable, Literal
 from prompt_toolkit.application.current import get_app
 from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.filters import Condition, is_done
-from prompt_toolkit.formatted_text import AnyFormattedText, FormattedText
+from prompt_toolkit.formatted_text import (
+    AnyFormattedText,
+    FormattedText,
+    StyleAndTextTuples,
+    fragment_list_width,
+    split_lines,
+    to_formatted_text,
+)
 from prompt_toolkit.layout import (
     AnyContainer,
     BufferControl,
@@ -24,7 +31,6 @@ from prompt_toolkit.layout import (
     FormattedTextControl,
     HSplit,
     Layout,
-    VSplit,
     Window,
 )
 from prompt_toolkit.layout.containers import ConditionalContainer
@@ -208,6 +214,12 @@ def create_status_bar(
     )
 
 
+def _prompt_lines(message: AnyFormattedText) -> list[StyleAndTextTuples]:
+    """The prompt ``message`` in the prompt's style, one fragment list per
+    line (at least one)."""
+    return list(split_lines(to_formatted_text(message, style="class:prompt")))
+
+
 def create_layout(
     default_buffer: Buffer,
     message: Callable[[], AnyFormattedText],
@@ -249,13 +261,36 @@ def create_layout(
         input_processors=input_processors,
     )
 
-    # Prompt window
-    prompt_window = Window(
-        content=FormattedTextControl(text=message),
-        style="class:prompt",
-        dont_extend_width=True,
-        dont_extend_height=True,
+    # The prompt's last line starts the input's first row and wraps with
+    # it, as prompt_toolkit's PromptSession draws it, so the input shows
+    # after a prompt of any length; the lines before it, if any, get rows
+    # of their own above.
+    def lines_above() -> StyleAndTextTuples:
+        above: StyleAndTextTuples = []
+        for line in _prompt_lines(message())[:-1]:
+            above.extend([*line, ("class:prompt", "\n")])
+        return above[:-1]
+
+    prompt_above = ConditionalContainer(
+        Window(
+            content=FormattedTextControl(text=lines_above),
+            wrap_lines=True,
+            dont_extend_height=True,
+        ),
+        filter=Condition(lambda: len(_prompt_lines(message())) > 1),
     )
+
+    def line_prefix(line_number: int, wrap_count: int) -> StyleAndTextTuples:
+        prompt = _prompt_lines(message())[-1]
+        if line_number == 0 and wrap_count == 0:
+            return prompt
+        # The input's other rows line up under its first character, unless
+        # the prompt takes over half the row, which would leave the input
+        # little room on each: then they start at the left edge.
+        width = fragment_list_width(prompt)
+        if width * 2 > get_app().output.get_size().columns:
+            return []
+        return [("class:prompt", " " * width)]
 
     # Dynamic height function that reserves space for completion menu
     def get_input_height() -> D:
@@ -274,13 +309,9 @@ def create_layout(
         content=buffer_control,
         height=get_input_height,
         wrap_lines=True,
+        get_line_prefix=line_prefix,
+        dont_extend_height=True,
     )
-
-    # Main input container with prompt + input + completions
-    input_line = VSplit([
-        prompt_window,
-        input_window,
-    ])
 
     # Separator lines above and below input
     separator_top = Window(
@@ -297,7 +328,8 @@ def create_layout(
     # Input area with separators
     input_with_separators = HSplit([
         separator_top,
-        input_line,
+        prompt_above,
+        input_window,
         separator_bottom,
     ])
 
