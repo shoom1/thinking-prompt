@@ -27,9 +27,9 @@ Example:
 
 Key bindings (defaults; set expand_key on the session):
     Ctrl+T: Expand/collapse the thinking boxes
-    Ctrl+C: Cancel the running handler; at an idle prompt, end the boxes
-            nobody else will, or exit when no box is open
-    Ctrl+D: Exit (on an empty input line)
+    Ctrl+C: Cancel the running handler; at an idle prompt, clear the line
+            and end the boxes nobody else will. Never exits
+    Ctrl+D: Exit (at an empty prompt, with no handler running)
 """
 
 import logging
