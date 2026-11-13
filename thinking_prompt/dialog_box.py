@@ -25,6 +25,7 @@ from prompt_toolkit.layout import (
     to_container,
 )
 from prompt_toolkit.layout.dimension import Dimension
+from prompt_toolkit.layout.layout import walk
 from prompt_toolkit.widgets import Button, Frame, Label
 from prompt_toolkit.widgets import Dialog as _DialogWidget
 
@@ -78,9 +79,10 @@ def build_box(dialog: Dialog) -> BoxView:
 
     The body, text and fields alike, sits in one ScrollRegion, which is
     scrolled when the dialog is capped (BoxPresenter._cap): it follows the
-    cursor, and ↑↓ read what's around the fields (RowNavigator.step), as
-    they scroll a text body. A body that is one window of another kind
-    taking the cursor (a RadioList, a TextArea) scrolls itself, squeezed.
+    cursor, and ↑↓ read what's around the fields (RowNavigator.step) and
+    widgets (ScrollRegion.scrolls_past), as they scroll a text body. A body
+    that is nothing but one window of another kind taking the cursor (a
+    RadioList, a TextArea) scrolls itself, squeezed.
     """
     content, start = dialog._content()
     if content is None:
@@ -89,8 +91,11 @@ def build_box(dialog: Dialog) -> BoxView:
     stops = focusable_windows(content)
     body: Container = content
     region: ScrollRegion | None = None
-    scrolls_itself = len(stops) == 1 and not (
-        isinstance(stops[0], Window) and isinstance(stops[0].content, RowControl)
+    # Nothing else in the body: with text around the window, the text
+    # would be squeezed off with nothing to scroll it.
+    windows = [w for w in walk(content) if isinstance(w, Window)]
+    scrolls_itself = (
+        len(stops) == 1 and windows == stops and not isinstance(windows[0].content, RowControl)
     )
     if not scrolls_itself:
 

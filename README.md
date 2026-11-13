@@ -596,7 +596,9 @@ and follows the cursor, the buttons under it. ↑↓ read what's around the
 fields on the way: on the first field, ↑ scrolls up through the text above
 it a line at a time, and ↓ back down to it before moving on; a field further
 away than the rows shown is reached a line at a time too, so nothing between
-is skipped. Any
+is skipped. A prompt_toolkit widget in a `body` (a `RadioList`, a `TextArea`)
+keeps its own arrow keys; past its first and last lines they read the text
+around it the same way. Any
 other key brings the cursor back into view. PgUp/PgDn page, where the
 keyboard has them. Every helper takes `max_height=`.
 

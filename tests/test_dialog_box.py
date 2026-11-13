@@ -96,9 +96,15 @@ class TestBuildBox:
             build_box(Old())
 
     def test_a_list_that_scrolls_itself_is_not_in_a_region(self):
+        view = build_box(Dialog("T", RadioList([("a", "A"), ("b", "B")]), [ButtonConfig("OK")]))
+        assert not any(isinstance(c, ScrollRegion) for c in walk(to_container(view.widget)))
+
+    def test_a_list_under_text_scrolls_in_a_region(self):
+        """Squeezed in a body with text above it, the list would leave the
+        text cut off with nothing to scroll it: the body scrolls as one."""
         body = HSplit([Label("Pick:"), RadioList([("a", "A"), ("b", "B")])])
         view = build_box(Dialog("T", body, [ButtonConfig("OK")]))
-        assert not any(isinstance(c, ScrollRegion) for c in walk(to_container(view.widget)))
+        assert view.region is not None and not view.text_only
 
     def test_a_body_with_several_stops_scrolls_in_a_region(self):
         group = OptionGroup(["a", "b"], multiple=True)

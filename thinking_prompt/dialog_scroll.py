@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Callable, Optional, Union
 
 from prompt_toolkit.application.current import get_app
+from prompt_toolkit.data_structures import Point
 from prompt_toolkit.filters import Condition
 from prompt_toolkit.layout import Container, ScrollablePane, ScrollOffsets, Window
 from prompt_toolkit.layout.dimension import Dimension
@@ -108,10 +109,13 @@ class ScrollRegion(ScrollablePane):
     does, with no scroll offsets (squeezed to one row, it shows the cursor
     row itself), and it goes back to its top when the cursor arrives at the
     first stop (``at_top()``) or its rows change while there, so rows above
-    that stop show again. Keys scroll it past the cursor, to read what's
-    around it: scroll(), page(), toward(). It stays so until the cursor
-    moves, or a key that doesn't scroll it brings the cursor back into view
-    (settle(), after each key). With ``scrollbar``, a scrollbar shows while the content overflows.
+    that stop show again. Of a window taller than the rows shown (a long
+    list), only the cursor's row is kept in view, so the rows above it show
+    as they do above a field. Keys scroll it past the cursor, to read what's
+    around it: scroll(), page(), toward(), and past a widget's first and last
+    lines, scroll_past(). It stays so until the cursor moves, or a key that
+    doesn't scroll it brings the cursor back into view (settle(), after each
+    key). With ``scrollbar``, a scrollbar shows while the content overflows.
     """
 
     def __init__(
@@ -174,10 +178,10 @@ class ScrollRegion(ScrollablePane):
         cursor can go: following it then shows everything between."""
         top = self._view_top(current)
         bottom = top + self._visible_rows
-        here = self._span(current)
-        if self._manual and here is not None:
-            start, rows = here
-            if (start < top) if step < 0 else (start + rows > bottom):
+        following = self._following(current)
+        if self._manual and following is not None:
+            low, high = following
+            if (top > high) if step < 0 else (top < low):
                 self.vertical_scroll = top
                 self.scroll(step)
                 return True
@@ -204,15 +208,63 @@ class ScrollRegion(ScrollablePane):
         self.scroll(lines)
         return True
 
+    def scrolls_past(self, window: Window, step: int) -> bool:
+        """True if ↑ (``step`` -1) or ↓ (1) on ``window``, a widget that moves
+        its own cursor (a RadioList, a TextArea), scrolls a line instead
+        (scroll_past()), as toward() does around a stop: back toward the
+        cursor while keys have scrolled it out of view that way; else, with
+        the cursor on the widget's first line (↑) or last line (↓), on past
+        the widget toward the content's edge, unless there already."""
+        info = window.render_info
+        following = self._following(window)
+        if info is None or following is None:
+            return False
+        top = self._view_top(window)
+        low, high = following
+        if self._manual and ((top > high) if step < 0 else (top < low)):
+            return True
+        # The cursor's line as it is now: keys can come faster than draws.
+        content = window.content.create_content(info.window_width, info.window_height)
+        line = content.cursor_position.y
+        if step < 0:
+            return line <= 0 and top > 0
+        return line >= content.line_count - 1 and top + self._visible_rows < self._content_rows
+
+    def scroll_past(self, window: Window, step: int) -> None:
+        """Scroll a line for ↑ (``step`` -1) or ↓ (1) on ``window``, from
+        where the view is about to be (see scrolls_past())."""
+        self.vertical_scroll = self._view_top(window)
+        self.scroll(step)
+
     def _view_top(self, current: Container) -> int:
         """The first row shown, once the next draw follows the cursor to
         ``current`` (keys can come faster than draws)."""
         top = self.vertical_scroll
-        where = self._span(current)
-        if not self._manual and where is not None:
-            start, rows = where
-            top = max(min(top, start), start + rows - self._visible_rows)
+        following = self._following(current)
+        if not self._manual and following is not None:
+            low, high = following
+            top = max(low, min(top, high))
         return max(0, min(top, self._content_rows - self._visible_rows))
+
+    def _following(self, container: Container) -> tuple[int, int] | None:
+        """The first rows the view may start at while it follows the cursor
+        in ``container``, lowest and highest, as the pane clips its scroll
+        (_make_window_visible()): with all of ``container`` in view if it
+        fits, else the focused window's cursor row. None if it wasn't drawn."""
+        where = self._span(container)
+        if where is None:
+            return None
+        start, rows = where
+        visible = self._visible_rows
+        if rows <= visible:
+            return start + rows - visible, start
+        focused = get_app().layout.current_window
+        drawn = self._windows.get(focused)
+        info = focused.render_info
+        if drawn is None or info is None or not any(w is focused for w in walk(container)):
+            return start, start + rows - visible
+        cursor = drawn[0] + info.cursor_position.y
+        return cursor - visible + 1, cursor
 
     def _span(self, container: Container) -> tuple[int, int] | None:
         """Where ``container`` was last drawn, in content rows: its first row
@@ -227,6 +279,27 @@ class ScrollRegion(ScrollablePane):
             return None
         start = min(first for first, _ in drawn)
         return start, max(first + rows for first, rows in drawn) - start
+
+    def _make_window_visible(
+        self,
+        visible_height: int,
+        virtual_height: int,
+        visible_win_write_pos: WritePosition,
+        cursor_position: Point | None,
+    ) -> None:
+        # A focused window taller than the rows shown: keep its cursor's row
+        # in view, not the rows shown filled with the window (which would
+        # hide the rows above it while following).
+        if cursor_position is not None and visible_win_write_pos.height > visible_height:
+            visible_win_write_pos = WritePosition(
+                xpos=visible_win_write_pos.xpos,
+                ypos=cursor_position.y,
+                width=visible_win_write_pos.width,
+                height=1,
+            )
+        super()._make_window_visible(
+            visible_height, virtual_height, visible_win_write_pos, cursor_position
+        )
 
     def page(self, pages: int) -> None:
         """Scroll ``pages`` pages down (up if negative); a page is the
