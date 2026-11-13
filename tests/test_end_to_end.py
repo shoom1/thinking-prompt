@@ -19,9 +19,9 @@ from prompt_toolkit.application import Application, create_app_session
 from prompt_toolkit.application.current import set_app
 from prompt_toolkit.data_structures import Size
 from prompt_toolkit.input import PipeInput, create_pipe_input
-from prompt_toolkit.layout import BufferControl
+from prompt_toolkit.layout import BufferControl, HSplit
 from prompt_toolkit.output import DummyOutput
-from prompt_toolkit.widgets import TextArea
+from prompt_toolkit.widgets import Label, RadioList, TextArea
 
 from tests.helpers import transcript_texts
 from thinking_prompt import (
@@ -4091,5 +4091,146 @@ class TestDialogTextAboveFields:
                 assert on_screen(session, "Name"), screen_lines(session)
                 inp.send_text(ENTER + "bob" + ENTER)  # the cursor is still on Name
                 await wait_until(lambda: dialog.values["name"] == "bob")
+                dialog.set_result(None)
+                await shown
+
+
+class TestDialogTextAroundAWidget:
+    """The same for a body of text around a prompt_toolkit widget that moves
+    its own cursor (a RadioList, a TextArea): the body scrolls as one, the
+    widget keeps its arrow keys, and past its first and last lines ↑↓ read
+    the text around it. In a box and inline."""
+
+    TEXT = TestDialogTextAboveFields.TEXT
+    _instructions = staticmethod(TestDialogTextAboveFields._instructions)
+    _keys = staticmethod(TestDialogTextAboveFields._keys)
+    WIDGETS: dict[str, Callable[[], Any]] = {
+        "a text area": lambda: TextArea(text="first\nsecond", height=2),
+        "a radio list": lambda: RadioList([(i, f"option {i}") for i in range(3)]),
+        "a long radio list": lambda: RadioList([(i, f"option {i}") for i in range(30)]),
+    }
+
+    @staticmethod
+    async def _open(session: ThinkingPromptSession, widget: Any, placement: str, **kwargs: Any) -> tuple[Dialog, Any]:
+        dialog = Dialog(
+            "Q", HSplit([Label(TestDialogTextAroundAWidget.TEXT), widget]), [ButtonConfig("OK")],
+            max_height=10, placement=placement, width=40, **kwargs,
+        )
+        shown = asyncio.ensure_future(session.show_dialog(dialog))
+        await wait_until(lambda: dialog_rendered(session))
+        return dialog, shown
+
+    @pytest.mark.parametrize("placement", ["box", "inline"])
+    @pytest.mark.parametrize("widget", list(WIDGETS))
+    async def test_every_line_of_the_text_can_be_read_with_the_arrows(self, placement: str, widget: str):
+        made = self.WIDGETS[widget]()
+        with piped_session(rows=40) as (session, inp):
+            async with session:
+                await wait_until(lambda: session.app.is_running)
+                dialog, shown = await self._open(session, made, placement)
+                seen = self._instructions(session)
+                for key in [UP] * 25:  # up through the text
+                    await self._keys(session, inp, [key])
+                    seen |= self._instructions(session)
+                assert seen == set(range(1, 21)), screen_lines(session)
+                # The widget's cursor stayed where it was.
+                if isinstance(made, RadioList):
+                    assert made._selected_index == 0
+                else:
+                    assert made.document.cursor_position_row == 0
+                dialog.set_result(None)
+                await shown
+
+    @pytest.mark.parametrize("placement", ["box", "inline"])
+    async def test_down_scrolls_back_to_the_widget_before_moving_in_it(self, placement: str):
+        """Scrolled up past the widget, ↓ scrolls back down a line at a time
+        till the widget shows (all of it, as it fits); then it moves in the
+        widget, and the view stays."""
+        radio = RadioList([(i, f"option {i}") for i in range(3)])
+        with piped_session(rows=40) as (session, inp):
+            async with session:
+                await wait_until(lambda: session.app.is_running)
+                dialog, shown = await self._open(session, radio, placement)
+                await self._keys(session, inp, [UP] * 6)
+                assert not on_screen(session, "option 0"), screen_lines(session)
+                top = min(self._instructions(session))
+                for _ in range(10):
+                    await self._keys(session, inp, [DOWN])
+                    top += 1
+                    assert min(self._instructions(session)) == top, screen_lines(session)
+                    assert radio._selected_index == 0
+                    if on_screen(session, "option 2"):
+                        break
+                assert on_screen(session, "option 2"), screen_lines(session)
+                await self._keys(session, inp, [DOWN])
+                assert radio._selected_index == 1
+                assert min(self._instructions(session)) == top, screen_lines(session)
+                dialog.set_result(None)
+                await shown
+
+    @pytest.mark.parametrize("placement", ["box", "inline"])
+    async def test_text_below_the_widget_reads_down_and_back_up(self, placement: str):
+        """↓ past the widget's last line reads the text under it; ↑ scrolls
+        back up to the widget before moving in it."""
+        radio = RadioList([(i, f"option {i}") for i in range(3)])
+        with piped_session(rows=40) as (session, inp):
+            async with session:
+                await wait_until(lambda: session.app.is_running)
+                dialog = Dialog(
+                    "Q", HSplit([radio, Label(self.TEXT)]), [ButtonConfig("OK")],
+                    max_height=10, placement=placement, width=40,
+                )
+                shown = asyncio.ensure_future(session.show_dialog(dialog))
+                await wait_until(lambda: dialog_rendered(session))
+                seen = self._instructions(session)
+                for _ in range(25):
+                    await self._keys(session, inp, [DOWN])
+                    seen |= self._instructions(session)
+                assert seen == set(range(1, 21)) and radio._selected_index == 2
+                for _ in range(25):
+                    await self._keys(session, inp, [UP])
+                    if not on_screen(session, "option 2"):
+                        assert radio._selected_index == 2
+                assert radio._selected_index == 0
+                dialog.set_result(None)
+                await shown
+
+    @pytest.mark.parametrize("placement", ["box", "inline"])
+    async def test_a_list_taller_than_the_rows_shown_opens_under_the_text_above_it(self, placement: str):
+        """The cursor's row is kept in view, not the whole list: the text
+        right above the list shows, as it does above a field, and the list
+        scrolls a row at a time as the cursor moves down it."""
+        radio = RadioList([(i, f"option {i}") for i in range(30)])
+        with piped_session(rows=40) as (session, inp):
+            async with session:
+                await wait_until(lambda: session.app.is_running)
+                dialog, shown = await self._open(session, radio, placement)
+                assert 20 in self._instructions(session), screen_lines(session)
+                assert on_screen(session, "option 0"), screen_lines(session)
+                top = min(self._instructions(session))
+                await self._keys(session, inp, [DOWN])
+                assert min(self._instructions(session)) == top + 1, screen_lines(session)
+                dialog.set_result(None)
+                await shown
+
+    @pytest.mark.parametrize("placement", ["box", "inline"])
+    async def test_up_while_editing_a_text_field_leaves_the_text_where_it_is(self, placement: str):
+        """↑ reads past a widget, not past a field being edited: the text
+        field's edit row keeps the key."""
+        with piped_session(rows=40) as (session, inp):
+            async with session:
+                await wait_until(lambda: session.app.is_running)
+                dialog = Dialog(
+                    "Q", self.TEXT, [ButtonConfig("OK")], fields=[TextField("name", "Name")],
+                    max_height=10, placement=placement, width=40,
+                )
+                shown = asyncio.ensure_future(session.show_dialog(dialog))
+                await wait_until(lambda: dialog_rendered(session))
+                await self._keys(session, inp, [ENTER])  # edit Name
+                shown_before = self._instructions(session)
+                inp.send_text(UP + "bob" + ENTER)
+                await wait_until(lambda: dialog.values["name"] == "bob")
+                await settled_renders(session)
+                assert self._instructions(session) == shown_before, screen_lines(session)
                 dialog.set_result(None)
                 await shown

@@ -47,6 +47,7 @@ from typing import (
     cast,
 )
 
+from prompt_toolkit.application.current import get_app
 from prompt_toolkit.filters import Condition
 from prompt_toolkit.formatted_text import AnyFormattedText
 from prompt_toolkit.key_binding import KeyBindings, merge_key_bindings
@@ -57,7 +58,7 @@ from prompt_toolkit.widgets import Label
 from ._text import format_exception_detail
 from .dialog_box import BoxPresenter
 from .dialog_inline import InlinePresenter, InlineView
-from .dialog_scroll import ScrollRegion, focusable_windows
+from .dialog_scroll import ScrollRegion, enclosing_region, focusable_windows
 from .fields import (
     AlignValues,
     ChecklistField,
@@ -67,6 +68,7 @@ from .fields import (
     _check_once,
     _Form,
 )
+from .rows import RowControl
 from .types import Placement, check_count, check_placement
 
 if TYPE_CHECKING:
@@ -608,7 +610,8 @@ class DialogManager:
     def _create_key_bindings(self) -> KeyBindings:
         """Escape, and the keys that scroll a body that doesn't fit: PgUp/PgDn,
         and in a box whose body is text also ↑↓ (its buttons use ←→ and Tab;
-        with fields, ↑↓ scroll on the way between them: RowNavigator.step)."""
+        with fields, ↑↓ scroll on the way between them: RowNavigator.step;
+        on a widget, past its first and last lines: ScrollRegion.scrolls_past)."""
         kb = KeyBindings()
 
         @kb.add("escape", filter=Condition(lambda: self._visible))
@@ -639,7 +642,42 @@ class DialogManager:
         def line_down(event: Any) -> None:
             self._scroll(lines=1)
 
+        # A widget in the body that moves its own cursor (a RadioList, a
+        # TextArea) keeps ↑↓, but past its first and last lines they read
+        # the text around it, as around a field. Eager: they outrank the
+        # widget's own keys, which are closer to the cursor.
+        @kb.add("up", filter=Condition(lambda: self._scrolls_past(-1)), eager=True)
+        def past_up(event: Any) -> None:
+            self._scroll_past(-1)
+
+        @kb.add("down", filter=Condition(lambda: self._scrolls_past(1)), eager=True)
+        def past_down(event: Any) -> None:
+            self._scroll_past(1)
+
         return kb
+
+    def _widget(self) -> tuple[ScrollRegion, Window] | None:
+        """The open dialog's region and the window with the cursor, when
+        that's a widget in the region that moves its own cursor: neither
+        one of the fields' rows nor a field being edited."""
+        region = self._region()
+        dialog = self._current_dialog
+        if not self._visible or region is None or dialog is None or dialog._form.is_editing():
+            return None
+        layout = get_app().layout
+        window = layout.current_window
+        if isinstance(window.content, RowControl) or enclosing_region(layout, window) is not region:
+            return None
+        return region, window
+
+    def _scrolls_past(self, step: int) -> bool:
+        widget = self._widget()
+        return widget is not None and widget[0].scrolls_past(widget[1], step)
+
+    def _scroll_past(self, step: int) -> None:
+        widget = self._widget()
+        if widget is not None:
+            widget[0].scroll_past(widget[1], step)
 
     def _region(self) -> ScrollRegion | None:
         """The open dialog's body region (box or inline); None when no
