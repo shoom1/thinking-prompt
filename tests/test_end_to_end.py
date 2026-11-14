@@ -3702,6 +3702,29 @@ class TestBoxDialogWidth:
             await run_with(session, lambda text: None, script)
 
 
+    async def test_inline_a_fixed_width_widget_stays_under_its_text(self):
+        """Filling the width is the box's, for its frame: inline, a Button
+        in the body stays as wide as the text (it moved to the middle of the
+        terminal, a theme's button colour painting the whole row)."""
+        text = "Some text above the widget."
+        body = HSplit([Label(text), Button("Go")])
+        dialog = Dialog("Inline", body, [ButtonConfig("OK")], placement="inline")
+        with piped_session(rows=16, columns=80) as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                shown = asyncio.ensure_future(session.show_dialog(dialog))
+                await wait_until(lambda: dialog_rendered(session))
+                rows = screen_rows(session)
+                (text_row,) = [row for row in rows if text in row]
+                (go_row,) = [row for row in rows if "Go" in row and "<" in row]
+                start = text_row.index(text)
+                assert start <= go_row.index("<") and go_row.rindex(">") < start + len(text), rows
+                shown.cancel()
+                with suppress(asyncio.CancelledError):
+                    await shown
+
+            await run_with(session, lambda text: None, script)
+
     @pytest.mark.parametrize("width", [50, "full", None])
     @pytest.mark.parametrize("widget", ["text area", "radio list"])
     async def test_a_widget_alone_without_a_width_fills_the_box(self, width: int | str | None, widget: str):

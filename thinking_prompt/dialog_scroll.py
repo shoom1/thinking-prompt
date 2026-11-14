@@ -124,8 +124,10 @@ class ScrollRegion(ScrollablePane):
         at_top: Callable[[], bool] = lambda: False,
         *,
         scrollbar: bool = False,
+        fill_width: bool = False,
     ) -> None:
         self._scrollbar = scrollbar
+        self._fill_width = fill_width
         self._overflowing = False
         # Scrolled by keys, past the cursor: the cursor isn't followed. And
         # whether the key being handled scrolled it (settle()).
@@ -149,11 +151,13 @@ class ScrollRegion(ScrollablePane):
         self._windows: dict[Window, tuple[int, int]] = {}
 
     def preferred_width(self, max_available_width: int) -> Dimension:
-        """The content's minimum and preferred width, and no maximum: a
-        fixed-width widget in the body (a Button) would cap it, and a box
-        given a wider width would draw its right border at the body's
+        """The content's width. With ``fill_width`` (a box's body), no
+        maximum: a fixed-width widget in it (a Button) would cap it, and a
+        box given a wider width would draw its right border at the body's
         edge, mid-box."""
         wanted = super().preferred_width(max_available_width)
+        if not self._fill_width:
+            return wanted
         return Dimension(min=wanted.min, preferred=wanted.preferred)
 
     @property

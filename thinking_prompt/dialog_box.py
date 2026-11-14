@@ -111,7 +111,7 @@ def build_box(dialog: Dialog) -> BoxView:
             first = focusable_windows(content)[:1]
             return bool(first) and get_app().layout.has_focus(first[0])
 
-        region = ScrollRegion(content, at_first_stop, scrollbar=True)
+        region = ScrollRegion(content, at_first_stop, scrollbar=True, fill_width=True)
         body = region
     elif to_container(body).preferred_width(1000).max_specified:
         # A lone widget with a capped width (a Button's) keeps it, and a
