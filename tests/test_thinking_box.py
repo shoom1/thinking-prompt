@@ -312,7 +312,11 @@ class TestSessionBoxes:
         ({"max_lines": True}, r"max_lines must be an int \(or None\), got True"),
         ({"overflow": "Tail"}, r"overflow must be 'tail' or 'head', got 'Tail'"),
         ({"content_format": "markdown"}, r"content_format must be 'plain' or 'ansi', got 'markdown'"),
-    ], ids=["max lines 1.5", "max lines True", "overflow", "content format"])
+        ({"order": None}, r"order must be an int, got None"),
+        ({"order": 1.5}, r"order must be an int, got 1\.5"),
+        ({"order": True}, r"order must be an int, got True"),
+    ], ids=["max lines 1.5", "max lines True", "overflow", "content format",
+            "order None", "order 1.5", "order True"])
     def test_start_thinking_refuses_a_bad_option(self, kwargs, message):
         session = _session()
         with pytest.raises(ValueError, match=message):
@@ -325,6 +329,11 @@ class TestSessionBoxes:
             async with session.thinking(overflow="Tail"):  # type: ignore[arg-type]
                 pass
         assert not session.is_thinking
+
+    def test_any_int_is_an_order(self):
+        session = _session()
+        session.start_thinking(order=-3)
+        session.start_thinking(order=10**6)
 
     def test_no_lines_is_a_title_line_only(self):
         assert _session().start_thinking(max_lines=0)._control.max_collapsed_lines == 0

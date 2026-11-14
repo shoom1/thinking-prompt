@@ -1483,12 +1483,12 @@ class TestDialogsEndToEnd:
 
             await run_with(session, handler, script)
 
-    async def test_dropdown_dialog_returns_option_chosen_with_arrow_keys(self):
+    async def test_choice_dialog_returns_option_chosen_with_arrow_keys(self):
         results: list[Any] = []
 
         async def handler(text: str) -> None:
             results.append(
-                await session.dropdown_dialog("Theme", "Pick:", ["Light", "Dark", "System"])
+                await session.choice_dialog("Theme", "Pick:", ["Light", "Dark", "System"])
             )
 
         with piped_session() as (session, inp):
@@ -1505,7 +1505,7 @@ class TestDialogsEndToEnd:
         results: list[Any] = []
 
         async def handler(text: str) -> None:
-            results.append(await session.dropdown_dialog(
+            results.append(await session.choice_dialog(
                 "Theme", "Pick:", ["Light", "Dark", "System"], default="Dark"
             ))
 
@@ -1529,7 +1529,7 @@ class TestDialogsEndToEnd:
 
         async def handler(text: str) -> None:
             results.append(
-                await session.dropdown_dialog("Theme", "Pick:", ["Light", "Dark", "System"])
+                await session.choice_dialog("Theme", "Pick:", ["Light", "Dark", "System"])
             )
 
         with piped_session() as (session, inp):
@@ -1574,7 +1574,7 @@ class TestDialogsAtTheBottomOfTheTerminal:
 
     async def test_a_box_dialog_opens_whole(self):
         frame = await first_dialog_frame(
-            lambda s: s.dropdown_dialog("Select Theme", "Pick:", self.OPTIONS, default="System"),
+            lambda s: s.choice_dialog("Select Theme", "Pick:", self.OPTIONS, default="System"),
             rows=24, below_cursor=4,
         )
         assert self._shows(frame, "Select Theme", *self.OPTIONS, "OK", "Cancel"), frame
@@ -1590,14 +1590,14 @@ class TestDialogsAtTheBottomOfTheTerminal:
     async def test_a_box_dialog_taller_than_the_terminal_keeps_the_layout(self):
         options = [f"Option {i}" for i in range(40)]
         frame = await first_dialog_frame(
-            lambda s: s.dropdown_dialog("Select Theme", "Pick:", options), rows=24, below_cursor=4
+            lambda s: s.choice_dialog("Select Theme", "Pick:", options), rows=24, below_cursor=4
         )
         assert self._shows(frame, "Select Theme", ">>>", "Ctrl+C: cancel"), frame
         assert not self._shows(frame, "Window too small"), frame
 
     async def test_an_inline_dialog_opens_whole(self):
         frame = await first_dialog_frame(
-            lambda s: s.dropdown_dialog(
+            lambda s: s.choice_dialog(
                 "Select Theme", "Pick:", self.OPTIONS, default="System", placement="inline"
             ),
             rows=24, below_cursor=4,
@@ -1894,7 +1894,7 @@ class TestBoxLongLists:
         results: list[Any] = []
 
         async def handler(text: str) -> None:
-            results.append(await session.dropdown_dialog(
+            results.append(await session.choice_dialog(
                 "Pick", "Which one?", options, placement="box"
             ))
 
@@ -2378,7 +2378,7 @@ class TestInlineDialogs:
         results: list[Any] = []
 
         async def handler(text: str) -> None:
-            results.append(await session.dropdown_dialog(
+            results.append(await session.choice_dialog(
                 "Theme", "Pick:", ["Light", "Dark", "System"], default="Dark", placement="inline"
             ))
 
@@ -2399,7 +2399,7 @@ class TestInlineDialogs:
         results: list[Any] = []
 
         async def handler(text: str) -> None:
-            results.append(await session.dropdown_dialog("Pick", "", options, placement="inline"))
+            results.append(await session.choice_dialog("Pick", "", options, placement="inline"))
 
         with piped_session() as (session, inp):
 
@@ -3173,7 +3173,7 @@ class TestChecklistDialog:
 
         async def handler(text: str) -> None:
             results.append(await session.checklist_dialog(
-                "Tools", "Pick any", ["search", "code", "files"], defaults=["search"],
+                "Tools", "Pick any", ["search", "code", "files"], default=["search"],
                 placement="inline",
             ))
 
@@ -3194,7 +3194,7 @@ class TestChecklistDialog:
 
         async def handler(text: str) -> None:
             results.append(await session.checklist_dialog(
-                "Tools", "Pick any", ["search", "code", "files"], defaults=["search"]
+                "Tools", "Pick any", ["search", "code", "files"], default=["search"]
             ))
 
         with piped_session() as (session, inp):
@@ -3209,8 +3209,8 @@ class TestChecklistDialog:
             await run_with(session, handler, script)
 
 
-class TestChoiceDialog:
-    """One action per choice; the dialog returns the choice taken."""
+class TestButtonDialog:
+    """One button per option; the dialog returns the option taken."""
 
     CHOICES = ["Save", "Discard", "Cancel"]
 
@@ -3219,7 +3219,7 @@ class TestChoiceDialog:
         results: list[Any] = []
 
         async def handler(text: str) -> None:
-            results.append(await session.choice_dialog("Action", "What to do?", self.CHOICES))
+            results.append(await session.button_dialog("Action", "What to do?", self.CHOICES))
 
         with piped_session() as (session, inp):
 
@@ -3235,7 +3235,7 @@ class TestChoiceDialog:
         results: list[Any] = []
 
         async def handler(text: str) -> None:
-            results.append(await session.choice_dialog(
+            results.append(await session.button_dialog(
                 "Action", "What to do?", self.CHOICES, placement="inline"
             ))
 

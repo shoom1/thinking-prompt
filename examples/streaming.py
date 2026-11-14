@@ -40,7 +40,7 @@ async def main():
         response = random.choice(SAMPLE_RESPONSES)
 
         # Use a list for O(1) append
-        chunks = []
+        chunks: list[str] = []
 
         def get_content():
             return ''.join(chunks)

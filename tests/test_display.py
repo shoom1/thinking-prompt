@@ -48,8 +48,8 @@ class TestIsRichRenderable:
 
 
 class TestPrivateRichToAnsi:
-    """Test _rich_to_ansi, the converter Display.rich() uses (the public
-    rich_to_ansi is _renderable_to_ansi, tested in TestRenderableToAnsi)."""
+    """Test _rich_to_ansi, the converter Display.rich() uses (a box's
+    _rich methods use _renderable_to_ansi, tested in TestRenderableToAnsi)."""
 
     def test_converts_string_to_string(self):
         """Should convert plain string to string."""
@@ -560,7 +560,7 @@ class TestRenderableToAnsi:
 
         NO_COLOR is honored at terminal-output layers, not at this converter.
         Since the function's contract is "produce ANSI", silently stripping
-        styling under NO_COLOR breaks public APIs (rich_to_ansi, append_rich,
+        styling under NO_COLOR breaks public APIs (append_rich,
         set_line_rich) that promise styled output.
         """
         pytest.importorskip("rich")

@@ -3,7 +3,7 @@
 Test script demonstrating the dialog system in thinking_prompt.
 
 This example shows:
-1. Built-in dialogs (yes_no, message, choice, dropdown)
+1. Built-in dialogs (yes_no, message, button, choice)
 2. Custom dialog built with Dialog(...) arguments
 3. Custom dialog via Dialog subclass
 
@@ -49,8 +49,8 @@ async def main():
             "Commands:\n"
             "  settings  - Yes/No dialog\n"
             "  info      - Message dialog\n"
-            "  action    - Choice dialog\n"
-            "  theme     - Dropdown dialog\n"
+            "  action    - Button dialog\n"
+            "  theme     - Choice dialog\n"
             "  custom    - Dialog built with arguments\n"
             "  login     - Dialog subclass\n"
             "  quit      - Exit"
@@ -96,28 +96,28 @@ async def main():
             return
 
         if text == "action":
-            # Choice dialog (multiple buttons)
-            result = await session.choice_dialog(
+            # Button dialog (one button per option)
+            action = await session.button_dialog(
                 title="Select Action",
                 text="What would you like to do?",
-                choices=["Save", "Discard", "Cancel"],
+                options=["Save", "Discard", "Cancel"],
             )
-            if result:
-                session.add_response(f"Selected action: {result}")
+            if action:
+                session.add_response(f"Selected action: {action}")
             else:
                 session.add_response("Action cancelled (Escape pressed)")
             return
 
         if text == "theme":
-            # Dropdown dialog (a choice list in a box)
-            result = await session.dropdown_dialog(
+            # Choice dialog (a choice list in a box)
+            theme = await session.choice_dialog(
                 title="Select Theme",
                 text="Choose a color theme:",
                 options=["Light", "Dark", "System", "High Contrast"],
                 default="System",
             )
-            if result:
-                session.add_response(f"Theme set to: {result}")
+            if theme:
+                session.add_response(f"Theme set to: {theme}")
             else:
                 session.add_response("Theme selection cancelled")
             return

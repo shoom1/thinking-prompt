@@ -11,7 +11,7 @@ Example usage:
     # Built-in dialogs
     result = await session.yes_no_dialog("Confirm", "Are you sure?")
     await session.message_dialog("Info", "Operation completed.")
-    choice = await session.choice_dialog("Action", "What to do?", ["Save", "Discard"])
+    choice = await session.button_dialog("Action", "What to do?", ["Save", "Discard"])
 
     # A dialog built with arguments
     result = await session.show_dialog(Dialog(
@@ -476,7 +476,7 @@ def _message_dialog(
     return Dialog(title, text, [ButtonConfig(ok_text)], placement=placement, max_height=max_height)
 
 
-def _choice_dialog(
+def _button_dialog(
     title: str,
     text: str,
     options: Sequence[str],
@@ -484,7 +484,9 @@ def _choice_dialog(
     max_height: int | None = None,
 ) -> Dialog:
     """One button per option, returning its text; Escape returns None."""
-    _check_once("choice_dialog()", options)
+    if not options:
+        raise ValueError("button_dialog() needs at least one option")
+    _check_once("button_dialog()", options)
     return Dialog(
         title,
         text,
@@ -494,7 +496,7 @@ def _choice_dialog(
     )
 
 
-def _dropdown_dialog(
+def _choice_dialog(
     title: str,
     text: str,
     options: Sequence[str],
@@ -510,8 +512,8 @@ def _dropdown_dialog(
     isn't one).
     """
     if not options:
-        raise ValueError("dropdown_dialog() needs at least one option")
-    _check_once("dropdown_dialog()", options)
+        raise ValueError("choice_dialog() needs at least one option")
+    _check_once("choice_dialog()", options)
     if placement == "inline":
         return Dialog(
             title,
@@ -541,7 +543,7 @@ def _checklist_dialog(
     title: str,
     text: str,
     options: Sequence[str],
-    defaults: Sequence[str] = (),
+    default: Sequence[str] = (),
     placement: Placement = "box",
     max_height: int | None = None,
 ) -> Dialog:
@@ -550,10 +552,16 @@ def _checklist_dialog(
     if not options:
         raise ValueError("checklist_dialog() needs at least one option")
     _check_once("checklist_dialog()", options)
+    if default is None or isinstance(default, str):
+        # A str would be taken letter by letter, none of them an option.
+        raise ValueError(
+            f"checklist_dialog() default must be a sequence of options "
+            f"(() for none), got {default!r}"
+        )
     dialog = Dialog(
         title,
         text,
-        fields=[ChecklistField("checked", "", options=list(options), default=tuple(defaults))],
+        fields=[ChecklistField("checked", "", options=list(options), default=tuple(default))],
         placement=placement,
         max_height=max_height,
     )
@@ -773,8 +781,9 @@ class DialogManager:
         app_done = self._session.app.future
         if not self._session.app.is_running or app_done is None or app_done.done():
             raise RuntimeError(
-                "show_dialog() needs a running session: call it while run() "
-                "or run_async() is running, e.g. from an input handler."
+                "show_dialog() needs a running session: call it inside "
+                "`async with session:`, or while run() or run_async() is "
+                "running, e.g. from an input handler."
             )
 
         placement = (
@@ -785,8 +794,9 @@ class DialogManager:
 
         if self._current_dialog is not None:
             raise RuntimeError(
-                "A dialog is already being shown. Wait for it to close "
-                "before showing another one."
+                "A dialog is already being shown: one at a time. Wait for "
+                "it to close before showing another one (tasks that may "
+                "ask at the same moment can share an asyncio.Lock)."
             )
 
         self._inject_float_container()

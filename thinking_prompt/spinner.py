@@ -44,8 +44,11 @@ class Spinner:
         object.__setattr__(self, "frames", tuple(self.frames))
         if not self.frames:
             raise ValueError("a Spinner needs frames; pass spinner=None for no spinner")
+        interval = self.interval
+        if not isinstance(interval, (int, float)) or isinstance(interval, bool):
+            raise ValueError(f"a Spinner's interval must be a number of seconds, got {interval!r}")
         # Not just > 0: NaN compares false both ways, and infinity never redraws.
-        if not (math.isfinite(self.interval) and self.interval > 0):
+        if not (math.isfinite(interval) and interval > 0):
             raise ValueError(f"a Spinner's interval must be positive and finite, got {self.interval!r}")
 
 

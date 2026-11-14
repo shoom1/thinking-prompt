@@ -50,7 +50,6 @@ from .fields import (
     SelectField,
     TextField,
 )
-from .rich_utils import _renderable_to_ansi as rich_to_ansi
 from .session import ThinkingPromptSession
 from .spinner import Spinner
 from .styles import ThinkingPromptStyles
@@ -101,6 +100,4 @@ __all__ = [
     "ChoiceField",
     # Spinner
     "Spinner",
-    # Utilities
-    "rich_to_ansi",
 ]
