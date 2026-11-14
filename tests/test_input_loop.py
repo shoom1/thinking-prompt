@@ -848,6 +848,73 @@ class TestQueue:
 
             await run_loop(session, body, script)
 
+    async def _busy_loop(
+        self,
+        session: ThinkingPromptSession,
+        started: asyncio.Event,
+        release: asyncio.Event,
+    ) -> None:
+        """A loop that does its work itself, not in query(), in a box."""
+        while True:
+            try:
+                await session.prompt_async()
+            except (EOFError, KeyboardInterrupt):
+                return
+            async with session.thinking(title="work") as box:
+                box.append("step 1\n")
+                started.set()
+                await release.wait()
+                box.append("step 2\n")
+            session.add_response("answer")
+
+    async def test_ctrl_c_while_busy_outside_a_query_leaves_the_work_alone(self):
+        """Nothing for Ctrl+C to stop: the loop's box is its live work, not
+        a box nobody will end, and the typed draft stays."""
+        started, release = asyncio.Event(), asyncio.Event()
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                try:
+                    inp.send_text("go" + ENTER)
+                    await started.wait()
+                    inp.send_text("draft" + CTRL_C)
+                    await wait_until(lambda: session._hint is not None)
+                    assert session.status_text == "Busy"
+                    assert session.is_thinking
+                    assert session._default_buffer.text == "draft"
+                finally:
+                    release.set()
+                await wait_until(lambda: waiting_for_input(session))
+                texts = transcript_texts(session._display)
+                assert "Operation cancelled...\n" not in texts
+                assert "step 1\nstep 2\n" in texts
+                assert "answer" in texts[-1]
+
+            await run_loop(session, lambda: self._busy_loop(session, started, release), script)
+
+    async def test_ctrl_d_while_busy_outside_a_query_doesnt_exit(self):
+        """As Enter does, Ctrl+D finds the session busy: it exits once the
+        loop waits for input again."""
+        started, release = asyncio.Event(), asyncio.Event()
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                try:
+                    inp.send_text("go" + ENTER)
+                    await started.wait()
+                    inp.send_text(CTRL_D)
+                    await wait_until(lambda: session._hint is not None)
+                    assert session.status_text == "Busy"
+                    assert session.app.is_running
+                finally:
+                    release.set()
+                await wait_until(lambda: waiting_for_input(session))
+                assert "answer" in transcript_texts(session._display)[-1]
+                inp.send_text(CTRL_D)
+                await finished(run)
+
+            await run_loop(session, lambda: self._busy_loop(session, started, release), script)
+
     async def test_queued_lines_run_in_order_each_echoed_when_it_runs(self):
         ran: list[str] = []
         started: list[str] = []

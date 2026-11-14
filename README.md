@@ -132,7 +132,7 @@ which closes the stream, and the unanswered turn stays out of `history`.
 |-----|--------|
 | Ctrl+T | Expand/collapse all thinking boxes (while one is open) |
 | Ctrl+C | Stop: cancel the running handler (lines queued behind it are dropped); at an idle prompt, clear the line and end the boxes nobody else will (see [When a Box Ends](#when-a-box-ends)). Never exits |
-| Ctrl+D | Exit, at an empty prompt with no handler running (Ctrl+C stops one first) |
+| Ctrl+D | Exit, at an empty, idle prompt: waiting for input, with no handler running (Ctrl+C stops one first) |
 
 Rebind Ctrl+T with `expand_key=` (see [Session Options](#session-options)).
 An exit command such as `/exit` is your app's: end your loop on it (see
@@ -213,13 +213,14 @@ A box belongs to the task that opened it. The session ends a box only when
 nobody else will: its task has ended, it was opened outside asyncio (from a
 thread), or the app's own task opened it (the task running the
 `async with session:` block, or `run_async()`, e.g. for a startup status
-box). A box a live task is feeding is that task's to end.
+box) and now waits for input. A box a live task is feeding is that task's
+to end.
 
 - **Its task ends:** the session finishes the boxes the task left open.
 - **A handler or a query ends:** the session also finishes the boxes opened
   outside asyncio.
-- **Ctrl+C at an idle prompt:** the session ends the boxes nobody else
-  will. If boxes that live tasks are feeding remain, the status bar says
+- **Ctrl+C at an idle prompt** (one waiting for input): the session ends
+  the boxes nobody else will. If boxes that live tasks are feeding remain, the status bar says
   `Background work is running — Ctrl+D exits` until those boxes end or the
   next input is accepted.
 - **Exit:** the last frame leaves out the boxes and the status bar. The
@@ -269,6 +270,10 @@ a value (`None` then means cancelled), or do what depends on it finishing
 after its own `await`s: a cancelled coroutine never gets there.
 `examples/claude_chat.py` keeps a cancelled reply out of its history that
 way.
+
+Work your loop does itself, outside `query()`, keeps the session busy
+too, but Ctrl+C can't stop it: Enter, Ctrl+C and Ctrl+D say `Busy`, and
+the boxes the loop opens stay its own.
 
 A line typed while a query runs is refused by default (`Busy`). With
 `ThinkingPromptSession(input_while_busy="queue")` it waits under the
@@ -501,10 +506,11 @@ session.add_system("Connecting to server...")
 
 The session sometimes puts a hint in the status bar in place of your
 status: `Busy — press Ctrl+C to cancel` when Enter (or Ctrl+D) is pressed
-while a query runs (`Busy` alone while your loop is busy outside
-`query()`, where Ctrl+C has no query to cancel), `Nothing to stop — Ctrl+D
-exits` when Ctrl+C finds nothing to stop, and `Background work is running
-— Ctrl+D exits` (see [When a Box Ends](#when-a-box-ends)). Your status comes back
+while a query runs; `Busy` alone when Enter, Ctrl+C or Ctrl+D is pressed
+while your loop is busy outside `query()`, where Ctrl+C has no query to
+cancel; `Nothing to stop — Ctrl+D exits` when Ctrl+C finds nothing to
+stop; and `Background work is running — Ctrl+D exits` (see [When a Box
+Ends](#when-a-box-ends)). Your status comes back
 once the hint no longer applies; a status you set meanwhile replaces the
 hint.
 

@@ -167,7 +167,8 @@ class ThinkingPromptSession:
 
     # Status hints shown when Enter is refused because nobody awaits input:
     # while a query runs, which Ctrl+C cancels (Ctrl+D says so too), and
-    # while the loop is busy outside one, where Ctrl+C has no query to cancel.
+    # while the loop is busy outside one, where Ctrl+C has no query to cancel
+    # (Ctrl+C and Ctrl+D say so too).
     _BUSY_STATUS = "Busy — press Ctrl+C to cancel"
     _BUSY_NO_QUERY_STATUS = "Busy"
     # Status hints shown when Ctrl+C at an idle prompt finds nothing to stop
@@ -353,7 +354,8 @@ class ThinkingPromptSession:
         self._box_owners: set[asyncio.Task[Any]] = set()
         self._cancel_owed: set[asyncio.Task[Any]] = set()
         # The task that entered `async with session:` (run_async()'s, too);
-        # None outside. Its boxes count as nobody's: the session ends them.
+        # None outside. Its boxes count as nobody's once it waits for input:
+        # an idle Ctrl+C ends them, as does the exit.
         self._app_task: asyncio.Task[Any] | None = None
         # The task running the Application while `async with session:` (or
         # run_async()) runs it; None outside.
@@ -442,6 +444,12 @@ class ThinkingPromptSession:
                 self._default_buffer.reset()
                 self._invalidate()
             return
+        self._show_busy()
+
+    def _show_busy(self) -> None:
+        """Say the session is busy: nobody waits for input. Ctrl+C is
+        offered only when it has a query to cancel (a loop doing its work
+        outside query() has none)."""
         if self._query_running():
             self._show_hint(self._BUSY_STATUS)
         else:
@@ -605,10 +613,17 @@ class ThinkingPromptSession:
                 # typed draft stays: one thing stops at a time.
                 self._cancel_query(by_user=True)
                 return
+            at_prompt = event.app.layout.has_focus(self._default_buffer)
+            if not self._input_wanted():
+                # Busy outside a query (a loop doing its work itself, in
+                # the app's own task): nothing to stop, and that task's
+                # boxes are its live work.
+                if at_prompt:
+                    self._show_busy()
+                return
             # An idle prompt. The waiting prompt_async() is left alone: it
             # still delivers the next line. A dialog open over it (a
             # background task's) keeps the focus, and the draft under it.
-            at_prompt = event.app.layout.has_focus(self._default_buffer)
             cleared = at_prompt and bool(self._default_buffer.text)
             if cleared:
                 self._default_buffer.reset()
@@ -637,17 +652,19 @@ class ThinkingPromptSession:
             & Condition(lambda: not self._default_buffer.text),
         )
         def exit_app(event: KeyPressEvent) -> None:
-            """Exit the application, unless a query runs."""
-            if self._query_running():
-                # Exiting doesn't stop work on the way out: Ctrl+C stops it.
-                # The status bar says so while the prompt isn't taking input;
-                # at a query's follow-up there's nothing to say.
+            """Exit the application: at an idle prompt, where someone waits
+            for input and no query runs."""
+            if self._query_running() or not self._input_wanted():
+                # Exiting doesn't stop work on the way out: Ctrl+C stops a
+                # query. The status bar says the session is busy while the
+                # prompt isn't taking input; at a query's follow-up there's
+                # nothing to say.
                 if not self._input_wanted():
-                    self._show_hint(self._BUSY_STATUS)
+                    self._show_busy()
                 return
-            # A waiting prompt_async() gets the documented EOFError at once.
-            if self._pending_input is not None and not self._pending_input.done():
-                self._pending_input.set_exception(EOFError())
+            # The waiting prompt_async() gets the documented EOFError at once.
+            assert self._pending_input is not None  # checked by _input_wanted()
+            self._pending_input.set_exception(EOFError())
             event.app.exit()
 
         # Enter to submit (when not thinking)
