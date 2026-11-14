@@ -55,8 +55,8 @@ class SlashCommandCompleter(Completer):
         "thinking": "Dynamic title + line editing demo",
         "confirm": "Yes/No dialog demo",
         "info": "Message dialog demo",
-        "action": "Choice dialog demo",
-        "theme": "Dropdown dialog demo",
+        "action": "Button dialog demo",
+        "theme": "Choice dialog demo",
         "tools": "Check list dialog demo",
         "inline": "Toggle inline / box dialogs",
         "tasks": "Multi-box task progress demo",
@@ -167,8 +167,8 @@ async def main():
                 "- **/thinking** - Dynamic title + line editing demo\n"
                 "- **/confirm** - Yes/No dialog demo\n"
                 "- **/info** - Message dialog demo\n"
-                "- **/action** - Choice dialog demo\n"
-                "- **/theme** - Dropdown dialog demo\n"
+                "- **/action** - Button dialog demo\n"
+                "- **/theme** - Choice dialog demo\n"
                 "- **/tools** - Check list dialog demo\n"
                 "- **/inline** - Toggle inline / box dialogs\n"
                 "- **/tasks** - Multi-box task progress demo\n"
@@ -312,10 +312,10 @@ async def main():
             return
 
         if cmd == "action":
-            result = await session.choice_dialog(
+            result = await session.button_dialog(
                 title="Select Action",
                 text="What would you like to do?",
-                choices=["Save", "Discard", "Cancel"],
+                options=["Save", "Discard", "Cancel"],
                 placement=placement,
             )
             if result:
@@ -325,7 +325,7 @@ async def main():
             return
 
         if cmd == "theme":
-            result = await session.dropdown_dialog(
+            result = await session.choice_dialog(
                 title="Select Theme",
                 text="Choose your preferred theme:",
                 options=["Light", "Dark", "System", "High Contrast"],
@@ -343,7 +343,7 @@ async def main():
                 title="Tools",
                 text="Which tools can the assistant use?",
                 options=["Web search", "Code execution", "File access", "Image generation"],
-                defaults=["Web search"],
+                default=["Web search"],
                 placement=placement,
             )
             if result is None:

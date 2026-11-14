@@ -21,8 +21,8 @@ from thinking_prompt.dialog import (
     Dialog,
     DialogManager,
     _checklist_dialog,
+    _button_dialog,
     _choice_dialog,
-    _dropdown_dialog,
     _message_dialog,
     _yes_no_dialog,
 )
@@ -110,22 +110,22 @@ class TestBuiltinDialogs:
         assert d.escape_result is None
 
     def test_choice(self):
-        d = _choice_dialog("Action", "Choose:", ["A", "B", "C"])
+        d = _button_dialog("Action", "Choose:", ["A", "B", "C"])
         assert self._results(d) == ["A", "B", "C"]
         assert d.escape_result is None
 
     def test_dropdown_preselects_default_and_ok_returns_selection(self):
-        d = _dropdown_dialog("Theme", "Select:", ["Light", "Dark", "System"], default="Dark")
+        d = _choice_dialog("Theme", "Select:", ["Light", "Dark", "System"], default="Dark")
         assert d.values == {"choice": "Dark"}
         assert [b.text for b in d.get_buttons()] == ["OK", "Cancel"]
         assert self._results(d) == ["Dark", None]
 
     def test_dropdown_needs_at_least_one_option(self):
         with pytest.raises(ValueError, match="at least one option"):
-            _dropdown_dialog("Theme", "Select:", [])
+            _choice_dialog("Theme", "Select:", [])
 
     def test_inline_dropdown_is_one_action_per_option_starting_on_the_default(self):
-        d = _dropdown_dialog("Theme", "Select:", ["Light", "Dark", "System"], default="Dark",
+        d = _choice_dialog("Theme", "Select:", ["Light", "Dark", "System"], default="Dark",
                              placement="inline")
         assert isinstance(d.build_body(), Label)
         buttons = d.get_buttons()
@@ -135,7 +135,7 @@ class TestBuiltinDialogs:
         assert d.escape_result is None
 
     def test_checklist_ok_returns_the_checked_options_cancel_none(self):
-        d = _checklist_dialog("Tools", "Pick any", ["a", "b", "c"], defaults=["c", "a", "z"])
+        d = _checklist_dialog("Tools", "Pick any", ["a", "b", "c"], default=["c", "a", "z"])
         assert [b.text for b in d.get_buttons()] == ["OK", "Cancel"]
         assert self._results(d) == [["a", "c"], None]
         assert d.escape_result is None
@@ -145,19 +145,19 @@ class TestBuiltinDialogs:
             _checklist_dialog("Tools", "Pick any", [])
 
     @pytest.mark.parametrize("build,call", [
+        (lambda options: _button_dialog("T", "B", options), "button_dialog()"),
         (lambda options: _choice_dialog("T", "B", options), "choice_dialog()"),
-        (lambda options: _dropdown_dialog("T", "B", options), "dropdown_dialog()"),
-        (lambda options: _dropdown_dialog("T", "B", options, placement="inline"), "dropdown_dialog()"),
+        (lambda options: _choice_dialog("T", "B", options, placement="inline"), "choice_dialog()"),
         (lambda options: _checklist_dialog("T", "B", options), "checklist_dialog()"),
         (lambda options: _checklist_dialog("T", "B", options, placement="inline"), "checklist_dialog()"),
-    ], ids=["choice", "dropdown box", "dropdown inline", "checklist box", "checklist inline"])
+    ], ids=["button", "choice box", "choice inline", "checklist box", "checklist inline"])
     def test_an_option_listed_twice_is_refused_naming_the_call(self, build, call):
         """In both placements, and naming the call, not the field it builds."""
         with pytest.raises(ValueError, match=rf"^{re.escape(call)}: option 'a' is listed twice"):
             build(["a", "b", "a"])
 
     def test_box_dropdown_is_a_choice_list_starting_on_the_default(self):
-        d = _dropdown_dialog("Theme", "Select:", ["Light", "Dark", "System"], default="Dark")
+        d = _choice_dialog("Theme", "Select:", ["Light", "Dark", "System"], default="Dark")
         d._placement = "box"
         _, start = d._content()
         (control,) = d._form.controls
@@ -166,7 +166,7 @@ class TestBuiltinDialogs:
 
     @pytest.mark.parametrize("default", [None, "Blue"])
     def test_box_dropdown_without_a_valid_default_starts_on_the_first_option(self, default):
-        d = _dropdown_dialog("Theme", "Select:", ["Light", "Dark"], default=default)
+        d = _choice_dialog("Theme", "Select:", ["Light", "Dark"], default=default)
         d._placement = "box"
         _, start = d._content()
         (control,) = d._form.controls
@@ -229,11 +229,11 @@ class TestDialogNeedsRunningSession:
             lambda s: s.show_dialog(Dialog("T", "B", [ButtonConfig("OK")])),
             lambda s: s.yes_no_dialog("T", "B"),
             lambda s: s.message_dialog("T", "B"),
+            lambda s: s.button_dialog("T", "B", ["a"]),
             lambda s: s.choice_dialog("T", "B", ["a"]),
-            lambda s: s.dropdown_dialog("T", "B", ["a"]),
             lambda s: s.checklist_dialog("T", "B", ["a"]),
         ],
-        ids=["show_dialog", "yes_no", "message", "choice", "dropdown", "checklist"],
+        ids=["show_dialog", "yes_no", "message", "button", "choice", "checklist"],
     )
     async def test_raises_before_the_session_runs(self, open_dialog):
         from thinking_prompt import ThinkingPromptSession
@@ -652,7 +652,7 @@ class TestWidth:
             Wide()
 
     def test_the_inline_dropdown_builder_passes_it_on(self):
-        assert _dropdown_dialog("T", "B", ["a"], placement="inline", max_height=9).max_height == 9
+        assert _choice_dialog("T", "B", ["a"], placement="inline", max_height=9).max_height == 9
 
 
 class TestHelperPlacement:
@@ -677,10 +677,10 @@ class TestHelperPlacement:
     @pytest.mark.parametrize("call", [
         lambda s, **kw: s.yes_no_dialog("T", "B", **kw),
         lambda s, **kw: s.message_dialog("T", "B", **kw),
+        lambda s, **kw: s.button_dialog("T", "B", ["a"], **kw),
         lambda s, **kw: s.choice_dialog("T", "B", ["a"], **kw),
-        lambda s, **kw: s.dropdown_dialog("T", "B", ["a"], **kw),
         lambda s, **kw: s.checklist_dialog("T", "B", ["a"], **kw),
-    ], ids=["yes_no", "message", "choice", "dropdown", "checklist"])
+    ], ids=["yes_no", "message", "button", "choice", "checklist"])
     async def test_session_default_and_per_call_override(self, captured, call):
         session, shown = captured(dialog_placement="inline")
         await call(session)
@@ -690,10 +690,10 @@ class TestHelperPlacement:
     @pytest.mark.parametrize("call", [
         lambda s, **kw: s.yes_no_dialog("T", "B", **kw),
         lambda s, **kw: s.message_dialog("T", "B", **kw),
+        lambda s, **kw: s.button_dialog("T", "B", ["a"], **kw),
         lambda s, **kw: s.choice_dialog("T", "B", ["a"], **kw),
-        lambda s, **kw: s.dropdown_dialog("T", "B", ["a"], **kw),
         lambda s, **kw: s.checklist_dialog("T", "B", ["a"], **kw),
-    ], ids=["yes_no", "message", "choice", "dropdown", "checklist"])
+    ], ids=["yes_no", "message", "button", "choice", "checklist"])
     async def test_max_height_passes_through(self, captured, call):
         session, shown = captured()
         await call(session, max_height=9)

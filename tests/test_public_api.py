@@ -108,6 +108,7 @@ def test_styles_convert_to_a_prompt_toolkit_style_only():
     [
         (ThinkingPromptSession, "set_status"),  # status_text takes all kinds of text
         (ThinkingPromptSession, "add_message"),  # add_system(); add_response()
+        (ThinkingPromptSession, "dropdown_dialog"),  # choice_dialog(): it draws a ChoiceField
     ],
 )
 def test_one_name_per_thing(owner: type, member: str):
@@ -152,22 +153,22 @@ def _parameters(func: Callable[..., object]) -> list[str]:
             ["title", "text", "yes_text", "no_text", "placement", "max_height"],
         ),
         (
-            ThinkingPromptSession.choice_dialog,
+            ThinkingPromptSession.button_dialog,
             ["title", "text", "options", "placement", "max_height"],
         ),
         (
-            ThinkingPromptSession.dropdown_dialog,
+            ThinkingPromptSession.choice_dialog,
             ["title", "text", "options", "default", "placement", "max_height"],
         ),
         (
             ThinkingPromptSession.checklist_dialog,
-            ["title", "text", "options", "defaults", "placement", "max_height"],
+            ["title", "text", "options", "default", "placement", "max_height"],
         ),
         (ThinkingPromptSession.query, ["coro"]),
     ],
     ids=[
         "session", "start_thinking", "thinking", "finish", "message_dialog",
-        "yes_no_dialog", "choice_dialog", "dropdown_dialog", "checklist_dialog", "query",
+        "yes_no_dialog", "button_dialog", "choice_dialog", "checklist_dialog", "query",
     ],
 )
 def test_parameter_names(func: Callable[..., object], names: list[str]):

@@ -1728,7 +1728,7 @@ class ThinkingPromptSession:
         dialog = _message_dialog(title, text, ok_text, self._resolve_placement(placement), max_height)
         await self._dialogs.show(dialog)
 
-    async def choice_dialog(
+    async def button_dialog(
         self,
         title: str,
         text: str,
@@ -1738,7 +1738,7 @@ class ThinkingPromptSession:
         max_height: int | None = None,
     ) -> str | None:
         """
-        Show a dialog with multiple choice buttons.
+        Show a dialog with one button per option.
 
         Args:
             title: Dialog title.
@@ -1757,7 +1757,7 @@ class ThinkingPromptSession:
             ValueError: If an option is listed twice.
 
         Example:
-            action = await session.choice_dialog(
+            action = await session.button_dialog(
                 "Select Action",
                 "What would you like to do?",
                 ["Save", "Discard", "Cancel"],
@@ -1765,11 +1765,11 @@ class ThinkingPromptSession:
             if action == "Save":
                 save_file()
         """
-        from .dialog import _choice_dialog
-        dialog = _choice_dialog(title, text, options, self._resolve_placement(placement), max_height)
+        from .dialog import _button_dialog
+        dialog = _button_dialog(title, text, options, self._resolve_placement(placement), max_height)
         return cast(Optional[str], await self._dialogs.show(dialog))
 
-    async def dropdown_dialog(
+    async def choice_dialog(
         self,
         title: str,
         text: str,
@@ -1802,15 +1802,15 @@ class ThinkingPromptSession:
             ValueError: If ``options`` is empty, or an option is listed twice.
 
         Example:
-            theme = await session.dropdown_dialog(
+            theme = await session.choice_dialog(
                 "Select Theme",
                 "Choose a color theme:",
                 ["Light", "Dark", "System"],
                 default="System",
             )
         """
-        from .dialog import _dropdown_dialog
-        dialog = _dropdown_dialog(title, text, options, default, self._resolve_placement(placement), max_height)
+        from .dialog import _choice_dialog
+        dialog = _choice_dialog(title, text, options, default, self._resolve_placement(placement), max_height)
         return cast(Optional[str], await self._dialogs.show(dialog))
 
     async def checklist_dialog(
@@ -1818,7 +1818,7 @@ class ThinkingPromptSession:
         title: str,
         text: str,
         options: Sequence[str],
-        defaults: Sequence[str] = (),
+        default: Sequence[str] = (),
         *,
         placement: Placement | None = None,
         max_height: int | None = None,
@@ -1830,7 +1830,7 @@ class ThinkingPromptSession:
             title: Dialog title.
             text: Text above the options ("" for none).
             options: The options to check.
-            defaults: Options checked at first (others are ignored).
+            default: Options checked at first (others are ignored).
             placement: "box" or "inline"; None (default) uses the session's
                 dialog_placement.
             max_height: The most rows the dialog takes; what doesn't fit
@@ -1845,11 +1845,11 @@ class ThinkingPromptSession:
 
         Example:
             tools = await session.checklist_dialog(
-                "Tools", "Enable any:", ["search", "code", "files"], defaults=["search"]
+                "Tools", "Enable any:", ["search", "code", "files"], default=["search"]
             )
         """
         from .dialog import _checklist_dialog
-        dialog = _checklist_dialog(title, text, options, defaults, self._resolve_placement(placement), max_height)
+        dialog = _checklist_dialog(title, text, options, default, self._resolve_placement(placement), max_height)
         return cast("list[str] | None", await self._dialogs.show(dialog))
 
     async def show_dialog(self, dialog: Dialog) -> Any:

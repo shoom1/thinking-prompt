@@ -20,8 +20,8 @@ form fields on a prompt that stays inline, in the terminal's scrollback.
 - **Several at once**: boxes run side by side, each finished on its own,
   ordered by `order=`.
 - **Animated header**: a spinner, and a title you can change while it runs.
-- **Dialogs**: yes/no, choice, dropdown, checklist or your own, drawn as a
-  box or inline under the prompt.
+- **Dialogs**: yes/no, buttons, a choice list, a checklist or your own,
+  drawn as a box or inline under the prompt.
 - **Form fields**: text, checkbox, select, dropdown, checklist, radio and
   choice fields on any dialog, so a settings dialog is a few lines.
 - **Rich output**: markdown, syntax-highlighted code and Rich renderables, in
@@ -524,11 +524,11 @@ if result:
 # Message dialog
 await session.message_dialog("Info", "Operation completed!")
 
-# Choice dialog (multiple buttons)
-action = await session.choice_dialog("Action", "What to do?", ["Save", "Discard", "Cancel"])
+# One button per option
+action = await session.button_dialog("Action", "What to do?", ["Save", "Discard", "Cancel"])
 
-# Dropdown selection
-theme = await session.dropdown_dialog("Theme", "Choose:", ["Light", "Dark", "System"])
+# One option from a list (a ChoiceField)
+theme = await session.choice_dialog("Theme", "Choose:", ["Light", "Dark", "System"])
 
 # Custom dialog
 from thinking_prompt import Dialog, ButtonConfig
@@ -662,7 +662,7 @@ Check, radio and choice lists show one option per line, in both styles:
 from thinking_prompt import ButtonConfig, ChecklistField, ChoiceField, Dialog, RadioField
 
 tools = await session.checklist_dialog(
-    "Tools", "Enable any:", ["search", "code", "files"], defaults=["search"],
+    "Tools", "Enable any:", ["search", "code", "files"], default=["search"],
 )   # the checked options, or None if cancelled
 
 await session.show_dialog(Dialog("Settings", fields=[
@@ -736,7 +736,7 @@ radio or choice list with no label and no description shows just its options.
 A field keeps its `options` (and a checklist its `default`, a sequence of
 options: `()` for none) as a tuple of its own, so changing the list you
 passed doesn't change the field. An option listed twice raises
-`ValueError`, in a field and in `choice_dialog()`, `dropdown_dialog()` and
+`ValueError`, in a field and in `button_dialog()`, `choice_dialog()` and
 `checklist_dialog()`.
 
 **Keys:** in a box, ↑↓ move a row at a time and Tab / Shift+Tab a field at a
@@ -918,7 +918,9 @@ removed:
 | `session.add_message("system", x)` | `session.add_system(x)` |
 | `session.add_message("assistant", x)` | `session.add_response(x)` |
 | `session.add_message("user", x)`, `add_message("thinking", x)` | Drop it: the session echoes input and finished boxes itself |
-| `session.choice_dialog(..., choices=...)` | `options=...` |
+| `session.choice_dialog(title, text, choices)`, one button per choice | `session.button_dialog(title, text, options)`. `choice_dialog()` is now the list that `dropdown_dialog()` was: a 0.4 call by position still runs, and shows a list |
+| `session.dropdown_dialog(...)` | `session.choice_dialog(...)`: it draws a `ChoiceField` list, never a dropdown |
+| `session.checklist_dialog(..., defaults=...)` | `default=...`, as in `ChecklistField(default=...)` |
 | `TextField(edit_width=N)` | `width=N` |
 | `Dialog(width=0)`, `Dialog(width=-1)` (or a subclass's `width`) | `width=None` (fit the content), `width="full"` |
 | A field's `options`: the list you passed | A tuple of the field's own (`list(field.options)` for a list) |
@@ -955,7 +957,7 @@ See the `examples/` directory for complete demos:
 - `demo_messages_during_thinking.py` - Output messages during thinking
 - `demo_animated_separator.py` - Different animation configurations
 - `demo_task_progress.py` - Rich-styled task progress with in-place status updates
-- `dialog_test.py` - Dialog system demo (yes/no, message, choice, dropdown)
+- `dialog_test.py` - Dialog system demo (yes/no, message, buttons, choice list)
 - `settings_dialog_demo.py` - A settings dialog built from Dialog fields, box and inline
 - `demo_showcase.py` - Feature showcase for demos and screenshots; dialogs start inline, `/inline` switches to boxes
 - `demo.tape` - [VHS](https://github.com/charmbracelet/vhs) script that records the demo GIF above from `demo_showcase.py`: `vhs examples/demo.tape`

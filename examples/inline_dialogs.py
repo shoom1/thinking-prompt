@@ -2,7 +2,7 @@
 Inline dialogs: dialogs drawn as rows under the prompt instead of boxes.
 
 Run with: conda run -n thinking_prompt python examples/inline_dialogs.py
-Commands: yesno, choice, dropdown, checklist, settings, box, quit
+Commands: yesno, button, choice, checklist, settings, box, quit
 """
 import asyncio
 
@@ -24,7 +24,7 @@ async def main() -> None:
         app_info=AppInfo(
             name="Inline dialogs",
             version="0.4",
-            welcome_message="Commands: yesno, choice, dropdown, checklist, settings, box, quit",
+            welcome_message="Commands: yesno, button, choice, checklist, settings, box, quit",
         ),
         dialog_placement="inline",
     )
@@ -37,18 +37,18 @@ async def main() -> None:
         elif command == "yesno":
             ok = await session.yes_no_dialog("Delete 3 files?", "This can't be undone.")
             session.add_response(f"yes_no_dialog -> {ok}")
+        elif command == "button":
+            action = await session.button_dialog("Unsaved changes", "", ["Save", "Discard", "Cancel"])
+            session.add_response(f"button_dialog -> {action}")
         elif command == "choice":
-            action = await session.choice_dialog("Unsaved changes", "", ["Save", "Discard", "Cancel"])
-            session.add_response(f"choice_dialog -> {action}")
-        elif command == "dropdown":
-            theme = await session.dropdown_dialog(
+            theme = await session.choice_dialog(
                 "Theme", "Pick a theme:", ["dark", "light", "mono", "terminal"], default="light"
             )
-            session.add_response(f"dropdown_dialog -> {theme}")
+            session.add_response(f"choice_dialog -> {theme}")
         elif command == "checklist":
             tools = await session.checklist_dialog(
                 "Tools", "Enable any:", ["search", "code execution", "file access"],
-                defaults=["search"],
+                default=["search"],
             )
             session.add_response(f"checklist_dialog -> {tools}")
         elif command == "settings":
