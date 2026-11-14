@@ -97,27 +97,27 @@ async def main():
 
         if text == "action":
             # Button dialog (one button per option)
-            result = await session.button_dialog(
+            action = await session.button_dialog(
                 title="Select Action",
                 text="What would you like to do?",
                 options=["Save", "Discard", "Cancel"],
             )
-            if result:
-                session.add_response(f"Selected action: {result}")
+            if action:
+                session.add_response(f"Selected action: {action}")
             else:
                 session.add_response("Action cancelled (Escape pressed)")
             return
 
         if text == "theme":
             # Choice dialog (a choice list in a box)
-            result = await session.choice_dialog(
+            theme = await session.choice_dialog(
                 title="Select Theme",
                 text="Choose a color theme:",
                 options=["Light", "Dark", "System", "High Contrast"],
                 default="System",
             )
-            if result:
-                session.add_response(f"Theme set to: {result}")
+            if theme:
+                session.add_response(f"Theme set to: {theme}")
             else:
                 session.add_response("Theme selection cancelled")
             return

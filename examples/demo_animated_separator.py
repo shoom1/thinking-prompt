@@ -14,11 +14,12 @@ Run:
 from __future__ import annotations
 
 import asyncio
+from typing import Any
 
 from thinking_prompt import ThinkingPromptSession, AppInfo, Spinner
 
 # Different animation configurations to demonstrate (session options)
-CONFIGS = [
+CONFIGS: list[dict[str, Any]] = [
     {
         "name": "Default (spinner)",
         "options": {

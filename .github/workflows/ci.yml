@@ -10,6 +10,9 @@ jobs:
   test:
     name: test (${{ matrix.os }}, ${{ matrix.python-version }})
     runs-on: ${{ matrix.os }}
+    # A hang (a lost cancellation, a prompt waiting forever) fails the job
+    # rather than holding the runner for GitHub's default 6 hours.
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -42,12 +45,18 @@ jobs:
       - name: Type-check with mypy
         run: mypy thinking_prompt/
 
+      # The examples are documentation: a call the API no longer takes (a
+      # renamed keyword, a removed method) fails here, not in a user's hands.
+      - name: Type-check the examples
+        run: mypy examples/ --allow-untyped-defs --allow-incomplete-defs --check-untyped-defs --ignore-missing-imports
+
       - name: Run pytest
         run: pytest -v
 
   test-minimal:
     name: Test without optional extras
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -74,6 +83,7 @@ jobs:
   test-floors:
     name: Test the lowest supported versions
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -97,6 +107,7 @@ jobs:
   test-package:
     name: Test the built wheel
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
