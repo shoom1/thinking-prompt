@@ -160,9 +160,8 @@ Every argument after `message` is keyword-only. Keys and the thinking
 header are under [Session Options](#session-options). Options are checked
 when they're passed (the session's here, a box's in `start_thinking()`, a
 field's or a dialog's when it's made): one of the wrong kind (a count
-that isn't an int, a `spinner` that isn't a `Spinner`, an `editing_mode`
-that isn't an `EditingMode`), out of range, or not one of its choices
-raises `ValueError`.
+that isn't an int, a `spinner` that isn't a `Spinner`), out of range, or
+not one of its choices raises `ValueError`.
 
 ### Thinking API
 
@@ -929,6 +928,7 @@ removed:
 | The default theme, the dark palette | The terminal's own colors: `theme="dark"` keeps 0.4's look, and `ThinkingPromptStyles()` is now the terminal theme (`.dark()` is the dark palette) |
 | `theme="auto"` | Drop it: the default follows the terminal |
 | `styles.to_rich_theme_dict()` | Drop it: the session's Rich output uses its theme already |
+| `ThinkingPromptSession(editing_mode=...)` | Drop it: the keys are prompt_toolkit's default (Emacs) ones, which the dialogs and fields are built for |
 | Ctrl+C at an idle prompt exits | Ctrl+C never exits (it clears the line): Ctrl+D exits, or your own `/exit` command |
 | Ctrl+D while a handler runs: exits | Stop the handler with Ctrl+C first: Ctrl+D exits at an idle prompt |
 | Style field `history`, classes `history.*` (`history.user-message`, ...) | `transcript`, `transcript.*` (`transcript.user-message`, ...) |

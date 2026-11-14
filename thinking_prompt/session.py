@@ -33,7 +33,7 @@ from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.completion import Completer
 from prompt_toolkit.data_structures import Point
 from prompt_toolkit.document import Document
-from prompt_toolkit.enums import DEFAULT_BUFFER, EditingMode
+from prompt_toolkit.enums import DEFAULT_BUFFER
 from prompt_toolkit.filters import Condition, has_focus, is_done
 from prompt_toolkit.formatted_text import (
     AnyFormattedText,
@@ -153,7 +153,6 @@ class ThinkingPromptSession:
         completer: Completer | None = None,
         complete_while_typing: bool = False,
         completions_menu_height: int = 5,
-        editing_mode: EditingMode = EditingMode.EMACS,
         enable_status_bar: bool = True,
         status_text: AnyFormattedText = "Ctrl+C: cancel | Ctrl+D: exit",
         expand_key: str = "c-t",
@@ -183,7 +182,6 @@ class ThinkingPromptSession:
             completer: Completer for input autocompletion.
             complete_while_typing: Show completions automatically while typing.
             completions_menu_height: Maximum height of completions dropdown menu.
-            editing_mode: Editing mode (EMACS or VI).
             enable_status_bar: Whether to show status bar.
             status_text: Text to display in status bar.
             expand_key: Expands/collapses thinking boxes.
@@ -222,10 +220,10 @@ class ThinkingPromptSession:
                 thinking_max_lines isn't an int of at least 0,
                 transcript_limit one of at least 0 (or None), or
                 completions_menu_height one of at least 1; spinner isn't a
-                Spinner or None, or editing_mode an EditingMode;
-                spinner_position isn't 'before' or 'after', dialog_placement
-                'box' or 'inline', or input_while_busy 'refuse' or 'queue';
-                or theme= names an unknown theme.
+                Spinner or None; spinner_position isn't 'before' or
+                'after', dialog_placement 'box' or 'inline', or
+                input_while_busy 'refuse' or 'queue'; or theme= names an
+                unknown theme.
         """
         check_count("thinking_max_lines", thinking_max_lines, 0)
         check_count("transcript_limit", transcript_limit, 0, optional=True)
@@ -233,8 +231,6 @@ class ThinkingPromptSession:
         check_choice("spinner_position", spinner_position, ("before", "after"))
         if spinner is not None and not isinstance(spinner, Spinner):
             raise ValueError(f"spinner must be a Spinner or None, got {spinner!r}")
-        if not isinstance(editing_mode, EditingMode):
-            raise ValueError(f"editing_mode must be EditingMode.EMACS or EditingMode.VI, got {editing_mode!r}")
 
         self._message = message
         self._app_info = app_info
@@ -261,7 +257,6 @@ class ThinkingPromptSession:
         # _show_hint / _clear_hint / _status_now).
         self._hint: str | None = None
         self._status_under_hint: AnyFormattedText = None
-        self._editing_mode = editing_mode
         self._echo_input = echo_input
         self._completer = completer
         self._complete_while_typing = complete_while_typing
@@ -542,7 +537,6 @@ class ThinkingPromptSession:
             layout=self._create_session_layout(),
             style=DynamicStyle(lambda: self._style),
             key_bindings=kb,
-            editing_mode=self._editing_mode,
             # No refresh_interval: redrawn when something changes or an
             # animation asks (FrameScheduler), so an idle prompt costs
             # nothing. Bursts of writes are capped at 30 redraws a second.

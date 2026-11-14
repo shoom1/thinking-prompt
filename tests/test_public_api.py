@@ -125,7 +125,7 @@ def _parameters(func: Callable[..., object]) -> list[str]:
             ThinkingPromptSession.__init__,
             [
                 "message", "app_info", "theme", "history", "completer",
-                "complete_while_typing", "completions_menu_height", "editing_mode",
+                "complete_while_typing", "completions_menu_height",
                 "enable_status_bar", "status_text", "expand_key", "thinking_max_lines",
                 "thinking_title", "thinking_border", "spinner", "spinner_position", "echo_input",
                 "thinking_echo", "transcript_limit", "dialog_placement", "input_while_busy",
