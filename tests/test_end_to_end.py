@@ -2269,10 +2269,10 @@ class TestDialogLifetime:
     def _dialog() -> Dialog:
         return Dialog("T", "B", [ButtonConfig("OK", result="ok")])
 
-    async def test_app_exit_cancels_a_dialog_opened_outside_the_handler(self):
-        """A dialog awaited by the input handler is cancelled with it on exit.
-        One opened from another task used to wait forever once the app
-        exited, and the manager kept it, refusing every later dialog."""
+    async def test_app_exit_ends_a_dialog_opened_outside_the_handler_with_eof_error(self):
+        """As prompt_async() does: nothing cancelled the task. (Such a
+        dialog used to wait forever once the app exited, and the manager
+        kept it, refusing every later dialog.)"""
         background: list[asyncio.Future[Any]] = []
 
         def handler(text: str) -> None:
@@ -2289,8 +2289,39 @@ class TestDialogLifetime:
             await run_with(session, handler, script)
 
             (task,) = background
-            with pytest.raises(asyncio.CancelledError):
+            with pytest.raises(EOFError):
                 await asyncio.wait_for(task, timeout=1)
+            assert session._dialogs._current_dialog is None
+
+    async def test_app_exit_cancels_the_handler_awaiting_a_dialog(self):
+        """The app stopping cancels the running query, whatever it awaits:
+        a real cancel (as for its follow-up prompt_async()), and the handler
+        ends quietly."""
+        seen: list[Any] = []
+
+        async def handler(text: str) -> None:
+            try:
+                await session.show_dialog(self._dialog())
+            except BaseException as exc:
+                task = asyncio.current_task()
+                seen.append(type(exc))
+                if hasattr(task, "cancelling"):  # 3.11+: cancelled by a cancel()
+                    seen.append(task.cancelling())  # type: ignore[union-attr]
+                raise
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_open(session))
+                session.exit()
+                await asyncio.wait_for(run, timeout=2)
+
+            await run_with(session, handler, script)
+
+            assert seen[0] is asyncio.CancelledError
+            assert seen[1:] in ([], [1])
+            assert not any("[ERROR]" in text for text in transcript_texts(session._display))
             assert session._dialogs._current_dialog is None
 
     async def test_show_dialog_after_exit_raises(self):
@@ -2526,7 +2557,7 @@ class TestInlineDialogs:
 
             await run_with(session, handler, script)
 
-    async def test_app_exit_cancels_an_inline_dialog(self):
+    async def test_app_exit_ends_an_inline_dialog_with_eof_error(self):
         background: list[asyncio.Future[Any]] = []
 
         def handler(text: str) -> None:
@@ -2543,7 +2574,7 @@ class TestInlineDialogs:
             await run_with(session, handler, script)
 
             (task,) = background
-            with pytest.raises(asyncio.CancelledError):
+            with pytest.raises(EOFError):
                 await asyncio.wait_for(task, timeout=1)
             assert not inline_open(session)
 

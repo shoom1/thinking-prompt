@@ -521,8 +521,10 @@ hint.
 Dialogs open over a running session: call them from an input handler,
 inside `async with session:`, or from a task started while the session
 runs. On a session that isn't running they raise `RuntimeError`. If the
-session exits while a dialog is open, awaiting it raises
-`asyncio.CancelledError`.
+session exits while a dialog is open, awaiting it raises `EOFError`, as
+`prompt_async()` does. The running query (a handler, or what `query()`
+runs) is cancelled instead: the session stopping cancels it, whatever it
+awaits.
 
 One dialog is open at a time: opening another while one is open raises
 `RuntimeError`. Background tasks that may ask at the same moment (two tool
@@ -963,6 +965,7 @@ removed:
 | `ThinkingPromptSession(editing_mode=...)` | Drop it: the keys are prompt_toolkit's default (Emacs) ones, which the dialogs and fields are built for |
 | Ctrl+C at an idle prompt exits | Ctrl+C never exits (it clears the line): Ctrl+D exits, or your own `/exit` command |
 | Ctrl+D while a handler runs: exits | Stop the handler with Ctrl+C first: Ctrl+D exits at an idle prompt |
+| A dialog open when the session exits raises `asyncio.CancelledError` | `EOFError`, as `prompt_async()` raises it. A handler awaiting it is cancelled, as before: the session stopping cancels the handler |
 | Style field `history`, classes `history.*` (`history.user-message`, ...) | `transcript`, `transcript.*` (`transcript.user-message`, ...). The class names aren't covered by [Stability](#stability): style with the field |
 | Style fields `radio_list`, `radio_selected`, `checkbox_list`, `checkbox_selected` (classes `radio-*`, `checkbox-*`) | Drop them: the dialog fields use the `field_*` styles |
 

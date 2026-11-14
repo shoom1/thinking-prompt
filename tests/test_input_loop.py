@@ -70,6 +70,30 @@ class TestLifetime:
             async with session:
                 assert welcomed == [True]
 
+    async def test_a_dialog_the_loop_awaits_when_the_app_stops_raises_eof_error(self):
+        """As prompt_async() in the same spot: nothing cancelled the loop's
+        task, so it isn't left cancelling (3.11+: cancelling() is 0)."""
+        from thinking_prompt import ButtonConfig, Dialog
+
+        seen: list[object] = []
+        with piped_session() as (session, inp):
+
+            async def stop_soon() -> None:
+                await wait_until(lambda: dialog_rendered(session))
+                session.exit()  # a shutdown timer, a server push, ...
+
+            stopper = asyncio.create_task(stop_soon())
+            with pytest.raises(EOFError):
+                async with session:
+                    try:
+                        await session.show_dialog(Dialog("Save?", "Save first?", [ButtonConfig("OK")]))
+                    finally:
+                        task = asyncio.current_task()
+                        if hasattr(task, "cancelling"):
+                            seen.append(task.cancelling())  # type: ignore[union-attr]
+            await stopper
+        assert seen in ([], [0])
+
     async def test_an_error_in_the_block_stops_the_app_and_propagates(self):
         with piped_session() as (session, inp):
             with pytest.raises(ValueError, match="boom"):

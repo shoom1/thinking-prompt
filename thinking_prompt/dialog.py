@@ -751,8 +751,9 @@ class DialogManager:
                 would wait forever. Also if a dialog is already being
                 shown: a second one would orphan the first one's result
                 future, leaving its awaiter hung forever.
-            asyncio.CancelledError: If the app exits while the dialog is
-                open (e.g. one opened from a background task).
+            EOFError: If the app exits while the dialog is open (e.g. one
+                opened from a background task). The running query isn't
+                given it: the app stopping cancels the query.
             TypeError: If ``dialog`` isn't a Dialog.
             ValueError: If the dialog has nothing focusable (e.g. no buttons
                 and a text body), or its placement isn't 'box' or 'inline'.
@@ -835,11 +836,20 @@ class DialogManager:
             self._session.app.invalidate()
 
             # Wait for result. If the app exits first, nobody can answer the
-            # dialog any more: cancel it, so the awaiter gets CancelledError
-            # instead of waiting forever.
+            # dialog any more, and the awaiter mustn't wait forever. The
+            # running query is cancelled: the app stopping cancels it,
+            # whatever it awaits (its follow-up prompt_async() too). Anyone
+            # else gets EOFError, as from prompt_async(): nothing cancelled
+            # them.
+            waiter = asyncio.current_task()
+
             def abandon(_app_done: object) -> None:
-                if not future.done():
-                    future.cancel()
+                if future.done():
+                    return
+                session = self._session
+                if waiter is session._foreground and session._cancel_query():
+                    return
+                future.set_exception(EOFError())
 
             app_done.add_done_callback(abandon)
             try:

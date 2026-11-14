@@ -405,8 +405,9 @@ class ThinkingPromptSession:
         foreground = self._foreground
         return foreground is not None and not foreground.done()
 
-    def _cancel_query(self, *, by_user: bool = False) -> None:
+    def _cancel_query(self, *, by_user: bool = False) -> bool:
         """Cancel the running foreground query; the one place that does.
+        Returns whether it did.
 
         The session cancels a query once: the app stopping, or the caller
         of query() being cancelled, leaves a query that's already unwinding
@@ -415,16 +416,17 @@ class ThinkingPromptSession:
         the way out of a cleanup that hangs.
         """
         if not self._query_running():
-            return
+            return False
         if by_user:
             # Mark before cancel: the "Operation cancelled..." line waits
             # until the query is done (see _announce_cancel).
             self._user_cancelled_handler = True
         elif self._query_cancelled:
-            return
+            return False
         self._query_cancelled = True
         assert self._foreground is not None
         self._foreground.cancel()
+        return True
 
     def _record_input(self, text: str) -> None:
         """A line becomes input: it goes into the input history (↑) and
@@ -1782,6 +1784,8 @@ class ThinkingPromptSession:
         Raises:
             RuntimeError: If the session isn't running (see show_dialog()),
                 or another dialog is open: one at a time.
+            EOFError: If the session stops while the dialog is open (see
+                show_dialog()).
 
         Example:
             if await session.yes_no_dialog("Confirm", "Delete this file?"):
@@ -1816,6 +1820,8 @@ class ThinkingPromptSession:
         Raises:
             RuntimeError: If the session isn't running (see show_dialog()),
                 or another dialog is open: one at a time.
+            EOFError: If the session stops while the dialog is open (see
+                show_dialog()).
 
         Example:
             await session.message_dialog("Info", "Operation completed.")
@@ -1852,6 +1858,8 @@ class ThinkingPromptSession:
         Raises:
             RuntimeError: If the session isn't running (see show_dialog()),
                 or another dialog is open: one at a time.
+            EOFError: If the session stops while the dialog is open (see
+                show_dialog()).
             ValueError: If ``options`` is empty, or an option is listed twice.
 
         Example:
@@ -1899,6 +1907,8 @@ class ThinkingPromptSession:
         Raises:
             RuntimeError: If the session isn't running (see show_dialog()),
                 or another dialog is open: one at a time.
+            EOFError: If the session stops while the dialog is open (see
+                show_dialog()).
             ValueError: If ``options`` is empty, or an option is listed twice.
 
         Example:
@@ -1943,6 +1953,8 @@ class ThinkingPromptSession:
         Raises:
             RuntimeError: If the session isn't running (see show_dialog()),
                 or another dialog is open: one at a time.
+            EOFError: If the session stops while the dialog is open (see
+                show_dialog()).
             ValueError: If ``options`` is empty, an option is listed twice,
                 or ``default`` is a str or None rather than a sequence.
 
@@ -1970,8 +1982,10 @@ class ThinkingPromptSession:
                 ``async with session:``, or while run() or run_async()
                 runs (e.g. from an input handler or a task it started).
                 Also if another dialog is open: one at a time.
-            asyncio.CancelledError: If the session stops while the dialog
-                is open.
+            EOFError: If the session stops while the dialog is open, as
+                prompt_async() raises it. The running query (a run_async()
+                handler, or what query() runs) is cancelled instead: the
+                session stopping cancels it, whatever it awaits.
             TypeError: If ``dialog`` isn't a Dialog.
             ValueError: If the dialog has nothing to focus, or its
                 placement isn't 'box' or 'inline'.
