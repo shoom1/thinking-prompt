@@ -747,7 +747,9 @@ if values is not None:
     config.update(values)
 ```
 
-A field missing from `values=` starts at its `default`. Each show starts
+A field missing from `values=` starts at its `default`. A `TextField`
+shows any value as its text (a port number, say), and a value the user
+edited comes back as a `str`: convert it where you store it. Each show starts
 afresh from `values=` (read again then) or the defaults, so a dialog can be
 kept and shown again: it picks up what Save put in `config`, and an edit the
 user cancelled is gone. Fields are frozen, so a list of them can be a

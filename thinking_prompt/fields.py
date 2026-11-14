@@ -839,7 +839,9 @@ class TextFieldControl(FieldControl[TextField]):
     def enter_edit_mode(self, app: Any = None) -> None:
         """Enter edit mode - populate buffer with current value."""
         self._original_value = self._value
-        self._buffer.text = self._value or ""
+        # A value from values= may not be a str (a port number): it's
+        # edited as its text, and an edited value is a str.
+        self._buffer.text = self._text()
         self._buffer.cursor_position = len(self._buffer.text)
         self._editing = True
         self._app_ref = app
@@ -877,21 +879,22 @@ class TextFieldControl(FieldControl[TextField]):
             return _content([])
 
         is_selected = self._check_focus()
-        if not self._value:
+        if not self._text():
             value_style = "class:field-desc-selected" if is_selected else "class:field-desc"
         else:
             value_style = "class:field-value-selected" if is_selected else "class:field-value"
         return _content(self._build_row(width, self._row_value(value_style), is_selected))
 
+    def _text(self) -> str:
+        """The value as text: "" for None, str() of anything else (0 too)."""
+        return "" if self._value is None else str(self._value)
+
     def _shown_value(self) -> str:
         """The value as its row shows it."""
-        if self._item.password and self._value:
-            text = "••••••"
-        elif self._value:
-            text = str(self._value)
-        else:
-            text = "(empty)"
-        return text
+        text = self._text()
+        if not text:
+            return "(empty)"
+        return "••••••" if self._item.password else text
 
     def widest_value(self) -> int:
         return self._row_value("").columns()
