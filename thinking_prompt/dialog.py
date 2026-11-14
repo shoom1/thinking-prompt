@@ -752,8 +752,9 @@ class DialogManager:
                 shown: a second one would orphan the first one's result
                 future, leaving its awaiter hung forever.
             EOFError: If the app exits while the dialog is open (e.g. one
-                opened from a background task). The running query isn't
-                given it: the app stopping cancels the query.
+                opened from a background task). A dialog the running query
+                awaits, itself or through the tasks it awaits, is cancelled
+                with it instead: the app stopping cancels the query.
             TypeError: If ``dialog`` isn't a Dialog.
             ValueError: If the dialog has nothing focusable (e.g. no buttons
                 and a text body), or its placement isn't 'box' or 'inline'.
@@ -836,20 +837,18 @@ class DialogManager:
             self._session.app.invalidate()
 
             # Wait for result. If the app exits first, nobody can answer the
-            # dialog any more, and the awaiter mustn't wait forever. The
-            # running query is cancelled: the app stopping cancels it,
-            # whatever it awaits (its follow-up prompt_async() too). Anyone
-            # else gets EOFError, as from prompt_async(): nothing cancelled
-            # them.
-            waiter = asyncio.current_task()
-
+            # dialog any more, and the awaiter mustn't wait forever. The app
+            # stopping cancels the running query, whatever it awaits (its
+            # follow-up prompt_async() too): cancelled now, the query takes
+            # a dialog it awaits, itself or through the tasks it awaits,
+            # with it. A dialog the cancel doesn't reach gets EOFError, as
+            # prompt_async() would: nothing cancelled its awaiter.
             def abandon(_app_done: object) -> None:
                 if future.done():
                     return
-                session = self._session
-                if waiter is session._foreground and session._cancel_query():
-                    return
-                future.set_exception(EOFError())
+                self._session._cancel_query()
+                if not future.done():
+                    future.set_exception(EOFError())
 
             app_done.add_done_callback(abandon)
             try:

@@ -2324,6 +2324,35 @@ class TestDialogLifetime:
             assert not any("[ERROR]" in text for text in transcript_texts(session._display))
             assert session._dialogs._current_dialog is None
 
+    async def test_app_exit_cancels_the_handler_whose_sub_task_awaits_a_dialog(self):
+        """Tool calls run with gather(), each asking for approval: the
+        cancel reaches the dialog through them, and the handler ends
+        quietly, not with "Handler error: EOFError"."""
+        seen: list[type] = []
+
+        async def approve() -> bool:
+            try:
+                return await session.yes_no_dialog("Approve", "Run search?")
+            except BaseException as exc:
+                seen.append(type(exc))
+                raise
+
+        async def handler(text: str) -> None:
+            await asyncio.gather(approve())
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_open(session))
+                session.exit()
+                await asyncio.wait_for(run, timeout=2)
+
+            await run_with(session, handler, script)
+
+            assert seen == [asyncio.CancelledError]
+            assert not any("[ERROR]" in text for text in transcript_texts(session._display))
+
     async def test_show_dialog_after_exit_raises(self):
         with piped_session() as (session, inp):
 

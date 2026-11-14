@@ -94,6 +94,35 @@ class TestLifetime:
             await stopper
         assert seen in ([], [0])
 
+    async def test_a_query_whose_sub_task_awaits_a_dialog_is_cancelled_when_the_app_stops(self):
+        """The query awaits a task that awaits the dialog: the cancel reaches
+        the dialog through it, and query() returns None, as for a dialog the
+        query awaits itself."""
+        from thinking_prompt import ButtonConfig, Dialog
+
+        results: list[object] = []
+        with piped_session() as (session, inp):
+
+            async def respond() -> object:
+                return await asyncio.ensure_future(
+                    session.show_dialog(Dialog("Approve", "Run search?", [ButtonConfig("OK")]))
+                )
+
+            async def body() -> None:
+                await session.prompt_async()
+                results.append(await session.query(respond()))
+                with suppress(EOFError):
+                    await session.prompt_async()
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                session.exit()
+                await finished(run)
+
+            await run_loop(session, body, script)
+        assert results == [None]
+
     async def test_an_error_in_the_block_stops_the_app_and_propagates(self):
         with piped_session() as (session, inp):
             with pytest.raises(ValueError, match="boom"):

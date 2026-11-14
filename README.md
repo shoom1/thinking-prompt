@@ -525,9 +525,11 @@ Dialogs open over a running session: call them from an input handler,
 inside `async with session:`, or from a task started while the session
 runs. On a session that isn't running they raise `RuntimeError`. If the
 session exits while a dialog is open, awaiting it raises `EOFError`, as
-`prompt_async()` does. The running query (a handler, or what `query()`
-runs) is cancelled instead: the session stopping cancels it, whatever it
-awaits.
+`prompt_async()` does. A dialog the running query (a handler, or what
+`query()` runs) awaits, itself or through the tasks it awaits, is cancelled
+with it instead: the session stopping cancels the query. A query Ctrl+C
+already cancelled isn't cancelled again, so a dialog in its cleanup gets
+`EOFError`.
 
 One dialog is open at a time: opening another while one is open raises
 `RuntimeError`. Background tasks that may ask at the same moment (two tool
@@ -969,7 +971,7 @@ removed:
 | Ctrl+C at an idle prompt exits | Ctrl+C never exits (it clears the line): Ctrl+D exits, or your own `/exit` command |
 | Ctrl+D while a handler runs: exits | Stop the handler with Ctrl+C first: Ctrl+D exits at an idle prompt |
 | `session.exit()` in a handler cancels the handler at its next `await` | The handler runs to its end, then the session stops (Ctrl+C still cancels it). From anywhere else, `exit()` stops the session at once, as before |
-| A dialog open when the session exits raises `asyncio.CancelledError` | `EOFError`, as `prompt_async()` raises it. A handler awaiting it is cancelled, as before: the session stopping cancels the handler |
+| A dialog open when the session exits raises `asyncio.CancelledError` | `EOFError`, as `prompt_async()` raises it. A dialog the running handler awaits is cancelled with the handler, as before: the session stopping cancels it |
 | Style field `history`, classes `history.*` (`history.user-message`, ...) | `transcript`, `transcript.*` (`transcript.user-message`, ...). The class names aren't covered by [Stability](#stability): style with the field |
 | Style fields `radio_list`, `radio_selected`, `checkbox_list`, `checkbox_selected` (classes `radio-*`, `checkbox-*`) | Drop them: the dialog fields use the `field_*` styles |
 
