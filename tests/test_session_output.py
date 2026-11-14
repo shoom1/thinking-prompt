@@ -209,6 +209,66 @@ class TestAddRich:
         assert (entry.kind, entry.source) == ("ansi", printed.value)
 
 
+def _terminal(action: Any) -> str:
+    """What ``action(session)`` writes to a real (vt100) terminal."""
+    terminal = io.StringIO()
+    output = Vt100_Output(terminal, lambda: Size(rows=24, columns=80), term="xterm")
+    with create_app_session(output=output):
+        action(ThinkingPromptSession())
+    return terminal.getvalue()
+
+
+def _shown(raw: str) -> str:
+    """``raw`` as the terminal shows it: its color codes dropped."""
+    return re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", raw)
+
+
+# Text that, written raw, sets the terminal's window title.
+_INJECTED = "\x01\x1b]0;pwned\x07\x02"
+
+
+class TestEscapesInRichOutput:
+    """Rich writes a link as an OSC 8 hyperlink, which prompt_toolkit's ANSI
+    parser doesn't know (it printed "8;id=…;URL" as text); and prompt_toolkit
+    writes what's between \x01 and \x02 to the terminal raw, so text (a
+    model's answer) could set the window title or the clipboard."""
+
+    def test_a_markdown_link_shows_its_text_and_url(self):
+        pytest.importorskip("rich")
+        raw = _terminal(lambda s: s.add_response("See [the docs](https://example.com/docs) for more.", markdown=True))
+        assert "\x1b]" not in raw and "8;id=" not in raw
+        assert "the docs (https://example.com/docs)" in _shown(raw)
+
+    def test_rich_link_markup_shows_its_text(self):
+        pytest.importorskip("rich")
+        from rich.text import Text
+
+        raw = _terminal(lambda s: s.add_rich(Text.from_markup("[link=https://e.com]site[/link] here")))
+        assert "\x1b]" not in raw and "8;id=" not in raw
+        assert "site here" in _shown(raw)
+
+    @pytest.mark.parametrize("path", ["markdown", "rich", "code"])
+    def test_escapes_in_the_text_never_reach_the_terminal_raw(self, path: str):
+        pytest.importorskip("rich")
+        pytest.importorskip("pygments")
+        text = f"a {_INJECTED} b"
+        if path == "markdown":
+            raw = _terminal(lambda s: s.add_response(text, markdown=True))
+        elif path == "rich":
+            raw = _terminal(lambda s: s.add_rich(text))
+        else:
+            raw = _terminal(lambda s: s.add_code(f"x = '{text}'"))
+        assert "\x1b]0;" not in raw and "\x01" not in raw
+
+    def test_a_boxs_rich_text_keeps_no_escapes(self):
+        pytest.importorskip("rich")
+        session = _session()
+        box = session.start_thinking()
+        box.append_rich(f"[link=https://e.com]site[/link] {_INJECTED}\n")
+        assert "\x1b]" not in box.text and "\x01" not in box.text
+        assert "site" in box.text
+
+
 class TestRichWidth:
     """Rich lays its output out at the width of the session's terminal,
     which needn't be the process's (here there's none: Rich alone would

@@ -514,6 +514,13 @@ session.add_error("Connection failed")
 session.add_system("Connecting to server...")
 ```
 
+In markdown, a link shows its text and then its URL, `the docs
+(https://…)`, which the terminal can open: a terminal hyperlink (OSC 8)
+hides the URL where the terminal doesn't support them. Rich output, markdown
+and code reach the terminal with no escapes but colors: a model's answer
+can't set the window title or the clipboard, and Rich's `[link=…]` shows
+its text.
+
 The session sometimes puts a hint in the status bar in place of your
 status: `Busy — press Ctrl+C to cancel` when Enter (or Ctrl+D) is pressed
 while a query runs; `Busy` alone when Enter, Ctrl+C or Ctrl+D is pressed

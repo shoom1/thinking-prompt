@@ -8,8 +8,27 @@ the package works without them installed.
 """
 from __future__ import annotations
 
+import re
 from functools import lru_cache
 from typing import Any
+
+# An OSC sequence: ESC ], ended by BEL or ESC \. Rich writes a link as one,
+# an OSC 8 hyperlink; text can bring others (a window title, the clipboard).
+_OSC = re.compile(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
+# An escape that doesn't start a color code: what's left of one cut short.
+_STRAY_ESCAPE = re.compile(r"\x1b(?!\[)")
+# prompt_toolkit's ANSI() writes the text between these to the terminal raw.
+_RAW_MARKS = str.maketrans("", "", "\x01\x02")
+
+
+def _ansi_safe(text: str) -> str:
+    """Rich's or Pygments' output, for prompt_toolkit's ANSI(): with no
+    \x01 or \x02 (text between them would reach the terminal raw, so a
+    model's answer could set the window title or the clipboard), and no
+    escapes but color codes: no OSC sequences (prompt_toolkit's parser
+    knows only color codes, and printed the rest of a hyperlink as text:
+    "8;id=…;URL"), nor the escape of one cut short."""
+    return _STRAY_ESCAPE.sub("", _OSC.sub("", text.translate(_RAW_MARKS)))
 
 
 def _is_rich_renderable(obj: Any) -> bool:
@@ -29,9 +48,9 @@ def _rich_to_ansi(renderable: Any, theme: Any = None, width: int | None = None) 
         file = StringIO()
         console = Console(file=file, force_terminal=True, theme=theme, width=width)
         console.print(renderable)
-        return file.getvalue()
+        return _ansi_safe(file.getvalue())
     except ImportError:
-        return str(renderable)
+        return _ansi_safe(str(renderable))
 
 
 def _renderable_to_ansi(renderable: Any, theme: Any = None, width: int | None = None) -> str:
@@ -72,9 +91,9 @@ def _renderable_to_ansi(renderable: Any, theme: Any = None, width: int | None = 
             # it, and words streamed a piece at a time ran together.
             console.width = max(console.width, renderable.cell_len + 1)
         console.print(renderable, end="", highlight=False, soft_wrap=is_text)
-        return f.getvalue()
+        return _ansi_safe(f.getvalue())
     except ImportError:
-        return str(renderable)
+        return _ansi_safe(str(renderable))
 
 
 @lru_cache(maxsize=1)
@@ -120,7 +139,10 @@ def _markdown_to_ansi(
     content: str, theme: Any = None, code_theme: str = "monokai", width: int | None = None
 ) -> str:
     """Convert markdown to ANSI-formatted string using Rich, laid out
-    ``width`` columns wide (None: the terminal's, as Rich finds it)."""
+    ``width`` columns wide (None: the terminal's, as Rich finds it). A link
+    shows its text and then its URL, which the terminal can open: not every
+    terminal shows a hyperlink's, and a hyperlink kept open across the
+    UI's partial redraws could spread to what's drawn after it."""
     try:
         from io import StringIO
 
@@ -129,10 +151,10 @@ def _markdown_to_ansi(
         markdown_cls = _get_markdown_cls()
         file = StringIO()
         console = Console(file=file, force_terminal=True, theme=theme, width=width)
-        console.print(markdown_cls(content, code_theme=code_theme))
-        return file.getvalue()
+        console.print(markdown_cls(content, code_theme=code_theme, hyperlinks=False))
+        return _ansi_safe(file.getvalue())
     except ImportError:
-        return content
+        return _ansi_safe(content)
 
 
 def _highlight_code(code: str, language: str = "python", code_theme: str = "monokai") -> str:
@@ -154,7 +176,7 @@ def _highlight_code(code: str, language: str = "python", code_theme: str = "mono
         from pygments.styles import get_style_by_name
         from pygments.util import ClassNotFound
     except ImportError:
-        return code
+        return _ansi_safe(code)
     try:
         lexer = get_lexer_by_name(language)
         formatter: Formatter[str]
@@ -166,7 +188,7 @@ def _highlight_code(code: str, language: str = "python", code_theme: str = "mono
             except ClassNotFound:
                 style = get_style_by_name("default")
             formatter = TerminalTrueColorFormatter(style=style)
-        return highlight(code, lexer, formatter)
+        return _ansi_safe(highlight(code, lexer, formatter))
     except Exception:
         # Handle unknown language or other errors
-        return code
+        return _ansi_safe(code)
