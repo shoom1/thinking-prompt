@@ -3559,6 +3559,33 @@ class TestButtonDialog:
 class TestBoxDropdownMenu:
     """A box dropdown's menu opens under its own row and uses the terminal's room."""
 
+    @pytest.mark.parametrize("placement", ["box", "inline"])
+    @pytest.mark.parametrize("width", [None, 60])
+    async def test_a_menu_wider_than_the_terminal_shows_its_options_cut(
+        self, placement: str, width: int | None
+    ):
+        """It drew as an empty frame, and options were picked blind."""
+        long = "a-long-option-" + "x" * 50
+        dialog = Dialog(
+            "Pick",
+            fields=[DropdownField("c", "Choice", options=["short", long], width=width)],
+            placement=placement,  # type: ignore[arg-type]
+        )
+        with piped_session(rows=16, columns=40) as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                shown = asyncio.ensure_future(session.show_dialog(dialog))
+                await wait_until(lambda: dialog_rendered(session))
+                inp.send_text(ENTER)
+                await wait_until(lambda: on_screen(session, "short"))
+                assert on_screen(session, "a-long-option-")
+                assert all(len(row) <= 40 for row in screen_rows(session))
+                shown.cancel()
+                with suppress(asyncio.CancelledError):
+                    await shown
+
+            await run_with(session, lambda text: None, script)
+
     @staticmethod
     def _items() -> list[Any]:
         return [

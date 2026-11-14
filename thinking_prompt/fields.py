@@ -622,10 +622,12 @@ class DropdownFieldControl(FieldControl[DropdownField]):
         self._app_ref: Any = None
         # The popup menu. Its height is the terminal's to give: the options
         # asked for, fewer where there's no room (the menu then scrolls and
-        # shows a scrollbar).
+        # shows a scrollbar). So is its width: narrower than the terminal,
+        # the options are cut (a fixed width drew an empty frame).
+        menu_width = self._get_dropdown_width()
         self._menu_window = Window(
             _DropdownMenuControl(self),
-            width=self._get_dropdown_width(),
+            width=Dimension(min=1, preferred=menu_width, max=menu_width),
             height=Dimension(min=1, preferred=self._preferred_menu_rows()),
             style="class:field-dropdown",
         )
