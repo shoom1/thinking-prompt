@@ -60,8 +60,8 @@ class TestResizeRepaint:
         watch.seen(WIDE)
         watch.seen(Size(rows=24, columns=60))
         first = watch._handle
-        # Growing back within the burst still repaints (the shrink left rows
-        # behind), but only after the wait starts over.
+        # Each change in the burst starts the wait over: one repaint, after
+        # the last.
         watch.seen(Size(rows=24, columns=90))
         assert first is not None and first.cancelled()
         assert watch._handle is not None and watch._handle is not first
@@ -89,7 +89,7 @@ class TestResizeRepaint:
         assert repaints == []
 
     async def test_after_cancel_the_next_size_is_a_first_sighting(self):
-        """A new run of the app draws a fresh frame: a shrink between runs
+        """A new run of the app draws a fresh frame: a resize between runs
         leaves nothing behind to repaint."""
         watch, repaints = _watch()
         watch.seen(WIDE)

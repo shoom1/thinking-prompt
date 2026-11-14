@@ -4,7 +4,7 @@ A repaint after the terminal changes size.
 When its window gets narrower, a terminal re-wraps every line now too long
 for it, the live UI's full-width rows (separators, the status bar, box
 borders) included; when it gets shorter than the UI, the UI's top scrolls
-into scrollback. A terminal that re-wraps as its window widens (macOS's)
+into scrollback. A terminal that re-wraps as its window widens (many do)
 joins rows back up as it grows. prompt_toolkit erases its last frame by
 moving the cursor up the rows it drew above it, so either way part of that
 frame stays behind: one row a step as a window is dragged. Once resizing

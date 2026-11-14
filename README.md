@@ -331,7 +331,7 @@ idle prompt costs no CPU:
   holds for 0.25 s: it clears the screen and scrollback and prints the
   transcript again, as `set_theme(repaint=True)` does. A narrower window
   re-wraps the UI's full-width rows, a shorter one pushes its top into
-  scrollback, and a terminal that re-wraps as it widens (macOS's) joins
+  scrollback, and a terminal that re-wraps as it widens (many do) joins
   rows back up, so the old frame can't be erased row by row. Shell
   output from before the session, anything printed outside it (plain
   `print()`) and entries `transcript_limit` dropped don't come back.

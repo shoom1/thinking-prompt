@@ -87,7 +87,7 @@ class TestAddResponse:
     @pytest.mark.parametrize(
         "content", [FormattedText(_FRAGMENTS), list(_FRAGMENTS)], ids=["FormattedText", "list"]
     )
-    def test_formatted_text_is_printed_and_kept_as_given(self, content):
+    def test_formatted_text_is_printed_and_kept_with_a_newline(self, content):
         session = _session()
         session.add_response(content)
 

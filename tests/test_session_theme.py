@@ -463,8 +463,8 @@ class TestRepaintedContent:
         assert "seen reply" in repainted
         assert "unseen thought" not in repainted
 
-class TestRepaintAfterShrinking:
-    """Once a running session's terminal stops shrinking, the transcript
+class TestRepaintAfterResizing:
+    """Once a running session's terminal stops changing size, the transcript
     repaints the same way: banner, markdown and code rendered."""
 
     async def test_the_banner_markdown_and_code_are_repainted_rendered(self, monkeypatch):
