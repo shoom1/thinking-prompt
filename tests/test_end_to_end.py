@@ -21,7 +21,7 @@ from prompt_toolkit.data_structures import Size
 from prompt_toolkit.input import PipeInput, create_pipe_input
 from prompt_toolkit.layout import BufferControl, HSplit
 from prompt_toolkit.output import DummyOutput
-from prompt_toolkit.widgets import Label, RadioList, TextArea
+from prompt_toolkit.widgets import Button, Label, RadioList, TextArea
 
 from tests.helpers import transcript_texts
 from thinking_prompt import (
@@ -3554,6 +3554,47 @@ class TestButtonDialog:
                 await wait_until(lambda: results == ["Discard"])
 
             await run_with(session, handler, script)
+
+
+class TestBoxDialogWidth:
+    """A box given a width (a number, or "full") is that wide, its frame
+    whole, whatever its body holds."""
+
+    @pytest.mark.parametrize("width", [50, "full"])
+    @pytest.mark.parametrize("widget", ["button", "label", "lone button", "lone text area"])
+    async def test_a_fixed_width_widget_in_the_body_leaves_the_frame_whole(
+        self, width: int | str, widget: str
+    ):
+        """A Button (12 columns), a Label(width=10) or a TextArea(width=10)
+        capped the body's width: the right border was drawn mid-box. A
+        widget alone in the body keeps its width."""
+        body: Any
+        if widget == "lone button":
+            body = Button("Go")
+        elif widget == "lone text area":
+            body = TextArea(width=10, height=2)
+        else:
+            fixed = Button("Go") if widget == "button" else Label("fixed", width=10)
+            body = HSplit([Label("Some text above the widget."), fixed])
+        dialog = Dialog("Wide", body, [ButtonConfig("OK")], width=width)  # type: ignore[arg-type]
+        with piped_session(rows=16, columns=70) as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                shown = asyncio.ensure_future(session.show_dialog(dialog))
+                await wait_until(lambda: dialog_rendered(session))
+                rows = screen_rows(session)
+                (top,) = [row for row in rows if "| Wide |" in row]
+                right = top.rindex("┐")
+                framed = rows[rows.index(top) + 1:]
+                bottom = next(row for row in framed if "└" in row)
+                assert bottom.rindex("┘") == right
+                for row in framed[:framed.index(bottom)]:
+                    assert row.rindex("│") == right, rows
+                shown.cancel()
+                with suppress(asyncio.CancelledError):
+                    await shown
+
+            await run_with(session, lambda text: None, script)
 
 
 class TestBoxDropdownMenu:

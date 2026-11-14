@@ -21,6 +21,7 @@ from prompt_toolkit.layout import (
     Float,
     FloatContainer,
     FormattedTextControl,
+    VSplit,
     Window,
     to_container,
 )
@@ -107,6 +108,12 @@ def build_box(dialog: Dialog) -> BoxView:
 
         region = ScrollRegion(content, at_first_stop, scrollbar=True)
         body = region
+    else:
+        # A lone widget keeps its own width, and a blank rest of the row
+        # fills the box: a fixed width (a Button's) would cap the body's,
+        # and a box given a wider width would draw its right border at the
+        # body's edge, mid-box. (The region reports no maximum for it.)
+        body = VSplit([body, Window()])
 
     # Each ButtonConfig's style and focused flag apply however the dialog was made.
     buttons: list[Button] = []

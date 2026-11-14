@@ -148,6 +148,14 @@ class ScrollRegion(ScrollablePane):
         self._visible_rows = 0
         self._windows: dict[Window, tuple[int, int]] = {}
 
+    def preferred_width(self, max_available_width: int) -> Dimension:
+        """The content's minimum and preferred width, and no maximum: a
+        fixed-width widget in the body (a Button) would cap it, and a box
+        given a wider width would draw its right border at the body's
+        edge, mid-box."""
+        wanted = super().preferred_width(max_available_width)
+        return Dimension(min=wanted.min, preferred=wanted.preferred)
+
     @property
     def overflows(self) -> bool:
         """True if the content didn't fit at the last render."""
