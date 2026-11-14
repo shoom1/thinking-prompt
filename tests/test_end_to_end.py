@@ -3621,6 +3621,26 @@ class TestBoxButtons:
 
             await run_with(session, lambda text: None, script)
 
+    async def test_a_label_wider_than_the_box_is_cut_and_the_dialog_shows(self):
+        """A button takes the box's inside at most, its label cut with "…":
+        a label wider than the terminal put the notice in the dialog's
+        place. Enter still answers with the whole option."""
+        first = "~/projects/thinking-prompt/" + "a" * 50
+        second = "~/projects/thinking-prompt/" + "b" * 50
+        with piped_session(rows=20, columns=60) as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                shown = await self._open(session, [first, second])
+                lines = screen_lines(session)
+                assert not any("Terminal" in line for line in lines), lines
+                rows = self._button_rows(session)
+                assert len(rows) == 2 and all("…" in row for row in rows), lines
+                assert all(len(row) <= 60 for row in screen_rows(session))
+                inp.send_text(RIGHT + ENTER)
+                assert await asyncio.wait_for(shown, 2) == second
+
+            await run_with(session, lambda text: None, script)
+
     async def test_buttons_that_fit_stay_on_one_row(self):
         with piped_session(rows=20, columns=60) as (session, inp):
 

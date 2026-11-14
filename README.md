@@ -618,7 +618,10 @@ where the terminal has the columns), `max_height`, `fields`,
 **A box's buttons** are as wide as their labels need (12 columns at
 least), in one row under the body. When the terminal is too narrow for
 that row, they wrap onto as many rows as they need, in order; ←→ go
-through them in that order, across rows, and Tab as ever.
+through them in that order, across rows, and Tab as ever. A label wider
+than the box is cut with `…` (two long ones alike at the start, such as
+paths in one folder, can then look the same: `choice_dialog()`'s list
+suits long options better).
 
 **Where a box sits.** Under the prompt, above the status bar: where an inline
 dialog would be. When the rest of the screen takes rows (a thinking box, a
@@ -644,8 +647,9 @@ other key brings the cursor back into view. PgUp/PgDn page, where the
 keyboard has them. Every helper takes `max_height=`.
 
 **Small terminals.** A box dialog that can't fit the terminal at all
-(narrower than its widest button, or shorter than its frame, buttons and
-one body row) shows a short notice in its place, with the size it needs. Keys still
+(narrower than a 12-column button or a fixed-width widget in its body, or
+shorter than its frame, buttons and one body row) shows a short notice in
+its place, with the size it needs. Keys still
 reach the hidden dialog: Esc cancels it and Enter presses its focused button. It comes back as soon as the
 terminal is big enough.
 

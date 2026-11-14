@@ -36,6 +36,7 @@ from prompt_toolkit.layout.screen import Screen, WritePosition
 from prompt_toolkit.utils import get_cwidth
 from prompt_toolkit.widgets import Frame
 
+from ._text import cut
 from .rows import MARKER, NO_MARKER, OptionGroup, RowControl, RowNavigator, has_focus
 from .types import Placement, check_count
 
@@ -207,20 +208,6 @@ class _ValueColumn:
         return max(self.least, min(self.most, width - 1 - self.widest))
 
 
-def _cut(text: str, columns: int) -> str:
-    """``text`` in at most ``columns`` terminal columns, ending in "…" if cut."""
-    if get_cwidth(text) <= columns:
-        return text
-    if columns < 1:
-        return ""
-    kept = ""
-    for char in text:
-        if get_cwidth(kept + char) > columns - 1:
-            break
-        kept += char
-    return kept.rstrip() + "…"
-
-
 def _justify(text: str, width: int, left: bool) -> str:
     """``text`` padded with spaces to ``width`` terminal columns, after it
     (``left``-justified) or before it."""
@@ -310,18 +297,18 @@ def _layout_row(
     full = max(value.field, text_width)
 
     def laid_out(label: str, start: int, field: int, lead: int = 0, trail: int = 0) -> _RowLayout:
-        text = _justify(_cut(value.text, field), field, value.left)
+        text = _justify(cut(value.text, field), field, value.left)
         return _RowLayout(label, start, field, text, lead, trail)
 
     if column is not None and column + value.columns() <= edge:
-        return laid_out(_cut(label, column - marker - 1), column, full, value.lead, value.trail)
+        return laid_out(cut(label, column - marker - 1), column, full, value.lead, value.trail)
     start = edge - value.columns()
     if start - marker - 1 >= keep:
-        return laid_out(_cut(label, start - marker - 1), start, full, value.lead, value.trail)
-    label = _cut(label, keep)
+        return laid_out(cut(label, start - marker - 1), start, full, value.lead, value.trail)
+    label = cut(label, keep)
     start = marker + get_cwidth(label) + 1
     if edge - start - decoration < minimum and minimum > text_width:
-        label = _cut(label, max(1, edge - decoration - minimum - marker - 1))
+        label = cut(label, max(1, edge - decoration - minimum - marker - 1))
         start = marker + get_cwidth(label) + 1
     left = edge - start - decoration
     # The padding gives way once the field is down to its minimum.
@@ -805,7 +792,7 @@ class _DropdownMenuControl(UIControl):
             opt = options[i]
             style = "class:field-dropdown-selected" if i == selected else "class:field-dropdown-item"
             # Cut and padded in terminal columns: a wide character takes two.
-            text = _justify(_cut(opt, text_width), text_width, True)
+            text = _justify(cut(opt, text_width), text_width, True)
             fragments = [(style, text)]
             if scrollbar:
                 on_thumb = thumb_top <= row < thumb_top + thumb
@@ -1028,7 +1015,7 @@ class _MarkedLabel(UIControl):
         self._item = item
 
     def create_content(self, width: int, height: int) -> UIContent:
-        label = _cut(self._item.label, width - get_cwidth(MARKER) - 1)
+        label = cut(self._item.label, width - get_cwidth(MARKER) - 1)
         line = FormattedText([
             ("class:field-indicator", MARKER),
             ("class:field-label-selected", label),

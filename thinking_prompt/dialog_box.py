@@ -35,6 +35,7 @@ from prompt_toolkit.utils import get_cwidth
 from prompt_toolkit.widgets import Box, Button, Frame, Label
 from prompt_toolkit.widgets import Dialog as _DialogWidget
 
+from ._text import cut
 from .dialog_scroll import AtMost, ScrollRegion, dialog_cap, focusable_windows
 from .rows import RowControl
 
@@ -63,8 +64,8 @@ class BoxView:
     """
 
     widget: _DialogWidget
-    buttons: list[Button]
-    focused_button: Button | None = None
+    buttons: list[_Button]
+    focused_button: _Button | None = None
     max_height: int | None = None
     region: ScrollRegion | None = None
     text_only: bool = False
@@ -124,10 +125,10 @@ def build_box(dialog: Dialog) -> BoxView:
         body = VSplit([body, Window()])
 
     # Each ButtonConfig's style and focused flag apply however the dialog was made.
-    buttons: list[Button] = []
-    focused: Button | None = None
+    buttons: list[_Button] = []
+    focused: _Button | None = None
     for cfg in dialog._button_configs():
-        button: Button = _Button(cfg.text, dialog._click_handler(cfg))
+        button = _Button(cfg.text, dialog._click_handler(cfg))
         _apply_button_style(button, cfg.style)
         if cfg.focused and focused is None:
             focused = button
@@ -182,28 +183,38 @@ def _width_dimension(width: int | Literal["full"] | None, least: int) -> Dimensi
     return Dimension(preferred=max(width, least))
 
 
-def _one_row(buttons: list[Button]) -> int:
-    """The columns ``buttons`` take side by side, a column between."""
-    return sum(b.width for b in buttons) + max(len(buttons) - 1, 0)
+# prompt_toolkit's button width: the least a box's button takes.
+_LEAST_BUTTON = 12
 
 
-def _widest(buttons: list[Button]) -> int:
-    """The widest of ``buttons``: the least a row of them needs."""
-    return max((b.width for b in buttons), default=0)
+def _one_row(buttons: list[_Button]) -> int:
+    """The columns ``buttons`` take side by side, each as wide as its label
+    needs, a column between."""
+    return sum(b.natural for b in buttons) + max(len(buttons) - 1, 0)
 
 
 class _Button(Button):
     """A box dialog's button: as wide as its label needs (prompt_toolkit's
-    12 columns at least), with the label centred by its columns. (3.0.36
+    12 columns at least), but no wider than the room it's given (fit()),
+    its label then cut with "…"; the label centred by its columns. (3.0.36
     centred it by its characters, so wide characters overflowed it.)"""
 
     def __init__(self, text: str, handler: Callable[[], None]) -> None:
-        super().__init__(text=text, handler=handler, width=max(12, get_cwidth(text) + 4))
+        # The width its label needs; ``width`` is what it's drawn at.
+        self.natural = max(_LEAST_BUTTON, get_cwidth(text) + 4)
+        super().__init__(text=text, handler=handler, width=self.natural)
+        self.window.width = lambda: self.width
+
+    def fit(self, columns: int) -> None:
+        """Draw it at most ``columns`` wide (12 at least)."""
+        self.width = max(_LEAST_BUTTON, min(self.natural, columns))
 
     def _get_text_fragments(self) -> StyleAndTextTuples:
         inner = self.width - get_cwidth(self.left_symbol) - get_cwidth(self.right_symbol)
-        pad = max(0, inner - get_cwidth(self.text))
-        label = " " * (pad // 2) + self.text + " " * (pad - pad // 2)
+        # A space either side of a label that's cut, as of one that isn't.
+        label = cut(self.text, inner - 2)
+        pad = max(0, inner - get_cwidth(label))
+        label = " " * (pad // 2) + label + " " * (pad - pad // 2)
         # prompt_toolkit's: the left arrow, the cursor's place, the label
         # (its style, its text, the click handler), the right arrow. If a
         # release draws it otherwise, its own label stands.
@@ -219,31 +230,40 @@ class _ButtonRows(Container):
     need, filled in order, each centred. A blank row above and below while
     there's room. ←→ go through them in order, across rows."""
 
-    def __init__(self, buttons: list[Button]) -> None:
+    def __init__(self, buttons: list[_Button]) -> None:
         self.buttons = buttons
         # One layout per way of breaking the buttons into rows.
         self._layouts: dict[tuple[int, ...], Container] = {}
         self._shown = self._layout(_one_row(buttons))
         self._key_bindings = self._arrows()
 
-    def _starts(self, width: int) -> tuple[int, ...]:
-        """Where each row starts, in rows ``width`` columns wide. Wrapped,
+    def _room(self, width: int) -> int:
+        """The columns a row has in a ``width``-column inside. Wrapped,
         each row keeps a column from either border, as the body's text
-        does: one row flush against both, over centred rows, looks off."""
-        if _one_row(self.buttons) > width:
-            width -= 2
+        does (one row flush against both, over centred rows, looks off),
+        while that leaves a button its 12."""
+        if _one_row(self.buttons) > width and width - 2 >= _LEAST_BUTTON:
+            return width - 2
+        return width
+
+    def _starts(self, room: int) -> tuple[int, ...]:
+        """Where each row starts, in rows of ``room`` columns. A button
+        wider than that has a row of its own, cut to it."""
         starts: list[int] = []
         used = 0
         for i, button in enumerate(self.buttons):
-            if not starts or used + 1 + button.width > width:
+            if not starts or used + 1 + button.natural > room:
                 starts.append(i)
-                used = button.width
+                used = button.natural
             else:
-                used += 1 + button.width
+                used += 1 + button.natural
         return tuple(starts)
 
     def _layout(self, width: int) -> Container:
-        starts = self._starts(width)
+        room = self._room(width)
+        for button in self.buttons:
+            button.fit(room)
+        starts = self._starts(room)
         layout = self._layouts.get(starts)
         if layout is None:
             ends = [*starts[1:], len(self.buttons)]
@@ -284,8 +304,8 @@ class _ButtonRows(Container):
             layout.reset()
 
     def preferred_width(self, max_available_width: int) -> Dimension:
-        # As narrow as the widest button, one per row.
-        return Dimension(min=_widest(self.buttons), preferred=_one_row(self.buttons))
+        # As narrow as a button at its least, one per row, labels cut.
+        return Dimension(min=_LEAST_BUTTON, preferred=_one_row(self.buttons))
 
     def preferred_height(self, width: int, max_available_height: int) -> Dimension:
         return self._layout(width).preferred_height(width, max_available_height)
