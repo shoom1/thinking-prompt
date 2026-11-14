@@ -34,6 +34,11 @@ class TestSpinner:
         with pytest.raises(ValueError, match="spinner=None"):
             Spinner(())
 
+    @pytest.mark.parametrize("interval", ["0.1", None, True])
+    def test_an_interval_that_is_not_a_number_raises(self, interval):
+        with pytest.raises(ValueError, match="interval must be a number of seconds"):
+            Spinner(("a", "b"), interval)
+
     @pytest.mark.parametrize("interval", [0, -0.1, math.nan, math.inf])
     def test_an_interval_that_is_not_positive_and_finite_raises(self, interval):
         with pytest.raises(ValueError, match="interval must be positive and finite"):

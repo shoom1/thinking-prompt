@@ -13,6 +13,7 @@ Run:
     python examples/progress_demo.py
 """
 import asyncio
+from typing import Any
 
 from thinking_prompt import ThinkingPromptSession, AppInfo
 
@@ -32,7 +33,7 @@ async def main():
             return
 
         # Mutable state that the callback reads
-        progress = {"percent": 0, "status": "Starting..."}
+        progress: dict[str, Any] = {"percent": 0, "status": "Starting..."}
 
         def get_content():
             """Return current content - called repeatedly by the UI."""

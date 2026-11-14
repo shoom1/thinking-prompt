@@ -15,6 +15,7 @@ from thinking_prompt import (
     ChoiceField,
     Dialog,
     DropdownField,
+    Placement,
     RadioField,
     SelectField,
     TextField,
@@ -40,7 +41,7 @@ FIELDS = [
 ]
 
 
-def settings_dialog(settings: dict, placement: str) -> Dialog:
+def settings_dialog(settings: dict, placement: Placement) -> Dialog:
     """A form over ``settings``: Save returns every value, Cancel None."""
     dialog = Dialog("Settings", fields=FIELDS, values=settings, width=60, placement=placement)
     dialog.buttons = [
@@ -76,7 +77,7 @@ async def main():
         if command == "quit":
             session.exit()
         elif command in ("settings", "inline"):
-            placement = "inline" if command == "inline" else "box"
+            placement: Placement = "inline" if command == "inline" else "box"
             values = await session.show_dialog(settings_dialog(settings, placement))
             if values is None:
                 session.add_response("Settings cancelled.")

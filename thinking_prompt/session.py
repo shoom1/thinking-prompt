@@ -33,14 +33,17 @@ from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.completion import Completer
 from prompt_toolkit.data_structures import Point
 from prompt_toolkit.document import Document
-from prompt_toolkit.enums import DEFAULT_BUFFER, EditingMode
+from prompt_toolkit.enums import DEFAULT_BUFFER
 from prompt_toolkit.filters import Condition, has_focus, is_done
 from prompt_toolkit.formatted_text import (
+    ANSI,
+    HTML,
     AnyFormattedText,
     FormattedText,
     fragment_list_to_text,
     to_formatted_text,
 )
+from prompt_toolkit.formatted_text.base import OneStyleAndTextTuple
 from prompt_toolkit.history import History, InMemoryHistory
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.key_binding.key_processor import KeyPressEvent
@@ -48,7 +51,7 @@ from prompt_toolkit.layout import AnyContainer, ConditionalContainer, DynamicCon
 from prompt_toolkit.layout.controls import FormattedTextControl, UIContent, UIControl
 from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.output import ColorDepth, Output
-from prompt_toolkit.styles import DynamicStyle
+from prompt_toolkit.styles import DynamicStyle, Style
 
 from ._text import format_exception_detail
 from .app_info import AppInfo
@@ -74,6 +77,37 @@ logger = logging.getLogger(__name__)
 # on_input() returns the handler it registers with its own type.
 _HandlerT = TypeVar("_HandlerT", bound="InputHandler")
 _T = TypeVar("_T")
+
+_FORMATTED_TEXT = "a str, or formatted text: (style, text) pairs, such as a FormattedText, or HTML or ANSI"
+
+
+def _response_fragments(content: object) -> FormattedText:
+    """``content`` as a FormattedText, or ValueError: checked before anything
+    keeps it, since a bad fragment kept in the transcript fails every
+    repaint after it."""
+    if isinstance(content, (HTML, ANSI)):
+        return to_formatted_text(content)
+    if isinstance(content, (list, tuple)):
+        for fragment in content:
+            if not (
+                isinstance(fragment, tuple)
+                and len(fragment) in (2, 3)
+                and isinstance(fragment[0], str)
+                and isinstance(fragment[1], str)
+            ):
+                raise ValueError(
+                    f"add_response() takes {_FORMATTED_TEXT}; got the fragment {fragment!r}"
+                )
+            try:
+                # The parser prompt_toolkit uses for a fragment's style.
+                Style([("fragment", fragment[0])])
+            except (ValueError, AssertionError) as exc:
+                raise ValueError(
+                    f"add_response() takes {_FORMATTED_TEXT}; the fragment "
+                    f"{fragment!r} has a style prompt_toolkit can't use: {exc}"
+                ) from None
+        return FormattedText(content)
+    raise ValueError(f"add_response() takes {_FORMATTED_TEXT}; got {content!r}")
 
 
 class _RoomControl(UIControl):
@@ -153,7 +187,6 @@ class ThinkingPromptSession:
         completer: Completer | None = None,
         complete_while_typing: bool = False,
         completions_menu_height: int = 5,
-        editing_mode: EditingMode = EditingMode.EMACS,
         enable_status_bar: bool = True,
         status_text: AnyFormattedText = "Ctrl+C: cancel | Ctrl+D: exit",
         expand_key: str = "c-t",
@@ -183,7 +216,6 @@ class ThinkingPromptSession:
             completer: Completer for input autocompletion.
             complete_while_typing: Show completions automatically while typing.
             completions_menu_height: Maximum height of completions dropdown menu.
-            editing_mode: Editing mode (EMACS or VI).
             enable_status_bar: Whether to show status bar.
             status_text: Text to display in status bar.
             expand_key: Expands/collapses thinking boxes.
@@ -222,10 +254,10 @@ class ThinkingPromptSession:
                 thinking_max_lines isn't an int of at least 0,
                 transcript_limit one of at least 0 (or None), or
                 completions_menu_height one of at least 1; spinner isn't a
-                Spinner or None, or editing_mode an EditingMode;
-                spinner_position isn't 'before' or 'after', dialog_placement
-                'box' or 'inline', or input_while_busy 'refuse' or 'queue';
-                or theme= names an unknown theme.
+                Spinner or None; spinner_position isn't 'before' or
+                'after', dialog_placement 'box' or 'inline', or
+                input_while_busy 'refuse' or 'queue'; or theme= names an
+                unknown theme.
         """
         check_count("thinking_max_lines", thinking_max_lines, 0)
         check_count("transcript_limit", transcript_limit, 0, optional=True)
@@ -233,13 +265,11 @@ class ThinkingPromptSession:
         check_choice("spinner_position", spinner_position, ("before", "after"))
         if spinner is not None and not isinstance(spinner, Spinner):
             raise ValueError(f"spinner must be a Spinner or None, got {spinner!r}")
-        if not isinstance(editing_mode, EditingMode):
-            raise ValueError(f"editing_mode must be EditingMode.EMACS or EditingMode.VI, got {editing_mode!r}")
 
         self._message = message
         self._app_info = app_info
         self._thinking_title = thinking_title
-        check_placement(dialog_placement)
+        check_placement(dialog_placement, name="dialog_placement")
         self._dialog_placement: Placement = dialog_placement
         check_input_while_busy(input_while_busy)
         self._input_while_busy: InputWhileBusy = input_while_busy
@@ -261,7 +291,6 @@ class ThinkingPromptSession:
         # _show_hint / _clear_hint / _status_now).
         self._hint: str | None = None
         self._status_under_hint: AnyFormattedText = None
-        self._editing_mode = editing_mode
         self._echo_input = echo_input
         self._completer = completer
         self._complete_while_typing = complete_while_typing
@@ -542,7 +571,6 @@ class ThinkingPromptSession:
             layout=self._create_session_layout(),
             style=DynamicStyle(lambda: self._style),
             key_bindings=kb,
-            editing_mode=self._editing_mode,
             # No refresh_interval: redrawn when something changes or an
             # animation asks (FrameScheduler), so an idle prompt costs
             # nothing. Bursts of writes are capped at 30 redraws a second.
@@ -665,7 +693,7 @@ class ThinkingPromptSession:
         return self._styles
 
     def set_theme(
-        self, theme: str | ThinkingPromptStyles, repaint: bool = False
+        self, theme: str | ThinkingPromptStyles, *, repaint: bool = False
     ) -> None:
         """Switch the active theme at runtime.
 
@@ -805,8 +833,8 @@ class ThinkingPromptSession:
 
         Raises:
             ValueError: If max_lines isn't an int of at least 0 (or
-                None), content_format 'plain' or 'ansi', or overflow
-                'tail' or 'head'.
+                None), order an int, content_format 'plain' or 'ansi', or
+                overflow 'tail' or 'head'.
 
         Example:
             box = session.start_thinking(title="Processing")
@@ -818,6 +846,9 @@ class ThinkingPromptSession:
         """
         # 0: the title line only; 1: the newest row, no hint.
         check_count("max_lines", max_lines, 0, optional=True)
+        # Any int sorts; anything else would fail the next redraw's sort.
+        if not isinstance(order, int) or isinstance(order, bool):
+            raise ValueError(f"order must be an int, got {order!r}")
         check_choice("content_format", content_format, ("plain", "ansi"))
         check_choice("overflow", overflow, ("tail", "head"))
         box = self._manager.create_box(
@@ -977,7 +1008,7 @@ class ThinkingPromptSession:
 
     def add_response(
         self,
-        content: str | FormattedText,
+        content: str | Sequence[OneStyleAndTextTuple] | HTML | ANSI,
         *,
         markdown: bool = False,
     ) -> None:
@@ -985,12 +1016,19 @@ class ThinkingPromptSession:
         Add a response to the console and transcript.
 
         This is the primary method for displaying assistant responses. Supports
-        plain text, markdown, or pre-formatted FormattedText.
+        plain text, markdown, or prompt_toolkit's formatted text.
 
         Args:
-            content: The response content (str or FormattedText).
-            markdown: If True and content is str, render as markdown via Rich.
-                     Falls back to plain text if Rich is not installed.
+            content: The response: a str, or formatted text ((style, text)
+                pairs, such as a FormattedText, or HTML or ANSI).
+            markdown: If True, render the str as markdown via Rich. Falls
+                back to plain text if Rich is not installed.
+
+        Raises:
+            ValueError: If content is neither a str nor formatted text (a
+                pair whose style prompt_toolkit can't use included), or
+                markdown=True comes with formatted text. Nothing is printed
+                or kept then.
 
         Examples:
             # Plain text
@@ -1003,9 +1041,12 @@ class ThinkingPromptSession:
             formatted = FormattedText([("bold", "Title: "), ("", "Content")])
             session.add_response(formatted)
         """
-        # Handle FormattedText directly
-        if isinstance(content, (FormattedText, list)):
-            self._display.formatted(content)
+        if not isinstance(content, str):
+            if markdown:
+                raise ValueError(f"add_response(markdown=True) takes a str, got {content!r}")
+            # As a FormattedText: prompt_toolkit's print shows a plain list
+            # as its repr.
+            self._display.formatted(_response_fragments(content))
             return
 
         # Handle markdown
@@ -1697,6 +1738,10 @@ class ThinkingPromptSession:
         Returns:
             True if Yes was clicked, False if No or Escape.
 
+        Raises:
+            RuntimeError: If the session isn't running (see show_dialog()),
+                or another dialog is open: one at a time.
+
         Example:
             if await session.yes_no_dialog("Confirm", "Delete this file?"):
                 delete_file()
@@ -1727,6 +1772,10 @@ class ThinkingPromptSession:
                 scrolls (see Dialog.max_height). None (default): the
                 terminal's rows less the prompt's.
 
+        Raises:
+            RuntimeError: If the session isn't running (see show_dialog()),
+                or another dialog is open: one at a time.
+
         Example:
             await session.message_dialog("Info", "Operation completed.")
         """
@@ -1734,7 +1783,7 @@ class ThinkingPromptSession:
         dialog = _message_dialog(title, text, ok_text, self._resolve_placement(placement), max_height)
         await self._dialogs.show(dialog)
 
-    async def choice_dialog(
+    async def button_dialog(
         self,
         title: str,
         text: str,
@@ -1744,7 +1793,7 @@ class ThinkingPromptSession:
         max_height: int | None = None,
     ) -> str | None:
         """
-        Show a dialog with multiple choice buttons.
+        Show a dialog with one button per option.
 
         Args:
             title: Dialog title.
@@ -1760,10 +1809,12 @@ class ThinkingPromptSession:
             The option picked, or None if Escape was pressed.
 
         Raises:
-            ValueError: If an option is listed twice.
+            RuntimeError: If the session isn't running (see show_dialog()),
+                or another dialog is open: one at a time.
+            ValueError: If ``options`` is empty, or an option is listed twice.
 
         Example:
-            action = await session.choice_dialog(
+            action = await session.button_dialog(
                 "Select Action",
                 "What would you like to do?",
                 ["Save", "Discard", "Cancel"],
@@ -1771,11 +1822,11 @@ class ThinkingPromptSession:
             if action == "Save":
                 save_file()
         """
-        from .dialog import _choice_dialog
-        dialog = _choice_dialog(title, text, options, self._resolve_placement(placement), max_height)
+        from .dialog import _button_dialog
+        dialog = _button_dialog(title, text, options, self._resolve_placement(placement), max_height)
         return cast(Optional[str], await self._dialogs.show(dialog))
 
-    async def dropdown_dialog(
+    async def choice_dialog(
         self,
         title: str,
         text: str,
@@ -1805,18 +1856,20 @@ class ThinkingPromptSession:
             The selected option string, or None if cancelled.
 
         Raises:
+            RuntimeError: If the session isn't running (see show_dialog()),
+                or another dialog is open: one at a time.
             ValueError: If ``options`` is empty, or an option is listed twice.
 
         Example:
-            theme = await session.dropdown_dialog(
+            theme = await session.choice_dialog(
                 "Select Theme",
                 "Choose a color theme:",
                 ["Light", "Dark", "System"],
                 default="System",
             )
         """
-        from .dialog import _dropdown_dialog
-        dialog = _dropdown_dialog(title, text, options, default, self._resolve_placement(placement), max_height)
+        from .dialog import _choice_dialog
+        dialog = _choice_dialog(title, text, options, default, self._resolve_placement(placement), max_height)
         return cast(Optional[str], await self._dialogs.show(dialog))
 
     async def checklist_dialog(
@@ -1824,7 +1877,7 @@ class ThinkingPromptSession:
         title: str,
         text: str,
         options: Sequence[str],
-        defaults: Sequence[str] = (),
+        default: Sequence[str] = (),
         *,
         placement: Placement | None = None,
         max_height: int | None = None,
@@ -1836,7 +1889,7 @@ class ThinkingPromptSession:
             title: Dialog title.
             text: Text above the options ("" for none).
             options: The options to check.
-            defaults: Options checked at first (others are ignored).
+            default: Options checked at first (others are ignored).
             placement: "box" or "inline"; None (default) uses the session's
                 dialog_placement.
             max_height: The most rows the dialog takes; what doesn't fit
@@ -1847,15 +1900,18 @@ class ThinkingPromptSession:
             The checked options in option order, or None if cancelled.
 
         Raises:
-            ValueError: If ``options`` is empty, or an option is listed twice.
+            RuntimeError: If the session isn't running (see show_dialog()),
+                or another dialog is open: one at a time.
+            ValueError: If ``options`` is empty, an option is listed twice,
+                or ``default`` is a str or None rather than a sequence.
 
         Example:
             tools = await session.checklist_dialog(
-                "Tools", "Enable any:", ["search", "code", "files"], defaults=["search"]
+                "Tools", "Enable any:", ["search", "code", "files"], default=["search"]
             )
         """
         from .dialog import _checklist_dialog
-        dialog = _checklist_dialog(title, text, options, defaults, self._resolve_placement(placement), max_height)
+        dialog = _checklist_dialog(title, text, options, default, self._resolve_placement(placement), max_height)
         return cast("list[str] | None", await self._dialogs.show(dialog))
 
     async def show_dialog(self, dialog: Dialog) -> Any:
@@ -1867,6 +1923,17 @@ class ThinkingPromptSession:
 
         Returns:
             The result value set by the dialog (a button or Escape).
+
+        Raises:
+            RuntimeError: If the session isn't running: call it inside
+                ``async with session:``, or while run() or run_async()
+                runs (e.g. from an input handler or a task it started).
+                Also if another dialog is open: one at a time.
+            asyncio.CancelledError: If the session stops while the dialog
+                is open.
+            TypeError: If ``dialog`` isn't a Dialog.
+            ValueError: If the dialog has nothing to focus, or its
+                placement isn't 'box' or 'inline'.
 
         Example (built with arguments):
             from thinking_prompt import ButtonConfig, Dialog

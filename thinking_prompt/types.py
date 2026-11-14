@@ -56,11 +56,12 @@ def check_input_while_busy(value: object) -> None:
     check_choice("input_while_busy", value, ("refuse", "queue"))
 
 
-def check_placement(value: object, *, optional: bool = False) -> None:
-    """Raise ValueError unless ``value`` is a Placement (or None, when ``optional``)."""
+def check_placement(value: object, *, name: str = "placement", optional: bool = False) -> None:
+    """Raise ValueError unless ``value`` is a Placement (or None, when
+    ``optional``), naming it ``name``."""
     if optional and value is None:
         return
-    check_choice("placement", value, ("box", "inline"))
+    check_choice(name, value, ("box", "inline"))
 
 # Returns a thinking box's current content; the box re-reads it while drawn.
 ContentCallback = Callable[[], str]

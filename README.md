@@ -20,8 +20,8 @@ form fields on a prompt that stays inline, in the terminal's scrollback.
 - **Several at once**: boxes run side by side, each finished on its own,
   ordered by `order=`.
 - **Animated header**: a spinner, and a title you can change while it runs.
-- **Dialogs**: yes/no, choice, dropdown, checklist or your own, drawn as a
-  box or inline under the prompt.
+- **Dialogs**: yes/no, buttons, a choice list, a checklist or your own,
+  drawn as a box or inline under the prompt.
 - **Form fields**: text, checkbox, select, dropdown, checklist, radio and
   choice fields on any dialog, so a settings dialog is a few lines.
 - **Rich output**: markdown, syntax-highlighted code and Rich renderables, in
@@ -151,8 +151,8 @@ session = ThinkingPromptSession(
     thinking_max_lines=15,       # Max lines when collapsed
     enable_status_bar=True,      # Show status bar
     echo_input=True,             # Echo user input to console
-    complete_while_typing=True,  # Show completions as you type
-    completions_menu_height=6,   # Max rows in completions popup
+    complete_while_typing=False, # Completions as you type (True), or on Tab
+    completions_menu_height=5,   # Max rows in completions popup
 )
 ```
 
@@ -160,9 +160,8 @@ Every argument after `message` is keyword-only. Keys and the thinking
 header are under [Session Options](#session-options). Options are checked
 when they're passed (the session's here, a box's in `start_thinking()`, a
 field's or a dialog's when it's made): one of the wrong kind (a count
-that isn't an int, a `spinner` that isn't a `Spinner`, an `editing_mode`
-that isn't an `EditingMode`), out of range, or not one of its choices
-raises `ValueError`.
+that isn't an int, a `spinner` that isn't a `Spinner`), out of range, or
+not one of its choices raises `ValueError`.
 
 ### Thinking API
 
@@ -511,25 +510,37 @@ hint.
 
 ### Dialogs
 
-Dialogs open over a running session: call them from an input handler, or
-from a task started while `run()`/`run_async()` is running. On a session
-that isn't running they raise `RuntimeError`. If the session exits while a
-dialog is open, awaiting it raises `asyncio.CancelledError`.
+Dialogs open over a running session: call them from an input handler,
+inside `async with session:`, or from a task started while the session
+runs. On a session that isn't running they raise `RuntimeError`. If the
+session exits while a dialog is open, awaiting it raises
+`asyncio.CancelledError`.
+
+One dialog is open at a time: opening another while one is open raises
+`RuntimeError`. Background tasks that may ask at the same moment (two tool
+calls each asking for approval, say) can share an `asyncio.Lock`:
+
+```python
+dialog_lock = asyncio.Lock()
+
+async def approve(tool: str) -> bool:
+    async with dialog_lock:
+        return await session.yes_no_dialog("Approve", f"Run {tool}?")
+```
 
 ```python
 # Yes/No confirmation
-result = await session.yes_no_dialog("Confirm", "Delete this item?")
-if result:
-    # User clicked Yes
+if await session.yes_no_dialog("Confirm", "Delete this item?"):
+    delete_item()   # Yes; No and Escape give False
 
 # Message dialog
 await session.message_dialog("Info", "Operation completed!")
 
-# Choice dialog (multiple buttons)
-action = await session.choice_dialog("Action", "What to do?", ["Save", "Discard", "Cancel"])
+# One button per option
+action = await session.button_dialog("Action", "What to do?", ["Save", "Discard", "Cancel"])
 
-# Dropdown selection
-theme = await session.dropdown_dialog("Theme", "Choose:", ["Light", "Dark", "System"])
+# One option from a list (a ChoiceField)
+theme = await session.choice_dialog("Theme", "Choose:", ["Light", "Dark", "System"])
 
 # Custom dialog
 from thinking_prompt import Dialog, ButtonConfig
@@ -663,14 +674,16 @@ Check, radio and choice lists show one option per line, in both styles:
 from thinking_prompt import ButtonConfig, ChecklistField, ChoiceField, Dialog, RadioField
 
 tools = await session.checklist_dialog(
-    "Tools", "Enable any:", ["search", "code", "files"], defaults=["search"],
+    "Tools", "Enable any:", ["search", "code", "files"], default=["search"],
 )   # the checked options, or None if cancelled
 
-await session.show_dialog(Dialog("Settings", fields=[
+dialog = Dialog("Settings", fields=[
     ChecklistField("tools", "Tools", options=["search", "code"]),
     RadioField("mode", "Mode", options=["fast", "careful"], default="fast"),
     ChoiceField("theme", "Theme", options=["dark", "light"]),
-], buttons=[ButtonConfig("Done")]))
+])
+dialog.buttons = [ButtonConfig("Done", handler=lambda: dialog.set_result(dialog.values))]
+values = await session.show_dialog(dialog)   # {"tools": [], "mode": "fast", "theme": "dark"}
 ```
 
 A body that doesn't fit scrolls with ↑↓ (and PgUp/PgDn), and the hint line
@@ -737,7 +750,7 @@ radio or choice list with no label and no description shows just its options.
 A field keeps its `options` (and a checklist its `default`, a sequence of
 options: `()` for none) as a tuple of its own, so changing the list you
 passed doesn't change the field. An option listed twice raises
-`ValueError`, in a field and in `choice_dialog()`, `dropdown_dialog()` and
+`ValueError`, in a field and in `button_dialog()`, `choice_dialog()` and
 `checklist_dialog()`.
 
 **Keys:** in a box, ↑↓ move a row at a time and Tab / Shift+Tab a field at a
@@ -895,11 +908,17 @@ From 0.5.0 on:
   with an upgrade note here.
 
 The API is what `thinking_prompt` exports (its `__all__`), with the
-parameters, attributes and style classes this README documents. It
-doesn't cover names that start with `_`, the modules inside the package
-(import from `thinking_prompt` itself), or what's inside `session.app`:
-that's prompt_toolkit's `Application`, and the layout the session builds
-in it can change in any release.
+parameters and attributes their docstrings document (what `help()` shows),
+the fields of `ThinkingPromptStyles` among them. A dataclass's fields
+(`ThinkingPromptStyles`, `ButtonConfig`, the form fields, `AppInfo`,
+`Spinner`) are covered by name, and new ones can come between them: pass
+them by name, past the ones this README passes by position (a form field's
+`key` and `label`, a button's `text`, a spinner's `frames`). It doesn't
+cover private names (one leading `_`), the modules inside the package
+(import from `thinking_prompt` itself), the prompt_toolkit style classes
+the style fields are applied to (`to_style_dict()` lists them), or what's
+inside `session.app`: that's prompt_toolkit's `Application`, and the
+layout the session builds in it can change in any release.
 
 ## Upgrading from 0.4
 
@@ -913,12 +932,15 @@ removed:
 | `ThinkingPromptSession(history_limit=N)` | `transcript_limit=N` |
 | `box.finish(echo_to_console=...)`, `session.thinking(echo_to_console=...)` | `echo=...` |
 | `add_to_history=` on `finish()` or `thinking()` | Drop it: `echo` alone decides (printed and kept for repaints, or neither) |
+| A flag passed by position: `box.finish(False)` (0.4's `add_to_history`), `set_theme(theme, True)` | By name: `box.finish(echo=...)`, `set_theme(theme, repaint=True)` |
 | `box.get_content()` | `box.text` |
 | `session.set_status(x)` | `session.status_text = x` (a Rich renderable too) |
 | `session.add_message("system", x)` | `session.add_system(x)` |
 | `session.add_message("assistant", x)` | `session.add_response(x)` |
 | `session.add_message("user", x)`, `add_message("thinking", x)` | Drop it: the session echoes input and finished boxes itself |
-| `session.choice_dialog(..., choices=...)` | `options=...` |
+| `session.choice_dialog(title, text, choices)`, one button per choice | `session.button_dialog(title, text, options)`. `choice_dialog()` is now the list that `dropdown_dialog()` was: a 0.4 call by position still runs, and shows a list |
+| `session.dropdown_dialog(...)` | `session.choice_dialog(...)`: it draws a `ChoiceField` list, never a dropdown |
+| `session.checklist_dialog(..., defaults=...)` | `default=...`, as in `ChecklistField(default=...)` |
 | `TextField(edit_width=N)` | `width=N` |
 | `Dialog(width=0)`, `Dialog(width=-1)` (or a subclass's `width`) | `width=None` (fit the content), `width="full"` |
 | A field's `options`: the list you passed | A tuple of the field's own (`list(field.options)` for a list) |
@@ -929,9 +951,11 @@ removed:
 | The default theme, the dark palette | The terminal's own colors: `theme="dark"` keeps 0.4's look, and `ThinkingPromptStyles()` is now the terminal theme (`.dark()` is the dark palette) |
 | `theme="auto"` | Drop it: the default follows the terminal |
 | `styles.to_rich_theme_dict()` | Drop it: the session's Rich output uses its theme already |
+| `rich_to_ansi(renderable)` | Drop it: a box's `append_rich()` and `set_line_rich()`, and the session's `add_rich()`, take Rich markup and renderables |
+| `ThinkingPromptSession(editing_mode=...)` | Drop it: the keys are prompt_toolkit's default (Emacs) ones, which the dialogs and fields are built for |
 | Ctrl+C at an idle prompt exits | Ctrl+C never exits (it clears the line): Ctrl+D exits, or your own `/exit` command |
 | Ctrl+D while a handler runs: exits | Stop the handler with Ctrl+C first: Ctrl+D exits at an idle prompt |
-| Style field `history`, classes `history.*` (`history.user-message`, ...) | `transcript`, `transcript.*` (`transcript.user-message`, ...) |
+| Style field `history`, classes `history.*` (`history.user-message`, ...) | `transcript`, `transcript.*` (`transcript.user-message`, ...). The class names aren't covered by [Stability](#stability): style with the field |
 | Style fields `radio_list`, `radio_selected`, `checkbox_list`, `checkbox_selected` (classes `radio-*`, `checkbox-*`) | Drop them: the dialog fields use the `field_*` styles |
 
 `prompt_async()` reads input inside `async with session:` (see
@@ -954,7 +978,7 @@ See the `examples/` directory for complete demos:
 - `demo_messages_during_thinking.py` - Output messages during thinking
 - `demo_animated_separator.py` - Different animation configurations
 - `demo_task_progress.py` - Rich-styled task progress with in-place status updates
-- `dialog_test.py` - Dialog system demo (yes/no, message, choice, dropdown)
+- `dialog_test.py` - Dialog system demo (yes/no, message, buttons, choice list)
 - `settings_dialog_demo.py` - A settings dialog built from Dialog fields, box and inline
 - `demo_showcase.py` - Feature showcase for demos and screenshots; dialogs start inline, `/inline` switches to boxes
 - `demo.tape` - [VHS](https://github.com/charmbracelet/vhs) script that records the demo GIF above from `demo_showcase.py`: `vhs examples/demo.tape`

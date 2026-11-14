@@ -28,6 +28,7 @@ from thinking_prompt import (
     ChecklistField,
     Dialog,
     DropdownField,
+    Placement,
     RadioField,
     SelectField,
     Spinner,
@@ -55,8 +56,8 @@ class SlashCommandCompleter(Completer):
         "thinking": "Dynamic title + line editing demo",
         "confirm": "Yes/No dialog demo",
         "info": "Message dialog demo",
-        "action": "Choice dialog demo",
-        "theme": "Dropdown dialog demo",
+        "action": "Button dialog demo",
+        "theme": "Choice dialog demo",
         "tools": "Check list dialog demo",
         "inline": "Toggle inline / box dialogs",
         "tasks": "Multi-box task progress demo",
@@ -124,7 +125,7 @@ async def main():
 
     # How the dialog commands draw their dialogs: "inline" (rows under the
     # prompt) or "box"; /inline toggles it. Each call passes placement=.
-    placement = "inline"
+    placement: Placement = "inline"
 
     def ready_status() -> str:
         return f"Ready · Dialogs: {placement}"
@@ -167,8 +168,8 @@ async def main():
                 "- **/thinking** - Dynamic title + line editing demo\n"
                 "- **/confirm** - Yes/No dialog demo\n"
                 "- **/info** - Message dialog demo\n"
-                "- **/action** - Choice dialog demo\n"
-                "- **/theme** - Dropdown dialog demo\n"
+                "- **/action** - Button dialog demo\n"
+                "- **/theme** - Choice dialog demo\n"
                 "- **/tools** - Check list dialog demo\n"
                 "- **/inline** - Toggle inline / box dialogs\n"
                 "- **/tasks** - Multi-box task progress demo\n"
@@ -269,11 +270,11 @@ async def main():
 
             # Step 3: Checks
             tasks.set_line_rich(2, "[bold cyan]  ⟳ Running checks…[/bold cyan]")
-            checks = session.start_thinking(title="Checks", max_lines=2)
+            check_box = session.start_thinking(title="Checks", max_lines=2)
             for name in ["lint", "types", "security"]:
-                checks.set_line(0, f"  Running {name}...")
+                check_box.set_line(0, f"  Running {name}...")
                 await asyncio.sleep(0.4)
-            checks.finish(echo=False)
+            check_box.finish(echo=False)
             tasks.set_line_rich(2, "[green]  ✓ Running checks[/green]")
 
             # Step 4: Report
@@ -312,45 +313,45 @@ async def main():
             return
 
         if cmd == "action":
-            result = await session.choice_dialog(
+            action = await session.button_dialog(
                 title="Select Action",
                 text="What would you like to do?",
-                choices=["Save", "Discard", "Cancel"],
+                options=["Save", "Discard", "Cancel"],
                 placement=placement,
             )
-            if result:
-                session.add_response(f"Action selected: **{result}**", markdown=True)
+            if action:
+                session.add_response(f"Action selected: **{action}**", markdown=True)
             else:
                 session.add_response("Action cancelled")
             return
 
         if cmd == "theme":
-            result = await session.dropdown_dialog(
+            theme = await session.choice_dialog(
                 title="Select Theme",
                 text="Choose your preferred theme:",
                 options=["Light", "Dark", "System", "High Contrast"],
                 default="System",
                 placement=placement,
             )
-            if result:
-                session.add_response(f"Theme set to: **{result}**", markdown=True)
+            if theme:
+                session.add_response(f"Theme set to: **{theme}**", markdown=True)
             else:
                 session.add_response("Theme selection cancelled")
             return
 
         if cmd == "tools":
-            result = await session.checklist_dialog(
+            tools = await session.checklist_dialog(
                 title="Tools",
                 text="Which tools can the assistant use?",
                 options=["Web search", "Code execution", "File access", "Image generation"],
-                defaults=["Web search"],
+                default=["Web search"],
                 placement=placement,
             )
-            if result is None:
+            if tools is None:
                 session.add_response("Tool selection cancelled")
             else:
                 session.add_response(
-                    f"Tools enabled: **{', '.join(result) or 'none'}**", markdown=True
+                    f"Tools enabled: **{', '.join(tools) or 'none'}**", markdown=True
                 )
             return
 

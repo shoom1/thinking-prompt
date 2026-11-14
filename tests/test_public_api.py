@@ -46,7 +46,6 @@ PUBLIC = {
     "RadioField",
     "ChoiceField",
     "Spinner",
-    "rich_to_ansi",
 }
 
 
@@ -59,7 +58,7 @@ def test_each_public_name_imports_from_the_package():
         assert hasattr(thinking_prompt, name), name
 
 
-@pytest.mark.parametrize("name", ["StreamingContent", "ThinkingHeader", "DEFAULT_STYLES"])
+@pytest.mark.parametrize("name", ["StreamingContent", "ThinkingHeader", "DEFAULT_STYLES", "rich_to_ansi"])
 def test_building_blocks_arent_exported(name: str):
     assert not hasattr(thinking_prompt, name)
 
@@ -108,6 +107,7 @@ def test_styles_convert_to_a_prompt_toolkit_style_only():
     [
         (ThinkingPromptSession, "set_status"),  # status_text takes all kinds of text
         (ThinkingPromptSession, "add_message"),  # add_system(); add_response()
+        (ThinkingPromptSession, "dropdown_dialog"),  # choice_dialog(): it draws a ChoiceField
     ],
 )
 def test_one_name_per_thing(owner: type, member: str):
@@ -125,7 +125,7 @@ def _parameters(func: Callable[..., object]) -> list[str]:
             ThinkingPromptSession.__init__,
             [
                 "message", "app_info", "theme", "history", "completer",
-                "complete_while_typing", "completions_menu_height", "editing_mode",
+                "complete_while_typing", "completions_menu_height",
                 "enable_status_bar", "status_text", "expand_key", "thinking_max_lines",
                 "thinking_title", "thinking_border", "spinner", "spinner_position", "echo_input",
                 "thinking_echo", "transcript_limit", "dialog_placement", "input_while_busy",
@@ -152,28 +152,63 @@ def _parameters(func: Callable[..., object]) -> list[str]:
             ["title", "text", "yes_text", "no_text", "placement", "max_height"],
         ),
         (
-            ThinkingPromptSession.choice_dialog,
+            ThinkingPromptSession.button_dialog,
             ["title", "text", "options", "placement", "max_height"],
         ),
         (
-            ThinkingPromptSession.dropdown_dialog,
+            ThinkingPromptSession.choice_dialog,
             ["title", "text", "options", "default", "placement", "max_height"],
         ),
         (
             ThinkingPromptSession.checklist_dialog,
-            ["title", "text", "options", "defaults", "placement", "max_height"],
+            ["title", "text", "options", "default", "placement", "max_height"],
         ),
         (ThinkingPromptSession.query, ["coro"]),
     ],
     ids=[
         "session", "start_thinking", "thinking", "finish", "message_dialog",
-        "yes_no_dialog", "choice_dialog", "dropdown_dialog", "checklist_dialog", "query",
+        "yes_no_dialog", "button_dialog", "choice_dialog", "checklist_dialog", "query",
     ],
 )
 def test_parameter_names(func: Callable[..., object], names: list[str]):
     """One name per meaning: a session default for boxes is ``thinking_`` +
     the box's parameter, and the dialog helpers all take ``options``."""
     assert _parameters(func) == names
+
+
+def _positional_flags(module: object = thinking_prompt) -> list[str]:
+    """The bool parameters (annotated bool, or defaulting to one) of the
+    methods of ``module``'s exported classes, inherited ones too, that can
+    be passed by position. A dataclass's own __init__ is left out: its
+    fields are its data."""
+    found = []
+    for name in module.__all__:  # type: ignore[attr-defined]
+        owner = getattr(module, name)
+        if not inspect.isclass(owner):
+            continue
+        for klass in owner.__mro__:
+            if klass is object:
+                continue
+            for attr, member in vars(klass).items():
+                if attr.startswith("_") and attr != "__init__":
+                    continue
+                if attr == "__init__" and dataclasses.is_dataclass(klass):
+                    continue
+                # A property's setter takes its value by assignment.
+                func = getattr(member, "__func__", member)
+                if not inspect.isfunction(func):
+                    continue
+                for param in inspect.signature(func).parameters.values():
+                    flag = "bool" in str(param.annotation) or isinstance(param.default, bool)
+                    if flag and param.kind is not param.KEYWORD_ONLY:
+                        found.append(f"{name}.{attr}({param.name})")
+    return sorted(set(found))
+
+
+def test_a_flag_is_passed_by_name():
+    """finish(False) reads as nothing, and 0.4's finish(False) meant
+    add_to_history=False: a bool is passed by its name."""
+    assert _positional_flags() == []
 
 
 @pytest.mark.parametrize(
