@@ -408,6 +408,19 @@ class ThinkingPromptSession:
         foreground = self._foreground
         return foreground is not None and not foreground.done()
 
+    def _check_loop(self, call: str) -> None:
+        """Refuse a call awaited on another event loop than the session's
+        (a thread's own): the session's input and keys run on its loop, so
+        it would never be woken."""
+        run = self._app_run
+        if run is not None and asyncio.get_running_loop() is not run.get_loop():
+            raise RuntimeError(
+                f"{call} runs on the session's event loop, not on another "
+                f"thread's: from a thread, hand it to the session's loop with "
+                f"asyncio.run_coroutine_threadsafe(coro, loop), loop being the "
+                f"one `async with session:` runs on"
+            )
+
     def _cancel_query(self, *, by_user: bool = False) -> None:
         """Cancel the running foreground query; the one place that does.
 
@@ -1395,7 +1408,10 @@ class ThinkingPromptSession:
                 an idle prompt.
             RuntimeError: Outside ``async with session:``, or while another
                 task is already waiting here: the next line is one task's.
-                A task beside the input loop asks with a dialog.
+                A task beside the input loop asks with a dialog. Also when
+                awaited on another event loop than the session's (a
+                thread's own): hand it over with
+                asyncio.run_coroutine_threadsafe().
         """
         run = self._app_run
         if run is None:
@@ -1403,6 +1419,7 @@ class ThinkingPromptSession:
                 "prompt_async() reads the input of a running session: "
                 "call it inside `async with session:`"
             )
+        self._check_loop("prompt_async()")
         if run.done() or self.app.is_done or self._exit_after_query:
             # Stopped, or told to stop (exit() takes the app a few loop
             # turns, or waits for the query that called it): queued lines
@@ -1452,6 +1469,8 @@ class ThinkingPromptSession:
                 function: query(respond(text))).
             RuntimeError: Outside ``async with session:``, or while another
                 query runs (start a task for work beside the next input).
+                Also when awaited on another event loop than the session's
+                (see prompt_async()); the coroutine isn't run.
 
         Example:
             async with session:
@@ -1474,6 +1493,11 @@ class ThinkingPromptSession:
                 "query() runs a query of a running session: "
                 "call it inside `async with session:`"
             )
+        try:
+            self._check_loop("query()")
+        except RuntimeError:
+            coro.close()
+            raise
         if run.done() or self.app.is_done:
             # Stopped, or told to stop: the query would be cancelled with
             # the app, so it isn't started. One loop turn even so: a loop
@@ -1827,7 +1851,8 @@ class ThinkingPromptSession:
 
         Raises:
             RuntimeError: If the session isn't running (see show_dialog()),
-                or another dialog is open: one at a time.
+                another dialog is open (one at a time), or it's awaited on
+                another event loop than the session's.
             EOFError: If the session stops while the dialog is open (see
                 show_dialog()).
 
@@ -1863,7 +1888,8 @@ class ThinkingPromptSession:
 
         Raises:
             RuntimeError: If the session isn't running (see show_dialog()),
-                or another dialog is open: one at a time.
+                another dialog is open (one at a time), or it's awaited on
+                another event loop than the session's.
             EOFError: If the session stops while the dialog is open (see
                 show_dialog()).
 
@@ -1901,7 +1927,8 @@ class ThinkingPromptSession:
 
         Raises:
             RuntimeError: If the session isn't running (see show_dialog()),
-                or another dialog is open: one at a time.
+                another dialog is open (one at a time), or it's awaited on
+                another event loop than the session's.
             EOFError: If the session stops while the dialog is open (see
                 show_dialog()).
             ValueError: If ``options`` is empty, or an option is listed twice.
@@ -1950,7 +1977,8 @@ class ThinkingPromptSession:
 
         Raises:
             RuntimeError: If the session isn't running (see show_dialog()),
-                or another dialog is open: one at a time.
+                another dialog is open (one at a time), or it's awaited on
+                another event loop than the session's.
             EOFError: If the session stops while the dialog is open (see
                 show_dialog()).
             ValueError: If ``options`` is empty, or an option is listed twice.
@@ -1996,7 +2024,8 @@ class ThinkingPromptSession:
 
         Raises:
             RuntimeError: If the session isn't running (see show_dialog()),
-                or another dialog is open: one at a time.
+                another dialog is open (one at a time), or it's awaited on
+                another event loop than the session's.
             EOFError: If the session stops while the dialog is open (see
                 show_dialog()).
             ValueError: If ``options`` is empty, an option is listed twice,
@@ -2025,7 +2054,9 @@ class ThinkingPromptSession:
             RuntimeError: If the session isn't running: call it inside
                 ``async with session:``, or while run() or run_async()
                 runs (e.g. from an input handler or a task it started).
-                Also if another dialog is open: one at a time.
+                Also if another dialog is open (one at a time), or when
+                awaited on another event loop than the session's (a
+                thread's own: see prompt_async()).
             EOFError: If the session stops while the dialog is open, as
                 prompt_async() raises it. A dialog the running query (a
                 run_async() handler, or what query() runs) awaits, itself or

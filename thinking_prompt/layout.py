@@ -348,6 +348,11 @@ def create_layout(
         is_enabled=is_status_bar_enabled,
     )
 
+    # An open dialog (inline, or a box's reserved rows) is left out of the
+    # app's last frame too: nobody can answer it once the app has stopped.
+    if inline_dialog is not None:
+        inline_dialog = ConditionalContainer(inline_dialog, filter=~is_done)
+
     # Build the main layout
     main_layout = HSplit([
         thinking_area,         # Only visible when thinking

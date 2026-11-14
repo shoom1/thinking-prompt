@@ -14,7 +14,7 @@ from typing import Any, Generic, Literal, TypeVar, Union
 
 from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.data_structures import Point
-from prompt_toolkit.filters import Condition
+from prompt_toolkit.filters import Condition, is_done
 from prompt_toolkit.formatted_text import FormattedText
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.key_binding.key_bindings import KeyBindingsBase
@@ -36,6 +36,7 @@ from prompt_toolkit.layout.screen import Screen, WritePosition
 from prompt_toolkit.utils import get_cwidth
 from prompt_toolkit.widgets import Frame
 
+from ._text import cut
 from .rows import MARKER, NO_MARKER, OptionGroup, RowControl, RowNavigator, has_focus
 from .types import Placement, check_count
 
@@ -207,20 +208,6 @@ class _ValueColumn:
         return max(self.least, min(self.most, width - 1 - self.widest))
 
 
-def _cut(text: str, columns: int) -> str:
-    """``text`` in at most ``columns`` terminal columns, ending in "…" if cut."""
-    if get_cwidth(text) <= columns:
-        return text
-    if columns < 1:
-        return ""
-    kept = ""
-    for char in text:
-        if get_cwidth(kept + char) > columns - 1:
-            break
-        kept += char
-    return kept.rstrip() + "…"
-
-
 def _justify(text: str, width: int, left: bool) -> str:
     """``text`` padded with spaces to ``width`` terminal columns, after it
     (``left``-justified) or before it."""
@@ -310,18 +297,18 @@ def _layout_row(
     full = max(value.field, text_width)
 
     def laid_out(label: str, start: int, field: int, lead: int = 0, trail: int = 0) -> _RowLayout:
-        text = _justify(_cut(value.text, field), field, value.left)
+        text = _justify(cut(value.text, field), field, value.left)
         return _RowLayout(label, start, field, text, lead, trail)
 
     if column is not None and column + value.columns() <= edge:
-        return laid_out(_cut(label, column - marker - 1), column, full, value.lead, value.trail)
+        return laid_out(cut(label, column - marker - 1), column, full, value.lead, value.trail)
     start = edge - value.columns()
     if start - marker - 1 >= keep:
-        return laid_out(_cut(label, start - marker - 1), start, full, value.lead, value.trail)
-    label = _cut(label, keep)
+        return laid_out(cut(label, start - marker - 1), start, full, value.lead, value.trail)
+    label = cut(label, keep)
     start = marker + get_cwidth(label) + 1
     if edge - start - decoration < minimum and minimum > text_width:
-        label = _cut(label, max(1, edge - decoration - minimum - marker - 1))
+        label = cut(label, max(1, edge - decoration - minimum - marker - 1))
         start = marker + get_cwidth(label) + 1
     left = edge - start - decoration
     # The padding gives way once the field is down to its minimum.
@@ -622,10 +609,12 @@ class DropdownFieldControl(FieldControl[DropdownField]):
         self._app_ref: Any = None
         # The popup menu. Its height is the terminal's to give: the options
         # asked for, fewer where there's no room (the menu then scrolls and
-        # shows a scrollbar).
+        # shows a scrollbar). So is its width: narrower than the terminal,
+        # the options are cut (a fixed width drew an empty frame).
+        menu_width = self._get_dropdown_width()
         self._menu_window = Window(
             _DropdownMenuControl(self),
-            width=self._get_dropdown_width(),
+            width=Dimension(min=1, preferred=menu_width, max=menu_width),
             height=Dimension(min=1, preferred=self._preferred_menu_rows()),
             style="class:field-dropdown",
         )
@@ -728,7 +717,8 @@ class DropdownFieldControl(FieldControl[DropdownField]):
         return Float(
             content=ConditionalContainer(
                 content=framed_menu,
-                filter=Condition(lambda: self._editing),
+                # Left out of the app's last frame, with its dialog.
+                filter=Condition(lambda: self._editing) & ~is_done,
             ),
             attach_to_window=self._window,
             xcursor=True,
@@ -802,7 +792,7 @@ class _DropdownMenuControl(UIControl):
             opt = options[i]
             style = "class:field-dropdown-selected" if i == selected else "class:field-dropdown-item"
             # Cut and padded in terminal columns: a wide character takes two.
-            text = _justify(_cut(opt, text_width), text_width, True)
+            text = _justify(cut(opt, text_width), text_width, True)
             fragments = [(style, text)]
             if scrollbar:
                 on_thumb = thumb_top <= row < thumb_top + thumb
@@ -839,7 +829,9 @@ class TextFieldControl(FieldControl[TextField]):
     def enter_edit_mode(self, app: Any = None) -> None:
         """Enter edit mode - populate buffer with current value."""
         self._original_value = self._value
-        self._buffer.text = self._value or ""
+        # A value from values= may not be a str (a port number): it's
+        # edited as its text, and an edited value is a str.
+        self._buffer.text = self._text()
         self._buffer.cursor_position = len(self._buffer.text)
         self._editing = True
         self._app_ref = app
@@ -877,21 +869,22 @@ class TextFieldControl(FieldControl[TextField]):
             return _content([])
 
         is_selected = self._check_focus()
-        if not self._value:
+        if not self._text():
             value_style = "class:field-desc-selected" if is_selected else "class:field-desc"
         else:
             value_style = "class:field-value-selected" if is_selected else "class:field-value"
         return _content(self._build_row(width, self._row_value(value_style), is_selected))
 
+    def _text(self) -> str:
+        """The value as text: "" for None, str() of anything else (0 too)."""
+        return "" if self._value is None else str(self._value)
+
     def _shown_value(self) -> str:
         """The value as its row shows it."""
-        if self._item.password and self._value:
-            text = "••••••"
-        elif self._value:
-            text = str(self._value)
-        else:
-            text = "(empty)"
-        return text
+        text = self._text()
+        if not text:
+            return "(empty)"
+        return "••••••" if self._item.password else text
 
     def widest_value(self) -> int:
         return self._row_value("").columns()
@@ -1022,7 +1015,7 @@ class _MarkedLabel(UIControl):
         self._item = item
 
     def create_content(self, width: int, height: int) -> UIContent:
-        label = _cut(self._item.label, width - get_cwidth(MARKER) - 1)
+        label = cut(self._item.label, width - get_cwidth(MARKER) - 1)
         line = FormattedText([
             ("class:field-indicator", MARKER),
             ("class:field-label-selected", label),

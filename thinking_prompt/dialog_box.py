@@ -9,11 +9,13 @@ from __future__ import annotations
 
 import textwrap
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Callable, Literal
+from typing import TYPE_CHECKING, Any, Callable, Literal, cast
 
 from prompt_toolkit.application.current import get_app
-from prompt_toolkit.filters import Condition
-from prompt_toolkit.key_binding import merge_key_bindings
+from prompt_toolkit.filters import Condition, is_done
+from prompt_toolkit.formatted_text import StyleAndTextTuples
+from prompt_toolkit.formatted_text.base import OneStyleAndTextTuple
+from prompt_toolkit.key_binding import KeyBindings, merge_key_bindings
 from prompt_toolkit.layout import (
     ConditionalContainer,
     Container,
@@ -21,14 +23,19 @@ from prompt_toolkit.layout import (
     Float,
     FloatContainer,
     FormattedTextControl,
+    HorizontalAlign,
+    HSplit,
+    VSplit,
     Window,
     to_container,
 )
 from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.layout.layout import walk
-from prompt_toolkit.widgets import Button, Frame, Label
+from prompt_toolkit.utils import get_cwidth
+from prompt_toolkit.widgets import Box, Button, Frame, Label
 from prompt_toolkit.widgets import Dialog as _DialogWidget
 
+from ._text import cut
 from .dialog_scroll import AtMost, ScrollRegion, dialog_cap, focusable_windows
 from .rows import RowControl
 
@@ -53,16 +60,18 @@ class BoxView:
         text_only: Nothing in the body takes the cursor (a text body): ↑↓ scroll it.
         floats: Floats the body needs over the whole screen (Dialog._screen_floats), drawn over the box.
         start: Where the body's cursor starts when no button asks for focus (a radio list's picked option).
+        inside: What the frame holds: the padded body and the buttons under it.
     """
 
     widget: _DialogWidget
-    buttons: list[Button]
-    focused_button: Button | None = None
+    buttons: list[_Button]
+    focused_button: _Button | None = None
     max_height: int | None = None
     region: ScrollRegion | None = None
     text_only: bool = False
     floats: list[Float] = field(default_factory=list)
     start: Container | None = None
+    inside: Container | None = None
 
     @property
     def initial_focus(self) -> Container | None:
@@ -105,14 +114,21 @@ def build_box(dialog: Dialog) -> BoxView:
             first = focusable_windows(content)[:1]
             return bool(first) and get_app().layout.has_focus(first[0])
 
-        region = ScrollRegion(content, at_first_stop, scrollbar=True)
+        region = ScrollRegion(content, at_first_stop, scrollbar=True, fill_width=True)
         body = region
+    elif to_container(body).preferred_width(1000).max_specified:
+        # A lone widget with a capped width (a Button's) keeps it, and a
+        # blank rest of the row fills the box: its width would cap the
+        # body's, and a box given a wider width would draw its right border
+        # at the body's edge, mid-box. (The region reports no maximum for
+        # it.) One without a cap (a TextArea) fills the box itself.
+        body = VSplit([body, Window()])
 
     # Each ButtonConfig's style and focused flag apply however the dialog was made.
-    buttons: list[Button] = []
-    focused: Button | None = None
+    buttons: list[_Button] = []
+    focused: _Button | None = None
     for cfg in dialog._button_configs():
-        button = Button(text=cfg.text, handler=dialog._click_handler(cfg))
+        button = _Button(cfg.text, dialog._click_handler(cfg))
         _apply_button_style(button, cfg.style)
         if cfg.focused and focused is None:
             focused = button
@@ -125,13 +141,21 @@ def build_box(dialog: Dialog) -> BoxView:
         own = button.control.key_bindings
         button.control.key_bindings = tabs if own is None else merge_key_bindings([own, tabs])
 
+    # The buttons go under the body as prompt_toolkit's Dialog puts them,
+    # but in rows of our own (_ButtonRows): its one row can't wrap. So the
+    # widget gets no buttons, and the body as its Dialog pads it.
+    frame_body: Container = body
+    if buttons:
+        frame_body = HSplit([
+            Box(body=body, padding=Dimension(preferred=1, max=1), padding_bottom=0),
+            _ButtonRows(buttons),
+        ])
     widget = _DialogWidget(
         title=dialog.title,
-        body=body,
-        buttons=buttons,
-        # Never narrower than its buttons, inside the frame: below that the
-        # box collapses to an empty frame.
-        width=_width_dimension(dialog.width, _buttons_row(buttons) + 2),
+        body=frame_body,
+        # A box given a width keeps its buttons on one row when the terminal
+        # has the columns for it.
+        width=_width_dimension(dialog.width, _one_row(buttons) + 2),
         with_background=False,  # Use styled dialog, no light overlay
     )
     return BoxView(
@@ -143,6 +167,7 @@ def build_box(dialog: Dialog) -> BoxView:
         text_only=not stops,
         floats=dialog._screen_floats(),
         start=start,
+        inside=frame_body,
     )
 
 
@@ -158,11 +183,157 @@ def _width_dimension(width: int | Literal["full"] | None, least: int) -> Dimensi
     return Dimension(preferred=max(width, least))
 
 
-def _buttons_row(buttons: list[Button]) -> int:
-    """The columns ``buttons`` take side by side (VSplit's padding=1
-    between): the one row of a box that can't be squeezed."""
-    widths = [b.window.preferred_width(1000).min for b in buttons]
-    return sum(widths) + max(len(widths) - 1, 0)
+# prompt_toolkit's button width: the least a box's button takes.
+_LEAST_BUTTON = 12
+
+
+def _one_row(buttons: list[_Button]) -> int:
+    """The columns ``buttons`` take side by side, each as wide as its label
+    needs, a column between."""
+    return sum(b.natural for b in buttons) + max(len(buttons) - 1, 0)
+
+
+class _Button(Button):
+    """A box dialog's button: as wide as its label needs (prompt_toolkit's
+    12 columns at least), but no wider than the room it's given (fit()),
+    its label then cut with "…"; the label centred by its columns. (3.0.36
+    centred it by its characters, so wide characters overflowed it.)"""
+
+    def __init__(self, text: str, handler: Callable[[], None]) -> None:
+        # The width its label needs; ``width`` is what it's drawn at.
+        self.natural = max(_LEAST_BUTTON, get_cwidth(text) + 4)
+        super().__init__(text=text, handler=handler, width=self.natural)
+        self.window.width = lambda: self.width
+
+    def fit(self, columns: int) -> None:
+        """Draw it at most ``columns`` wide (12 at least)."""
+        self.width = max(_LEAST_BUTTON, min(self.natural, columns))
+
+    def _get_text_fragments(self) -> StyleAndTextTuples:
+        inner = self.width - get_cwidth(self.left_symbol) - get_cwidth(self.right_symbol)
+        # A space either side of a label that's cut, as of one that isn't.
+        label = cut(self.text, inner - 2)
+        pad = max(0, inner - get_cwidth(label))
+        label = " " * (pad // 2) + label + " " * (pad - pad // 2)
+        # prompt_toolkit's: the left arrow, the cursor's place, the label
+        # (its style, its text, the click handler), the right arrow. If a
+        # release draws it otherwise, its own label stands.
+        fragments = super()._get_text_fragments()
+        if len(fragments) == 4 and "button.text" in fragments[2][0]:
+            fragments[2] = cast(OneStyleAndTextTuple, (fragments[2][0], label, *fragments[2][2:]))
+        return fragments
+
+
+class _ButtonRows(Container):
+    """A box dialog's buttons, under its body: one centred row while they
+    fit, as prompt_toolkit's Dialog draws them; else as many rows as they
+    need, filled in order, each centred. A blank row above and below while
+    there's room. ←→ go through them in order, across rows."""
+
+    def __init__(self, buttons: list[_Button]) -> None:
+        self.buttons = buttons
+        # One layout per way of breaking the buttons into rows.
+        self._layouts: dict[tuple[int, ...], Container] = {}
+        self._shown = self._layout(_one_row(buttons))
+        self._key_bindings = self._arrows()
+
+    def _room(self, width: int) -> int:
+        """The columns a row has in a ``width``-column inside. Wrapped,
+        each row keeps a column from either border, as the body's text
+        does (one row flush against both, over centred rows, looks off),
+        while that leaves a button its 12."""
+        if _one_row(self.buttons) > width and width - 2 >= _LEAST_BUTTON:
+            return width - 2
+        return width
+
+    def _starts(self, room: int) -> tuple[int, ...]:
+        """Where each row starts, in rows of ``room`` columns. A button
+        wider than that has a row of its own, cut to it."""
+        starts: list[int] = []
+        used = 0
+        for i, button in enumerate(self.buttons):
+            if not starts or used + 1 + button.natural > room:
+                starts.append(i)
+                used = button.natural
+            else:
+                used += 1 + button.natural
+        return tuple(starts)
+
+    def _layout(self, width: int) -> Container:
+        room = self._room(width)
+        for button in self.buttons:
+            button.fit(room)
+        starts = self._starts(room)
+        layout = self._layouts.get(starts)
+        if layout is None:
+            ends = [*starts[1:], len(self.buttons)]
+            rows = [
+                VSplit(self.buttons[start:end], padding=1, align=HorizontalAlign.CENTER)
+                for start, end in zip(starts, ends)
+            ]
+            blank = Dimension(min=0, preferred=1, max=1)
+            layout = HSplit([Window(height=blank), *rows, Window(height=blank)])
+            self._layouts[starts] = layout
+        return layout
+
+    def _arrows(self) -> KeyBindings:
+        def focused() -> int:
+            """The focused button's index; -1 when none is, or the buttons
+            weren't drawn (a "too small" notice in the box's place): moving
+            then would change what Enter presses, unseen."""
+            layout = get_app().layout
+            for i, button in enumerate(self.buttons):
+                if layout.has_focus(button):
+                    return i if button.window in layout.visible_windows else -1
+            return -1
+
+        kb = KeyBindings()
+
+        @kb.add("left", filter=Condition(lambda: focused() > 0))
+        def previous(event: Any) -> None:
+            event.app.layout.focus(self.buttons[focused() - 1])
+
+        @kb.add("right", filter=Condition(lambda: 0 <= focused() < len(self.buttons) - 1))
+        def next_(event: Any) -> None:
+            event.app.layout.focus(self.buttons[focused() + 1])
+
+        return kb
+
+    def reset(self) -> None:
+        for layout in self._layouts.values():
+            layout.reset()
+
+    def preferred_width(self, max_available_width: int) -> Dimension:
+        # As narrow as a button at its least, one per row, labels cut.
+        return Dimension(min=_LEAST_BUTTON, preferred=_one_row(self.buttons))
+
+    def preferred_height(self, width: int, max_available_height: int) -> Dimension:
+        return self._layout(width).preferred_height(width, max_available_height)
+
+    def write_to_screen(
+        self,
+        screen: Screen,
+        mouse_handlers: MouseHandlers,
+        write_position: WritePosition,
+        parent_style: str,
+        erase_bg: bool,
+        z_index: int | None,
+    ) -> None:
+        self._shown = self._layout(write_position.width)
+        self._shown.write_to_screen(
+            screen, mouse_handlers, write_position, parent_style, erase_bg, z_index
+        )
+
+    def get_children(self) -> list[Container]:
+        # The rows as last drawn: the parent links of the buttons that keys
+        # follow to the bindings (all buttons are in every layout).
+        return [self._shown]
+
+    def get_key_bindings(self) -> KeyBindings:
+        return self._key_bindings
+
+    def is_modal(self) -> bool:
+        return False
 
 
 def _apply_button_style(button: Button, extra_style: str) -> None:
@@ -274,7 +445,8 @@ class BoxPresenter:
             self._room_window,
             content=ConditionalContainer(
                 content=DynamicContainer(lambda: self._capped),
-                filter=Condition(lambda: self.view is not None),
+                # Left out of the app's last frame: nobody can answer it then.
+                filter=Condition(lambda: self.view is not None) & ~is_done,
             ),
             allow_cover_cursor=True,
         )
@@ -369,8 +541,11 @@ class BoxPresenter:
         assert self.view is not None
         widget = to_container(self.view.widget)
         # A box given a width reports no minimum for it, so the width comes
-        # from the buttons row, inside the frame.
-        needs_width = max(widget.preferred_width(width).min, _buttons_row(self.view.buttons) + 2)
+        # from what it holds (the body's widest fixed widget, the widest
+        # button), inside the frame.
+        inside = self.view.inside
+        least = 0 if inside is None else to_container(inside).preferred_width(width).min
+        needs_width = max(widget.preferred_width(width).min, least + 2)
         # Height at the width the box would get: below its minimum width the
         # box collapses, and reports a frame's two rows and no more.
         box_width = min(widget.preferred_width(width).preferred, max(width, needs_width))

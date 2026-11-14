@@ -3,7 +3,9 @@ Scrolling for dialogs, box and inline.
 
 AtMost caps how tall a container gets. ScrollRegion scrolls what doesn't
 fit, a dialog's whole body: it follows the cursor, and keys scroll it past
-the cursor to read what's around it (enclosing_region(), toward()).
+the cursor to read what's around it (enclosing_region(), toward()). The
+widgets in a body show their own scrollbars only while there's something
+for them to scroll (OverflowScrollbar).
 """
 from __future__ import annotations
 
@@ -15,6 +17,7 @@ from prompt_toolkit.filters import Condition
 from prompt_toolkit.layout import Container, ScrollablePane, ScrollOffsets, Window
 from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.layout.layout import Layout, walk
+from prompt_toolkit.layout.margins import ConditionalMargin, Margin, ScrollbarMargin
 from prompt_toolkit.layout.mouse_handlers import MouseHandlers
 from prompt_toolkit.layout.screen import Screen, WritePosition
 
@@ -45,6 +48,68 @@ def focusable_windows(container: Container) -> list[Container]:
         c for c in walk(container, skip_hidden=True)
         if isinstance(c, Window) and c.content.is_focusable()
     ]
+
+
+class OverflowScrollbar(ConditionalMargin):
+    """A widget's own scrollbar (a RadioList's, a TextArea's), drawn only
+    while its window doesn't show all of its content, as CSS's overflow:
+    auto: in a body that scrolls, the widget gets all its rows and the
+    body's scrollbar is the one; a widget alone that scrolls itself shows
+    its own. prompt_toolkit draws them always.
+
+    It goes by the window's last draw; settled() says when that draw left
+    it wrong, for another draw to put right.
+    """
+
+    def __init__(self, margin: Margin, window: Window) -> None:
+        self.window = window
+        self._shown = False
+        self._decided_at = -1
+        super().__init__(margin, filter=Condition(self._show))
+
+    def _show(self) -> bool:
+        self._shown = _overflows(self.window)
+        self._decided_at = get_app().render_counter
+        return self._shown
+
+    def settled(self) -> bool:
+        """False if the draw that just ended drew it, and that draw changed
+        whether its window shows all its content."""
+        if self._decided_at != get_app().render_counter:
+            return True  # not drawn this time (a notice in the box's place)
+        return self._shown == _overflows(self.window)
+
+
+def _overflows(window: Window) -> bool:
+    """True if ``window``, at its last draw, didn't show all its content."""
+    info = window.render_info
+    # (Not prompt_toolkit's full_height_visible: it's never true.)
+    return info is not None and not (info.top_visible and info.bottom_visible)
+
+
+def overflow_scrollbars(container: Container) -> list[OverflowScrollbar]:
+    """Make the scrollbars of the windows in ``container`` OverflowScrollbars,
+    and return them all (a dialog shown again finds its own)."""
+    found: list[OverflowScrollbar] = []
+    for window in walk(container):
+        if not isinstance(window, Window):
+            continue
+        for side in ("left_margins", "right_margins"):
+            margins: list[Margin] = []
+            for margin in getattr(window, side):
+                if not isinstance(margin, OverflowScrollbar) and _is_scrollbar(margin):
+                    margin = OverflowScrollbar(margin, window)
+                if isinstance(margin, OverflowScrollbar):
+                    found.append(margin)
+                margins.append(margin)
+            setattr(window, side, margins)
+    return found
+
+
+def _is_scrollbar(margin: Margin) -> bool:
+    while isinstance(margin, ConditionalMargin):
+        margin = margin.margin
+    return isinstance(margin, ScrollbarMargin)
 
 
 class AtMost(Container):
@@ -124,8 +189,10 @@ class ScrollRegion(ScrollablePane):
         at_top: Callable[[], bool] = lambda: False,
         *,
         scrollbar: bool = False,
+        fill_width: bool = False,
     ) -> None:
         self._scrollbar = scrollbar
+        self._fill_width = fill_width
         self._overflowing = False
         # Scrolled by keys, past the cursor: the cursor isn't followed. And
         # whether the key being handled scrolled it (settle()).
@@ -147,6 +214,16 @@ class ScrollRegion(ScrollablePane):
         self._content_rows = 0
         self._visible_rows = 0
         self._windows: dict[Window, tuple[int, int]] = {}
+
+    def preferred_width(self, max_available_width: int) -> Dimension:
+        """The content's width. With ``fill_width`` (a box's body), no
+        maximum: a fixed-width widget in it (a Button) would cap it, and a
+        box given a wider width would draw its right border at the body's
+        edge, mid-box."""
+        wanted = super().preferred_width(max_available_width)
+        if not self._fill_width:
+            return wanted
+        return Dimension(min=wanted.min, preferred=wanted.preferred)
 
     @property
     def overflows(self) -> bool:
@@ -214,7 +291,9 @@ class ScrollRegion(ScrollablePane):
         (scroll_past()), as toward() does around a stop: back toward the
         cursor while keys have scrolled it out of view that way; else, with
         the cursor on the widget's first line (↑) or last line (↓), on past
-        the widget toward the content's edge, unless there already."""
+        the widget toward the content's edge. At that edge, scrolled there
+        by keys, it holds (a scroll of no lines): left to the widget, the
+        key would bring the view back to its cursor."""
         info = window.render_info
         following = self._following(window)
         if info is None or following is None:
@@ -227,8 +306,9 @@ class ScrollRegion(ScrollablePane):
         content = window.content.create_content(info.window_width, info.window_height)
         line = content.cursor_position.y
         if step < 0:
-            return line <= 0 and top > 0
-        return line >= content.line_count - 1 and top + self._visible_rows < self._content_rows
+            return line <= 0 and (top > 0 or self._manual)
+        past_bottom = top + self._visible_rows < self._content_rows
+        return line >= content.line_count - 1 and (past_bottom or self._manual)
 
     def scroll_past(self, window: Window, step: int) -> None:
         """Scroll a line for ↑ (``step`` -1) or ↓ (1) on ``window``, from

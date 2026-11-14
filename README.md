@@ -344,7 +344,9 @@ can stream into a box the loop opened (`append`, `set_line`, `clear`,
 `len(box)`, `is_finished`). Opening and finishing boxes, the `add_*`
 methods, `status_text`, dialogs, `prompt_async()` and `query()` run on
 the loop: `finish()` and `add_*` print, and printed from another thread
-their text would draw over the UI.
+their text would draw over the UI. Dialogs, `prompt_async()` and `query()`
+awaited on a thread's own event loop raise `RuntimeError`: hand them to the
+session's loop with `asyncio.run_coroutine_threadsafe(coro, loop)`.
 
 Run the blocking part in a thread, and the rest after it, on the loop:
 
@@ -527,8 +529,8 @@ hint.
 Dialogs open over a running session: call them from an input handler,
 inside `async with session:`, or from a task started while the session
 runs. On a session that isn't running they raise `RuntimeError`. If the
-session exits while a dialog is open, awaiting it raises `EOFError`, as
-`prompt_async()` does. A dialog the running query (a handler, or what
+session exits while a dialog is open, its last frame leaves the dialog
+out, and awaiting it raises `EOFError`, as `prompt_async()` does. A dialog the running query (a handler, or what
 `query()` runs) awaits, itself or through the tasks it awaits, is cancelled
 with it instead: the session stopping cancels the query. A query Ctrl+C
 already cancelled isn't cancelled again, so a dialog in its cleanup gets
@@ -609,8 +611,17 @@ A `Dialog` has no buttons unless you give it some, and it needs something
 to take keyboard focus: at least one button, fields, or a focusable body (e.g. a
 `TextArea`, closed with Escape). Otherwise `show_dialog()` raises
 `ValueError`. Other options: `escape_result`, `escapable`, `width` (box
-only: columns, never fewer than the buttons take, or `"full"`), `max_height`,
-`fields`, `align_values`.
+only: columns, or `"full"`; never fewer than the buttons take in one row,
+where the terminal has the columns), `max_height`, `fields`,
+`align_values`.
+
+**A box's buttons** are as wide as their labels need (12 columns at
+least), in one row under the body. When the terminal is too narrow for
+that row, they wrap onto as many rows as they need, in order; ←→ go
+through them in that order, across rows, and Tab as ever. A label wider
+than the box is cut with `…` (two long ones alike at the start, such as
+paths in one folder, can then look the same: `choice_dialog()`'s list
+suits long options better).
 
 **Where a box sits.** Under the prompt, above the status bar: where an inline
 dialog would be. When the rest of the screen takes rows (a thinking box, a
@@ -620,7 +631,8 @@ need is it centered over the screen.
 
 **Long content scrolls.** A dialog is never taller than the terminal (less
 the prompt's rows), nor than `max_height` rows if you pass it — counting the
-whole dialog: title, borders, buttons, hint. What doesn't fit scrolls: the
+whole dialog: title, borders, buttons, hint. (A box is at least its frame,
+one body row and its buttons' rows tall, whatever `max_height` says.) What doesn't fit scrolls: the
 body, text and fields alike, scrolls as one (with one scrollbar in a box)
 and follows the cursor, the buttons under it. ↑↓ read what's around the
 fields on the way: on the first field, ↑ scrolls up through the text above
@@ -628,13 +640,16 @@ it a line at a time, and ↓ back down to it before moving on; a field further
 away than the rows shown is reached a line at a time too, so nothing between
 is skipped. A prompt_toolkit widget in a `body` (a `RadioList`, a `TextArea`)
 keeps its own arrow keys; past its first and last lines they read the text
-around it the same way. Any
+around it the same way. Such a widget scrolls with the rest of the body, on
+its scrollbar: its own scrollbar shows only while it has something to
+scroll itself (alone in a dialog too short for it). Any
 other key brings the cursor back into view. PgUp/PgDn page, where the
 keyboard has them. Every helper takes `max_height=`.
 
 **Small terminals.** A box dialog that can't fit the terminal at all
-(narrower than its buttons, or shorter than its frame, buttons and one body
-row) shows a short notice in its place, with the size it needs. Keys still
+(narrower than a 12-column button or a fixed-width widget in its body, or
+shorter than its frame, buttons and one body row) shows a short notice in
+its place, with the size it needs. Keys still
 reach the hidden dialog: Esc cancels it and Enter presses its focused button. It comes back as soon as the
 terminal is big enough.
 
@@ -747,7 +762,10 @@ if values is not None:
     config.update(values)
 ```
 
-A field missing from `values=` starts at its `default`. Each show starts
+A field missing from `values=` starts at its `default`. A `TextField`
+shows any value as its text (a port number, say), and once the user has
+edited it (Enter on its row, then Enter to keep, even unchanged) it comes
+back as a `str`: convert it where you store it. Each show starts
 afresh from `values=` (read again then) or the defaults, so a dialog can be
 kept and shown again: it picks up what Save put in `config`, and an edit the
 user cancelled is gone. Fields are frozen, so a list of them can be a

@@ -1,12 +1,13 @@
 """
-Text helpers shared by the thinking box, the transcript and error lines
-(internal).
+Text helpers shared by the thinking box, the transcript, error lines and
+dialogs (internal).
 """
 from __future__ import annotations
 
 from itertools import groupby
 
 from prompt_toolkit.formatted_text.base import OneStyleAndTextTuple
+from prompt_toolkit.utils import get_cwidth
 
 
 def coalesce(fragments: list[OneStyleAndTextTuple]) -> list[OneStyleAndTextTuple]:
@@ -33,3 +34,17 @@ def coalesce(fragments: list[OneStyleAndTextTuple]) -> list[OneStyleAndTextTuple
 def format_exception_detail(exc: BaseException) -> str:
     """Format an exception as "Type: message", or just "Type" if message is empty."""
     return f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
+
+
+def cut(text: str, columns: int) -> str:
+    """``text`` in at most ``columns`` terminal columns, ending in "…" if cut."""
+    if get_cwidth(text) <= columns:
+        return text
+    if columns < 1:
+        return ""
+    kept = ""
+    for char in text:
+        if get_cwidth(kept + char) > columns - 1:
+            break
+        kept += char
+    return kept.rstrip() + "…"

@@ -532,6 +532,25 @@ class TestTextControl:
         assert control.is_editing is False
         assert control.value == "Bob"
 
+    def test_a_value_that_isnt_a_str_is_edited_as_its_text(self):
+        """values={"port": 8080}: the field shows 8080, Enter edits it as
+        text (it raised TypeError), and an edited value comes back a str."""
+        d = Dialog("T", fields=[TextField("port", "Port")], values={"port": 8080})
+        control = d._form.controls[0]
+        control.enter_edit_mode()
+        assert control._buffer.text == "8080"
+        control.confirm_edit()
+        assert control.value == "8080"
+
+    def test_a_value_of_zero_shows_as_zero_not_empty(self):
+        d = Dialog("T", fields=[TextField("retries", "Retries")], values={"retries": 0})
+        control = d._form.controls[0]
+        text = "".join(t for _, t, *_ in control.create_content(width=50, height=1).get_line(0))
+        assert "(empty)" not in text
+        assert text.rstrip().endswith("0")
+        control.enter_edit_mode()
+        assert control._buffer.text == "0"
+
     def test_text_control_cancel_edit(self):
         """TextFieldControl cancel restores original value."""
         item = TextField(key="name", label="Name", default="Alice")

@@ -6,6 +6,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
+import threading
 from collections.abc import Awaitable
 from contextlib import suppress
 from typing import Callable
@@ -958,6 +959,72 @@ class TestExitFromTheQuery:
                 await finished(run)
 
             await run_loop(session, body, script)
+
+
+class TestOtherEventLoops:
+    """The calls that wait on the session (prompt_async(), query(), dialogs)
+    run on its event loop. Awaited on another thread's loop, prompt_async()
+    took the typed line and never woke: refused instead, naming the way to
+    hand a call over."""
+
+    @staticmethod
+    async def _on_a_threads_own_loop(make: Callable[[], Awaitable[object]]) -> object:
+        """Await ``make()`` on a thread's own event loop: its result, or
+        what it raised. A daemon thread, so a call that hangs fails the
+        test rather than the run."""
+        result: dict[str, object] = {}
+
+        def run() -> None:
+            try:
+                result["value"] = asyncio.run(make())  # type: ignore[arg-type]
+            except BaseException as exc:
+                result["error"] = exc
+
+        thread = threading.Thread(target=run, daemon=True)
+        thread.start()
+        await asyncio.to_thread(thread.join, 3)
+        assert not thread.is_alive(), "the call never returned on the thread's loop"
+        if "error" in result:
+            raise result["error"]  # type: ignore[misc]
+        return result.get("value")
+
+    async def test_prompt_async_on_another_loop_is_refused(self):
+        with piped_session() as (session, inp):
+            async with session:
+                with pytest.raises(RuntimeError, match="run_coroutine_threadsafe"):
+                    await self._on_a_threads_own_loop(session.prompt_async)
+                assert not waiting_for_input(session)
+
+    async def test_query_on_another_loop_is_refused_and_its_coroutine_closed(self):
+        ran: list[bool] = []
+
+        async def work() -> None:
+            ran.append(True)
+
+        with piped_session() as (session, inp):
+            async with session:
+                with pytest.raises(RuntimeError, match="run_coroutine_threadsafe"):
+                    await self._on_a_threads_own_loop(lambda: session.query(work()))
+                assert session._foreground is None
+        assert ran == []
+
+    async def test_a_dialog_on_another_loop_is_refused(self):
+        with piped_session() as (session, inp):
+            async with session:
+                with pytest.raises(RuntimeError, match="run_coroutine_threadsafe"):
+                    await self._on_a_threads_own_loop(lambda: session.yes_no_dialog("T", "B"))
+                assert session._dialog_manager is None or not session._dialog_manager._visible
+
+    async def test_a_call_handed_to_the_session_loop_from_a_thread_works(self):
+        with piped_session() as (session, inp):
+            async with session:
+                loop = asyncio.get_running_loop()
+                future = await asyncio.to_thread(
+                    lambda: asyncio.run_coroutine_threadsafe(session.prompt_async(), loop)
+                )
+                await wait_until(lambda: waiting_for_input(session))
+                inp.send_text("hi" + ENTER)
+                assert await asyncio.wait_for(asyncio.wrap_future(future), 2) == "hi"
 
 
 class TestRunAsyncHandlers:

@@ -1,17 +1,22 @@
 """Tests for dialog scrolling (thinking_prompt.dialog_scroll)."""
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 from prompt_toolkit.application import Application
 from prompt_toolkit.application.current import set_app
 from prompt_toolkit.input import DummyInput
 from prompt_toolkit.layout import HSplit, Layout, Window
 from prompt_toolkit.layout.controls import FormattedTextControl
+from prompt_toolkit.layout.margins import ScrollbarMargin
 from prompt_toolkit.layout.mouse_handlers import MouseHandlers
 from prompt_toolkit.layout.screen import Screen, WritePosition
 from prompt_toolkit.output import DummyOutput
 
 from thinking_prompt.dialog_scroll import (
+    OverflowScrollbar,
+    overflow_scrollbars,
     TERMINAL_BUFFER_ROWS,
     AtMost,
     ScrollRegion,
@@ -144,3 +149,41 @@ class TestFocusableWindows:
         a = Window(FormattedTextControl("a", focusable=True))
         b = Window(FormattedTextControl("b"))
         assert focusable_windows(HSplit([a, b])) == [a]
+
+
+class TestOverflowScrollbar:
+    """A widget's own scrollbar shows only while its window doesn't show all
+    its content, going by the window's last draw."""
+
+    @staticmethod
+    def _bar() -> tuple[Window, OverflowScrollbar]:
+        window = Window(right_margins=[ScrollbarMargin()])
+        (bar,) = overflow_scrollbars(window)
+        return window, bar
+
+    def test_it_follows_the_last_draw(self):
+        window, bar = self._bar()
+        app: Application[None] = Application(input=DummyInput(), output=DummyOutput())
+        with set_app(app):
+            assert bar.filter() is False  # never drawn
+            window.render_info = SimpleNamespace(top_visible=True, bottom_visible=False)  # type: ignore[assignment]
+            assert bar.filter() is True
+
+    def test_a_draw_that_changed_it_asks_for_another_unless_it_wasnt_drawn_again(self):
+        """No redraw loop for a bar hidden after one draw (a notice in the
+        box's place): a bar the last draw didn't draw is settled."""
+        window, bar = self._bar()
+        app: Application[None] = Application(input=DummyInput(), output=DummyOutput())
+        with set_app(app):
+            app.render_counter = 1
+            assert bar.filter() is False  # drawn at draw 1, from no earlier draw
+            window.render_info = SimpleNamespace(top_visible=True, bottom_visible=False)  # type: ignore[assignment]
+            assert not bar.settled()  # draw 1 found the content overflowing
+            app.render_counter = 2  # draw 2 didn't draw it
+            assert bar.settled()
+
+    def test_its_margin_is_wrapped_once(self):
+        window, bar = self._bar()
+        assert overflow_scrollbars(window) == [bar]
+        assert window.right_margins == [bar]
+
