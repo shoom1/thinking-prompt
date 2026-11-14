@@ -15,7 +15,7 @@ from typing import Callable, Optional
 from prompt_toolkit.formatted_text import ANSI, FormattedText, to_formatted_text
 from prompt_toolkit.formatted_text.base import OneStyleAndTextTuple
 
-from ._text import coalesce
+from ._text import coalesce, styled_lines
 
 
 @dataclass
@@ -111,7 +111,7 @@ class Transcript:
 
     def _render_entry(self, entry: _Entry) -> list[OneStyleAndTextTuple]:
         if entry.kind == "styled":
-            return [(entry.style, entry.text)]
+            return styled_lines(entry.style, entry.text)
         if entry.kind == "formatted":
             return entry.fragments
         if entry.cache is not None:

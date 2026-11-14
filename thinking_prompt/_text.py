@@ -48,3 +48,16 @@ def cut(text: str, columns: int) -> str:
             break
         kept += char
     return kept.rstrip() + "…"
+
+
+def styled_lines(style: str, text: str) -> list[OneStyleAndTextTuple]:
+    """``text`` in ``style``, its newlines unstyled: a newline written with
+    a background color set makes the terminal fill the next line with it
+    (a full-width bar after the line)."""
+    fragments: list[OneStyleAndTextTuple] = []
+    for i, piece in enumerate(text.split("\n")):
+        if i:
+            fragments.append(("", "\n"))
+        if piece:
+            fragments.append((style, piece))
+    return fragments

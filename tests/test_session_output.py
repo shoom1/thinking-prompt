@@ -62,7 +62,8 @@ class TestStyledLines:
         (entry,) = _entries(session)
         assert (entry.kind, entry.style, entry.text) == ("styled", style, text)
         (printed,) = session._display.kept
-        assert to_formatted_text(printed) == [(style, text)]
+        # The newline unstyled: a background ends with the text.
+        assert to_formatted_text(printed) == [(style, text.rstrip("\n")), ("", "\n")]
 
 
 class TestInputEcho:
@@ -72,7 +73,8 @@ class TestInputEcho:
 
         fragments = [
             ("class:transcript.user-prefix", "you> "),
-            ("class:transcript.user-message", "hello\n"),
+            ("class:transcript.user-message", "hello"),
+            ("", "\n"),
         ]
         (entry,) = _entries(session)
         assert (entry.kind, entry.fragments) == ("formatted", fragments)
@@ -223,12 +225,13 @@ class TestAddRich:
         assert (entry.kind, entry.source) == ("ansi", printed.value)
 
 
-def _terminal(action: Any) -> str:
-    """What ``action(session)`` writes to a real (vt100) terminal."""
+def _terminal(action: Any, **session: Any) -> str:
+    """What ``action(session)`` writes to a real (vt100) terminal, for a
+    session made with ``session``."""
     terminal = io.StringIO()
     output = Vt100_Output(terminal, lambda: Size(rows=24, columns=80), term="xterm")
     with create_app_session(output=output):
-        action(ThinkingPromptSession())
+        action(ThinkingPromptSession(**session))
     return terminal.getvalue()
 
 
@@ -239,6 +242,31 @@ def _shown(raw: str) -> str:
 
 # Text that, written raw, sets the terminal's window title.
 _INJECTED = "\x01\x1b]0;pwned\x07\x02"
+
+
+class TestBackgroundsEndWithTheirLine:
+    """A newline written with a background color set makes the terminal
+    fill the next line with it: a full-width bar after the line (the input
+    echo, in the dark and light themes)."""
+
+    @staticmethod
+    def _bg_across_a_newline(raw: str) -> bool:
+        """True if a newline in ``raw`` comes after a background color
+        (48;…) with no color code between."""
+        return re.search(r"\x1b\[[0-9;]*48;[0-9;]*m[^\x1b]*\n", raw) is not None
+
+    @pytest.mark.parametrize("theme", ["dark", "light"])
+    def test_the_input_echo(self, theme: str):
+        raw = _terminal(lambda s: s._display.user_input(">>> ", "hello"), theme=theme)
+        assert "hello" in raw and not self._bg_across_a_newline(raw), repr(raw)
+
+    def test_a_message_with_a_background(self):
+        from thinking_prompt import ThinkingPromptStyles
+
+        theme = ThinkingPromptStyles.dark()
+        theme.system_message = "bg:#202020 fg:#ffffff"
+        raw = _terminal(lambda s: s.add_system("note"), theme=theme)
+        assert "note" in raw and not self._bg_across_a_newline(raw), repr(raw)
 
 
 class TestEscapesInRichOutput:

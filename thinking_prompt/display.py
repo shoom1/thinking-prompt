@@ -23,6 +23,7 @@ from prompt_toolkit.formatted_text import (
 from prompt_toolkit.renderer import print_formatted_text as print_to_output
 from prompt_toolkit.styles import BaseStyle, default_pygments_style, default_ui_style, merge_styles
 
+from ._text import styled_lines
 from .rich_utils import (
     _highlight_code,
     _is_rich_renderable,
@@ -142,7 +143,7 @@ class Display:
     def _output_styled(self, style: str, text: str) -> None:
         """Output styled text to the transcript and console."""
         self._transcript.append(style, text)
-        self._print_to_console(FormattedText([(style, text)]))
+        self._print_to_console(FormattedText(styled_lines(style, text)))
 
     def _output_ansi(self, content: str) -> None:
         """Output baked ANSI string to console and transcript.
@@ -171,15 +172,14 @@ class Display:
         # would be reprinted separately (each print adds a trailing newline, and
         # the prefix has none of its own), splitting ">>> hello" across
         # lines. One input is also one transcript_limit entry this way.
-        self._transcript.append_formatted([
-            ("class:transcript.user-prefix", prompt),
-            ("class:transcript.user-message", f"{text}\n"),
-        ])
+        # The newlines unstyled: the theme's background ends with the text.
+        echo = [
+            *styled_lines("class:transcript.user-prefix", prompt),
+            *styled_lines("class:transcript.user-message", f"{text}\n"),
+        ]
+        self._transcript.append_formatted(echo)
         # Print as single formatted output
-        self._print_to_console(FormattedText([
-            ("class:transcript.user-prefix", prompt),
-            ("class:transcript.user-message", f"{text}\n"),
-        ]))
+        self._print_to_console(FormattedText(echo))
 
     def thinking(
         self,
