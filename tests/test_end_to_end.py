@@ -3635,6 +3635,23 @@ class TestBoxButtons:
 
             await run_with(session, lambda text: None, script)
 
+    @pytest.mark.parametrize("columns", [40, 50, 60])
+    async def test_wrapped_rows_keep_a_column_from_the_frame(self, columns: int):
+        """Each centred, none flush against the borders while others aren't."""
+        options = [f"Option {i}" for i in range(1, 8)]
+        with piped_session(rows=20, columns=columns) as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                shown = await self._open(session, options)
+                rows = [row for row in screen_rows(session) if "<" in row and ">" in row]
+                assert len(rows) > 1, rows
+                for row in rows:
+                    assert row[row.index("│") + 1] == " " and row[row.rindex("│") - 1] == " ", rows
+                inp.send_text(ESCAPE)
+                await asyncio.wait_for(shown, 2)
+
+            await run_with(session, lambda text: None, script)
+
     async def test_left_and_right_go_through_the_buttons_across_rows(self):
         options = [f"Option {i}" for i in range(1, 8)]
         with piped_session(rows=20, columns=60) as (session, inp):

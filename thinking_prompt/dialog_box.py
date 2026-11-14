@@ -222,7 +222,11 @@ class _ButtonRows(Container):
         self._key_bindings = self._arrows()
 
     def _starts(self, width: int) -> tuple[int, ...]:
-        """Where each row starts, in rows ``width`` columns wide."""
+        """Where each row starts, in rows ``width`` columns wide. Wrapped,
+        each row keeps a column from either border, as the body's text
+        does: one row flush against both, over centred rows, looks off."""
+        if _one_row(self.buttons) > width:
+            width -= 2
         starts: list[int] = []
         used = 0
         for i, button in enumerate(self.buttons):
