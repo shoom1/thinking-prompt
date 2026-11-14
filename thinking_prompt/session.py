@@ -36,8 +36,11 @@ from prompt_toolkit.document import Document
 from prompt_toolkit.enums import DEFAULT_BUFFER
 from prompt_toolkit.filters import Condition, has_focus, is_done
 from prompt_toolkit.formatted_text import (
+    ANSI,
+    HTML,
     AnyFormattedText,
     FormattedText,
+    StyleAndTextTuples,
     fragment_list_to_text,
     to_formatted_text,
 )
@@ -235,7 +238,7 @@ class ThinkingPromptSession:
         self._message = message
         self._app_info = app_info
         self._thinking_title = thinking_title
-        check_placement(dialog_placement)
+        check_placement(dialog_placement, name="dialog_placement")
         self._dialog_placement: Placement = dialog_placement
         check_input_while_busy(input_while_busy)
         self._input_while_busy: InputWhileBusy = input_while_busy
@@ -799,8 +802,8 @@ class ThinkingPromptSession:
 
         Raises:
             ValueError: If max_lines isn't an int of at least 0 (or
-                None), content_format 'plain' or 'ansi', or overflow
-                'tail' or 'head'.
+                None), order an int, content_format 'plain' or 'ansi', or
+                overflow 'tail' or 'head'.
 
         Example:
             box = session.start_thinking(title="Processing")
@@ -812,6 +815,9 @@ class ThinkingPromptSession:
         """
         # 0: the title line only; 1: the newest row, no hint.
         check_count("max_lines", max_lines, 0, optional=True)
+        # Any int sorts; anything else would fail the next redraw's sort.
+        if not isinstance(order, int) or isinstance(order, bool):
+            raise ValueError(f"order must be an int, got {order!r}")
         check_choice("content_format", content_format, ("plain", "ansi"))
         check_choice("overflow", overflow, ("tail", "head"))
         box = self._manager.create_box(
@@ -971,7 +977,7 @@ class ThinkingPromptSession:
 
     def add_response(
         self,
-        content: str | FormattedText,
+        content: str | StyleAndTextTuples | HTML | ANSI,
         *,
         markdown: bool = False,
     ) -> None:
@@ -979,12 +985,16 @@ class ThinkingPromptSession:
         Add a response to the console and transcript.
 
         This is the primary method for displaying assistant responses. Supports
-        plain text, markdown, or pre-formatted FormattedText.
+        plain text, markdown, or prompt_toolkit's formatted text.
 
         Args:
-            content: The response content (str or FormattedText).
+            content: The response: a str, or formatted text (a
+                FormattedText, a list of (style, text) pairs, HTML or ANSI).
             markdown: If True and content is str, render as markdown via Rich.
                      Falls back to plain text if Rich is not installed.
+
+        Raises:
+            ValueError: If content is neither a str nor formatted text.
 
         Examples:
             # Plain text
@@ -997,9 +1007,10 @@ class ThinkingPromptSession:
             formatted = FormattedText([("bold", "Title: "), ("", "Content")])
             session.add_response(formatted)
         """
-        # Handle FormattedText directly
-        if isinstance(content, (FormattedText, list)):
-            self._display.formatted(content)
+        if not isinstance(content, str):
+            # As a FormattedText: prompt_toolkit's print shows a plain list
+            # as its repr, and so it would HTML or ANSI here.
+            self._display.formatted(to_formatted_text(content))
             return
 
         # Handle markdown

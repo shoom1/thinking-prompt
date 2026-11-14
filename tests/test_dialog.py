@@ -563,7 +563,7 @@ class TestPlacement:
 
         assert ThinkingPromptSession().dialog_placement == "box"
         assert ThinkingPromptSession(dialog_placement="inline").dialog_placement == "inline"
-        with pytest.raises(ValueError, match="placement must be"):
+        with pytest.raises(ValueError, match="dialog_placement must be 'box' or 'inline', got 'side'"):
             ThinkingPromptSession(dialog_placement="side")
 
     @staticmethod

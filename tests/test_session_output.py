@@ -2,17 +2,21 @@
 keeps in the transcript."""
 from __future__ import annotations
 
+import io
 import re
 from typing import Any
 
 import pytest
 from prompt_toolkit.application import create_app_session
+from prompt_toolkit.data_structures import Size
 from prompt_toolkit.formatted_text import (
     ANSI,
+    HTML,
     FormattedText,
     fragment_list_to_text,
     to_formatted_text,
 )
+from prompt_toolkit.output.vt100 import Vt100_Output
 
 from tests.helpers import echoed, keep_console
 from tests.test_end_to_end import _ShortOutput
@@ -91,6 +95,38 @@ class TestAddResponse:
         assert (entry.kind, entry.fragments) == ("formatted", _FRAGMENTS)
         (printed,) = session._display.kept
         assert to_formatted_text(printed) == _FRAGMENTS
+
+    @pytest.mark.parametrize(
+        "content",
+        [
+            FormattedText(_FRAGMENTS),
+            list(_FRAGMENTS),
+            HTML("<b>Title: </b>Content"),
+            ANSI("\x1b[1mTitle: \x1b[0mContent"),
+        ],
+        ids=["FormattedText", "list", "HTML", "ANSI"],
+    )
+    def test_formatted_text_reaches_the_terminal_as_its_text(self, content):
+        """prompt_toolkit's print shows a plain list as its repr, and an
+        object it doesn't take as a str: the terminal gets the text, as the
+        transcript does."""
+        terminal = io.StringIO()
+        output = Vt100_Output(terminal, lambda: Size(rows=24, columns=80), term="xterm")
+        with create_app_session(output=output):
+            session = ThinkingPromptSession()
+            session.add_response(content)
+
+        printed = re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", terminal.getvalue())
+        assert "Title: Content" in printed
+        assert "(" not in printed
+        (entry,) = _entries(session)
+        assert fragment_list_to_text(entry.fragments) == "Title: Content"
+
+    def test_something_that_isnt_text_is_refused(self):
+        session = _session()
+        with pytest.raises(ValueError, match="42"):
+            session.add_response(42)  # type: ignore[arg-type]
+        assert _entries(session) == []
 
     def test_markdown_is_printed_rendered_and_kept_as_its_source(self):
         pytest.importorskip("rich")
