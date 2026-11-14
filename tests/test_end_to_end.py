@@ -3692,6 +3692,36 @@ class TestBoxDialogWidth:
             await run_with(session, lambda text: None, script)
 
 
+    @pytest.mark.parametrize("width", [50, "full", None])
+    @pytest.mark.parametrize("widget", ["text area", "radio list"])
+    async def test_a_widget_alone_without_a_width_fills_the_box(self, width: int | str | None, widget: str):
+        """Only one whose width is capped keeps it: a TextArea with no width
+        wrapped its text mid-box, and a RadioList's scrollbar sat mid-box."""
+        made: Any = (
+            TextArea(text="x" * 200, height=3) if widget == "text area"
+            else RadioList([(i, f"option {i}") for i in range(3)])
+        )
+        dialog = Dialog("Notes", made, [ButtonConfig("Save"), ButtonConfig("Cancel")], width=width)  # type: ignore[arg-type]
+        with piped_session(rows=16, columns=70) as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                shown = asyncio.ensure_future(session.show_dialog(dialog))
+                await wait_until(lambda: dialog_rendered(session))
+                inside = made.window.render_info.window_width
+                rows = screen_rows(session)
+                (top,) = [row for row in rows if "| Notes |" in row]
+                frame_inside = top.rindex("┐") - top.index("┌") - 1
+                # The body's padding: a column each side; and a radio list's
+                # own scrollbar, a column its text doesn't count.
+                margin = 1 if widget == "radio list" else 0
+                assert inside + margin == frame_inside - 2, rows
+                shown.cancel()
+                with suppress(asyncio.CancelledError):
+                    await shown
+
+            await run_with(session, lambda text: None, script)
+
+
 class TestBoxDropdownMenu:
     """A box dropdown's menu opens under its own row and uses the terminal's room."""
 

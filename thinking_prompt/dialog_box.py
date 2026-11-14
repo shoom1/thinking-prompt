@@ -113,11 +113,12 @@ def build_box(dialog: Dialog) -> BoxView:
 
         region = ScrollRegion(content, at_first_stop, scrollbar=True)
         body = region
-    else:
-        # A lone widget keeps its own width, and a blank rest of the row
-        # fills the box: a fixed width (a Button's) would cap the body's,
-        # and a box given a wider width would draw its right border at the
-        # body's edge, mid-box. (The region reports no maximum for it.)
+    elif to_container(body).preferred_width(1000).max_specified:
+        # A lone widget with a capped width (a Button's) keeps it, and a
+        # blank rest of the row fills the box: its width would cap the
+        # body's, and a box given a wider width would draw its right border
+        # at the body's edge, mid-box. (The region reports no maximum for
+        # it.) One without a cap (a TextArea) fills the box itself.
         body = VSplit([body, Window()])
 
     # Each ButtonConfig's style and focused flag apply however the dialog was made.
