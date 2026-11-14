@@ -251,7 +251,7 @@ class ThinkingBox:
 
     # -- finishing -------------------------------------------------------------
 
-    def finish(self, echo: bool | None = None) -> str:
+    def finish(self, *, echo: bool | None = None) -> str:
         """Finish the box: remove it from the screen and echo its text. Call
         it on the event loop: the echo prints above the UI from there.
 

@@ -659,7 +659,7 @@ class ThinkingPromptSession:
         return self._styles
 
     def set_theme(
-        self, theme: str | ThinkingPromptStyles, repaint: bool = False
+        self, theme: str | ThinkingPromptStyles, *, repaint: bool = False
     ) -> None:
         """Switch the active theme at runtime.
 

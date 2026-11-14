@@ -912,6 +912,7 @@ removed:
 | `ThinkingPromptSession(history_limit=N)` | `transcript_limit=N` |
 | `box.finish(echo_to_console=...)`, `session.thinking(echo_to_console=...)` | `echo=...` |
 | `add_to_history=` on `finish()` or `thinking()` | Drop it: `echo` alone decides (printed and kept for repaints, or neither) |
+| A flag passed by position: `box.finish(False)` (0.4's `add_to_history`), `set_theme(theme, True)` | By name: `box.finish(echo=...)`, `set_theme(theme, repaint=True)` |
 | `box.get_content()` | `box.text` |
 | `session.set_status(x)` | `session.status_text = x` (a Rich renderable too) |
 | `session.add_message("system", x)` | `session.add_system(x)` |

@@ -176,6 +176,32 @@ def test_parameter_names(func: Callable[..., object], names: list[str]):
     assert _parameters(func) == names
 
 
+def _positional_flags() -> list[str]:
+    """The bool parameters of exported classes' methods that can be passed
+    by position (a dataclass's fields are left out: they're its data)."""
+    found = []
+    for name in thinking_prompt.__all__:
+        owner = getattr(thinking_prompt, name)
+        if not inspect.isclass(owner):
+            continue
+        for attr, member in vars(owner).items():
+            if attr.startswith("_") and not (attr == "__init__" and not dataclasses.is_dataclass(owner)):
+                continue
+            func = getattr(member, "__func__", member)
+            if not inspect.isfunction(func):
+                continue
+            for param in inspect.signature(func).parameters.values():
+                if "bool" in str(param.annotation) and param.kind is not param.KEYWORD_ONLY:
+                    found.append(f"{name}.{attr}({param.name})")
+    return found
+
+
+def test_a_flag_is_passed_by_name():
+    """finish(False) reads as nothing, and 0.4's finish(False) meant
+    add_to_history=False: a bool is passed by its name."""
+    assert _positional_flags() == []
+
+
 @pytest.mark.parametrize(
     ("field_class", "names"),
     [
