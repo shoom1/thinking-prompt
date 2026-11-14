@@ -2267,7 +2267,7 @@ class TestDialogRegrown:
             results.append(await session.show_dialog(dialog))
 
         with piped_session(rows=30) as (session, inp):
-            session._shrinks._delay = 0.02
+            session._resizes._delay = 0.02
 
             def resize(rows: int) -> None:
                 session.app.output.resize(rows=rows)
@@ -3944,9 +3944,9 @@ class TestBoxMenuFloatsOnClose:
             await run_with(session, handler, script)
 
 
-class TestSessionRepaintsAfterShrinking:
+class TestSessionRepaintsAfterResizing:
     """The session repaints (clears the screen and scrollback and prints
-    the transcript again) once the terminal stops shrinking."""
+    the transcript again) once the terminal stops changing size."""
 
     DELAY = 0.02
 
@@ -3959,7 +3959,7 @@ class TestSessionRepaintsAfterShrinking:
             pass
 
         with piped_session(rows=24, columns=80) as (session, inp):
-            session._shrinks._delay = cls.DELAY
+            session._resizes._delay = cls.DELAY
             with patch.object(session, "_repaint_console") as repaint:
 
                 async def script(run: asyncio.Task[None]) -> None:
@@ -3968,7 +3968,7 @@ class TestSessionRepaintsAfterShrinking:
                     session.app.invalidate()
                     await wait_until(lambda: session.app.render_counter > renders)
                     # The repaint, if one was due, has happened.
-                    await wait_until(lambda: session._shrinks._handle is None)
+                    await wait_until(lambda: session._resizes._handle is None)
 
                 await run_with(session, handler, script)
             return repaint.call_count
@@ -3979,12 +3979,13 @@ class TestSessionRepaintsAfterShrinking:
     async def test_a_shorter_terminal_repaints(self):
         assert await self._resize(rows=12) == 1
 
-    async def test_a_wider_terminal_does_not_repaint(self):
-        assert await self._resize(columns=100) == 0
+    async def test_a_wider_terminal_repaints(self):
+        """A terminal that re-wraps as it widens leaves rows behind too."""
+        assert await self._resize(columns=100) == 1
 
 
 class TestRepaintWhileRunning:
-    """A repaint (set_theme(repaint=True), a shrink) of a running session is
+    """A repaint (set_theme(repaint=True), a resize) of a running session is
     one run_in_terminal job: the screen and scrollback cleared and the
     transcript printed in one go."""
 

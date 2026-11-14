@@ -1,21 +1,21 @@
-"""Tests for the repaint after the terminal gets smaller (thinking_prompt.resize)."""
+"""Tests for the repaint after the terminal changes size (thinking_prompt.resize)."""
 from __future__ import annotations
 
 import asyncio
 
 from prompt_toolkit.data_structures import Size
 
-from thinking_prompt.resize import ShrinkRepaint
+from thinking_prompt.resize import ResizeRepaint
 
 WIDE = Size(rows=24, columns=80)
 
 
-def _watch() -> tuple[ShrinkRepaint, list[bool]]:
+def _watch() -> tuple[ResizeRepaint, list[bool]]:
     repaints: list[bool] = []
-    return ShrinkRepaint(lambda: repaints.append(True), 0.01), repaints
+    return ResizeRepaint(lambda: repaints.append(True), 0.01), repaints
 
 
-async def _fired(watch: ShrinkRepaint) -> None:
+async def _fired(watch: ResizeRepaint) -> None:
     """Wait for the repaint ``watch`` has waiting to happen."""
     deadline = asyncio.get_running_loop().time() + 2
     while watch._handle is not None:
@@ -23,7 +23,7 @@ async def _fired(watch: ShrinkRepaint) -> None:
         await asyncio.sleep(0.005)
 
 
-class TestShrinkRepaint:
+class TestResizeRepaint:
     async def test_a_narrower_terminal_repaints_once_it_settles(self):
         watch, repaints = _watch()
         watch.seen(WIDE)
@@ -39,11 +39,20 @@ class TestShrinkRepaint:
         await _fired(watch)
         assert repaints == [True]
 
-    async def test_a_growing_terminal_does_not_repaint(self):
+    async def test_a_wider_terminal_repaints_too(self):
+        """A terminal that re-wraps its lines as it widens (macOS's) leaves
+        a row of the UI behind at each step, as narrowing does."""
         watch, repaints = _watch()
         watch.seen(WIDE)
         watch.seen(Size(rows=30, columns=100))
         watch.seen(Size(rows=30, columns=100))
+        await _fired(watch)
+        assert repaints == [True]
+
+    async def test_the_same_size_again_doesnt_repaint(self):
+        watch, repaints = _watch()
+        watch.seen(WIDE)
+        watch.seen(WIDE)
         assert watch._handle is None and repaints == []
 
     async def test_a_resize_burst_repaints_once_after_the_last_change(self):
@@ -59,14 +68,14 @@ class TestShrinkRepaint:
         await _fired(watch)
         assert repaints == [True]
 
-    async def test_each_settled_shrink_repaints(self):
+    async def test_each_settled_resize_repaints(self):
+        """Narrowed, then widened after the repaint: the widening repaints
+        too."""
         watch, repaints = _watch()
         watch.seen(WIDE)
         watch.seen(Size(rows=24, columns=60))
         await _fired(watch)
-        watch.seen(Size(rows=24, columns=70))
-        assert watch._handle is None  # growing alone doesn't
-        watch.seen(Size(rows=20, columns=70))
+        watch.seen(Size(rows=24, columns=90))
         await _fired(watch)
         assert repaints == [True, True]
 

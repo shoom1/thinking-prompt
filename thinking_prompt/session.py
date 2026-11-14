@@ -59,7 +59,7 @@ from .display import Display
 from .frames import POLL_INTERVAL, FrameScheduler
 from .layout import create_layout
 from .manager import ThinkingBoxManager
-from .resize import ShrinkRepaint
+from .resize import ResizeRepaint
 from .rich_utils import _is_rich_renderable
 from .spinner import Spinner
 from .styles import ThinkingPromptStyles, resolve_theme
@@ -314,8 +314,8 @@ class ThinkingPromptSession:
         # Redraws on demand: writes redraw now, animations ask for their
         # next frame; nothing redraws on a timer (see _create_application).
         self._frames = FrameScheduler(lambda: self.app.invalidate())
-        # A repaint once the terminal stops shrinking (see resize.py).
-        self._shrinks = ShrinkRepaint(self._repaint_after_shrink)
+        # A repaint once the terminal stops changing size (see resize.py).
+        self._resizes = ResizeRepaint(self._repaint_after_resize)
 
         # Thinking box manager: the boxes on screen, and their echo when
         # they end. expand_key flows through to each box so the truncation
@@ -602,8 +602,8 @@ class ThinkingPromptSession:
             min_redraw_interval=1 / 30,
             color_depth=self._effective_color_depth,
         )
-        # Every resize redraws: each draw tells _shrinks the terminal's size.
-        app.before_render += lambda sender: self._shrinks.seen(sender.output.get_size())
+        # Every resize redraws: each draw tells _resizes the terminal's size.
+        app.before_render += lambda sender: self._resizes.seen(sender.output.get_size())
         return app
 
     def _create_key_bindings(self) -> KeyBindings:
@@ -799,9 +799,9 @@ class ThinkingPromptSession:
         else:
             job(get_app_session().output)
 
-    def _repaint_after_shrink(self) -> None:
-        """Repaint once the terminal stopped shrinking, which left rows of
-        the live UI behind (see resize.py)."""
+    def _repaint_after_resize(self) -> None:
+        """Repaint once the terminal stopped changing size, which left rows
+        of the live UI behind (see resize.py)."""
         if self.app and self.app.is_running:
             self._repaint_console()
 
@@ -1373,7 +1373,7 @@ class ThinkingPromptSession:
             self._manager.finish_owned_by(self._app_task)
             self._app_task = None
             self._frames.cancel()
-            self._shrinks.cancel()
+            self._resizes.cancel()
         error = None if run.cancelled() else run.exception()
         if error is not None and exc_info[1] is None:
             raise error
