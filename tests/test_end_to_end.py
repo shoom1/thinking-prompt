@@ -3778,10 +3778,9 @@ class TestBoxDialogWidth:
                 rows = screen_rows(session)
                 (top,) = [row for row in rows if "| Notes |" in row]
                 frame_inside = top.rindex("┐") - top.index("┌") - 1
-                # The body's padding: a column each side; and a radio list's
-                # own scrollbar, a column its text doesn't count.
-                margin = 1 if widget == "radio list" else 0
-                assert inside + margin == frame_inside - 2, rows
+                # The body's padding: a column each side. (The radio list
+                # fits, so it draws no scrollbar of its own.)
+                assert inside == frame_inside - 2, rows
                 shown.cancel()
                 with suppress(asyncio.CancelledError):
                     await shown
@@ -4704,6 +4703,95 @@ class TestDialogTextAroundAWidget:
                     assert made._selected_index == 0
                 else:
                     assert made.document.cursor_position_row == 0
+                dialog.set_result(None)
+                await shown
+
+    @staticmethod
+    def _bar_marks(row: str, after: str) -> list[int]:
+        """Columns of scrollbar arrows (^, v) in ``row`` past the text ``after``."""
+        start = row.index(after) + len(after)
+        return [i for i, ch in enumerate(row) if i >= start and ch in "^v"]
+
+    @pytest.mark.parametrize("placement", ["box", "inline"])
+    async def test_a_widget_in_the_scrolling_body_draws_no_scrollbar_of_its_own(self, placement: str):
+        """The body gives it all its rows and scrolls them with the text: its
+        own bar never moved, a second, full-length one beside the body's."""
+        radio = RadioList([(i, f"option {i}") for i in range(3)])
+        with piped_session(rows=40) as (session, inp):
+            async with session:
+                await wait_until(lambda: session.app.is_running)
+                dialog, shown = await self._open(session, radio, placement)
+                await asyncio.sleep(0.2)  # any second draw
+                rows = screen_rows(session)
+                # The body's own bar (a box's) is the only one: in its column.
+                body_bar = {
+                    i for row in rows if "instruction" in row for i in self._bar_marks(row, "instruction")
+                } if placement == "box" else set()
+                for row in rows:
+                    if "option" in row:
+                        assert set(self._bar_marks(row, "option")) <= body_bar, rows
+                dialog.set_result(None)
+                await shown
+
+    async def test_a_widget_alone_that_scrolls_itself_draws_its_scrollbar(self):
+        radio = RadioList([(i, f"option {i}") for i in range(30)])
+        with piped_session(rows=40) as (session, inp):
+            async with session:
+                await wait_until(lambda: session.app.is_running)
+                dialog = Dialog("Q", radio, [ButtonConfig("OK")], max_height=10)
+                shown = asyncio.ensure_future(session.show_dialog(dialog))
+                await wait_until(lambda: dialog_rendered(session))
+
+                def marks() -> list[int]:
+                    return [m for row in screen_rows(session) if "option" in row for m in self._bar_marks(row, "option")]
+
+                await wait_until(lambda: len(marks()) > 0)
+                dialog.set_result(None)
+                await shown
+
+    async def test_a_dialog_shown_again_keeps_one_scrollbar_per_widget(self):
+        from thinking_prompt.dialog_scroll import OverflowScrollbar
+
+        radio = RadioList([(i, f"option {i}") for i in range(3)])
+        dialog = Dialog("Q", HSplit([Label(self.TEXT), radio]), [ButtonConfig("OK")], max_height=10)
+        with piped_session(rows=40) as (session, inp):
+            async with session:
+                await wait_until(lambda: session.app.is_running)
+                for _ in range(2):
+                    shown = asyncio.ensure_future(session.show_dialog(dialog))
+                    await wait_until(lambda: dialog_rendered(session))
+                    dialog.set_result(None)
+                    await shown
+        bars = [m for m in radio.window.right_margins if isinstance(m, OverflowScrollbar)]
+        assert len(bars) == 1 and not isinstance(bars[0].margin, OverflowScrollbar)
+
+    async def test_a_scrollbar_hidden_by_the_notice_doesnt_keep_redrawing(self):
+        radio = RadioList([(i, f"option {i}") for i in range(30)])
+        with piped_session(rows=24, columns=10) as (session, inp):
+            async with session:
+                await wait_until(lambda: session.app.is_running)
+                dialog = Dialog("Q", radio, [ButtonConfig("OK")], max_height=10)
+                shown = asyncio.ensure_future(session.show_dialog(dialog))
+                await wait_until(lambda: any("Terminal" in line for line in screen_lines(session)))
+                await asyncio.sleep(0.1)
+                before = session.app.render_counter
+                await asyncio.sleep(0.3)
+                assert session.app.render_counter - before <= 1
+                dialog.set_result(None)
+                await shown
+
+    async def test_a_widget_alone_with_room_to_spare_draws_no_scrollbar(self):
+        radio = RadioList([(i, f"option {i}") for i in range(3)])
+        with piped_session(rows=40) as (session, inp):
+            async with session:
+                await wait_until(lambda: session.app.is_running)
+                dialog = Dialog("Q", radio, [ButtonConfig("OK")])
+                shown = asyncio.ensure_future(session.show_dialog(dialog))
+                await wait_until(lambda: dialog_rendered(session))
+                await asyncio.sleep(0.2)  # any second draw
+                for row in screen_rows(session):
+                    if "option" in row:
+                        assert self._bar_marks(row, "option") == [], screen_rows(session)
                 dialog.set_result(None)
                 await shown
 

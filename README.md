@@ -637,7 +637,9 @@ it a line at a time, and ↓ back down to it before moving on; a field further
 away than the rows shown is reached a line at a time too, so nothing between
 is skipped. A prompt_toolkit widget in a `body` (a `RadioList`, a `TextArea`)
 keeps its own arrow keys; past its first and last lines they read the text
-around it the same way. Any
+around it the same way. Such a widget scrolls with the rest of the body, on
+its scrollbar: its own scrollbar shows only while it has something to
+scroll itself (alone in a dialog too short for it). Any
 other key brings the cursor back into view. PgUp/PgDn page, where the
 keyboard has them. Every helper takes `max_height=`.
 

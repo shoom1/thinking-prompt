@@ -58,7 +58,13 @@ from prompt_toolkit.widgets import Label
 from ._text import format_exception_detail
 from .dialog_box import BoxPresenter
 from .dialog_inline import InlinePresenter, InlineView
-from .dialog_scroll import ScrollRegion, enclosing_region, focusable_windows
+from .dialog_scroll import (
+    OverflowScrollbar,
+    ScrollRegion,
+    enclosing_region,
+    focusable_windows,
+    overflow_scrollbars,
+)
 from .fields import (
     AlignValues,
     ChecklistField,
@@ -266,6 +272,9 @@ class Dialog:
         # One control per field, holding its value (values) until the next
         # show starts a new form.
         self._form = self._new_form()
+        # The scrollbars of the widgets in the body as last built: drawn only
+        # while there's something for them to scroll (_content()).
+        self._scrollbars: list[OverflowScrollbar] = []
 
         self._result_future: asyncio.Future | None = None
         self._manager: DialogManager | None = None
@@ -316,6 +325,9 @@ class Dialog:
         _check_align_values(self.align_values)
         body = to_container(self.build_body()) if self._has_body() else None
         body_stops = focusable_windows(body) if body is not None else []
+        # A widget in the body shows its own scrollbar only when it scrolls
+        # itself: one in a body that scrolls gets all its rows.
+        self._scrollbars = overflow_scrollbars(body) if body is not None else []
         # A ChoiceField with nothing else to focus: Enter on an option picks
         # it and accepts the dialog.
         self._form.set_alone(not body_stops, self._accept_choice)
@@ -735,6 +747,13 @@ class DialogManager:
 
         self._injected = True
 
+    def _settle_scrollbars(self, _app: object) -> None:
+        """After a draw: draw again if it changed whether a widget in the
+        open dialog's body has something to scroll (OverflowScrollbar)."""
+        dialog = self._current_dialog
+        if dialog is not None and not all(bar.settled() for bar in dialog._scrollbars):
+            self._session.app.invalidate()
+
     async def show(self, dialog: Dialog) -> Any:
         """
         Show a dialog and wait for result.
@@ -828,6 +847,7 @@ class DialogManager:
             self._visible = True
             key_processor = self._session.app.key_processor
             key_processor.after_key_press += self._key_pressed
+            self._session.app.after_render += self._settle_scrollbars
             if target is None:
                 raise ValueError(_nothing_to_focus(dialog))
             try:
@@ -863,6 +883,7 @@ class DialogManager:
             # Hide dialog and restore focus
             # (Removing a handler that was never added does nothing.)
             self._session.app.key_processor.after_key_press -= self._key_pressed
+            self._session.app.after_render -= self._settle_scrollbars
             self._visible = False
             self._current_dialog = None
             self._box.close()

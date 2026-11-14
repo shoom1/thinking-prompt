@@ -3,7 +3,9 @@ Scrolling for dialogs, box and inline.
 
 AtMost caps how tall a container gets. ScrollRegion scrolls what doesn't
 fit, a dialog's whole body: it follows the cursor, and keys scroll it past
-the cursor to read what's around it (enclosing_region(), toward()).
+the cursor to read what's around it (enclosing_region(), toward()). The
+widgets in a body show their own scrollbars only while there's something
+for them to scroll (OverflowScrollbar).
 """
 from __future__ import annotations
 
@@ -15,6 +17,7 @@ from prompt_toolkit.filters import Condition
 from prompt_toolkit.layout import Container, ScrollablePane, ScrollOffsets, Window
 from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.layout.layout import Layout, walk
+from prompt_toolkit.layout.margins import ConditionalMargin, Margin, ScrollbarMargin
 from prompt_toolkit.layout.mouse_handlers import MouseHandlers
 from prompt_toolkit.layout.screen import Screen, WritePosition
 
@@ -45,6 +48,68 @@ def focusable_windows(container: Container) -> list[Container]:
         c for c in walk(container, skip_hidden=True)
         if isinstance(c, Window) and c.content.is_focusable()
     ]
+
+
+class OverflowScrollbar(ConditionalMargin):
+    """A widget's own scrollbar (a RadioList's, a TextArea's), drawn only
+    while its window doesn't show all of its content, as CSS's overflow:
+    auto: in a body that scrolls, the widget gets all its rows and the
+    body's scrollbar is the one; a widget alone that scrolls itself shows
+    its own. prompt_toolkit draws them always.
+
+    It goes by the window's last draw; settled() says when that draw left
+    it wrong, for another draw to put right.
+    """
+
+    def __init__(self, margin: Margin, window: Window) -> None:
+        self.window = window
+        self._shown = False
+        self._decided_at = -1
+        super().__init__(margin, filter=Condition(self._show))
+
+    def _show(self) -> bool:
+        self._shown = _overflows(self.window)
+        self._decided_at = get_app().render_counter
+        return self._shown
+
+    def settled(self) -> bool:
+        """False if the draw that just ended drew it, and that draw changed
+        whether its window shows all its content."""
+        if self._decided_at != get_app().render_counter:
+            return True  # not drawn this time (a notice in the box's place)
+        return self._shown == _overflows(self.window)
+
+
+def _overflows(window: Window) -> bool:
+    """True if ``window``, at its last draw, didn't show all its content."""
+    info = window.render_info
+    # (Not prompt_toolkit's full_height_visible: it's never true.)
+    return info is not None and not (info.top_visible and info.bottom_visible)
+
+
+def overflow_scrollbars(container: Container) -> list[OverflowScrollbar]:
+    """Make the scrollbars of the windows in ``container`` OverflowScrollbars,
+    and return them all (a dialog shown again finds its own)."""
+    found: list[OverflowScrollbar] = []
+    for window in walk(container):
+        if not isinstance(window, Window):
+            continue
+        for side in ("left_margins", "right_margins"):
+            margins: list[Margin] = []
+            for margin in getattr(window, side):
+                if not isinstance(margin, OverflowScrollbar) and _is_scrollbar(margin):
+                    margin = OverflowScrollbar(margin, window)
+                if isinstance(margin, OverflowScrollbar):
+                    found.append(margin)
+                margins.append(margin)
+            setattr(window, side, margins)
+    return found
+
+
+def _is_scrollbar(margin: Margin) -> bool:
+    while isinstance(margin, ConditionalMargin):
+        margin = margin.margin
+    return isinstance(margin, ScrollbarMargin)
 
 
 class AtMost(Container):
