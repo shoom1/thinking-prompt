@@ -46,7 +46,6 @@ PUBLIC = {
     "RadioField",
     "ChoiceField",
     "Spinner",
-    "rich_to_ansi",
 }
 
 
@@ -59,7 +58,7 @@ def test_each_public_name_imports_from_the_package():
         assert hasattr(thinking_prompt, name), name
 
 
-@pytest.mark.parametrize("name", ["StreamingContent", "ThinkingHeader", "DEFAULT_STYLES"])
+@pytest.mark.parametrize("name", ["StreamingContent", "ThinkingHeader", "DEFAULT_STYLES", "rich_to_ansi"])
 def test_building_blocks_arent_exported(name: str):
     assert not hasattr(thinking_prompt, name)
 

@@ -894,11 +894,13 @@ From 0.5.0 on:
   with an upgrade note here.
 
 The API is what `thinking_prompt` exports (its `__all__`), with the
-parameters, attributes and style classes this README documents. It
-doesn't cover names that start with `_`, the modules inside the package
-(import from `thinking_prompt` itself), or what's inside `session.app`:
-that's prompt_toolkit's `Application`, and the layout the session builds
-in it can change in any release.
+parameters and attributes their docstrings document (what `help()` shows),
+the fields of `ThinkingPromptStyles` among them. It doesn't cover names
+that start with `_`, the modules inside the package (import from
+`thinking_prompt` itself), the prompt_toolkit style classes those fields
+are applied to (`to_style_dict()` lists them), or what's inside
+`session.app`: that's prompt_toolkit's `Application`, and the layout the
+session builds in it can change in any release.
 
 ## Upgrading from 0.4
 
@@ -931,6 +933,7 @@ removed:
 | The default theme, the dark palette | The terminal's own colors: `theme="dark"` keeps 0.4's look, and `ThinkingPromptStyles()` is now the terminal theme (`.dark()` is the dark palette) |
 | `theme="auto"` | Drop it: the default follows the terminal |
 | `styles.to_rich_theme_dict()` | Drop it: the session's Rich output uses its theme already |
+| `rich_to_ansi(renderable)` | Drop it: a box's `append_rich()` and `set_line_rich()`, and the session's `add_rich()`, take Rich markup and renderables |
 | `ThinkingPromptSession(editing_mode=...)` | Drop it: the keys are prompt_toolkit's default (Emacs) ones, which the dialogs and fields are built for |
 | Ctrl+C at an idle prompt exits | Ctrl+C never exits (it clears the line): Ctrl+D exits, or your own `/exit` command |
 | Ctrl+D while a handler runs: exits | Stop the handler with Ctrl+C first: Ctrl+D exits at an idle prompt |
