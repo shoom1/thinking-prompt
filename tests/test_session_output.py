@@ -91,10 +91,12 @@ class TestAddResponse:
         session = _session()
         session.add_response(content)
 
+        # Ended as a str response is: a newline (a blank line after it).
+        ended = [*_FRAGMENTS, ("", "\n")]
         (entry,) = _entries(session)
-        assert (entry.kind, entry.fragments) == ("formatted", _FRAGMENTS)
+        assert (entry.kind, entry.fragments) == ("formatted", ended)
         (printed,) = session._display.kept
-        assert to_formatted_text(printed) == _FRAGMENTS
+        assert to_formatted_text(printed) == ended
 
     @pytest.mark.parametrize(
         "content",
@@ -120,7 +122,19 @@ class TestAddResponse:
         assert "Title: Content" in printed
         assert "(" not in printed
         (entry,) = _entries(session)
-        assert fragment_list_to_text(entry.fragments) == "Title: Content"
+        assert fragment_list_to_text(entry.fragments) == "Title: Content\n"
+
+    @pytest.mark.parametrize(
+        "content",
+        [FormattedText([("", "answer")]), [("bold", "answer")], HTML("answer"), ANSI("answer")],
+        ids=["FormattedText", "list", "HTML", "ANSI"],
+    )
+    def test_formatted_text_is_spaced_as_a_str_is(self, content):
+        """A blank line after it, as after every message: it had none."""
+        def printed(given: Any) -> str:
+            return _shown(_terminal(lambda s: s.add_response(given)))
+
+        assert printed(content) == printed("answer")
 
     @pytest.mark.parametrize(
         "content",
@@ -153,7 +167,7 @@ class TestAddResponse:
         session = _session()
         session.add_response((("bold", "Title: "), ("", "Content")))
         (entry,) = _entries(session)
-        assert entry.fragments == _FRAGMENTS
+        assert entry.fragments == [*_FRAGMENTS, ("", "\n")]
 
     def test_markdown_is_printed_rendered_and_kept_as_its_source(self):
         pytest.importorskip("rich")

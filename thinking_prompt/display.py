@@ -311,13 +311,15 @@ class Display:
 
     def formatted(self, formatted_text: FormattedText) -> None:
         """
-        Output pre-formatted FormattedText directly.
+        Output pre-formatted FormattedText directly, ended as a str
+        response is (with a newline, so a blank line follows it).
 
         Args:
             formatted_text: A FormattedText object with (style, text) pairs.
         """
-        self._transcript.append_formatted(formatted_text)
-        self._print_to_console(formatted_text)
+        ended = FormattedText([*formatted_text, ("", "\n")])
+        self._transcript.append_formatted(ended)
+        self._print_to_console(ended)
 
     def rich(self, renderable: Any) -> None:
         """
