@@ -27,17 +27,26 @@ def _style_str(*parts: str) -> str:
     return " ".join(p for p in parts if p)
 
 
-def _own(rule: str, *, fg: bool = False, bg: bool = False) -> str:
+def _own(rule: str, *, fg: bool = False, bg: bool = False, noreverse: bool = False) -> str:
     """``rule`` for a class prompt_toolkit's default style paints (a white
     dialog body, a red title, a gray completion menu): the colors it
     doesn't set itself start as the terminal's own, as an empty token
-    means. Left empty, the rule wouldn't override prompt_toolkit's."""
+    means. Left empty, the rule wouldn't override prompt_toolkit's.
+    ``noreverse``: prompt_toolkit's rule is reverse video too, which a rule
+    that doesn't say would keep.
+
+    The reset is an empty color ("fg:"), not "default": prompt_toolkit's
+    legacy Windows console output draws "default" black, and keeps the
+    console's own colors only for an empty one.
+    """
     words = rule.split()
     resets = []
     if fg and not any(word.startswith("fg:") for word in words):
-        resets.append("fg:default")
+        resets.append("fg:")
     if bg and not any(word.startswith("bg:") for word in words):
-        resets.append("bg:default")
+        resets.append("bg:")
+    if noreverse and "reverse" not in words and "noreverse" not in words:
+        resets.append("noreverse")
     return _style_str(*resets, rule)
 
 
@@ -443,15 +452,25 @@ class ThinkingPromptStyles:
             # Dropdown menu (uses shared menu styles)
             'field-dropdown': r("menu_bg"),
             'field-dropdown-border': r("menu_border"),
-            'field-dropdown-item': r("menu_item"),
+            # Not the frame's (the border's) muted color.
+            'field-dropdown-item': _own(r("menu_item"), fg=True),
             'field-dropdown-selected': r("menu_item_selected"),
             # Completion menu (uses shared menu styles)
             'completion-menu': _own(r("menu_bg"), fg=True, bg=True),
             'completion-menu.completion': r("menu_item"),
-            'completion-menu.completion.current': _own(r("menu_item_selected"), fg=True, bg=True),
+            'completion-menu.completion.current': _own(
+                r("menu_item_selected"), fg=True, bg=True, noreverse=True
+            ),
             'completion-menu.meta': r("menu_meta"),
             'completion-menu.meta.completion': _own(r("menu_meta"), fg=True, bg=True),
-            'completion-menu.meta.completion.current': _own(r("menu_meta_selected"), fg=True, bg=True),
+            'completion-menu.meta.completion.current': _own(
+                r("menu_meta_selected"), fg=True, bg=True, noreverse=True
+            ),
+            # A FuzzyCompleter's letters outside the match: muted (prompt_
+            # toolkit's #444444 was for its own gray menu); on the current
+            # item, the item's own color.
+            'completion-menu.completion fuzzymatch.outside': _own(_fg(self.color_text_muted), fg=True),
+            'completion-menu.completion.current fuzzymatch.outside': _own("", fg=True),
             'scrollbar.background': _own(r("scrollbar_background"), bg=True),
             'scrollbar.button': _own(r("scrollbar_button"), bg=True),
         }

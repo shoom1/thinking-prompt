@@ -145,20 +145,24 @@ class TestThemeFactories:
         assert ThinkingPromptStyles.light().code_theme == "default"
 
 
-# Class stacks as prompt_toolkit draws them: a box dialog's body, its title,
-# its focused button, a text area in it, its scrollbar; the completion menu.
+# Class stacks as the session draws them: a box dialog's body, its title,
+# its focused button, a text area in it, a scrollbar (its cells carry only
+# the scrollbar's classes); the completion menu, with a FuzzyCompleter's
+# match classes; a dropdown's option, in its framed menu.
 _DRAWN = [
     "class:dialog class:dialog.body",
     "class:dialog class:frame.label",
-    "class:dialog class:shadow",
     "class:dialog class:dialog.body class:button class:button.focused",
     "class:dialog class:dialog.body class:text-area",
-    "class:dialog class:dialog.body class:scrollbar.background",
-    "class:dialog class:dialog.body class:scrollbar.button",
+    "class:scrollbar.background",
+    "class:scrollbar.button",
     "class:completion-menu class:completion-menu.completion",
     "class:completion-menu class:completion-menu.completion.current",
     "class:completion-menu class:completion-menu.meta.completion",
     "class:completion-menu class:completion-menu.meta.completion.current",
+    "class:completion-menu class:completion-menu.completion class:fuzzymatch.outside",
+    "class:completion-menu class:completion-menu.completion.current class:fuzzymatch.outside",
+    "class:field-dropdown-border class:field-dropdown class:field-dropdown-item",
 ]
 
 
@@ -185,12 +189,37 @@ class TestNoPromptToolkitColors:
             assert not re.fullmatch(r"[0-9a-f]{6}", color or ""), (classes, attrs)
 
     def test_a_focused_button_still_stands_out(self):
-        attrs = _drawn(ThinkingPromptStyles(), _DRAWN[3])
+        attrs = _drawn(ThinkingPromptStyles(), _DRAWN[2])
         assert attrs.reverse and attrs.bold
 
     def test_the_current_completion_still_stands_out(self):
-        attrs = _drawn(ThinkingPromptStyles(), _DRAWN[8])
+        attrs = _drawn(ThinkingPromptStyles(), _DRAWN[7])
         assert attrs.reverse
+
+    def test_the_terminals_own_color_is_no_color(self):
+        """An empty color, not "default": prompt_toolkit's legacy Windows
+        console output draws "default" black (it keeps the console's own
+        colors only for an empty one)."""
+        for theme in ("terminal", "mono"):
+            for classes in _DRAWN:
+                attrs = _drawn(resolve_theme(theme), classes)
+                assert "default" not in (attrs.color, attrs.bgcolor), (theme, classes)
+
+    def test_a_fuzzy_completers_unmatched_letters_are_muted(self):
+        """prompt_toolkit's #444444 was readable on its own gray menu, not
+        on a dark terminal's background."""
+        s = ThinkingPromptStyles()
+        assert _drawn(s, _DRAWN[10]).color == s.color_text_muted
+
+    def test_a_dropdowns_options_are_the_terminals_own_color(self):
+        """Not the border's muted color, which the frame passes on."""
+        assert _drawn(ThinkingPromptStyles(), _DRAWN[12]).color == ""
+
+    def test_an_explicit_selection_isnt_reversed_by_prompt_toolkit(self):
+        """prompt_toolkit's current completion is reverse video: a selection
+        set by colors came out swapped, in the completion menu only."""
+        s = ThinkingPromptStyles(menu_item_selected="bg:#222222 fg:ansiyellow")
+        assert not _drawn(s, _DRAWN[7]).reverse
 
     @pytest.mark.parametrize("theme", ["dark", "light"])
     def test_themes_with_colors_keep_them(self, theme: str):
