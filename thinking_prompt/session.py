@@ -1253,6 +1253,10 @@ class ThinkingPromptSession:
             caller = None
         if caller is not None and caller is self._foreground:
             self._exit_after_query = True
+            # No more input: a task already waiting for some is told so.
+            pending = self._pending_input
+            if pending is not None and not pending.done():
+                pending.set_exception(EOFError())
         else:
             self._exit_app()
 

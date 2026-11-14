@@ -845,6 +845,37 @@ class TestExitFromTheQuery:
             await run_loop(session, body, script)
         assert results == ["EOF"]
 
+    async def test_a_task_waiting_for_input_gets_eof_error_at_once(self):
+        """Told to stop, the session reads no more input: a task already
+        waiting in prompt_async() isn't left to take the next line."""
+        from tests.test_end_to_end import run_with
+
+        got: list[str] = []
+        finishing = asyncio.Event()
+
+        async def asker() -> None:
+            try:
+                got.append(await session.prompt_async())
+            except EOFError:
+                got.append("EOF")
+
+        async def handler(text: str) -> None:
+            asyncio.ensure_future(asker())
+            await asyncio.sleep(0.05)  # the task waits for input
+            session.exit()
+            await finishing.wait()
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("/quit" + ENTER)
+                await wait_until(lambda: got == ["EOF"])
+                assert session.app.is_running  # the handler is finishing
+                finishing.set()
+                await finished(run)
+
+            await run_with(session, handler, script)
+
     async def test_ctrl_c_after_exit_cancels_the_query_then_the_session_exits(self):
         from tests.test_end_to_end import run_with
 
