@@ -344,7 +344,9 @@ can stream into a box the loop opened (`append`, `set_line`, `clear`,
 `len(box)`, `is_finished`). Opening and finishing boxes, the `add_*`
 methods, `status_text`, dialogs, `prompt_async()` and `query()` run on
 the loop: `finish()` and `add_*` print, and printed from another thread
-their text would draw over the UI.
+their text would draw over the UI. Dialogs, `prompt_async()` and `query()`
+awaited on a thread's own event loop raise `RuntimeError`: hand them to the
+session's loop with `asyncio.run_coroutine_threadsafe(coro, loop)`.
 
 Run the blocking part in a thread, and the rest after it, on the loop:
 

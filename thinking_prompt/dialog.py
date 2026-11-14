@@ -750,7 +750,9 @@ class DialogManager:
                 ended): only the running app can answer a dialog, so it
                 would wait forever. Also if a dialog is already being
                 shown: a second one would orphan the first one's result
-                future, leaving its awaiter hung forever.
+                future, leaving its awaiter hung forever. And when awaited
+                on another event loop than the session's (a thread's own):
+                nothing would wake it.
             EOFError: If the app exits while the dialog is open (e.g. one
                 opened from a background task). A dialog the running query
                 awaits, itself or through the tasks it awaits, is cancelled
@@ -787,6 +789,8 @@ class DialogManager:
                 "`async with session:`, or while run() or run_async() is "
                 "running, e.g. from an input handler."
             )
+
+        self._session._check_loop("A dialog")
 
         placement = (
             dialog.placement if dialog.placement is not None
