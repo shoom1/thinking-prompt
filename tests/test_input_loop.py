@@ -280,13 +280,15 @@ class TestPromptAsync:
 
             await run_loop(session, body, script)
 
-    async def test_a_second_waiter_is_refused(self):
+    async def test_a_second_waiter_is_refused_and_pointed_to_a_dialog(self):
+        """The prompt's next line is one task's: a task beside the input
+        loop asks with a dialog."""
         with piped_session() as (session, inp):
 
             async def body() -> None:
                 first = asyncio.ensure_future(session.prompt_async())
                 await wait_until(lambda: waiting_for_input(session))
-                with pytest.raises(RuntimeError, match="already waiting"):
+                with pytest.raises(RuntimeError, match="already waiting.*dialog"):
                     await session.prompt_async()
                 first.cancel()
                 with suppress(asyncio.CancelledError):

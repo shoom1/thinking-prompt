@@ -1394,7 +1394,8 @@ class ThinkingPromptSession:
                 Ctrl+C never exits: it stops the running query, or clears
                 an idle prompt.
             RuntimeError: Outside ``async with session:``, or while another
-                task is already waiting here.
+                task is already waiting here: the next line is one task's.
+                A task beside the input loop asks with a dialog.
         """
         run = self._app_run
         if run is None:
@@ -1409,7 +1410,11 @@ class ThinkingPromptSession:
             raise EOFError
         pending = self._pending_input
         if pending is not None and not pending.done():
-            raise RuntimeError("Another task is already waiting in prompt_async()")
+            raise RuntimeError(
+                "Another task is already waiting in prompt_async(): the next "
+                "line is one task's. A task beside the input loop asks with a "
+                "dialog (yes_no_dialog(), say)."
+            )
         if self._queued:
             text = self._queued.popleft()
             self._clear_hint()
