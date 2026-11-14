@@ -144,6 +144,16 @@ class TestBuiltinDialogs:
         with pytest.raises(ValueError, match="at least one option"):
             _checklist_dialog("Tools", "Pick any", [])
 
+    @pytest.mark.parametrize("default", ["search", None], ids=["a str", "None"])
+    def test_checklist_default_is_a_sequence_of_options(self, default):
+        """A str would be taken letter by letter, none of them an option."""
+        with pytest.raises(ValueError, match=r"checklist_dialog\(\) default must be a sequence of options"):
+            _checklist_dialog("Tools", "Pick any", ["search", "code"], default=default)
+
+    def test_buttons_need_options(self):
+        with pytest.raises(ValueError, match=r"button_dialog\(\) needs at least one option"):
+            _button_dialog("Action", "Choose:", [])
+
     @pytest.mark.parametrize("build,call", [
         (lambda options: _button_dialog("T", "B", options), "button_dialog()"),
         (lambda options: _choice_dialog("T", "B", options), "choice_dialog()"),
@@ -239,7 +249,7 @@ class TestDialogNeedsRunningSession:
         from thinking_prompt import ThinkingPromptSession
 
         session = ThinkingPromptSession()
-        with pytest.raises(RuntimeError, match=r"needs a running session.*async with session"):
+        with pytest.raises(RuntimeError, match=r"needs a running session.*`async with session:`"):
             await asyncio.wait_for(open_dialog(session), timeout=1)
         assert session._dialogs._current_dialog is None
 

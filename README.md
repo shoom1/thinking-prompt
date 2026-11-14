@@ -909,12 +909,16 @@ From 0.5.0 on:
 
 The API is what `thinking_prompt` exports (its `__all__`), with the
 parameters and attributes their docstrings document (what `help()` shows),
-the fields of `ThinkingPromptStyles` among them. It doesn't cover names
-that start with `_`, the modules inside the package (import from
-`thinking_prompt` itself), the prompt_toolkit style classes those fields
-are applied to (`to_style_dict()` lists them), or what's inside
-`session.app`: that's prompt_toolkit's `Application`, and the layout the
-session builds in it can change in any release.
+the fields of `ThinkingPromptStyles` among them. A dataclass's fields
+(`ThinkingPromptStyles`, `ButtonConfig`, the form fields, `AppInfo`,
+`Spinner`) are covered by name, and new ones can come between them: pass
+them by name, past the ones this README passes by position (a form field's
+`key` and `label`, a button's `text`, a spinner's `frames`). It doesn't
+cover private names (one leading `_`), the modules inside the package
+(import from `thinking_prompt` itself), the prompt_toolkit style classes
+the style fields are applied to (`to_style_dict()` lists them), or what's
+inside `session.app`: that's prompt_toolkit's `Application`, and the
+layout the session builds in it can change in any release.
 
 ## Upgrading from 0.4
 
@@ -951,7 +955,7 @@ removed:
 | `ThinkingPromptSession(editing_mode=...)` | Drop it: the keys are prompt_toolkit's default (Emacs) ones, which the dialogs and fields are built for |
 | Ctrl+C at an idle prompt exits | Ctrl+C never exits (it clears the line): Ctrl+D exits, or your own `/exit` command |
 | Ctrl+D while a handler runs: exits | Stop the handler with Ctrl+C first: Ctrl+D exits at an idle prompt |
-| Style field `history`, classes `history.*` (`history.user-message`, ...) | `transcript`, `transcript.*` (`transcript.user-message`, ...) |
+| Style field `history`, classes `history.*` (`history.user-message`, ...) | `transcript`, `transcript.*` (`transcript.user-message`, ...). The class names aren't covered by [Stability](#stability): style with the field |
 | Style fields `radio_list`, `radio_selected`, `checkbox_list`, `checkbox_selected` (classes `radio-*`, `checkbox-*`) | Drop them: the dialog fields use the `field_*` styles |
 
 `prompt_async()` reads input inside `async with session:` (see

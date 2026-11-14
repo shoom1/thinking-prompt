@@ -176,24 +176,33 @@ def test_parameter_names(func: Callable[..., object], names: list[str]):
     assert _parameters(func) == names
 
 
-def _positional_flags() -> list[str]:
-    """The bool parameters of exported classes' methods that can be passed
-    by position (a dataclass's fields are left out: they're its data)."""
+def _positional_flags(module: object = thinking_prompt) -> list[str]:
+    """The bool parameters (annotated bool, or defaulting to one) of the
+    methods of ``module``'s exported classes, inherited ones too, that can
+    be passed by position. A dataclass's own __init__ is left out: its
+    fields are its data."""
     found = []
-    for name in thinking_prompt.__all__:
-        owner = getattr(thinking_prompt, name)
+    for name in module.__all__:  # type: ignore[attr-defined]
+        owner = getattr(module, name)
         if not inspect.isclass(owner):
             continue
-        for attr, member in vars(owner).items():
-            if attr.startswith("_") and not (attr == "__init__" and not dataclasses.is_dataclass(owner)):
+        for klass in owner.__mro__:
+            if klass is object:
                 continue
-            func = getattr(member, "__func__", member)
-            if not inspect.isfunction(func):
-                continue
-            for param in inspect.signature(func).parameters.values():
-                if "bool" in str(param.annotation) and param.kind is not param.KEYWORD_ONLY:
-                    found.append(f"{name}.{attr}({param.name})")
-    return found
+            for attr, member in vars(klass).items():
+                if attr.startswith("_") and attr != "__init__":
+                    continue
+                if attr == "__init__" and dataclasses.is_dataclass(klass):
+                    continue
+                # A property's setter takes its value by assignment.
+                func = getattr(member, "__func__", member)
+                if not inspect.isfunction(func):
+                    continue
+                for param in inspect.signature(func).parameters.values():
+                    flag = "bool" in str(param.annotation) or isinstance(param.default, bool)
+                    if flag and param.kind is not param.KEYWORD_ONLY:
+                        found.append(f"{name}.{attr}({param.name})")
+    return sorted(set(found))
 
 
 def test_a_flag_is_passed_by_name():

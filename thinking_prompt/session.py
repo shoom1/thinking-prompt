@@ -40,10 +40,10 @@ from prompt_toolkit.formatted_text import (
     HTML,
     AnyFormattedText,
     FormattedText,
-    StyleAndTextTuples,
     fragment_list_to_text,
     to_formatted_text,
 )
+from prompt_toolkit.formatted_text.base import OneStyleAndTextTuple
 from prompt_toolkit.history import History, InMemoryHistory
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.key_binding.key_processor import KeyPressEvent
@@ -51,7 +51,7 @@ from prompt_toolkit.layout import AnyContainer, ConditionalContainer, DynamicCon
 from prompt_toolkit.layout.controls import FormattedTextControl, UIContent, UIControl
 from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.output import ColorDepth, Output
-from prompt_toolkit.styles import DynamicStyle
+from prompt_toolkit.styles import DynamicStyle, Style
 
 from ._text import format_exception_detail
 from .app_info import AppInfo
@@ -77,6 +77,37 @@ logger = logging.getLogger(__name__)
 # on_input() returns the handler it registers with its own type.
 _HandlerT = TypeVar("_HandlerT", bound="InputHandler")
 _T = TypeVar("_T")
+
+_FORMATTED_TEXT = "a str, or formatted text: (style, text) pairs, such as a FormattedText, or HTML or ANSI"
+
+
+def _response_fragments(content: object) -> FormattedText:
+    """``content`` as a FormattedText, or ValueError: checked before anything
+    keeps it, since a bad fragment kept in the transcript fails every
+    repaint after it."""
+    if isinstance(content, (HTML, ANSI)):
+        return to_formatted_text(content)
+    if isinstance(content, (list, tuple)):
+        for fragment in content:
+            if not (
+                isinstance(fragment, tuple)
+                and len(fragment) in (2, 3)
+                and isinstance(fragment[0], str)
+                and isinstance(fragment[1], str)
+            ):
+                raise ValueError(
+                    f"add_response() takes {_FORMATTED_TEXT}; got the fragment {fragment!r}"
+                )
+            try:
+                # The parser prompt_toolkit uses for a fragment's style.
+                Style([("fragment", fragment[0])])
+            except (ValueError, AssertionError) as exc:
+                raise ValueError(
+                    f"add_response() takes {_FORMATTED_TEXT}; the fragment "
+                    f"{fragment!r} has a style prompt_toolkit can't use: {exc}"
+                ) from None
+        return FormattedText(content)
+    raise ValueError(f"add_response() takes {_FORMATTED_TEXT}; got {content!r}")
 
 
 class _RoomControl(UIControl):
@@ -977,7 +1008,7 @@ class ThinkingPromptSession:
 
     def add_response(
         self,
-        content: str | StyleAndTextTuples | HTML | ANSI,
+        content: str | Sequence[OneStyleAndTextTuple] | HTML | ANSI,
         *,
         markdown: bool = False,
     ) -> None:
@@ -988,13 +1019,16 @@ class ThinkingPromptSession:
         plain text, markdown, or prompt_toolkit's formatted text.
 
         Args:
-            content: The response: a str, or formatted text (a
-                FormattedText, a list of (style, text) pairs, HTML or ANSI).
-            markdown: If True and content is str, render as markdown via Rich.
-                     Falls back to plain text if Rich is not installed.
+            content: The response: a str, or formatted text ((style, text)
+                pairs, such as a FormattedText, or HTML or ANSI).
+            markdown: If True, render the str as markdown via Rich. Falls
+                back to plain text if Rich is not installed.
 
         Raises:
-            ValueError: If content is neither a str nor formatted text.
+            ValueError: If content is neither a str nor formatted text (a
+                pair whose style prompt_toolkit can't use included), or
+                markdown=True comes with formatted text. Nothing is printed
+                or kept then.
 
         Examples:
             # Plain text
@@ -1008,9 +1042,11 @@ class ThinkingPromptSession:
             session.add_response(formatted)
         """
         if not isinstance(content, str):
+            if markdown:
+                raise ValueError(f"add_response(markdown=True) takes a str, got {content!r}")
             # As a FormattedText: prompt_toolkit's print shows a plain list
-            # as its repr, and so it would HTML or ANSI here.
-            self._display.formatted(to_formatted_text(content))
+            # as its repr.
+            self._display.formatted(_response_fragments(content))
             return
 
         # Handle markdown
@@ -1775,7 +1811,7 @@ class ThinkingPromptSession:
         Raises:
             RuntimeError: If the session isn't running (see show_dialog()),
                 or another dialog is open: one at a time.
-            ValueError: If an option is listed twice.
+            ValueError: If ``options`` is empty, or an option is listed twice.
 
         Example:
             action = await session.button_dialog(
@@ -1866,7 +1902,8 @@ class ThinkingPromptSession:
         Raises:
             RuntimeError: If the session isn't running (see show_dialog()),
                 or another dialog is open: one at a time.
-            ValueError: If ``options`` is empty, or an option is listed twice.
+            ValueError: If ``options`` is empty, an option is listed twice,
+                or ``default`` is a str or None rather than a sequence.
 
         Example:
             tools = await session.checklist_dialog(

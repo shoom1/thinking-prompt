@@ -122,11 +122,38 @@ class TestAddResponse:
         (entry,) = _entries(session)
         assert fragment_list_to_text(entry.fragments) == "Title: Content"
 
-    def test_something_that_isnt_text_is_refused(self):
+    @pytest.mark.parametrize(
+        "content",
+        [
+            42,
+            None,
+            lambda: "hi",
+            ["ab", "cd"],
+            [("bold",)],
+            [("bold", 1)],
+            [("a", "text")],
+        ],
+        ids=["int", "None", "callable", "strings", "short pair", "text not a str", "bad style"],
+    )
+    def test_something_that_isnt_text_is_refused_and_not_kept(self, content):
+        """Kept, a bad fragment would fail every repaint after it."""
         session = _session()
-        with pytest.raises(ValueError, match="42"):
-            session.add_response(42)  # type: ignore[arg-type]
+        with pytest.raises(ValueError, match=r"add_response\(\) takes"):
+            session.add_response(content)
         assert _entries(session) == []
+        assert session._display.kept == []
+
+    def test_markdown_takes_a_str(self):
+        session = _session()
+        with pytest.raises(ValueError, match=r"add_response\(markdown=True\) takes a str"):
+            session.add_response(HTML("<b>x</b>"), markdown=True)
+        assert _entries(session) == []
+
+    def test_a_sequence_of_pairs_is_formatted_text(self):
+        session = _session()
+        session.add_response((("bold", "Title: "), ("", "Content")))
+        (entry,) = _entries(session)
+        assert entry.fragments == _FRAGMENTS
 
     def test_markdown_is_printed_rendered_and_kept_as_its_source(self):
         pytest.importorskip("rich")

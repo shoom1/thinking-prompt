@@ -484,6 +484,8 @@ def _button_dialog(
     max_height: int | None = None,
 ) -> Dialog:
     """One button per option, returning its text; Escape returns None."""
+    if not options:
+        raise ValueError("button_dialog() needs at least one option")
     _check_once("button_dialog()", options)
     return Dialog(
         title,
@@ -550,6 +552,12 @@ def _checklist_dialog(
     if not options:
         raise ValueError("checklist_dialog() needs at least one option")
     _check_once("checklist_dialog()", options)
+    if default is None or isinstance(default, str):
+        # A str would be taken letter by letter, none of them an option.
+        raise ValueError(
+            f"checklist_dialog() default must be a sequence of options "
+            f"(() for none), got {default!r}"
+        )
     dialog = Dialog(
         title,
         text,
@@ -774,7 +782,7 @@ class DialogManager:
         if not self._session.app.is_running or app_done is None or app_done.done():
             raise RuntimeError(
                 "show_dialog() needs a running session: call it inside "
-                "async with session:, or while run() or run_async() is "
+                "`async with session:`, or while run() or run_async() is "
                 "running, e.g. from an input handler."
             )
 
