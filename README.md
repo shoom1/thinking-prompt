@@ -151,8 +151,8 @@ session = ThinkingPromptSession(
     thinking_max_lines=15,       # Max lines when collapsed
     enable_status_bar=True,      # Show status bar
     echo_input=True,             # Echo user input to console
-    complete_while_typing=True,  # Show completions as you type
-    completions_menu_height=6,   # Max rows in completions popup
+    complete_while_typing=False, # Completions as you type (True), or on Tab
+    completions_menu_height=5,   # Max rows in completions popup
 )
 ```
 
@@ -510,16 +510,28 @@ hint.
 
 ### Dialogs
 
-Dialogs open over a running session: call them from an input handler, or
-from a task started while `run()`/`run_async()` is running. On a session
-that isn't running they raise `RuntimeError`. If the session exits while a
-dialog is open, awaiting it raises `asyncio.CancelledError`.
+Dialogs open over a running session: call them from an input handler,
+inside `async with session:`, or from a task started while the session
+runs. On a session that isn't running they raise `RuntimeError`. If the
+session exits while a dialog is open, awaiting it raises
+`asyncio.CancelledError`.
+
+One dialog is open at a time: opening another while one is open raises
+`RuntimeError`. Background tasks that may ask at the same moment (two tool
+calls each asking for approval, say) can share an `asyncio.Lock`:
+
+```python
+dialog_lock = asyncio.Lock()
+
+async def approve(tool: str) -> bool:
+    async with dialog_lock:
+        return await session.yes_no_dialog("Approve", f"Run {tool}?")
+```
 
 ```python
 # Yes/No confirmation
-result = await session.yes_no_dialog("Confirm", "Delete this item?")
-if result:
-    # User clicked Yes
+if await session.yes_no_dialog("Confirm", "Delete this item?"):
+    delete_item()   # Yes; No and Escape give False
 
 # Message dialog
 await session.message_dialog("Info", "Operation completed!")
@@ -665,11 +677,13 @@ tools = await session.checklist_dialog(
     "Tools", "Enable any:", ["search", "code", "files"], default=["search"],
 )   # the checked options, or None if cancelled
 
-await session.show_dialog(Dialog("Settings", fields=[
+dialog = Dialog("Settings", fields=[
     ChecklistField("tools", "Tools", options=["search", "code"]),
     RadioField("mode", "Mode", options=["fast", "careful"], default="fast"),
     ChoiceField("theme", "Theme", options=["dark", "light"]),
-], buttons=[ButtonConfig("Done")]))
+])
+dialog.buttons = [ButtonConfig("Done", handler=lambda: dialog.set_result(dialog.values))]
+values = await session.show_dialog(dialog)   # {"tools": [], "mode": "fast", "theme": "dark"}
 ```
 
 A body that doesn't fit scrolls with ↑↓ (and PgUp/PgDn), and the hint line

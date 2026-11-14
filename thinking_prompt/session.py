@@ -1702,6 +1702,10 @@ class ThinkingPromptSession:
         Returns:
             True if Yes was clicked, False if No or Escape.
 
+        Raises:
+            RuntimeError: If the session isn't running (see show_dialog()),
+                or another dialog is open: one at a time.
+
         Example:
             if await session.yes_no_dialog("Confirm", "Delete this file?"):
                 delete_file()
@@ -1731,6 +1735,10 @@ class ThinkingPromptSession:
             max_height: The most rows the dialog takes; what doesn't fit
                 scrolls (see Dialog.max_height). None (default): the
                 terminal's rows less the prompt's.
+
+        Raises:
+            RuntimeError: If the session isn't running (see show_dialog()),
+                or another dialog is open: one at a time.
 
         Example:
             await session.message_dialog("Info", "Operation completed.")
@@ -1765,6 +1773,8 @@ class ThinkingPromptSession:
             The option picked, or None if Escape was pressed.
 
         Raises:
+            RuntimeError: If the session isn't running (see show_dialog()),
+                or another dialog is open: one at a time.
             ValueError: If an option is listed twice.
 
         Example:
@@ -1810,6 +1820,8 @@ class ThinkingPromptSession:
             The selected option string, or None if cancelled.
 
         Raises:
+            RuntimeError: If the session isn't running (see show_dialog()),
+                or another dialog is open: one at a time.
             ValueError: If ``options`` is empty, or an option is listed twice.
 
         Example:
@@ -1852,6 +1864,8 @@ class ThinkingPromptSession:
             The checked options in option order, or None if cancelled.
 
         Raises:
+            RuntimeError: If the session isn't running (see show_dialog()),
+                or another dialog is open: one at a time.
             ValueError: If ``options`` is empty, or an option is listed twice.
 
         Example:
@@ -1872,6 +1886,17 @@ class ThinkingPromptSession:
 
         Returns:
             The result value set by the dialog (a button or Escape).
+
+        Raises:
+            RuntimeError: If the session isn't running: call it inside
+                ``async with session:``, or while run() or run_async()
+                runs (e.g. from an input handler or a task it started).
+                Also if another dialog is open: one at a time.
+            asyncio.CancelledError: If the session stops while the dialog
+                is open.
+            TypeError: If ``dialog`` isn't a Dialog.
+            ValueError: If the dialog has nothing to focus, or its
+                placement isn't 'box' or 'inline'.
 
         Example (built with arguments):
             from thinking_prompt import ButtonConfig, Dialog

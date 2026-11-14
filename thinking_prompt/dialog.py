@@ -773,8 +773,9 @@ class DialogManager:
         app_done = self._session.app.future
         if not self._session.app.is_running or app_done is None or app_done.done():
             raise RuntimeError(
-                "show_dialog() needs a running session: call it while run() "
-                "or run_async() is running, e.g. from an input handler."
+                "show_dialog() needs a running session: call it inside "
+                "async with session:, or while run() or run_async() is "
+                "running, e.g. from an input handler."
             )
 
         placement = (
@@ -785,8 +786,9 @@ class DialogManager:
 
         if self._current_dialog is not None:
             raise RuntimeError(
-                "A dialog is already being shown. Wait for it to close "
-                "before showing another one."
+                "A dialog is already being shown: one at a time. Wait for "
+                "it to close before showing another one (tasks that may "
+                "ask at the same moment can share an asyncio.Lock)."
             )
 
         self._inject_float_container()

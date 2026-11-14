@@ -209,7 +209,7 @@ class TestDialogManager:
                 break
         assert manager._current_dialog is first
 
-        with pytest.raises(RuntimeError, match="already being shown"):
+        with pytest.raises(RuntimeError, match=r"already being shown.*asyncio\.Lock"):
             await manager.show(_message_dialog("Second", "body"))
 
         # The first dialog is unaffected and still resolvable.
@@ -239,7 +239,7 @@ class TestDialogNeedsRunningSession:
         from thinking_prompt import ThinkingPromptSession
 
         session = ThinkingPromptSession()
-        with pytest.raises(RuntimeError, match="needs a running session"):
+        with pytest.raises(RuntimeError, match=r"needs a running session.*async with session"):
             await asyncio.wait_for(open_dialog(session), timeout=1)
         assert session._dialogs._current_dialog is None
 
