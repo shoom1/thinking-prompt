@@ -136,7 +136,10 @@ which closes the stream, and the unanswered turn stays out of `history`.
 
 Rebind Ctrl+T with `expand_key=` (see [Session Options](#session-options)).
 An exit command such as `/exit` is your app's: end your loop on it (see
-[Your Own Loop](#your-own-loop)), or call `session.exit()` from a handler.
+[Your Own Loop](#your-own-loop)), or call `session.exit()` from a handler:
+the handler runs to its end, then the session stops. Called from anywhere
+else (a task, a dialog's button), `exit()` stops the session at once,
+cancelling a running handler.
 
 ## API Reference
 
@@ -965,6 +968,7 @@ removed:
 | `ThinkingPromptSession(editing_mode=...)` | Drop it: the keys are prompt_toolkit's default (Emacs) ones, which the dialogs and fields are built for |
 | Ctrl+C at an idle prompt exits | Ctrl+C never exits (it clears the line): Ctrl+D exits, or your own `/exit` command |
 | Ctrl+D while a handler runs: exits | Stop the handler with Ctrl+C first: Ctrl+D exits at an idle prompt |
+| `session.exit()` in a handler cancels the handler at its next `await` | The handler runs to its end, then the session stops (Ctrl+C still cancels it). From anywhere else, `exit()` stops the session at once, as before |
 | A dialog open when the session exits raises `asyncio.CancelledError` | `EOFError`, as `prompt_async()` raises it. A handler awaiting it is cancelled, as before: the session stopping cancels the handler |
 | Style field `history`, classes `history.*` (`history.user-message`, ...) | `transcript`, `transcript.*` (`transcript.user-message`, ...). The class names aren't covered by [Stability](#stability): style with the field |
 | Style fields `radio_list`, `radio_selected`, `checkbox_list`, `checkbox_selected` (classes `radio-*`, `checkbox-*`) | Drop them: the dialog fields use the `field_*` styles |

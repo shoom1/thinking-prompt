@@ -741,6 +741,163 @@ class TestCancelOnce:
         assert log == ["cleanup cancelled"]
 
 
+class TestExitFromTheQuery:
+    """exit() called by the running query asks the session to stop once the
+    query ends: the code after it runs, with the app up. Called from
+    anywhere else, it stops the app at once (see TestCancelOnce)."""
+
+    async def test_a_handler_runs_to_its_end_then_the_session_exits(self):
+        from tests.test_end_to_end import run_with
+
+        seen: list[bool] = []
+
+        async def handler(text: str) -> None:
+            session.exit()
+            await asyncio.sleep(0.05)  # a real await: no cancel arrives
+            seen.append(session.app.is_running and not session.app.is_done)
+            session.add_response("goodbye")
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("/quit" + ENTER)
+                await finished(run)
+
+            await run_with(session, handler, script)
+        assert seen == [True]
+        assert "goodbye" in transcript_texts(session._display)[-1]
+
+    async def test_a_query_runs_to_its_end_and_returns_its_result(self):
+        results: list[object] = []
+        with piped_session() as (session, inp):
+
+            async def respond() -> str:
+                session.exit()
+                await asyncio.sleep(0.05)
+                return "done"
+
+            async def body() -> None:
+                while True:
+                    try:
+                        await session.prompt_async()
+                    except EOFError:
+                        results.append("EOF")
+                        return
+                    results.append(await session.query(respond()))
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("/quit" + ENTER)
+                await finished(run)
+
+            await run_loop(session, body, script)
+        assert results == ["done", "EOF"]
+
+    async def test_after_exit_the_query_gets_no_more_input(self):
+        """The session was told to stop: prompt_async() raises EOFError, as
+        it does once the app has stopped."""
+        results: list[str] = []
+        with piped_session() as (session, inp):
+
+            async def respond() -> None:
+                session.exit()
+                try:
+                    await session.prompt_async()
+                except EOFError:
+                    results.append("EOF")
+
+            async def body() -> None:
+                await session.prompt_async()
+                await session.query(respond())
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("/quit" + ENTER)
+                await finished(run)
+
+            await run_loop(session, body, script)
+        assert results == ["EOF"]
+
+    async def test_ctrl_c_after_exit_cancels_the_query_then_the_session_exits(self):
+        from tests.test_end_to_end import run_with
+
+        async def handler(text: str) -> None:
+            session.exit()
+            async with session.thinking() as box:
+                box.append("closing\n")
+                await asyncio.sleep(3600)
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("/quit" + ENTER)
+                await wait_until(lambda: session.is_thinking)
+                assert session.app.is_running
+                inp.send_text(CTRL_C)
+                await finished(run)
+                assert transcript_texts(session._display)[-1] == "Operation cancelled...\n"
+
+            await run_with(session, handler, script)
+
+    async def test_exit_from_a_task_the_query_started_stops_at_once(self):
+        """Only the query itself is let finish: exit() from its sub-task
+        stops the app now, and the query is cancelled with it."""
+        from tests.test_end_to_end import run_with
+
+        log: list[str] = []
+
+        async def stop() -> None:
+            session.exit()
+
+        async def handler(text: str) -> None:
+            asyncio.ensure_future(stop())
+            try:
+                await asyncio.sleep(3600)
+            except asyncio.CancelledError:
+                log.append("cancelled")
+                raise
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await finished(run)
+
+            await run_with(session, handler, script)
+        assert log == ["cancelled"]
+
+    async def test_exit_again_does_nothing_more(self):
+        from tests.test_end_to_end import run_with
+
+        async def handler(text: str) -> None:
+            session.exit()
+            session.exit()
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("/quit" + ENTER)
+                await finished(run)
+                session.exit()  # stopped: nothing to do
+
+            await run_with(session, handler, script)
+        assert not any("[ERROR]" in text for text in transcript_texts(session._display))
+
+    async def test_exit_twice_from_elsewhere_does_nothing_more(self):
+        """The app takes a few loop turns to stop: a second exit() meanwhile
+        is a no-op, not prompt_toolkit's "Return value already set"."""
+        with piped_session() as (session, inp):
+
+            async def body() -> None:
+                with suppress(EOFError):
+                    await session.prompt_async()
+
+            async def script(run: asyncio.Task[None]) -> None:
+                session.exit()
+                session.exit()
+                await finished(run)
+
+            await run_loop(session, body, script)
+
+
 class TestRunAsyncHandlers:
     async def test_a_handler_can_ask_a_follow_up(self):
         from tests.test_end_to_end import run_with

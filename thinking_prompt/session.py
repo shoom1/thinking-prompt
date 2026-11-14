@@ -346,6 +346,9 @@ class ThinkingPromptSession:
         # The foreground query has been cancelled (see _cancel_query): it's
         # unwinding, and the session doesn't cancel it again.
         self._query_cancelled: bool = False
+        # The foreground query called exit(): the app stops when it ends
+        # (see _run_query), and no input is read meanwhile.
+        self._exit_after_query: bool = False
         # The tasks that opened boxes, each until it ends: its boxes end
         # with it (see _box_owner_ended). Of those, the ones a cancel ended
         # a thinking() block of while other boxes of theirs stay open: the
@@ -1213,21 +1216,37 @@ class ThinkingPromptSession:
 
     def exit(self) -> None:
         """
-        Exit the session.
+        Exit the session: stop the app.
 
-        Call this from a handler to end the session loop. Open boxes are
-        handled as on any exit (see run_async()).
+        Called by the running query (a run_async() handler, or what query()
+        runs), it lets the query finish: the code after exit() runs, and the
+        app stops when the query ends (Ctrl+C still cancels it). Meanwhile
+        prompt_async() raises EOFError: no more input is read. Called from
+        anywhere else (another task, a dialog's button, a key binding), it
+        stops the app now, cancelling a running query.
+
+        Open boxes are handled as on any exit (see run_async()). Calling it
+        again, or once the session has stopped, does nothing.
 
         Example:
             @session.on_input
             async def handle(text: str):
-                if text.strip() == "exit":
+                if text.strip() == "/quit":
                     session.exit()
+                    session.add_system("Goodbye")
                     return
                 # ... handle other input
         """
-        if self.app and self.app.is_running:
-            self.app.exit()
+        if not self.app.is_running:
+            return
+        try:
+            caller = asyncio.current_task()
+        except RuntimeError:  # no event loop in this thread
+            caller = None
+        if caller is not None and caller is self._foreground:
+            self._exit_after_query = True
+        else:
+            self._exit_app()
 
     # =========================================================================
     # Handler Registration
@@ -1357,8 +1376,10 @@ class ThinkingPromptSession:
 
         Raises:
             EOFError: On Ctrl+D at an empty, idle prompt, and on any call
-                once the app has stopped (Ctrl+D, exit()). Ctrl+C never
-                exits: it stops the running query, or clears an idle prompt.
+                once the app has stopped or been told to stop (Ctrl+D,
+                exit(), also while the query that called exit() finishes).
+                Ctrl+C never exits: it stops the running query, or clears
+                an idle prompt.
             RuntimeError: Outside ``async with session:``, or while another
                 task is already waiting here.
         """
@@ -1368,9 +1389,10 @@ class ThinkingPromptSession:
                 "prompt_async() reads the input of a running session: "
                 "call it inside `async with session:`"
             )
-        if run.done() or self.app.is_done:
+        if run.done() or self.app.is_done or self._exit_after_query:
             # Stopped, or told to stop (exit() takes the app a few loop
-            # turns): queued lines don't run after a quit.
+            # turns, or waits for the query that called it): queued lines
+            # don't run after a quit.
             raise EOFError
         pending = self._pending_input
         if pending is not None and not pending.done():
@@ -1488,6 +1510,10 @@ class ThinkingPromptSession:
         finally:
             self._foreground = None
             self._query_cancelled = False
+            if self._exit_after_query:
+                # The query called exit(): it has ended, so the app stops.
+                self._exit_after_query = False
+                self._exit_app()
             if self._cancel_line_pending:
                 # One line after all the boxes the Ctrl+C ended, those of
                 # the query's sub-tasks too.
