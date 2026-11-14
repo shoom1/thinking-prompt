@@ -222,7 +222,9 @@ class ScrollRegion(ScrollablePane):
         (scroll_past()), as toward() does around a stop: back toward the
         cursor while keys have scrolled it out of view that way; else, with
         the cursor on the widget's first line (↑) or last line (↓), on past
-        the widget toward the content's edge, unless there already."""
+        the widget toward the content's edge. At that edge, scrolled there
+        by keys, it holds (a scroll of no lines): left to the widget, the
+        key would bring the view back to its cursor."""
         info = window.render_info
         following = self._following(window)
         if info is None or following is None:
@@ -235,8 +237,9 @@ class ScrollRegion(ScrollablePane):
         content = window.content.create_content(info.window_width, info.window_height)
         line = content.cursor_position.y
         if step < 0:
-            return line <= 0 and top > 0
-        return line >= content.line_count - 1 and top + self._visible_rows < self._content_rows
+            return line <= 0 and (top > 0 or self._manual)
+        past_bottom = top + self._visible_rows < self._content_rows
+        return line >= content.line_count - 1 and (past_bottom or self._manual)
 
     def scroll_past(self, window: Window, step: int) -> None:
         """Scroll a line for ↑ (``step`` -1) or ↓ (1) on ``window``, from

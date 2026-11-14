@@ -4516,6 +4516,44 @@ class TestDialogTextAroundAWidget:
                 await shown
 
     @pytest.mark.parametrize("placement", ["box", "inline"])
+    @pytest.mark.parametrize("widget", list(WIDGETS))
+    async def test_the_view_holds_at_the_top_of_the_text(self, placement: str, widget: str):
+        """↑ with the text's first line shown does nothing more: it snapped
+        the view back to the widget, so a held ↑ went round and round."""
+        made = self.WIDGETS[widget]()
+        with piped_session(rows=40) as (session, inp):
+            async with session:
+                await wait_until(lambda: session.app.is_running)
+                dialog, shown = await self._open(session, made, placement)
+                await self._keys(session, inp, [UP] * 25)
+                assert min(self._instructions(session)) == 1, screen_lines(session)
+                for _ in range(3):
+                    await self._keys(session, inp, [UP])
+                    assert min(self._instructions(session)) == 1, screen_lines(session)
+                dialog.set_result(None)
+                await shown
+
+    @pytest.mark.parametrize("placement", ["box", "inline"])
+    async def test_the_view_holds_at_the_bottom_of_the_text(self, placement: str):
+        radio = RadioList([(i, f"option {i}") for i in range(3)])
+        with piped_session(rows=40) as (session, inp):
+            async with session:
+                await wait_until(lambda: session.app.is_running)
+                dialog = Dialog(
+                    "Q", HSplit([radio, Label(self.TEXT)]), [ButtonConfig("OK")],
+                    max_height=10, placement=placement, width=40,
+                )
+                shown = asyncio.ensure_future(session.show_dialog(dialog))
+                await wait_until(lambda: dialog_rendered(session))
+                await self._keys(session, inp, [DOWN] * 25)
+                assert max(self._instructions(session)) == 20, screen_lines(session)
+                for _ in range(3):
+                    await self._keys(session, inp, [DOWN])
+                    assert max(self._instructions(session)) == 20, screen_lines(session)
+                dialog.set_result(None)
+                await shown
+
+    @pytest.mark.parametrize("placement", ["box", "inline"])
     async def test_down_scrolls_back_to_the_widget_before_moving_in_it(self, placement: str):
         """Scrolled up past the widget, ↓ scrolls back down a line at a time
         till the widget shows (all of it, as it fits); then it moves in the
