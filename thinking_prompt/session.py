@@ -1234,7 +1234,8 @@ class ThinkingPromptSession:
         stops the app now, cancelling a running query.
 
         Open boxes are handled as on any exit (see run_async()). Calling it
-        again, or once the session has stopped, does nothing.
+        again from the query, or once the app is stopping or has stopped,
+        does nothing.
 
         Example:
             @session.on_input

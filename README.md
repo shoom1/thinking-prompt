@@ -131,7 +131,7 @@ which closes the stream, and the unanswered turn stays out of `history`.
 | Key | Action |
 |-----|--------|
 | Ctrl+T | Expand/collapse all thinking boxes (while one is open) |
-| Ctrl+C | Stop: cancel the running handler (lines queued behind it are dropped); at an idle prompt, clear the line and end the boxes nobody else will (see [When a Box Ends](#when-a-box-ends)). Never exits |
+| Ctrl+C | Stop: cancel the running handler (lines queued behind it are dropped); at an idle prompt, clear the line and end the boxes nobody else will (see [When a Box Ends](#when-a-box-ends)); while your own loop is busy outside `query()`, nothing (`Busy`). Never exits |
 | Ctrl+D | Exit, at an empty, idle prompt: waiting for input, with no handler running (Ctrl+C stops one first) |
 
 Rebind Ctrl+T with `expand_key=` (see [Session Options](#session-options)).
@@ -223,9 +223,9 @@ to end.
 - **A handler or a query ends:** the session also finishes the boxes opened
   outside asyncio.
 - **Ctrl+C at an idle prompt** (one waiting for input): the session ends
-  the boxes nobody else will. If boxes that live tasks are feeding remain, the status bar says
-  `Background work is running — Ctrl+D exits` until those boxes end or the
-  next input is accepted.
+  the boxes nobody else will. If boxes that live tasks are feeding remain,
+  the status bar says `Background work is running — Ctrl+D exits` until
+  those boxes end or the next input is accepted.
 - **Exit:** the last frame leaves out the boxes and the status bar. The
   boxes nobody else will end are echoed below it. A live task's box is
   echoed when the task finishes it, or else when the task ends
@@ -267,8 +267,10 @@ isn't run), and lets its errors through. A loop that calls only `query()`,
 never `prompt_async()`, should stop on that `None` (or once
 `session.app.is_done`). Inside a query (or a handler),
 `prompt_async()` asks a follow-up question. So can a task a `run_async()`
-handler started, after the handler returns: the task asked first, so it
-gets the next line, and the handler gets the one after.
+handler started, if it asks before the handler returns: it asked first, so
+it gets the next line, and the handler gets the one after. One task waits
+in `prompt_async()` at a time: a task that asks while the session already
+waits for the next input gets `RuntimeError`.
 
 To tell a finished query from a cancelled one, have the coroutine return
 a value (`None` then means cancelled), or do what depends on it finishing
@@ -277,8 +279,9 @@ after its own `await`s: a cancelled coroutine never gets there.
 way.
 
 Work your loop does itself, outside `query()`, keeps the session busy
-too, but Ctrl+C can't stop it: Enter, Ctrl+C and Ctrl+D say `Busy`, and
-the boxes the loop opens stay its own.
+too, and no key stops it: Enter, Ctrl+C and Ctrl+D say `Busy`, and the
+boxes the loop opens stay its own. Run work you may need to stop (a
+startup connection, say) with `query()`: Ctrl+C cancels it.
 
 A line typed while a query runs is refused by default (`Busy`). With
 `ThinkingPromptSession(input_while_busy="queue")` it waits under the
@@ -529,7 +532,8 @@ session exits while a dialog is open, awaiting it raises `EOFError`, as
 `query()` runs) awaits, itself or through the tasks it awaits, is cancelled
 with it instead: the session stopping cancels the query. A query Ctrl+C
 already cancelled isn't cancelled again, so a dialog in its cleanup gets
-`EOFError`.
+`EOFError`. Your own loop catches it around a dialog the loop awaits, as
+around `prompt_async()`.
 
 One dialog is open at a time: opening another while one is open raises
 `RuntimeError`. Background tasks that may ask at the same moment (two tool
