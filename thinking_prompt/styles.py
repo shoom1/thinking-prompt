@@ -27,6 +27,20 @@ def _style_str(*parts: str) -> str:
     return " ".join(p for p in parts if p)
 
 
+def _own(rule: str, *, fg: bool = False, bg: bool = False) -> str:
+    """``rule`` for a class prompt_toolkit's default style paints (a white
+    dialog body, a red title, a gray completion menu): the colors it
+    doesn't set itself start as the terminal's own, as an empty token
+    means. Left empty, the rule wouldn't override prompt_toolkit's."""
+    words = rule.split()
+    resets = []
+    if fg and not any(word.startswith("fg:") for word in words):
+        resets.append("fg:default")
+    if bg and not any(word.startswith("bg:") for word in words):
+        resets.append("bg:default")
+    return _style_str(*resets, rule)
+
+
 @dataclass
 class ThinkingPromptStyles:
     """
@@ -68,7 +82,7 @@ class ThinkingPromptStyles:
     # terminal's own). dark() and light() set fixed palettes instead.
     # ==========================================================================
     color_accent: str = "ansicyan"  # Primary accent (selection, indicators)
-    color_accent_button: str = "ansiblue"  # Button/menu selection highlight
+    color_accent_button: str = ""  # Focused dialog button background ("": reverse video)
     color_success: str = "ansigreen"  # Success states
     color_warning: str = "ansiyellow"  # Warnings, system messages
     color_error: str = "ansired"  # Errors
@@ -86,7 +100,7 @@ class ThinkingPromptStyles:
     color_text_status: str = "ansiblue"  # Status bar text
     color_separator: str = "ansibrightblack"  # Input separator line
     color_bg_button: str = ""  # Dialog button background
-    color_bg_selected: str = ""  # Selected menu/completion item bg
+    color_bg_selected: str = ""  # Selected menu/completion item bg ("": reverse video)
     color_shadow: str = ""  # Dialog shadow
 
     # ==========================================================================
@@ -94,12 +108,11 @@ class ThinkingPromptStyles:
     # ==========================================================================
     menu_bg: str = ""  # Defaults to color_bg_dark
     menu_item: str = ""  # Defaults to color_text on color_bg_dark
-    # The default theme shows selections in reverse video (it has no
-    # background colors); "" derives color_accent on color_bg_selected.
-    menu_item_selected: str = "reverse"
+    # Defaults to color_accent on color_bg_selected; reverse video without one.
+    menu_item_selected: str = ""
     menu_border: str = ""  # Defaults to color_text_muted on color_bg_dark
     menu_meta: str = ""  # Defaults to color_text on color_bg_dark
-    menu_meta_selected: str = "reverse"  # "": color_accent on color_bg_selected
+    menu_meta_selected: str = ""  # As menu_item_selected
 
     # ==========================================================================
     # Thinking box styles
@@ -146,7 +159,7 @@ class ThinkingPromptStyles:
     dialog_border: str = ""  # Defaults to color_text_muted
     dialog_shadow: str = ""
     dialog_button: str = ""  # Defaults to color_text on color_bg_button
-    dialog_button_focused: str = "bold reverse"  # "": color_text_bright on color_accent_button bold
+    dialog_button_focused: str = ""  # Defaults to color_text_bright on color_accent_button bold; bold reverse without one
     dialog_choice: str = ""  # Inline action rows. Defaults to color_text
     dialog_choice_selected: str = ""  # Highlighted action row, and a ChoiceField's pick. Defaults to color_accent bold
     dialog_hint: str = ""  # Inline dialog key hint. Defaults to color_text_muted italic
@@ -232,11 +245,6 @@ class ThinkingPromptStyles:
             color_bg_button="#404040",
             color_bg_selected="#454545",
             color_shadow="#000000",
-            # Selections by background color: "" derives them from the
-            # tokens, in place of the default's reverse video.
-            menu_item_selected="",
-            menu_meta_selected="",
-            dialog_button_focused="",
             code_theme="monokai",
         )
 
@@ -265,11 +273,6 @@ class ThinkingPromptStyles:
             color_bg_button="#d1d5db",
             color_bg_selected="#cbd5e1",
             color_shadow="#9ca3af",
-            # Selections by background color: "" derives them from the
-            # tokens, in place of the default's reverse video.
-            menu_item_selected="",
-            menu_meta_selected="",
-            dialog_button_focused="",
             code_theme="default",
         )
 
@@ -284,10 +287,8 @@ class ThinkingPromptStyles:
             color_thinking="", color_thinking_border="", color_thinking_hint="",
             color_bg_status="", color_text_status="", color_separator="",
             color_bg_button="", color_bg_selected="", color_shadow="",
-            # Selection/focus states need reverse video to stay visible.
-            menu_item_selected="reverse",
-            menu_meta_selected="reverse",
-            dialog_button_focused="bold reverse",
+            # Selection/focus states need an attribute to stay visible
+            # (selections derive reverse video: no background tokens).
             field_label_selected="bold",
             field_value_selected="italic",
             field_desc_selected="italic",
@@ -298,7 +299,8 @@ class ThinkingPromptStyles:
     @classmethod
     def terminal(cls) -> ThinkingPromptStyles:
         """The default: named ANSI colors, so the terminal's own palette
-        (light or dark), with no backgrounds; selections in reverse video."""
+        (light or dark), with no backgrounds; selections in reverse video
+        (no selection background tokens)."""
         return cls()
 
     def _derived(self) -> dict[str, str]:
@@ -320,14 +322,10 @@ class ThinkingPromptStyles:
             # Menu styles
             "menu_bg": _bg(self.color_bg_dark),
             "menu_item": _style_str(_fg(self.color_text), _bg(self.color_bg_dark)),
-            "menu_item_selected": _style_str(
-                _fg(self.color_accent), _bg(self.color_bg_selected), "noreverse"
-            ),
+            "menu_item_selected": self._selected(),
             "menu_border": _style_str(_fg(self.color_text_muted), _bg(self.color_bg_dark)),
             "menu_meta": _style_str(_fg(self.color_text), _bg(self.color_bg_dark)),
-            "menu_meta_selected": _style_str(
-                _fg(self.color_accent), _bg(self.color_bg_selected), "noreverse"
-            ),
+            "menu_meta_selected": self._selected(),
             # The transcript
             "user_prefix": _style_str(_fg(self.color_accent), _bg(self.color_bg_input)),
             "user_message": _style_str(
@@ -346,8 +344,9 @@ class ThinkingPromptStyles:
             "dialog_body": _style_str(_bg(self.color_bg_dialog), _fg(self.color_text)),
             "dialog_border": _fg(self.color_text_muted),
             "dialog_button": _style_str(_bg(self.color_bg_button), _fg(self.color_text)),
-            "dialog_button_focused": _style_str(
-                _bg(self.color_accent_button), _fg(self.color_text_bright), "bold"
+            "dialog_button_focused": (
+                _style_str(_bg(self.color_accent_button), _fg(self.color_text_bright), "bold")
+                if self.color_accent_button else "bold reverse"
             ),
             "dialog_choice": _fg(self.color_text),
             "dialog_choice_selected": _style_str(_fg(self.color_accent), "bold"),
@@ -372,6 +371,13 @@ class ThinkingPromptStyles:
             "scrollbar_background": _bg(self.color_bg_dark),
             "scrollbar_button": _bg(self.color_text_dim),
         }
+
+    def _selected(self) -> str:
+        """A selected menu item: the accent on color_bg_selected, or with no
+        such background (the terminal and mono themes), reverse video."""
+        if not self.color_bg_selected:
+            return "reverse"
+        return _style_str(_fg(self.color_accent), _bg(self.color_bg_selected), "noreverse")
 
     def to_style_dict(self) -> dict[str, str]:
         """
@@ -407,19 +413,19 @@ class ThinkingPromptStyles:
             'prompt': r("prompt"),
             'input-separator': r("input_separator"),
             # Dialog styles
-            'dialog': r("dialog"),
-            'dialog.body': r("dialog_body"),
-            'dialog frame.label': r("dialog_title"),
+            'dialog': _own(r("dialog"), bg=True),
+            'dialog.body': _own(r("dialog_body"), fg=True, bg=True),
+            'dialog frame.label': _own(r("dialog_title"), fg=True),
             'dialog-title': r("dialog_title"),  # inline dialogs
             'dialog frame.border': r("dialog_border"),
-            'dialog shadow': r("dialog_shadow"),
+            'dialog shadow': _own(r("dialog_shadow"), bg=True),
             'button': r("dialog_button"),
-            'button.focused': r("dialog_button_focused"),
+            'button.focused': _own(r("dialog_button_focused"), fg=True, bg=True),
             'dialog-choice': r("dialog_choice"),
             'dialog-choice-selected': r("dialog_choice_selected"),
             'dialog-hint': r("dialog_hint"),
             # Form controls
-            'text-area': r("text_area"),
+            'text-area': _own(r("text_area"), bg=True),
             'select-arrow': r("select_arrow"),
             'checkbox-mark': r("checkbox_mark"),
             # Form fields
@@ -440,14 +446,14 @@ class ThinkingPromptStyles:
             'field-dropdown-item': r("menu_item"),
             'field-dropdown-selected': r("menu_item_selected"),
             # Completion menu (uses shared menu styles)
-            'completion-menu': r("menu_bg"),
+            'completion-menu': _own(r("menu_bg"), fg=True, bg=True),
             'completion-menu.completion': r("menu_item"),
-            'completion-menu.completion.current': r("menu_item_selected"),
+            'completion-menu.completion.current': _own(r("menu_item_selected"), fg=True, bg=True),
             'completion-menu.meta': r("menu_meta"),
-            'completion-menu.meta.completion': r("menu_meta"),
-            'completion-menu.meta.completion.current': r("menu_meta_selected"),
-            'scrollbar.background': r("scrollbar_background"),
-            'scrollbar.button': r("scrollbar_button"),
+            'completion-menu.meta.completion': _own(r("menu_meta"), fg=True, bg=True),
+            'completion-menu.meta.completion.current': _own(r("menu_meta_selected"), fg=True, bg=True),
+            'scrollbar.background': _own(r("scrollbar_background"), bg=True),
+            'scrollbar.button': _own(r("scrollbar_button"), bg=True),
         }
 
     def to_style(self) -> Style:

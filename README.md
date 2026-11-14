@@ -879,8 +879,12 @@ colors of any theme.
 
 Custom themes are `ThinkingPromptStyles` instances (`theme=` accepts them
 too). All element styles derive from the `color_*` tokens, so overriding
-tokens restyles the whole UI consistently. Derivation happens at render
-time, so tweaking a built-in theme works too:
+tokens restyles the whole UI consistently. An empty token (`""`) is the
+terminal's own color, in dialogs and menus too. A selection (the current
+completion, a dropdown's pick) shows `color_accent` on `color_bg_selected`,
+and the focused button `color_accent_button` behind it; with those empty,
+both show in reverse video. Derivation happens at render time, so
+tweaking a built-in theme works too:
 
 ```python
 import dataclasses
