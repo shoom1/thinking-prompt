@@ -133,6 +133,60 @@ class TestEffectiveColorDepth:
         assert s._effective_color_depth() is None
 
 
+# A selection's cells as the session draws them: the current completion, a
+# dropdown's pick, the focused button, a scrollbar's thumb.
+_SELECTIONS = {
+    "completion": "class:completion-menu class:completion-menu.completion.current",
+    "dropdown": "class:field-dropdown-border class:field-dropdown class:field-dropdown-selected",
+    "button": "class:dialog class:dialog.body class:button class:button.focused",
+    "thumb": "class:scrollbar.button",
+}
+
+
+def _attrs(session: ThinkingPromptSession, classes: str):  # type: ignore[no-untyped-def]
+    """A cell's attributes as the app draws it: prompt_toolkit's defaults
+    under the session's style."""
+    from prompt_toolkit.styles import default_ui_style, merge_styles
+
+    return merge_styles([default_ui_style(), session._style]).get_attrs_for_style_str(classes)
+
+
+class TestSelectionsWithoutColor:
+    """At 1 bit (NO_COLOR, a 1-bit theme) a color shows nothing: a
+    selection made of colors alone vanished (a dropdown's pick, the
+    current completion, a focused button set by color_accent_button), and
+    a scrollbar's thumb. Reverse video keeps each one visible."""
+
+    @pytest.mark.parametrize(
+        "theme",
+        [
+            "dark",
+            ThinkingPromptStyles(color_bg_selected="#2a4d69", color_accent_button="#2a4d69"),
+        ],
+        ids=["dark", "custom"],
+    )
+    def test_no_color_keeps_every_selection_visible(self, monkeypatch, theme):
+        monkeypatch.setenv("NO_COLOR", "1")
+        session = ThinkingPromptSession(theme=theme)
+        for name, classes in _SELECTIONS.items():
+            assert _attrs(session, classes).reverse, name
+        assert _attrs(session, _SELECTIONS["button"]).bold
+
+    def test_a_1bit_theme_set_later_too(self, monkeypatch):
+        import dataclasses
+
+        monkeypatch.delenv("NO_COLOR", raising=False)
+        session = ThinkingPromptSession()
+        session.set_theme(dataclasses.replace(ThinkingPromptStyles.dark(), color_depth=ColorDepth.DEPTH_1_BIT))
+        assert _attrs(session, _SELECTIONS["dropdown"]).reverse
+
+    def test_in_color_the_themes_selections_are_as_they_were(self, monkeypatch):
+        monkeypatch.delenv("NO_COLOR", raising=False)
+        session = ThinkingPromptSession(theme="dark")
+        assert not _attrs(session, _SELECTIONS["completion"]).reverse
+        assert not _attrs(session, _SELECTIONS["dropdown"]).reverse
+
+
 def _respond(session: ThinkingPromptSession) -> None:
     session.add_response("plain reply")
     session.add_response(FormattedText([("fg:#ff0000 bold", "hot"), ("italic", " take")]))

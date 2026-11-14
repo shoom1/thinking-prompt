@@ -883,7 +883,8 @@ session = ThinkingPromptSession(theme="dark")   # or "light", "mono", "terminal"
 
 A fixed palette assumes the terminal's background: `light` on a dark
 terminal (or `dark` on a light one) is hard to read. `NO_COLOR` drops the
-colors of any theme.
+colors of any theme; selections, the focused button and scrollbar thumbs
+then show in reverse video, as they do in `mono`.
 
 Custom themes are `ThinkingPromptStyles` instances (`theme=` accepts them
 too). All element styles derive from the `color_*` tokens, so overriding

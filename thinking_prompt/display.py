@@ -21,7 +21,7 @@ from prompt_toolkit.formatted_text import (
     to_formatted_text,
 )
 from prompt_toolkit.renderer import print_formatted_text as print_to_output
-from prompt_toolkit.styles import Style, default_pygments_style, default_ui_style, merge_styles
+from prompt_toolkit.styles import BaseStyle, default_pygments_style, default_ui_style, merge_styles
 
 from .rich_utils import (
     _highlight_code,
@@ -49,7 +49,7 @@ class Display:
 
     def __init__(
         self,
-        get_style: Callable[[], Style],
+        get_style: Callable[[], BaseStyle],
         thinking_styles: ThinkingPromptStyles | None = None,
         get_color_depth: Callable[[], ColorDepth | None] = lambda: None,
         transcript_limit: int | None = None,
