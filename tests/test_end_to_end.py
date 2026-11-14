@@ -503,6 +503,31 @@ class TestBoxLifecycle:
 
             await run_with(session, lambda text: None, script)
 
+    async def test_a_caught_cancel_owes_no_line_to_a_later_cancel(self):
+        """The task caught the inner block's cancel and its outer block
+        ended: cancelled later with no box open, it ends nothing, so
+        nothing is said."""
+        done_agent = asyncio.Event()
+
+        async def agent_then_wait() -> None:
+            await self._agent(session)
+            done_agent.set()
+            await asyncio.sleep(3600)
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                task = asyncio.create_task(agent_then_wait())
+                await asyncio.wait_for(done_agent.wait(), 2)
+                task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await task
+                await asyncio.sleep(0.05)  # the task's done callbacks
+                transcript = transcript_texts(session._display)
+                assert "Operation cancelled...\n" not in transcript, transcript
+
+            await run_with(session, lambda text: None, script)
+
     async def test_a_cancel_a_query_catches_under_an_outer_box_says_nothing(self):
         async def handler(text: str) -> None:
             await self._agent(session)

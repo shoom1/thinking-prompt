@@ -1030,9 +1030,19 @@ class ThinkingPromptSession:
             raise
         except BaseException:
             box.finish(echo=echo)
+            self._cancel_caught()
             raise
         else:
             box.finish(echo=echo)
+            self._cancel_caught()
+
+    def _cancel_caught(self) -> None:
+        """A thinking() block ended without a cancel. If it was its task's
+        last box, a cancel that ended inner blocks of its was caught: the
+        line they owed is dropped."""
+        task = asyncio.current_task()
+        if task is not None and not self._manager.has_boxes_opened_by(task):
+            self._cancel_owed.discard(task)
 
     # =========================================================================
     # Output API
