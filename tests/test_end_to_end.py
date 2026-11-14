@@ -1857,11 +1857,11 @@ class TestBoxOverItsRoom:
     async def test_the_notice_takes_the_rooms_place_too(self):
         frame, prompt, status = await self._open_at_top(
             lambda s: s.yes_no_dialog("Delete files?", "This removes 3 files.", placement="box"),
-            rows=30, columns=16,
+            rows=30, columns=12,
         )
         top = next(i for i, line in enumerate(frame) if "┌" in line)
         assert top == prompt + 2, frame
-        assert any("Terminal too" in line for line in frame[top:status]), frame
+        assert any("too small" in line for line in frame[top:status]), frame
         assert "Ctrl+C" in frame[status] and "│" not in frame[status], frame
 
     async def test_a_multi_line_prompt_keeps_its_lines(self):
@@ -3378,22 +3378,24 @@ class TestBoxTooSmall:
             shown.append(frames[0])
             inp.send_text(ESCAPE)
 
-        await self._ask(self._yes_no, keys, rows=24, columns=16)
+        await self._ask(self._yes_no, keys, rows=24, columns=12)
         text = self._text(shown[0])
-        assert "too small" in text and "27" in text and "Esc cancels" in text, shown[0]
+        # 14: the widest button, 12 columns, in the frame (the buttons wrap
+        # onto rows down to that).
+        assert "too small" in text and "14" in text and "Esc cancels" in text, shown[0]
         assert "Delete" in text  # the title, clipped to the frame
 
     async def test_escape_cancels_under_the_notice(self):
         async def keys(session, inp, frames):
             inp.send_text(ESCAPE)
 
-        assert await self._ask(self._yes_no, keys, rows=24, columns=16) is False
+        assert await self._ask(self._yes_no, keys, rows=24, columns=12) is False
 
     async def test_enter_presses_the_focused_button_under_the_notice(self):
         async def keys(session, inp, frames):
             inp.send_text(ENTER)
 
-        assert await self._ask(self._yes_no, keys, rows=24, columns=16) is True
+        assert await self._ask(self._yes_no, keys, rows=24, columns=12) is True
 
     async def test_the_dialog_stays_in_the_layout_under_the_notice(self):
         """Tab and Left/Right between buttons only act on windows drawn, so
@@ -3414,7 +3416,7 @@ class TestBoxTooSmall:
             found.append(any(p.is_modal() for p in parents))
             inp.send_text(ESCAPE)
 
-        await self._ask(self._yes_no, keys, rows=24, columns=16)
+        await self._ask(self._yes_no, keys, rows=24, columns=12)
         assert found == [True]
 
     async def test_a_dialog_that_ignores_escape_does_not_say_escape_cancels(self):
@@ -3456,13 +3458,13 @@ class TestBoxTooSmall:
             grown.append(screen_lines(session))
             inp.send_text(ENTER)
 
-        assert await self._ask(self._yes_no, keys, rows=24, columns=16) is True
+        assert await self._ask(self._yes_no, keys, rows=24, columns=12) is True
         text = self._text(grown[0])
         assert "This removes 3 files." in text and "Yes" in text and "No" in text
         assert "too small" not in text
 
     async def test_a_settings_form_in_a_narrow_box_shows_the_notice_then_fits_at_40(self):
-        for cols, small in [(24, True), (40, False)]:
+        for cols, small in [(12, True), (40, False)]:
             frame = await first_dialog_frame(
                 lambda s: s.show_dialog(settings_form(self.ITEMS, placement="box")),
                 rows=14, columns=cols,
@@ -3554,6 +3556,99 @@ class TestButtonDialog:
                 await wait_until(lambda: results == ["Discard"])
 
             await run_with(session, handler, script)
+
+
+class TestBoxButtons:
+    """A box's buttons are as wide as their labels need, and wrap onto
+    rows when one row doesn't fit the terminal."""
+
+    @staticmethod
+    async def _open(session: ThinkingPromptSession, options: list[str]) -> asyncio.Future[Any]:
+        shown = asyncio.ensure_future(session.button_dialog("Pick", "Choose one:", options))
+        await wait_until(lambda: dialog_rendered(session))
+        return shown
+
+    @staticmethod
+    def _button_rows(session: ThinkingPromptSession) -> list[str]:
+        return [line for line in screen_lines(session) if "<" in line and ">" in line]
+
+    @pytest.mark.parametrize(
+        "options",
+        [
+            ["Save and quit", "Discard changes", "Cancel"],
+            ["保存して終了", "キャンセル"],
+        ],
+        ids=["long", "wide characters"],
+    )
+    async def test_a_long_label_shows_whole(self, options: list[str]):
+        """Each button was 12 columns: "<Save and qu"."""
+        with piped_session(rows=20) as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                shown = await self._open(session, options)
+                (row,) = self._button_rows(session)
+                for option in options:
+                    assert option in row, row
+                inp.send_text(ESCAPE)
+                assert await asyncio.wait_for(shown, 2) is None
+
+            await run_with(session, lambda text: None, script)
+
+    async def test_buttons_that_fit_stay_on_one_row(self):
+        with piped_session(rows=20, columns=60) as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                shown = await self._open(session, ["Yes", "No", "Maybe"])
+                (row,) = self._button_rows(session)
+                assert all(name in row for name in ("Yes", "No", "Maybe"))
+                inp.send_text(ESCAPE)
+                await asyncio.wait_for(shown, 2)
+
+            await run_with(session, lambda text: None, script)
+
+    async def test_buttons_that_dont_fit_one_row_wrap_onto_rows(self):
+        """Seven buttons in 60 columns: the box showed only "Terminal too
+        small: needs 92×4"."""
+        options = [f"Option {i}" for i in range(1, 8)]
+        with piped_session(rows=20, columns=60) as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                shown = await self._open(session, options)
+                lines = screen_lines(session)
+                assert not any("too small" in line for line in lines), lines
+                rows = self._button_rows(session)
+                assert len(rows) == 2, lines
+                assert [name for row in rows for name in options if name in row] == options
+                assert all(len(row) <= 60 for row in screen_rows(session))
+                inp.send_text(ESCAPE)
+                await asyncio.wait_for(shown, 2)
+
+            await run_with(session, lambda text: None, script)
+
+    async def test_left_and_right_go_through_the_buttons_across_rows(self):
+        options = [f"Option {i}" for i in range(1, 8)]
+        with piped_session(rows=20, columns=60) as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                shown = await self._open(session, options)
+                inp.send_text(RIGHT * 6)  # to the last, on the second row
+                await asyncio.sleep(0.1)
+                inp.send_text(RIGHT + LEFT)  # past the last: stays; then back one
+                await asyncio.sleep(0.1)
+                inp.send_text(ENTER)
+                assert await asyncio.wait_for(shown, 2) == "Option 6"
+
+            await run_with(session, lambda text: None, script)
+
+    async def test_left_at_the_first_button_stays(self):
+        with piped_session(rows=20) as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                shown = await self._open(session, ["One", "Two"])
+                inp.send_text(LEFT + ENTER)
+                assert await asyncio.wait_for(shown, 2) == "One"
+
+            await run_with(session, lambda text: None, script)
 
 
 class TestBoxDialogWidth:

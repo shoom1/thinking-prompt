@@ -213,8 +213,8 @@ class TestBoxTooSmall:
         presenter, _ = self._open()
         box = presenter.rows(80, 24)
         assert box > 3
-        # The notice, wrapped to 14 columns inside its frame: 4 lines and 2 borders.
-        assert presenter.rows(16, 24) == 6
+        # The notice, wrapped to 10 columns inside its frame: 5 lines and 2 borders.
+        assert presenter.rows(12, 24) == 7
         assert presenter.rows(80, 24) == box
 
     def test_rows_are_the_notices_while_the_box_is_too_short(self):
@@ -225,7 +225,9 @@ class TestBoxTooSmall:
     def test_a_box_exactly_as_wide_as_it_needs_is_drawn(self):
         presenter, _ = self._open()
         needs_width, needs_rows = presenter._smallest(80, 24)
-        assert needs_width == 27
+        # The widest button, 12 columns, in the frame: the buttons wrap onto
+        # rows down to that.
+        assert needs_width == 14
         assert presenter._notice(needs_width, 24) is None
         assert presenter._notice(needs_width - 1, 24) is not None
 
