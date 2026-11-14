@@ -59,6 +59,7 @@ class BoxView:
         text_only: Nothing in the body takes the cursor (a text body): ↑↓ scroll it.
         floats: Floats the body needs over the whole screen (Dialog._screen_floats), drawn over the box.
         start: Where the body's cursor starts when no button asks for focus (a radio list's picked option).
+        inside: What the frame holds: the padded body and the buttons under it.
     """
 
     widget: _DialogWidget
@@ -69,6 +70,7 @@ class BoxView:
     text_only: bool = False
     floats: list[Float] = field(default_factory=list)
     start: Container | None = None
+    inside: Container | None = None
 
     @property
     def initial_focus(self) -> Container | None:
@@ -164,6 +166,7 @@ def build_box(dialog: Dialog) -> BoxView:
         text_only=not stops,
         floats=dialog._screen_floats(),
         start=start,
+        inside=frame_body,
     )
 
 
@@ -518,8 +521,11 @@ class BoxPresenter:
         assert self.view is not None
         widget = to_container(self.view.widget)
         # A box given a width reports no minimum for it, so the width comes
-        # from the buttons row, inside the frame.
-        needs_width = max(widget.preferred_width(width).min, _widest(self.view.buttons) + 2)
+        # from what it holds (the body's widest fixed widget, the widest
+        # button), inside the frame.
+        inside = self.view.inside
+        least = 0 if inside is None else to_container(inside).preferred_width(width).min
+        needs_width = max(widget.preferred_width(width).min, least + 2)
         # Height at the width the box would get: below its minimum width the
         # box collapses, and reports a frame's two rows and no more.
         box_width = min(widget.preferred_width(width).preferred, max(width, needs_width))

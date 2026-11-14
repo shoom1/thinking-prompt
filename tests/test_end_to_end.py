@@ -3397,6 +3397,23 @@ class TestBoxTooSmall:
 
         assert await self._ask(self._yes_no, keys, rows=24, columns=12) is True
 
+    async def test_a_box_given_a_width_counts_a_wide_widget_in_its_body(self):
+        """A box's width hides its body's minimum: narrower than a Label(
+        width=30) in it, it drew an empty frame, no notice and no buttons."""
+        shown: list[list[str]] = []
+
+        def make(session):
+            body = HSplit([Label("Some text."), Label("fixed", width=30)])
+            return session.show_dialog(Dialog("Wide body", body, [ButtonConfig("OK")], width=60))
+
+        async def keys(session, inp, frames):
+            shown.append(frames[0])
+            inp.send_text(ESCAPE)
+
+        await self._ask(make, keys, rows=24, columns=25)
+        text = self._text(shown[0])
+        assert "too small" in text and "32" in text, shown[0]
+
     async def test_left_and_right_do_nothing_under_the_notice(self):
         """The buttons aren't drawn: moving between them would change what
         Enter presses unseen."""
