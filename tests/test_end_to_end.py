@@ -424,6 +424,103 @@ class TestBoxLifecycle:
 
             await run_with(session, lambda text: None, script)
 
+    @staticmethod
+    async def _nested_blocks(session: ThinkingPromptSession, opened: asyncio.Event) -> None:
+        async with session.thinking(title="Agent") as outer:
+            outer.append("planning\n")
+            async with session.thinking(title="Tool") as inner:
+                inner.append("tool running\n")
+                opened.set()
+                await asyncio.sleep(3600)
+
+    async def test_a_cancelled_task_says_so_once_after_nested_blocks(self):
+        """The cancel ends the inner block, then the outer one: one line,
+        after both."""
+        opened = asyncio.Event()
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                task = asyncio.create_task(self._nested_blocks(session, opened))
+                await asyncio.wait_for(opened.wait(), 2)
+                task.cancel()
+                await wait_until(lambda: not session.is_thinking)
+                await asyncio.sleep(0.05)  # the task's done callbacks
+                transcript = transcript_texts(session._display)
+                assert transcript.count("Operation cancelled...\n") == 1, transcript
+                assert transcript[-1] == "Operation cancelled...\n"
+
+            await run_with(session, lambda text: None, script)
+
+    async def test_a_query_the_app_stopping_cancels_says_so_once_after_nested_blocks(self):
+        opened = asyncio.Event()
+
+        async def handler(text: str) -> None:
+            await self._nested_blocks(session, opened)
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await asyncio.wait_for(opened.wait(), 2)
+                session.exit()
+                await asyncio.wait_for(run, 2)
+                transcript = transcript_texts(session._display)
+                assert transcript.count("Operation cancelled...\n") == 1, transcript
+                assert transcript[-1] == "Operation cancelled...\n"
+
+            await run_with(session, handler, script)
+
+    @staticmethod
+    async def _agent(session: ThinkingPromptSession) -> None:
+        """An outer box, and under it a tool box whose time limit runs out:
+        the task cancels itself and catches the cancel (as asyncio.timeout()
+        does), then goes on to its answer."""
+        async with session.thinking(title="Agent") as outer:
+            outer.append("planning\n")
+            me = asyncio.current_task()
+            assert me is not None
+            try:
+                async with session.thinking(title="Tool") as tool:
+                    tool.append("tool running\n")
+                    asyncio.get_running_loop().call_soon(me.cancel)
+                    await asyncio.sleep(3600)
+            except asyncio.CancelledError:
+                if hasattr(me, "uncancel"):  # 3.11+
+                    me.uncancel()
+            outer.append("tool timed out; going on\n")
+        session.add_response("final answer")
+
+    async def test_a_cancel_a_task_catches_under_an_outer_box_says_nothing(self):
+        """The task went on and succeeded: nothing was cancelled."""
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                await asyncio.create_task(self._agent(session))
+                await asyncio.sleep(0.05)  # the task's done callbacks
+                transcript = transcript_texts(session._display)
+                assert "Operation cancelled...\n" not in transcript, transcript
+                assert "final answer" in transcript[-1]
+
+            await run_with(session, lambda text: None, script)
+
+    async def test_a_cancel_a_query_catches_under_an_outer_box_says_nothing(self):
+        async def handler(text: str) -> None:
+            await self._agent(session)
+
+        with piped_session() as (session, inp):
+
+            def answered() -> bool:
+                return any("final answer" in text for text in transcript_texts(session._display))
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: answered() and waiting_for_input(session))
+                transcript = transcript_texts(session._display)
+                assert "Operation cancelled...\n" not in transcript, transcript
+                assert "final answer" in transcript[-1]
+
+            await run_with(session, handler, script)
+
     async def test_ctrl_c_ends_a_querys_sub_task_boxes_under_one_line(self):
         """The query cancels its sub-task as it unwinds: the sub-task's box
         ends with it, and one "Operation cancelled..." follows all the boxes

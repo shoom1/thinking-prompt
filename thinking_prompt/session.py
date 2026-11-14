@@ -348,7 +348,8 @@ class ThinkingPromptSession:
         # The tasks that opened boxes, each until it ends: its boxes end
         # with it (see _box_owner_ended). Of those, the ones a cancel ended
         # a thinking() block of while other boxes of theirs stay open: the
-        # "Operation cancelled..." line waits for those to end too.
+        # "Operation cancelled..." line waits for those to end too, and is
+        # said only if the cancel ends the task (it may catch it).
         self._box_owners: set[asyncio.Task[Any]] = set()
         self._cancel_owed: set[asyncio.Task[Any]] = set()
         # The task that entered `async with session:` (run_async()'s, too);
@@ -879,7 +880,9 @@ class ThinkingPromptSession:
         ended = self._manager.finish_opened_by(task)
         owed = task in self._cancel_owed
         self._cancel_owed.discard(task)
-        if task.cancelled() or owed:
+        # A cancel the task caught (a time limit on an inner block, say)
+        # cancelled nothing: the task went on.
+        if task.cancelled():
             self._announce_cancel(bool(ended) or owed)
 
     def _announce_cancel(self, ended: bool) -> None:
@@ -990,9 +993,15 @@ class ThinkingPromptSession:
         except asyncio.CancelledError:
             ended = self._manager.finish(box, echo=echo)
             task = asyncio.current_task()
-            if ended and task is not None and self._manager.has_boxes_opened_by(task):
-                # Its other boxes end with it: one line after them all.
-                self._cancel_owed.add(task)
+            if task is not None and self._manager.has_boxes_opened_by(task):
+                # Its other boxes end with it: one line after them all,
+                # if the cancel ends the task (it may catch it and go on).
+                if ended:
+                    self._cancel_owed.add(task)
+            elif task is not None and task in self._cancel_owed:
+                # Its last box: the line owed for its inner blocks is this one.
+                self._cancel_owed.discard(task)
+                self._announce_cancel(True)
             else:
                 self._announce_cancel(ended)
             raise
@@ -1599,14 +1608,15 @@ class ThinkingPromptSession:
         """Finish the boxes the ended handler answers for.
 
         See ThinkingBoxManager.finish_owned_by. Their content is echoed;
-        when the handler was cancelled, or a cancelled thinking() block of
-        it left the line to them, "Operation cancelled..." follows.
+        when the handler was cancelled, "Operation cancelled..." follows,
+        also when only its cancelled thinking() blocks ended boxes. A cancel
+        it caught and went on from says nothing.
         """
         ended = self._manager.finish_owned_by(owner)
         owed = owner is not None and owner in self._cancel_owed
         if owner is not None:
             self._cancel_owed.discard(owner)
-        if cancelled or owed:
+        if cancelled:
             self._announce_cancel(bool(ended) or owed)
 
     def run(self, handler: InputHandler | None = None) -> None:
