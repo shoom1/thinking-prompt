@@ -616,8 +616,8 @@ where the terminal has the columns), `max_height`, `fields`,
 `align_values`.
 
 **A box's buttons** are as wide as their labels need (12 columns at
-least), in one row under the body. When that row is wider than the
-terminal they wrap onto as many rows as they need, in order; ←→ go
+least), in one row under the body. When the terminal is too narrow for
+that row, they wrap onto as many rows as they need, in order; ←→ go
 through them in that order, across rows, and Tab as ever.
 
 **Where a box sits.** Under the prompt, above the status bar: where an inline
@@ -628,7 +628,8 @@ need is it centered over the screen.
 
 **Long content scrolls.** A dialog is never taller than the terminal (less
 the prompt's rows), nor than `max_height` rows if you pass it — counting the
-whole dialog: title, borders, buttons, hint. What doesn't fit scrolls: the
+whole dialog: title, borders, buttons, hint. (A box is at least its frame,
+one body row and its buttons' rows tall, whatever `max_height` says.) What doesn't fit scrolls: the
 body, text and fields alike, scrolls as one (with one scrollbar in a box)
 and follows the cursor, the buttons under it. ↑↓ read what's around the
 fields on the way: on the first field, ↑ scrolls up through the text above
@@ -756,8 +757,9 @@ if values is not None:
 ```
 
 A field missing from `values=` starts at its `default`. A `TextField`
-shows any value as its text (a port number, say), and a value the user
-edited comes back as a `str`: convert it where you store it. Each show starts
+shows any value as its text (a port number, say), and once the user has
+edited it (Enter on its row, then Enter to keep, even unchanged) it comes
+back as a `str`: convert it where you store it. Each show starts
 afresh from `values=` (read again then) or the defaults, so a dialog can be
 kept and shown again: it picks up what Save put in `config`, and an edit the
 user cancelled is gone. Fields are frozen, so a list of them can be a

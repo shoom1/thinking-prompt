@@ -416,8 +416,9 @@ class ThinkingPromptSession:
         if run is not None and asyncio.get_running_loop() is not run.get_loop():
             raise RuntimeError(
                 f"{call} runs on the session's event loop, not on another "
-                f"thread's: from a thread, hand it over with "
-                f"asyncio.run_coroutine_threadsafe(coro, loop)"
+                f"thread's: from a thread, hand it to the session's loop with "
+                f"asyncio.run_coroutine_threadsafe(coro, loop), loop being the "
+                f"one `async with session:` runs on"
             )
 
     def _cancel_query(self, *, by_user: bool = False) -> None:

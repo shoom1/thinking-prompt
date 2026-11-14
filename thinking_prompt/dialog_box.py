@@ -202,9 +202,11 @@ class _Button(Button):
         pad = max(0, inner - get_cwidth(self.text))
         label = " " * (pad // 2) + self.text + " " * (pad - pad // 2)
         # prompt_toolkit's: the left arrow, the cursor's place, the label
-        # (its style, its text, the click handler), the right arrow.
+        # (its style, its text, the click handler), the right arrow. If a
+        # release draws it otherwise, its own label stands.
         fragments = super()._get_text_fragments()
-        fragments[2] = cast(OneStyleAndTextTuple, (fragments[2][0], label, *fragments[2][2:]))
+        if len(fragments) == 4 and "button.text" in fragments[2][0]:
+            fragments[2] = cast(OneStyleAndTextTuple, (fragments[2][0], label, *fragments[2][2:]))
         return fragments
 
 
