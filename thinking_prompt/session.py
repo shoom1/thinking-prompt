@@ -1565,10 +1565,21 @@ class ThinkingPromptSession:
         stops (EOFError), or a handler raises KeyboardInterrupt."""
         while True:
             try:
+                await self._others_asked()
                 text = await self.prompt_async()
                 await self._run_handler(handler, text)
             except (EOFError, KeyboardInterrupt):
                 return
+
+    async def _others_asked(self) -> None:
+        """Wait while another task waits in prompt_async(): one a handler
+        started, asking a question of its own. It asked first, so the next
+        line is its answer; the loop asks after it."""
+        pending = self._pending_input
+        while pending is not None and not pending.done():
+            # wait() rather than await: the line (or EOFError) is the asker's.
+            await asyncio.wait({pending})
+            pending = self._pending_input
 
     async def _run_handler(
         self,

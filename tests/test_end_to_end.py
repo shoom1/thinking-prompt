@@ -928,6 +928,61 @@ class TestInputLoopLifetime:
 
             await run_with(session, handler, script)
 
+    async def test_a_question_a_task_asks_gets_the_next_line_then_the_loop_goes_on(self):
+        """A handler starts a task that asks with prompt_async() (a confirm
+        flow, say), then returns. The task asked first: the next line is its
+        answer, and the line after it goes to the handler."""
+        handled: list[str] = []
+        answers: list[str] = []
+
+        async def confirm() -> None:
+            answers.append(await session.prompt_async())
+
+        async def handler(text: str) -> None:
+            handled.append(text)
+            if text == "/deploy":
+                asyncio.ensure_future(confirm())
+                await asyncio.sleep(0.05)  # the task asks before the handler returns
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("/deploy" + ENTER)
+                await wait_until(lambda: handled == ["/deploy"])
+                await asyncio.sleep(0.1)  # the handler returns; the loop asks
+                assert not run.done()
+                inp.send_text("yes" + ENTER)
+                await wait_until(lambda: answers == ["yes"])
+                inp.send_text("next" + ENTER)
+                await wait_until(lambda: handled == ["/deploy", "next"])
+                assert echoed_inputs(session) == ["/deploy", "yes", "next"]
+
+            await run_with(session, handler, script)
+
+    async def test_ctrl_d_while_a_task_asks_ends_its_question_and_the_loop(self):
+        answers: list[str] = []
+
+        async def confirm() -> None:
+            try:
+                answers.append(await session.prompt_async())
+            except EOFError:
+                answers.append("EOF")
+
+        async def handler(text: str) -> None:
+            asyncio.ensure_future(confirm())
+            await asyncio.sleep(0.05)
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("/deploy" + ENTER)
+                await asyncio.sleep(0.15)  # the task asks; the handler returns
+                inp.send_text(CTRL_D)
+                await asyncio.wait_for(asyncio.shield(run), 2)  # returns, no error
+                assert answers == ["EOF"]
+
+            await run_with(session, handler, script)
+
 
 class TestQuickStart:
     """The README's Quick Start: a handler registered with @session.on_input

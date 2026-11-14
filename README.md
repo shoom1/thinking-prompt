@@ -263,7 +263,9 @@ after Ctrl+C or the app stopping (once the app has stopped, the coroutine
 isn't run), and lets its errors through. A loop that calls only `query()`,
 never `prompt_async()`, should stop on that `None` (or once
 `session.app.is_done`). Inside a query (or a handler),
-`prompt_async()` asks a follow-up question.
+`prompt_async()` asks a follow-up question. So can a task a `run_async()`
+handler started, after the handler returns: the task asked first, so it
+gets the next line, and the handler gets the one after.
 
 To tell a finished query from a cancelled one, have the coroutine return
 a value (`None` then means cancelled), or do what depends on it finishing
