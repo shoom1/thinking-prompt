@@ -1133,6 +1133,27 @@ class TestQueue:
 
             await run_loop(session, lambda: self._busy_loop(session, started, release), script)
 
+    async def test_ctrl_c_while_busy_outside_a_query_keeps_the_queued_lines(self):
+        """Ctrl+C drops them with the query it stops: here it stops
+        nothing, so they run next."""
+        started, release = asyncio.Event(), asyncio.Event()
+        with piped_session(input_while_busy="queue") as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                try:
+                    inp.send_text("go" + ENTER)
+                    await started.wait()
+                    inp.send_text("next" + ENTER)
+                    await wait_until(lambda: list(session._queued) == ["next"])
+                    inp.send_text(CTRL_C)
+                    await wait_until(lambda: session._hint is not None)
+                    assert list(session._queued) == ["next"]
+                finally:
+                    release.set()
+                await wait_until(lambda: echoed_inputs(session) == ["go", "next"])
+
+            await run_loop(session, lambda: self._busy_loop(session, started, release), script)
+
     async def test_ctrl_d_while_busy_outside_a_query_doesnt_exit(self):
         """As Enter does, Ctrl+D finds the session busy: it exits once the
         loop waits for input again."""

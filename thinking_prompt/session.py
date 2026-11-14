@@ -606,6 +606,14 @@ class ThinkingPromptSession:
         @kb.add("<sigint>")
         def cancel(event: KeyPressEvent) -> None:
             """Stop the running query, or clear an idle prompt."""
+            at_prompt = event.app.layout.has_focus(self._default_buffer)
+            if not self._query_running() and not self._input_wanted():
+                # Busy outside a query (a loop doing its work itself, in
+                # the app's own task): nothing to stop, so the queued lines
+                # still run next, and that task's boxes are its live work.
+                if at_prompt:
+                    self._show_busy()
+                return
             dropped = bool(self._queued)
             if dropped:
                 self._queued.clear()
@@ -615,14 +623,6 @@ class ThinkingPromptSession:
                 # cleanup); a background task's live box keeps going. The
                 # typed draft stays: one thing stops at a time.
                 self._cancel_query(by_user=True)
-                return
-            at_prompt = event.app.layout.has_focus(self._default_buffer)
-            if not self._input_wanted():
-                # Busy outside a query (a loop doing its work itself, in
-                # the app's own task): nothing to stop, and that task's
-                # boxes are its live work.
-                if at_prompt:
-                    self._show_busy()
                 return
             # An idle prompt. The waiting prompt_async() is left alone: it
             # still delivers the next line. A dialog open over it (a
