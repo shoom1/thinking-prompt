@@ -3397,6 +3397,16 @@ class TestBoxTooSmall:
 
         assert await self._ask(self._yes_no, keys, rows=24, columns=12) is True
 
+    async def test_left_and_right_do_nothing_under_the_notice(self):
+        """The buttons aren't drawn: moving between them would change what
+        Enter presses unseen."""
+        async def keys(session, inp, frames):
+            inp.send_text(RIGHT)
+            await asyncio.sleep(0.1)
+            inp.send_text(ENTER)
+
+        assert await self._ask(self._yes_no, keys, rows=24, columns=12) is True
+
     async def test_the_dialog_stays_in_the_layout_under_the_notice(self):
         """Tab and Left/Right between buttons only act on windows drawn, so
         under the notice they do nothing. But the Dialog's own bindings and

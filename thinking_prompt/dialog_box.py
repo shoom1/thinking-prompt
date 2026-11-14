@@ -249,8 +249,14 @@ class _ButtonRows(Container):
 
     def _arrows(self) -> KeyBindings:
         def focused() -> int:
+            """The focused button's index; -1 when none is, or the buttons
+            weren't drawn (a "too small" notice in the box's place): moving
+            then would change what Enter presses, unseen."""
             layout = get_app().layout
-            return next((i for i, b in enumerate(self.buttons) if layout.has_focus(b)), -1)
+            for i, button in enumerate(self.buttons):
+                if layout.has_focus(button):
+                    return i if button.window in layout.visible_windows else -1
+            return -1
 
         kb = KeyBindings()
 
