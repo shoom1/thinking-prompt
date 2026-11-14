@@ -576,6 +576,27 @@ class TestBoxLifecycle:
 
             await run_with(session, handler, script)
 
+    async def test_ctrl_c_sent_as_a_signal_stops_the_handler_too(self):
+        """While the session prints (run_in_terminal), the terminal is in
+        cooked mode: Ctrl+C arrives as SIGINT, which prompt_toolkit turns
+        into the <sigint> key."""
+
+        async def handler(text: str) -> None:
+            async with session.thinking() as ctx:
+                ctx.append("working\n")
+                await asyncio.sleep(3600)
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: session.is_thinking)
+                session.app.key_processor.send_sigint()
+                await wait_until(lambda: waiting_for_input(session) and not session.is_thinking)
+                assert transcript_texts(session._display)[-1] == "Operation cancelled...\n"
+
+            await run_with(session, handler, script)
+
 
 async def settled_renders(session: ThinkingPromptSession, quiet: float = 0.15) -> int:
     """The app's render count once it hasn't redrawn for ``quiet`` seconds."""

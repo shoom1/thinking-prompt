@@ -588,8 +588,11 @@ class ThinkingPromptSession:
 
         # Ctrl+C stops, and never exits (Ctrl+D does): the running query,
         # else what's left at an idle prompt. The lines queued behind a query
-        # go either way: stopped, nothing starts next.
+        # go either way: stopped, nothing starts next. While the session
+        # prints (run_in_terminal), the terminal is in cooked mode, and
+        # Ctrl+C arrives as SIGINT: prompt_toolkit's <sigint> key.
         @kb.add("c-c")
+        @kb.add("<sigint>")
         def cancel(event: KeyPressEvent) -> None:
             """Stop the running query, or clear an idle prompt."""
             dropped = bool(self._queued)
