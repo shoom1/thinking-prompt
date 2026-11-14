@@ -11,7 +11,7 @@ from prompt_toolkit.keys import Keys
 
 from thinking_prompt import ThinkingPromptSession
 from thinking_prompt.thinking_control import ThinkingBoxControl
-from tests.helpers import make_manager
+from tests.helpers import idle_prompt, make_manager
 
 LONG = "\n".join(f"line {i}" for i in range(40))
 CANCELLED = "Operation cancelled...\n"
@@ -157,6 +157,7 @@ class TestOwnership:
 
         task = asyncio.create_task(background())
         await asyncio.wait_for(opened.wait(), 1)
+        idle_prompt(session)
         event = MagicMock()
 
         _ctrl_c(session)(event)
@@ -190,6 +191,7 @@ class TestOwnership:
 
         task = asyncio.create_task(live())
         await asyncio.sleep(0)
+        idle_prompt(session)
         event = MagicMock()
 
         _ctrl_c(session)(event)
@@ -210,6 +212,7 @@ class TestOwnership:
         session = ThinkingPromptSession()
         session.start_thinking().append("mine\n")
         await asyncio.to_thread(lambda: session.start_thinking().append("thread\n"))
+        idle_prompt(session)
         event = MagicMock()
 
         _ctrl_c(session)(event)
@@ -230,6 +233,7 @@ class TestOwnership:
 
         task = asyncio.create_task(background())
         await asyncio.wait_for(opened.wait(), 1)
+        idle_prompt(session)
         event = MagicMock()
 
         _ctrl_c(session)(event)
@@ -250,10 +254,12 @@ class TestFinishedHandle:
         ctx.finish()
         assert ctx.is_finished is True
 
-    def test_finish_after_the_session_finished_the_box_returns_its_content(self):
+    async def test_finish_after_the_session_finished_the_box_returns_its_content(self):
         session = ThinkingPromptSession()
+        session._app_task = asyncio.current_task()  # the test plays the app's task
         ctx = session.start_thinking()
         ctx.append("partial\n")
+        idle_prompt(session)
 
         _ctrl_c(session)(MagicMock())
 
@@ -264,9 +270,11 @@ class TestFinishedHandle:
 class TestCancelledContent:
     """Cancelled thinking is echoed, then 'Operation cancelled...' (#6)."""
 
-    def test_ctrl_c_echoes_content_then_says_so(self):
+    async def test_ctrl_c_echoes_content_then_says_so(self):
         session = ThinkingPromptSession()
+        session._app_task = asyncio.current_task()  # the test plays the app's task
         session.start_thinking().append("half done\n")
+        idle_prompt(session)
 
         _ctrl_c(session)(MagicMock())
 
@@ -275,10 +283,12 @@ class TestCancelledContent:
         assert transcript[-1] == CANCELLED
         assert not any(text.startswith("[WARN]") for text in transcript)
 
-    def test_one_line_after_several_boxes(self):
+    async def test_one_line_after_several_boxes(self):
         session = ThinkingPromptSession()
+        session._app_task = asyncio.current_task()  # the test plays the app's task
         session.start_thinking().append("a\n")
         session.start_thinking().append("b\n")
+        idle_prompt(session)
 
         _ctrl_c(session)(MagicMock())
 
@@ -288,9 +298,11 @@ class TestCancelledContent:
         assert any("a" in text for text in transcript[:-1])
         assert any("b" in text for text in transcript[:-1])
 
-    def test_cancelling_an_empty_box_still_says_so(self):
+    async def test_cancelling_an_empty_box_still_says_so(self):
         session = ThinkingPromptSession()
+        session._app_task = asyncio.current_task()  # the test plays the app's task
         session.start_thinking()
+        idle_prompt(session)
 
         _ctrl_c(session)(MagicMock())
 

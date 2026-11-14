@@ -13,7 +13,7 @@ from prompt_toolkit.keys import Keys
 
 from thinking_prompt import ThinkingBox, ThinkingPromptSession, ThinkingPromptStyles
 from thinking_prompt.frames import FrameScheduler
-from tests.helpers import echoed, transcript_texts, keep_console, make_display, make_manager
+from tests.helpers import echoed, idle_prompt, transcript_texts, keep_console, make_display, make_manager
 
 NO_CONTENT = "shows a content callback's text"
 
@@ -366,9 +366,11 @@ class TestSessionBoxes:
         assert not session.is_thinking
         assert _transcript(session) == ["from a thread\n"]
 
-    def test_ctrl_c_echoes_what_a_callback_box_showed(self):
+    async def test_ctrl_c_echoes_what_a_callback_box_showed(self):
         session = _session()
+        session._app_task = asyncio.current_task()  # the test plays the app's task
         session.start_thinking(lambda: "shown\n")
+        idle_prompt(session)
         _ctrl_c(session)(MagicMock())
         assert _transcript(session) == ["shown\n", "Operation cancelled...\n"]
 

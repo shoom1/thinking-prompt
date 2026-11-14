@@ -1,7 +1,8 @@
 """Builders shared by the thinking-box tests."""
 from __future__ import annotations
 
-from typing import Any
+import asyncio
+from typing import TYPE_CHECKING, Any
 
 from prompt_toolkit.formatted_text import (
     AnyFormattedText,
@@ -12,6 +13,9 @@ from prompt_toolkit.styles import Style
 
 from thinking_prompt.display import Display
 from thinking_prompt.manager import ThinkingBoxManager
+
+if TYPE_CHECKING:
+    from thinking_prompt import ThinkingPromptSession
 
 
 def keep_console(display: Display) -> Display:
@@ -43,3 +47,9 @@ def echoed(display: Display) -> list[str]:
 def transcript_texts(display: Display) -> list[str]:
     """The text of each transcript entry."""
     return [entry.text for entry in display.transcript.iter_entries()]
+
+
+def idle_prompt(session: ThinkingPromptSession) -> None:
+    """Make ``session``'s prompt idle, as Ctrl+C and Ctrl+D see it: a task
+    waits in prompt_async(). Call it with a loop running."""
+    session._pending_input = asyncio.get_running_loop().create_future()

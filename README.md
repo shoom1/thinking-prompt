@@ -131,12 +131,15 @@ which closes the stream, and the unanswered turn stays out of `history`.
 | Key | Action |
 |-----|--------|
 | Ctrl+T | Expand/collapse all thinking boxes (while one is open) |
-| Ctrl+C | Stop: cancel the running handler (lines queued behind it are dropped); at an idle prompt, clear the line and end the boxes nobody else will (see [When a Box Ends](#when-a-box-ends)). Never exits |
-| Ctrl+D | Exit, at an empty prompt with no handler running (Ctrl+C stops one first) |
+| Ctrl+C | Stop: cancel the running handler (lines queued behind it are dropped); at an idle prompt, clear the line and end the boxes nobody else will (see [When a Box Ends](#when-a-box-ends)); while your own loop is busy outside `query()`, nothing (`Busy`). Never exits |
+| Ctrl+D | Exit, at an empty, idle prompt: waiting for input, with no handler running (Ctrl+C stops one first) |
 
 Rebind Ctrl+T with `expand_key=` (see [Session Options](#session-options)).
 An exit command such as `/exit` is your app's: end your loop on it (see
-[Your Own Loop](#your-own-loop)), or call `session.exit()` from a handler.
+[Your Own Loop](#your-own-loop)), or call `session.exit()` from a handler:
+the handler runs to its end, then the session stops. Called from anywhere
+else (a task, a dialog's button), `exit()` stops the session at once,
+cancelling a running handler.
 
 ## API Reference
 
@@ -213,15 +216,16 @@ A box belongs to the task that opened it. The session ends a box only when
 nobody else will: its task has ended, it was opened outside asyncio (from a
 thread), or the app's own task opened it (the task running the
 `async with session:` block, or `run_async()`, e.g. for a startup status
-box). A box a live task is feeding is that task's to end.
+box) and now waits for input. A box a live task is feeding is that task's
+to end.
 
 - **Its task ends:** the session finishes the boxes the task left open.
 - **A handler or a query ends:** the session also finishes the boxes opened
   outside asyncio.
-- **Ctrl+C at an idle prompt:** the session ends the boxes nobody else
-  will. If boxes that live tasks are feeding remain, the status bar says
-  `Background work is running — Ctrl+D exits` until those boxes end or the
-  next input is accepted.
+- **Ctrl+C at an idle prompt** (one waiting for input): the session ends
+  the boxes nobody else will. If boxes that live tasks are feeding remain,
+  the status bar says `Background work is running — Ctrl+D exits` until
+  those boxes end or the next input is accepted.
 - **Exit:** the last frame leaves out the boxes and the status bar. The
   boxes nobody else will end are echoed below it. A live task's box is
   echoed when the task finishes it, or else when the task ends
@@ -262,13 +266,22 @@ after Ctrl+C or the app stopping (once the app has stopped, the coroutine
 isn't run), and lets its errors through. A loop that calls only `query()`,
 never `prompt_async()`, should stop on that `None` (or once
 `session.app.is_done`). Inside a query (or a handler),
-`prompt_async()` asks a follow-up question.
+`prompt_async()` asks a follow-up question. A task that runs beside the
+input loop (a background job, a handler's task that outlives it) asks with
+a dialog instead: the prompt's next line belongs to the loop, and a line
+typed as a command shouldn't become an answer. `prompt_async()` raises
+`RuntimeError` while another task waits there.
 
 To tell a finished query from a cancelled one, have the coroutine return
 a value (`None` then means cancelled), or do what depends on it finishing
 after its own `await`s: a cancelled coroutine never gets there.
 `examples/claude_chat.py` keeps a cancelled reply out of its history that
 way.
+
+Work your loop does itself, outside `query()`, keeps the session busy
+too, and no key stops it: Enter, Ctrl+C and Ctrl+D say `Busy`, and the
+boxes the loop opens stay its own. Run work you may need to stop (a
+startup connection, say) with `query()`: Ctrl+C cancels it.
 
 A line typed while a query runs is refused by default (`Busy`). With
 `ThinkingPromptSession(input_while_busy="queue")` it waits under the
@@ -501,10 +514,11 @@ session.add_system("Connecting to server...")
 
 The session sometimes puts a hint in the status bar in place of your
 status: `Busy — press Ctrl+C to cancel` when Enter (or Ctrl+D) is pressed
-while a query runs (`Busy` alone while your loop is busy outside
-`query()`, where Ctrl+C has no query to cancel), `Nothing to stop — Ctrl+D
-exits` when Ctrl+C finds nothing to stop, and `Background work is running
-— Ctrl+D exits` (see [When a Box Ends](#when-a-box-ends)). Your status comes back
+while a query runs; `Busy` alone when Enter, Ctrl+C or Ctrl+D is pressed
+while your loop is busy outside `query()`, where Ctrl+C has no query to
+cancel; `Nothing to stop — Ctrl+D exits` when Ctrl+C finds nothing to
+stop; and `Background work is running — Ctrl+D exits` (see [When a Box
+Ends](#when-a-box-ends)). Your status comes back
 once the hint no longer applies; a status you set meanwhile replaces the
 hint.
 
@@ -513,8 +527,13 @@ hint.
 Dialogs open over a running session: call them from an input handler,
 inside `async with session:`, or from a task started while the session
 runs. On a session that isn't running they raise `RuntimeError`. If the
-session exits while a dialog is open, awaiting it raises
-`asyncio.CancelledError`.
+session exits while a dialog is open, awaiting it raises `EOFError`, as
+`prompt_async()` does. A dialog the running query (a handler, or what
+`query()` runs) awaits, itself or through the tasks it awaits, is cancelled
+with it instead: the session stopping cancels the query. A query Ctrl+C
+already cancelled isn't cancelled again, so a dialog in its cleanup gets
+`EOFError`. Your own loop catches it around a dialog the loop awaits, as
+around `prompt_async()`.
 
 One dialog is open at a time: opening another while one is open raises
 `RuntimeError`. Background tasks that may ask at the same moment (two tool
@@ -955,6 +974,8 @@ removed:
 | `ThinkingPromptSession(editing_mode=...)` | Drop it: the keys are prompt_toolkit's default (Emacs) ones, which the dialogs and fields are built for |
 | Ctrl+C at an idle prompt exits | Ctrl+C never exits (it clears the line): Ctrl+D exits, or your own `/exit` command |
 | Ctrl+D while a handler runs: exits | Stop the handler with Ctrl+C first: Ctrl+D exits at an idle prompt |
+| `session.exit()` in a handler cancels the handler at its next `await` | The handler runs to its end, then the session stops (Ctrl+C still cancels it). From anywhere else, `exit()` stops the session at once, as before |
+| A dialog open when the session exits raises `asyncio.CancelledError` | `EOFError`, as `prompt_async()` raises it. A dialog the running handler awaits is cancelled with the handler, as before: the session stopping cancels it |
 | Style field `history`, classes `history.*` (`history.user-message`, ...) | `transcript`, `transcript.*` (`transcript.user-message`, ...). The class names aren't covered by [Stability](#stability): style with the field |
 | Style fields `radio_list`, `radio_selected`, `checkbox_list`, `checkbox_selected` (classes `radio-*`, `checkbox-*`) | Drop them: the dialog fields use the `field_*` styles |
 

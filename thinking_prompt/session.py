@@ -167,7 +167,8 @@ class ThinkingPromptSession:
 
     # Status hints shown when Enter is refused because nobody awaits input:
     # while a query runs, which Ctrl+C cancels (Ctrl+D says so too), and
-    # while the loop is busy outside one, where Ctrl+C has no query to cancel.
+    # while the loop is busy outside one, where Ctrl+C has no query to cancel
+    # (Ctrl+C and Ctrl+D say so too).
     _BUSY_STATUS = "Busy — press Ctrl+C to cancel"
     _BUSY_NO_QUERY_STATUS = "Busy"
     # Status hints shown when Ctrl+C at an idle prompt finds nothing to stop
@@ -345,14 +346,19 @@ class ThinkingPromptSession:
         # The foreground query has been cancelled (see _cancel_query): it's
         # unwinding, and the session doesn't cancel it again.
         self._query_cancelled: bool = False
+        # The foreground query called exit(): the app stops when it ends
+        # (see _run_query), and no input is read meanwhile.
+        self._exit_after_query: bool = False
         # The tasks that opened boxes, each until it ends: its boxes end
         # with it (see _box_owner_ended). Of those, the ones a cancel ended
         # a thinking() block of while other boxes of theirs stay open: the
-        # "Operation cancelled..." line waits for those to end too.
+        # "Operation cancelled..." line waits for those to end too, and is
+        # said only if the cancel ends the task (it may catch it).
         self._box_owners: set[asyncio.Task[Any]] = set()
         self._cancel_owed: set[asyncio.Task[Any]] = set()
         # The task that entered `async with session:` (run_async()'s, too);
-        # None outside. Its boxes count as nobody's: the session ends them.
+        # None outside. Its boxes count as nobody's once it waits for input:
+        # an idle Ctrl+C ends them, as does the exit.
         self._app_task: asyncio.Task[Any] | None = None
         # The task running the Application while `async with session:` (or
         # run_async()) runs it; None outside.
@@ -441,6 +447,12 @@ class ThinkingPromptSession:
                 self._default_buffer.reset()
                 self._invalidate()
             return
+        self._show_busy()
+
+    def _show_busy(self) -> None:
+        """Say the session is busy: nobody waits for input. Ctrl+C is
+        offered only when it has a query to cancel (a loop doing its work
+        outside query() has none)."""
         if self._query_running():
             self._show_hint(self._BUSY_STATUS)
         else:
@@ -587,10 +599,21 @@ class ThinkingPromptSession:
 
         # Ctrl+C stops, and never exits (Ctrl+D does): the running query,
         # else what's left at an idle prompt. The lines queued behind a query
-        # go either way: stopped, nothing starts next.
+        # go either way: stopped, nothing starts next. While the session
+        # prints (run_in_terminal), the terminal is in cooked mode, and
+        # Ctrl+C arrives as SIGINT: prompt_toolkit's <sigint> key.
         @kb.add("c-c")
+        @kb.add("<sigint>")
         def cancel(event: KeyPressEvent) -> None:
             """Stop the running query, or clear an idle prompt."""
+            at_prompt = event.app.layout.has_focus(self._default_buffer)
+            if not self._query_running() and not self._input_wanted():
+                # Busy outside a query (a loop doing its work itself, in
+                # the app's own task): nothing to stop, so the queued lines
+                # still run next, and that task's boxes are its live work.
+                if at_prompt:
+                    self._show_busy()
+                return
             dropped = bool(self._queued)
             if dropped:
                 self._queued.clear()
@@ -604,7 +627,6 @@ class ThinkingPromptSession:
             # An idle prompt. The waiting prompt_async() is left alone: it
             # still delivers the next line. A dialog open over it (a
             # background task's) keeps the focus, and the draft under it.
-            at_prompt = event.app.layout.has_focus(self._default_buffer)
             cleared = at_prompt and bool(self._default_buffer.text)
             if cleared:
                 self._default_buffer.reset()
@@ -633,17 +655,19 @@ class ThinkingPromptSession:
             & Condition(lambda: not self._default_buffer.text),
         )
         def exit_app(event: KeyPressEvent) -> None:
-            """Exit the application, unless a query runs."""
-            if self._query_running():
-                # Exiting doesn't stop work on the way out: Ctrl+C stops it.
-                # The status bar says so while the prompt isn't taking input;
-                # at a query's follow-up there's nothing to say.
+            """Exit the application: at an idle prompt, where someone waits
+            for input and no query runs."""
+            if self._query_running() or not self._input_wanted():
+                # Exiting doesn't stop work on the way out: Ctrl+C stops a
+                # query. The status bar says the session is busy while the
+                # prompt isn't taking input; at a query's follow-up there's
+                # nothing to say.
                 if not self._input_wanted():
-                    self._show_hint(self._BUSY_STATUS)
+                    self._show_busy()
                 return
-            # A waiting prompt_async() gets the documented EOFError at once.
-            if self._pending_input is not None and not self._pending_input.done():
-                self._pending_input.set_exception(EOFError())
+            # The waiting prompt_async() gets the documented EOFError at once.
+            assert self._pending_input is not None  # checked by _input_wanted()
+            self._pending_input.set_exception(EOFError())
             event.app.exit()
 
         # Enter to submit (when not thinking)
@@ -879,7 +903,9 @@ class ThinkingPromptSession:
         ended = self._manager.finish_opened_by(task)
         owed = task in self._cancel_owed
         self._cancel_owed.discard(task)
-        if task.cancelled() or owed:
+        # A cancel the task caught (a time limit on an inner block, say)
+        # cancelled nothing: the task went on.
+        if task.cancelled():
             self._announce_cancel(bool(ended) or owed)
 
     def _announce_cancel(self, ended: bool) -> None:
@@ -990,17 +1016,33 @@ class ThinkingPromptSession:
         except asyncio.CancelledError:
             ended = self._manager.finish(box, echo=echo)
             task = asyncio.current_task()
-            if ended and task is not None and self._manager.has_boxes_opened_by(task):
-                # Its other boxes end with it: one line after them all.
-                self._cancel_owed.add(task)
+            if task is not None and self._manager.has_boxes_opened_by(task):
+                # Its other boxes end with it: one line after them all,
+                # if the cancel ends the task (it may catch it and go on).
+                if ended:
+                    self._cancel_owed.add(task)
+            elif task is not None and task in self._cancel_owed:
+                # Its last box: the line owed for its inner blocks is this one.
+                self._cancel_owed.discard(task)
+                self._announce_cancel(True)
             else:
                 self._announce_cancel(ended)
             raise
         except BaseException:
             box.finish(echo=echo)
+            self._cancel_caught()
             raise
         else:
             box.finish(echo=echo)
+            self._cancel_caught()
+
+    def _cancel_caught(self) -> None:
+        """A thinking() block ended without a cancel. If it was its task's
+        last box, a cancel that ended inner blocks of its was caught: the
+        line they owed is dropped."""
+        task = asyncio.current_task()
+        if task is not None and not self._manager.has_boxes_opened_by(task):
+            self._cancel_owed.discard(task)
 
     # =========================================================================
     # Output API
@@ -1182,21 +1224,42 @@ class ThinkingPromptSession:
 
     def exit(self) -> None:
         """
-        Exit the session.
+        Exit the session: stop the app.
 
-        Call this from a handler to end the session loop. Open boxes are
-        handled as on any exit (see run_async()).
+        Called by the running query (a run_async() handler, or what query()
+        runs), it lets the query finish: the code after exit() runs, and the
+        app stops when the query ends (Ctrl+C still cancels it). Meanwhile
+        prompt_async() raises EOFError: no more input is read. Called from
+        anywhere else (another task, a dialog's button, a key binding), it
+        stops the app now, cancelling a running query.
+
+        Open boxes are handled as on any exit (see run_async()). Calling it
+        again from the query, or once the app is stopping or has stopped,
+        does nothing.
 
         Example:
             @session.on_input
             async def handle(text: str):
-                if text.strip() == "exit":
+                if text.strip() == "/quit":
                     session.exit()
+                    session.add_system("Goodbye")
                     return
                 # ... handle other input
         """
-        if self.app and self.app.is_running:
-            self.app.exit()
+        if not self.app.is_running:
+            return
+        try:
+            caller = asyncio.current_task()
+        except RuntimeError:  # no event loop in this thread
+            caller = None
+        if caller is not None and caller is self._foreground:
+            self._exit_after_query = True
+            # No more input: a task already waiting for some is told so.
+            pending = self._pending_input
+            if pending is not None and not pending.done():
+                pending.set_exception(EOFError())
+        else:
+            self._exit_app()
 
     # =========================================================================
     # Handler Registration
@@ -1326,10 +1389,13 @@ class ThinkingPromptSession:
 
         Raises:
             EOFError: On Ctrl+D at an empty, idle prompt, and on any call
-                once the app has stopped (Ctrl+D, exit()). Ctrl+C never
-                exits: it stops the running query, or clears an idle prompt.
+                once the app has stopped or been told to stop (Ctrl+D,
+                exit(), also while the query that called exit() finishes).
+                Ctrl+C never exits: it stops the running query, or clears
+                an idle prompt.
             RuntimeError: Outside ``async with session:``, or while another
-                task is already waiting here.
+                task is already waiting here: the next line is one task's.
+                A task beside the input loop asks with a dialog.
         """
         run = self._app_run
         if run is None:
@@ -1337,13 +1403,18 @@ class ThinkingPromptSession:
                 "prompt_async() reads the input of a running session: "
                 "call it inside `async with session:`"
             )
-        if run.done() or self.app.is_done:
+        if run.done() or self.app.is_done or self._exit_after_query:
             # Stopped, or told to stop (exit() takes the app a few loop
-            # turns): queued lines don't run after a quit.
+            # turns, or waits for the query that called it): queued lines
+            # don't run after a quit.
             raise EOFError
         pending = self._pending_input
         if pending is not None and not pending.done():
-            raise RuntimeError("Another task is already waiting in prompt_async()")
+            raise RuntimeError(
+                "Another task is already waiting in prompt_async(): the next "
+                "line is one task's. A task beside the input loop asks with a "
+                "dialog (yes_no_dialog(), say)."
+            )
         if self._queued:
             text = self._queued.popleft()
             self._clear_hint()
@@ -1457,6 +1528,10 @@ class ThinkingPromptSession:
         finally:
             self._foreground = None
             self._query_cancelled = False
+            if self._exit_after_query:
+                # The query called exit(): it has ended, so the app stops.
+                self._exit_after_query = False
+                self._exit_app()
             if self._cancel_line_pending:
                 # One line after all the boxes the Ctrl+C ended, those of
                 # the query's sub-tasks too.
@@ -1536,10 +1611,21 @@ class ThinkingPromptSession:
         stops (EOFError), or a handler raises KeyboardInterrupt."""
         while True:
             try:
+                await self._others_asked()
                 text = await self.prompt_async()
                 await self._run_handler(handler, text)
             except (EOFError, KeyboardInterrupt):
                 return
+
+    async def _others_asked(self) -> None:
+        """Wait while another task waits in prompt_async(): one a handler
+        started, asking a question of its own. It asked first, so the next
+        line is its answer; the loop asks after it."""
+        pending = self._pending_input
+        while pending is not None and not pending.done():
+            # wait() rather than await: the line (or EOFError) is the asker's.
+            await asyncio.wait({pending})
+            pending = self._pending_input
 
     async def _run_handler(
         self,
@@ -1599,14 +1685,15 @@ class ThinkingPromptSession:
         """Finish the boxes the ended handler answers for.
 
         See ThinkingBoxManager.finish_owned_by. Their content is echoed;
-        when the handler was cancelled, or a cancelled thinking() block of
-        it left the line to them, "Operation cancelled..." follows.
+        when the handler was cancelled, "Operation cancelled..." follows,
+        also when only its cancelled thinking() blocks ended boxes. A cancel
+        it caught and went on from says nothing.
         """
         ended = self._manager.finish_owned_by(owner)
         owed = owner is not None and owner in self._cancel_owed
         if owner is not None:
             self._cancel_owed.discard(owner)
-        if cancelled or owed:
+        if cancelled:
             self._announce_cancel(bool(ended) or owed)
 
     def run(self, handler: InputHandler | None = None) -> None:
@@ -1741,6 +1828,8 @@ class ThinkingPromptSession:
         Raises:
             RuntimeError: If the session isn't running (see show_dialog()),
                 or another dialog is open: one at a time.
+            EOFError: If the session stops while the dialog is open (see
+                show_dialog()).
 
         Example:
             if await session.yes_no_dialog("Confirm", "Delete this file?"):
@@ -1775,6 +1864,8 @@ class ThinkingPromptSession:
         Raises:
             RuntimeError: If the session isn't running (see show_dialog()),
                 or another dialog is open: one at a time.
+            EOFError: If the session stops while the dialog is open (see
+                show_dialog()).
 
         Example:
             await session.message_dialog("Info", "Operation completed.")
@@ -1811,6 +1902,8 @@ class ThinkingPromptSession:
         Raises:
             RuntimeError: If the session isn't running (see show_dialog()),
                 or another dialog is open: one at a time.
+            EOFError: If the session stops while the dialog is open (see
+                show_dialog()).
             ValueError: If ``options`` is empty, or an option is listed twice.
 
         Example:
@@ -1858,6 +1951,8 @@ class ThinkingPromptSession:
         Raises:
             RuntimeError: If the session isn't running (see show_dialog()),
                 or another dialog is open: one at a time.
+            EOFError: If the session stops while the dialog is open (see
+                show_dialog()).
             ValueError: If ``options`` is empty, or an option is listed twice.
 
         Example:
@@ -1902,6 +1997,8 @@ class ThinkingPromptSession:
         Raises:
             RuntimeError: If the session isn't running (see show_dialog()),
                 or another dialog is open: one at a time.
+            EOFError: If the session stops while the dialog is open (see
+                show_dialog()).
             ValueError: If ``options`` is empty, an option is listed twice,
                 or ``default`` is a str or None rather than a sequence.
 
@@ -1929,8 +2026,13 @@ class ThinkingPromptSession:
                 ``async with session:``, or while run() or run_async()
                 runs (e.g. from an input handler or a task it started).
                 Also if another dialog is open: one at a time.
-            asyncio.CancelledError: If the session stops while the dialog
-                is open.
+            EOFError: If the session stops while the dialog is open, as
+                prompt_async() raises it. A dialog the running query (a
+                run_async() handler, or what query() runs) awaits, itself or
+                through the tasks it awaits, is cancelled with it instead:
+                the session stopping cancels the query. A query Ctrl+C
+                already cancelled isn't cancelled again, so a dialog in its
+                cleanup gets EOFError.
             TypeError: If ``dialog`` isn't a Dialog.
             ValueError: If the dialog has nothing to focus, or its
                 placement isn't 'box' or 'inline'.

@@ -15,6 +15,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from tests.helpers import idle_prompt
 from thinking_prompt import ThinkingPromptSession
 
 
@@ -295,14 +296,16 @@ class TestCtrlCKeyBinding:
 
             await run_with(session, handler, script)
 
-    def test_ctrl_c_with_orphan_box_clears_box_and_does_not_exit(self, session):
+    async def test_ctrl_c_with_orphan_box_clears_box_and_does_not_exit(self, session):
         """Ctrl+C with an active thinking box (and no handler) must clear
         the box but not also exit the app. Previously the binding read
         has_active_boxes after ending the boxes and treated the now-empty
         manager as 'idle', falling through to app.exit()."""
         # Open a box without a handler — simulates a box left orphaned by
         # earlier code, or a box opened from a non-handler context.
+        session._app_task = asyncio.current_task()  # the test plays the app's task
         session.start_thinking(lambda: "stuck", title="Stuck")
+        idle_prompt(session)
         assert session._manager.has_active_boxes is True
 
         handler = self._get_ctrl_c_handler(session)

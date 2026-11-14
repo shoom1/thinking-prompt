@@ -424,6 +424,128 @@ class TestBoxLifecycle:
 
             await run_with(session, lambda text: None, script)
 
+    @staticmethod
+    async def _nested_blocks(session: ThinkingPromptSession, opened: asyncio.Event) -> None:
+        async with session.thinking(title="Agent") as outer:
+            outer.append("planning\n")
+            async with session.thinking(title="Tool") as inner:
+                inner.append("tool running\n")
+                opened.set()
+                await asyncio.sleep(3600)
+
+    async def test_a_cancelled_task_says_so_once_after_nested_blocks(self):
+        """The cancel ends the inner block, then the outer one: one line,
+        after both."""
+        opened = asyncio.Event()
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                task = asyncio.create_task(self._nested_blocks(session, opened))
+                await asyncio.wait_for(opened.wait(), 2)
+                task.cancel()
+                await wait_until(lambda: not session.is_thinking)
+                await asyncio.sleep(0.05)  # the task's done callbacks
+                transcript = transcript_texts(session._display)
+                assert transcript.count("Operation cancelled...\n") == 1, transcript
+                assert transcript[-1] == "Operation cancelled...\n"
+
+            await run_with(session, lambda text: None, script)
+
+    async def test_a_query_the_app_stopping_cancels_says_so_once_after_nested_blocks(self):
+        opened = asyncio.Event()
+
+        async def handler(text: str) -> None:
+            await self._nested_blocks(session, opened)
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await asyncio.wait_for(opened.wait(), 2)
+                session.exit()
+                await asyncio.wait_for(run, 2)
+                transcript = transcript_texts(session._display)
+                assert transcript.count("Operation cancelled...\n") == 1, transcript
+                assert transcript[-1] == "Operation cancelled...\n"
+
+            await run_with(session, handler, script)
+
+    @staticmethod
+    async def _agent(session: ThinkingPromptSession) -> None:
+        """An outer box, and under it a tool box whose time limit runs out:
+        the task cancels itself and catches the cancel (as asyncio.timeout()
+        does), then goes on to its answer."""
+        async with session.thinking(title="Agent") as outer:
+            outer.append("planning\n")
+            me = asyncio.current_task()
+            assert me is not None
+            try:
+                async with session.thinking(title="Tool") as tool:
+                    tool.append("tool running\n")
+                    asyncio.get_running_loop().call_soon(me.cancel)
+                    await asyncio.sleep(3600)
+            except asyncio.CancelledError:
+                if hasattr(me, "uncancel"):  # 3.11+
+                    me.uncancel()
+            outer.append("tool timed out; going on\n")
+        session.add_response("final answer")
+
+    async def test_a_cancel_a_task_catches_under_an_outer_box_says_nothing(self):
+        """The task went on and succeeded: nothing was cancelled."""
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                await asyncio.create_task(self._agent(session))
+                await asyncio.sleep(0.05)  # the task's done callbacks
+                transcript = transcript_texts(session._display)
+                assert "Operation cancelled...\n" not in transcript, transcript
+                assert "final answer" in transcript[-1]
+
+            await run_with(session, lambda text: None, script)
+
+    async def test_a_caught_cancel_owes_no_line_to_a_later_cancel(self):
+        """The task caught the inner block's cancel and its outer block
+        ended: cancelled later with no box open, it ends nothing, so
+        nothing is said."""
+        done_agent = asyncio.Event()
+
+        async def agent_then_wait() -> None:
+            await self._agent(session)
+            done_agent.set()
+            await asyncio.sleep(3600)
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                task = asyncio.create_task(agent_then_wait())
+                await asyncio.wait_for(done_agent.wait(), 2)
+                task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await task
+                await asyncio.sleep(0.05)  # the task's done callbacks
+                transcript = transcript_texts(session._display)
+                assert "Operation cancelled...\n" not in transcript, transcript
+
+            await run_with(session, lambda text: None, script)
+
+    async def test_a_cancel_a_query_catches_under_an_outer_box_says_nothing(self):
+        async def handler(text: str) -> None:
+            await self._agent(session)
+
+        with piped_session() as (session, inp):
+
+            def answered() -> bool:
+                return any("final answer" in text for text in transcript_texts(session._display))
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: answered() and waiting_for_input(session))
+                transcript = transcript_texts(session._display)
+                assert "Operation cancelled...\n" not in transcript, transcript
+                assert "final answer" in transcript[-1]
+
+            await run_with(session, handler, script)
+
     async def test_ctrl_c_ends_a_querys_sub_task_boxes_under_one_line(self):
         """The query cancels its sub-task as it unwinds: the sub-task's box
         ends with it, and one "Operation cancelled..." follows all the boxes
@@ -476,6 +598,27 @@ class TestBoxLifecycle:
                 assert sum("working" in text for text in transcript) == 1
                 assert transcript[-1] == "Operation cancelled...\n"
                 assert not run.done()
+
+            await run_with(session, handler, script)
+
+    async def test_ctrl_c_sent_as_a_signal_stops_the_handler_too(self):
+        """While the session prints (run_in_terminal), the terminal is in
+        cooked mode: Ctrl+C arrives as SIGINT, which prompt_toolkit turns
+        into the <sigint> key."""
+
+        async def handler(text: str) -> None:
+            async with session.thinking() as ctx:
+                ctx.append("working\n")
+                await asyncio.sleep(3600)
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: session.is_thinking)
+                session.app.key_processor.send_sigint()
+                await wait_until(lambda: waiting_for_input(session) and not session.is_thinking)
+                assert transcript_texts(session._display)[-1] == "Operation cancelled...\n"
 
             await run_with(session, handler, script)
 
@@ -807,6 +950,61 @@ class TestInputLoopLifetime:
             async def script(run: asyncio.Task[None]) -> None:
                 inp.send_text("boom" + ENTER)
                 await asyncio.wait_for(asyncio.shield(run), timeout=2)
+
+            await run_with(session, handler, script)
+
+    async def test_a_question_a_task_asks_gets_the_next_line_then_the_loop_goes_on(self):
+        """A handler starts a task that asks with prompt_async() (a confirm
+        flow, say), then returns. The task asked first: the next line is its
+        answer, and the line after it goes to the handler."""
+        handled: list[str] = []
+        answers: list[str] = []
+
+        async def confirm() -> None:
+            answers.append(await session.prompt_async())
+
+        async def handler(text: str) -> None:
+            handled.append(text)
+            if text == "/deploy":
+                asyncio.ensure_future(confirm())
+                await asyncio.sleep(0.05)  # the task asks before the handler returns
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("/deploy" + ENTER)
+                await wait_until(lambda: handled == ["/deploy"])
+                await asyncio.sleep(0.1)  # the handler returns; the loop asks
+                assert not run.done()
+                inp.send_text("yes" + ENTER)
+                await wait_until(lambda: answers == ["yes"])
+                inp.send_text("next" + ENTER)
+                await wait_until(lambda: handled == ["/deploy", "next"])
+                assert echoed_inputs(session) == ["/deploy", "yes", "next"]
+
+            await run_with(session, handler, script)
+
+    async def test_ctrl_d_while_a_task_asks_ends_its_question_and_the_loop(self):
+        answers: list[str] = []
+
+        async def confirm() -> None:
+            try:
+                answers.append(await session.prompt_async())
+            except EOFError:
+                answers.append("EOF")
+
+        async def handler(text: str) -> None:
+            asyncio.ensure_future(confirm())
+            await asyncio.sleep(0.05)
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("/deploy" + ENTER)
+                await asyncio.sleep(0.15)  # the task asks; the handler returns
+                inp.send_text(CTRL_D)
+                await asyncio.wait_for(asyncio.shield(run), 2)  # returns, no error
+                assert answers == ["EOF"]
 
             await run_with(session, handler, script)
 
@@ -2096,10 +2294,10 @@ class TestDialogLifetime:
     def _dialog() -> Dialog:
         return Dialog("T", "B", [ButtonConfig("OK", result="ok")])
 
-    async def test_app_exit_cancels_a_dialog_opened_outside_the_handler(self):
-        """A dialog awaited by the input handler is cancelled with it on exit.
-        One opened from another task used to wait forever once the app
-        exited, and the manager kept it, refusing every later dialog."""
+    async def test_app_exit_ends_a_dialog_opened_outside_the_handler_with_eof_error(self):
+        """As prompt_async() does: nothing cancelled the task. (Such a
+        dialog used to wait forever once the app exited, and the manager
+        kept it, refusing every later dialog.)"""
         background: list[asyncio.Future[Any]] = []
 
         def handler(text: str) -> None:
@@ -2116,9 +2314,69 @@ class TestDialogLifetime:
             await run_with(session, handler, script)
 
             (task,) = background
-            with pytest.raises(asyncio.CancelledError):
+            with pytest.raises(EOFError):
                 await asyncio.wait_for(task, timeout=1)
             assert session._dialogs._current_dialog is None
+
+    async def test_app_exit_cancels_the_handler_awaiting_a_dialog(self):
+        """The app stopping cancels the running query, whatever it awaits:
+        a real cancel (as for its follow-up prompt_async()), and the handler
+        ends quietly."""
+        seen: list[Any] = []
+
+        async def handler(text: str) -> None:
+            try:
+                await session.show_dialog(self._dialog())
+            except BaseException as exc:
+                task = asyncio.current_task()
+                seen.append(type(exc))
+                if hasattr(task, "cancelling"):  # 3.11+: cancelled by a cancel()
+                    seen.append(task.cancelling())  # type: ignore[union-attr]
+                raise
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_open(session))
+                session.exit()
+                await asyncio.wait_for(run, timeout=2)
+
+            await run_with(session, handler, script)
+
+            assert seen[0] is asyncio.CancelledError
+            assert seen[1:] in ([], [1])
+            assert not any("[ERROR]" in text for text in transcript_texts(session._display))
+            assert session._dialogs._current_dialog is None
+
+    async def test_app_exit_cancels_the_handler_whose_sub_task_awaits_a_dialog(self):
+        """Tool calls run with gather(), each asking for approval: the
+        cancel reaches the dialog through them, and the handler ends
+        quietly, not with "Handler error: EOFError"."""
+        seen: list[type] = []
+
+        async def approve() -> bool:
+            try:
+                return await session.yes_no_dialog("Approve", "Run search?")
+            except BaseException as exc:
+                seen.append(type(exc))
+                raise
+
+        async def handler(text: str) -> None:
+            await asyncio.gather(approve())
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_open(session))
+                session.exit()
+                await asyncio.wait_for(run, timeout=2)
+
+            await run_with(session, handler, script)
+
+            assert seen == [asyncio.CancelledError]
+            assert not any("[ERROR]" in text for text in transcript_texts(session._display))
 
     async def test_show_dialog_after_exit_raises(self):
         with piped_session() as (session, inp):
@@ -2353,7 +2611,7 @@ class TestInlineDialogs:
 
             await run_with(session, handler, script)
 
-    async def test_app_exit_cancels_an_inline_dialog(self):
+    async def test_app_exit_ends_an_inline_dialog_with_eof_error(self):
         background: list[asyncio.Future[Any]] = []
 
         def handler(text: str) -> None:
@@ -2370,7 +2628,7 @@ class TestInlineDialogs:
             await run_with(session, handler, script)
 
             (task,) = background
-            with pytest.raises(asyncio.CancelledError):
+            with pytest.raises(EOFError):
                 await asyncio.wait_for(task, timeout=1)
             assert not inline_open(session)
 

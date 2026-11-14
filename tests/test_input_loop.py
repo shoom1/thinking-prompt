@@ -70,6 +70,59 @@ class TestLifetime:
             async with session:
                 assert welcomed == [True]
 
+    async def test_a_dialog_the_loop_awaits_when_the_app_stops_raises_eof_error(self):
+        """As prompt_async() in the same spot: nothing cancelled the loop's
+        task, so it isn't left cancelling (3.11+: cancelling() is 0)."""
+        from thinking_prompt import ButtonConfig, Dialog
+
+        seen: list[object] = []
+        with piped_session() as (session, inp):
+
+            async def stop_soon() -> None:
+                await wait_until(lambda: dialog_rendered(session))
+                session.exit()  # a shutdown timer, a server push, ...
+
+            stopper = asyncio.create_task(stop_soon())
+            with pytest.raises(EOFError):
+                async with session:
+                    try:
+                        await session.show_dialog(Dialog("Save?", "Save first?", [ButtonConfig("OK")]))
+                    finally:
+                        task = asyncio.current_task()
+                        if hasattr(task, "cancelling"):
+                            seen.append(task.cancelling())  # type: ignore[union-attr]
+            await stopper
+        assert seen in ([], [0])
+
+    async def test_a_query_whose_sub_task_awaits_a_dialog_is_cancelled_when_the_app_stops(self):
+        """The query awaits a task that awaits the dialog: the cancel reaches
+        the dialog through it, and query() returns None, as for a dialog the
+        query awaits itself."""
+        from thinking_prompt import ButtonConfig, Dialog
+
+        results: list[object] = []
+        with piped_session() as (session, inp):
+
+            async def respond() -> object:
+                return await asyncio.ensure_future(
+                    session.show_dialog(Dialog("Approve", "Run search?", [ButtonConfig("OK")]))
+                )
+
+            async def body() -> None:
+                await session.prompt_async()
+                results.append(await session.query(respond()))
+                with suppress(EOFError):
+                    await session.prompt_async()
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: dialog_rendered(session))
+                session.exit()
+                await finished(run)
+
+            await run_loop(session, body, script)
+        assert results == [None]
+
     async def test_an_error_in_the_block_stops_the_app_and_propagates(self):
         with piped_session() as (session, inp):
             with pytest.raises(ValueError, match="boom"):
@@ -227,13 +280,15 @@ class TestPromptAsync:
 
             await run_loop(session, body, script)
 
-    async def test_a_second_waiter_is_refused(self):
+    async def test_a_second_waiter_is_refused_and_pointed_to_a_dialog(self):
+        """The prompt's next line is one task's: a task beside the input
+        loop asks with a dialog."""
         with piped_session() as (session, inp):
 
             async def body() -> None:
                 first = asyncio.ensure_future(session.prompt_async())
                 await wait_until(lambda: waiting_for_input(session))
-                with pytest.raises(RuntimeError, match="already waiting"):
+                with pytest.raises(RuntimeError, match="already waiting.*dialog"):
                     await session.prompt_async()
                 first.cancel()
                 with suppress(asyncio.CancelledError):
@@ -717,6 +772,194 @@ class TestCancelOnce:
         assert log == ["cleanup cancelled"]
 
 
+class TestExitFromTheQuery:
+    """exit() called by the running query asks the session to stop once the
+    query ends: the code after it runs, with the app up. Called from
+    anywhere else, it stops the app at once (see TestCancelOnce)."""
+
+    async def test_a_handler_runs_to_its_end_then_the_session_exits(self):
+        from tests.test_end_to_end import run_with
+
+        seen: list[bool] = []
+
+        async def handler(text: str) -> None:
+            session.exit()
+            await asyncio.sleep(0.05)  # a real await: no cancel arrives
+            seen.append(session.app.is_running and not session.app.is_done)
+            session.add_response("goodbye")
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("/quit" + ENTER)
+                await finished(run)
+
+            await run_with(session, handler, script)
+        assert seen == [True]
+        assert "goodbye" in transcript_texts(session._display)[-1]
+
+    async def test_a_query_runs_to_its_end_and_returns_its_result(self):
+        results: list[object] = []
+        with piped_session() as (session, inp):
+
+            async def respond() -> str:
+                session.exit()
+                await asyncio.sleep(0.05)
+                return "done"
+
+            async def body() -> None:
+                while True:
+                    try:
+                        await session.prompt_async()
+                    except EOFError:
+                        results.append("EOF")
+                        return
+                    results.append(await session.query(respond()))
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("/quit" + ENTER)
+                await finished(run)
+
+            await run_loop(session, body, script)
+        assert results == ["done", "EOF"]
+
+    async def test_after_exit_the_query_gets_no_more_input(self):
+        """The session was told to stop: prompt_async() raises EOFError, as
+        it does once the app has stopped."""
+        results: list[str] = []
+        with piped_session() as (session, inp):
+
+            async def respond() -> None:
+                session.exit()
+                try:
+                    await session.prompt_async()
+                except EOFError:
+                    results.append("EOF")
+
+            async def body() -> None:
+                await session.prompt_async()
+                await session.query(respond())
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("/quit" + ENTER)
+                await finished(run)
+
+            await run_loop(session, body, script)
+        assert results == ["EOF"]
+
+    async def test_a_task_waiting_for_input_gets_eof_error_at_once(self):
+        """Told to stop, the session reads no more input: a task already
+        waiting in prompt_async() isn't left to take the next line."""
+        from tests.test_end_to_end import run_with
+
+        got: list[str] = []
+        finishing = asyncio.Event()
+
+        async def asker() -> None:
+            try:
+                got.append(await session.prompt_async())
+            except EOFError:
+                got.append("EOF")
+
+        async def handler(text: str) -> None:
+            asyncio.ensure_future(asker())
+            await asyncio.sleep(0.05)  # the task waits for input
+            session.exit()
+            await finishing.wait()
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("/quit" + ENTER)
+                await wait_until(lambda: got == ["EOF"])
+                assert session.app.is_running  # the handler is finishing
+                finishing.set()
+                await finished(run)
+
+            await run_with(session, handler, script)
+
+    async def test_ctrl_c_after_exit_cancels_the_query_then_the_session_exits(self):
+        from tests.test_end_to_end import run_with
+
+        async def handler(text: str) -> None:
+            session.exit()
+            async with session.thinking() as box:
+                box.append("closing\n")
+                await asyncio.sleep(3600)
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("/quit" + ENTER)
+                await wait_until(lambda: session.is_thinking)
+                assert session.app.is_running
+                inp.send_text(CTRL_C)
+                await finished(run)
+                assert transcript_texts(session._display)[-1] == "Operation cancelled...\n"
+
+            await run_with(session, handler, script)
+
+    async def test_exit_from_a_task_the_query_started_stops_at_once(self):
+        """Only the query itself is let finish: exit() from its sub-task
+        stops the app now, and the query is cancelled with it."""
+        from tests.test_end_to_end import run_with
+
+        log: list[str] = []
+
+        async def stop() -> None:
+            session.exit()
+
+        async def handler(text: str) -> None:
+            asyncio.ensure_future(stop())
+            try:
+                await asyncio.sleep(3600)
+            except asyncio.CancelledError:
+                log.append("cancelled")
+                raise
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await finished(run)
+
+            await run_with(session, handler, script)
+        assert log == ["cancelled"]
+
+    async def test_exit_again_does_nothing_more(self):
+        from tests.test_end_to_end import run_with
+
+        async def handler(text: str) -> None:
+            session.exit()
+            session.exit()
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("/quit" + ENTER)
+                await finished(run)
+                session.exit()  # stopped: nothing to do
+
+            await run_with(session, handler, script)
+        assert not any("[ERROR]" in text for text in transcript_texts(session._display))
+
+    async def test_exit_twice_from_elsewhere_does_nothing_more(self):
+        """The app takes a few loop turns to stop: a second exit() meanwhile
+        is a no-op, not prompt_toolkit's "Return value already set"."""
+        with piped_session() as (session, inp):
+
+            async def body() -> None:
+                with suppress(EOFError):
+                    await session.prompt_async()
+
+            async def script(run: asyncio.Task[None]) -> None:
+                session.exit()
+                session.exit()
+                await finished(run)
+
+            await run_loop(session, body, script)
+
+
 class TestRunAsyncHandlers:
     async def test_a_handler_can_ask_a_follow_up(self):
         from tests.test_end_to_end import run_with
@@ -847,6 +1090,94 @@ class TestQueue:
                     release.set()  # the app stopping doesn't end the loop's own work
 
             await run_loop(session, body, script)
+
+    async def _busy_loop(
+        self,
+        session: ThinkingPromptSession,
+        started: asyncio.Event,
+        release: asyncio.Event,
+    ) -> None:
+        """A loop that does its work itself, not in query(), in a box."""
+        while True:
+            try:
+                await session.prompt_async()
+            except (EOFError, KeyboardInterrupt):
+                return
+            async with session.thinking(title="work") as box:
+                box.append("step 1\n")
+                started.set()
+                await release.wait()
+                box.append("step 2\n")
+            session.add_response("answer")
+
+    async def test_ctrl_c_while_busy_outside_a_query_leaves_the_work_alone(self):
+        """Nothing for Ctrl+C to stop: the loop's box is its live work, not
+        a box nobody will end, and the typed draft stays."""
+        started, release = asyncio.Event(), asyncio.Event()
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                try:
+                    inp.send_text("go" + ENTER)
+                    await started.wait()
+                    inp.send_text("draft" + CTRL_C)
+                    await wait_until(lambda: session._hint is not None)
+                    assert session.status_text == "Busy"
+                    assert session.is_thinking
+                    assert session._default_buffer.text == "draft"
+                finally:
+                    release.set()
+                await wait_until(lambda: waiting_for_input(session))
+                texts = transcript_texts(session._display)
+                assert "Operation cancelled...\n" not in texts
+                assert "step 1\nstep 2\n" in texts
+                assert "answer" in texts[-1]
+
+            await run_loop(session, lambda: self._busy_loop(session, started, release), script)
+
+    async def test_ctrl_c_while_busy_outside_a_query_keeps_the_queued_lines(self):
+        """Ctrl+C drops them with the query it stops: here it stops
+        nothing, so they run next."""
+        started, release = asyncio.Event(), asyncio.Event()
+        with piped_session(input_while_busy="queue") as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                try:
+                    inp.send_text("go" + ENTER)
+                    await started.wait()
+                    inp.send_text("next" + ENTER)
+                    await wait_until(lambda: list(session._queued) == ["next"])
+                    inp.send_text(CTRL_C)
+                    await wait_until(lambda: session._hint is not None)
+                    assert list(session._queued) == ["next"]
+                finally:
+                    release.set()
+                await wait_until(lambda: echoed_inputs(session) == ["go", "next"])
+
+            await run_loop(session, lambda: self._busy_loop(session, started, release), script)
+
+    async def test_ctrl_d_while_busy_outside_a_query_doesnt_exit(self):
+        """As Enter does, Ctrl+D finds the session busy: it exits once the
+        loop waits for input again."""
+        started, release = asyncio.Event(), asyncio.Event()
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                try:
+                    inp.send_text("go" + ENTER)
+                    await started.wait()
+                    inp.send_text(CTRL_D)
+                    await wait_until(lambda: session._hint is not None)
+                    assert session.status_text == "Busy"
+                    assert session.app.is_running
+                finally:
+                    release.set()
+                await wait_until(lambda: waiting_for_input(session))
+                assert "answer" in transcript_texts(session._display)[-1]
+                inp.send_text(CTRL_D)
+                await finished(run)
+
+            await run_loop(session, lambda: self._busy_loop(session, started, release), script)
 
     async def test_queued_lines_run_in_order_each_echoed_when_it_runs(self):
         ran: list[str] = []
