@@ -14,7 +14,7 @@ from typing import Any, Generic, Literal, TypeVar, Union
 
 from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.data_structures import Point
-from prompt_toolkit.filters import Condition
+from prompt_toolkit.filters import Condition, is_done
 from prompt_toolkit.formatted_text import FormattedText
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.key_binding.key_bindings import KeyBindingsBase
@@ -728,7 +728,8 @@ class DropdownFieldControl(FieldControl[DropdownField]):
         return Float(
             content=ConditionalContainer(
                 content=framed_menu,
-                filter=Condition(lambda: self._editing),
+                # Left out of the app's last frame, with its dialog.
+                filter=Condition(lambda: self._editing) & ~is_done,
             ),
             attach_to_window=self._window,
             xcursor=True,

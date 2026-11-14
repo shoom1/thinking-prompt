@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable, Literal
 
 from prompt_toolkit.application.current import get_app
-from prompt_toolkit.filters import Condition
+from prompt_toolkit.filters import Condition, is_done
 from prompt_toolkit.key_binding import merge_key_bindings
 from prompt_toolkit.layout import (
     ConditionalContainer,
@@ -274,7 +274,8 @@ class BoxPresenter:
             self._room_window,
             content=ConditionalContainer(
                 content=DynamicContainer(lambda: self._capped),
-                filter=Condition(lambda: self.view is not None),
+                # Left out of the app's last frame: nobody can answer it then.
+                filter=Condition(lambda: self.view is not None) & ~is_done,
             ),
             allow_cover_cursor=True,
         )

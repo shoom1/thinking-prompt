@@ -527,8 +527,8 @@ hint.
 Dialogs open over a running session: call them from an input handler,
 inside `async with session:`, or from a task started while the session
 runs. On a session that isn't running they raise `RuntimeError`. If the
-session exits while a dialog is open, awaiting it raises `EOFError`, as
-`prompt_async()` does. A dialog the running query (a handler, or what
+session exits while a dialog is open, its last frame leaves the dialog
+out, and awaiting it raises `EOFError`, as `prompt_async()` does. A dialog the running query (a handler, or what
 `query()` runs) awaits, itself or through the tasks it awaits, is cancelled
 with it instead: the session stopping cancels the query. A query Ctrl+C
 already cancelled isn't cancelled again, so a dialog in its cleanup gets

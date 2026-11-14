@@ -2378,6 +2378,54 @@ class TestDialogLifetime:
             assert seen == [asyncio.CancelledError]
             assert not any("[ERROR]" in text for text in transcript_texts(session._display))
 
+    @pytest.mark.parametrize("placement", ["box", "inline"])
+    async def test_the_last_frame_leaves_out_an_open_dialog(self, placement: str):
+        """Nobody can answer it any more: it isn't left in the scrollback,
+        as open thinking boxes and the status bar aren't."""
+        dialog = Dialog("Unanswered", "Still open", [ButtonConfig("OK")], placement=placement)  # type: ignore[arg-type]
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                shown = asyncio.ensure_future(session.show_dialog(dialog))
+                await wait_until(lambda: dialog_rendered(session))
+                assert any("Still open" in line for line in screen_lines(session))
+
+                frame = done_frame(session)
+
+                assert any(line.startswith(">>>") for line in frame)
+                for text in ("Unanswered", "Still open", "OK"):
+                    assert not any(text in line for line in frame), frame
+                shown.cancel()
+                with suppress(asyncio.CancelledError):
+                    await shown
+
+            await run_with(session, lambda text: None, script)
+
+    @pytest.mark.parametrize("placement", ["box", "inline"])
+    async def test_the_last_frame_leaves_out_an_open_dropdown_menu(self, placement: str):
+        dialog = Dialog(
+            "Colors",
+            fields=[DropdownField("c", "Color", options=["crimson", "olive", "teal"])],
+            placement=placement,  # type: ignore[arg-type]
+        )
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                shown = asyncio.ensure_future(session.show_dialog(dialog))
+                await wait_until(lambda: dialog_rendered(session))
+                inp.send_text(ENTER)
+                await wait_until(lambda: any("olive" in line for line in screen_lines(session)))
+
+                frame = done_frame(session)
+
+                for text in ("crimson", "olive", "teal", "Color"):
+                    assert not any(text in line for line in frame), frame
+                shown.cancel()
+                with suppress(asyncio.CancelledError):
+                    await shown
+
+            await run_with(session, lambda text: None, script)
+
     async def test_show_dialog_after_exit_raises(self):
         with piped_session() as (session, inp):
 
