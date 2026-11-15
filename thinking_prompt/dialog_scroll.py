@@ -9,7 +9,7 @@ for them to scroll (OverflowScrollbar).
 """
 from __future__ import annotations
 
-from typing import Callable, Optional, Union
+from collections.abc import Callable
 
 from prompt_toolkit.application.current import get_app
 from prompt_toolkit.data_structures import Point
@@ -25,7 +25,7 @@ from prompt_toolkit.layout.screen import Screen, WritePosition
 TERMINAL_BUFFER_ROWS = 4
 
 # A cap on rows: a number, a function of the width, or None for no cap.
-Cap = Union[int, Callable[[int], Optional[int]], None]
+Cap = int | Callable[[int], int | None] | None
 
 
 def dialog_cap(max_height: int | None, terminal_rows: int) -> int:

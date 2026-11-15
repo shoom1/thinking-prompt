@@ -10,7 +10,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
-from typing import Any, Generic, Literal, TypeVar, Union
+from typing import Any, Generic, Literal, TypeVar
 
 from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.data_structures import Point
@@ -176,7 +176,7 @@ T = TypeVar("T", bound=Field)
 
 # Where field values start: "labels" (two columns after the longest label or
 # description), "right" (the row's right edge) or a column, the marker included.
-AlignValues = Union[Literal["labels", "right"], int]
+AlignValues = Literal["labels", "right"] | int
 
 # The smallest value column: the marker, one label character and a space.
 MIN_VALUE_COLUMN = len(MARKER) + 2

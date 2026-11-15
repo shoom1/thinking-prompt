@@ -17,7 +17,6 @@ from typing import (
     TYPE_CHECKING,
     Any,
     Literal,
-    Optional,
     TypeVar,
     cast,
 )
@@ -1965,7 +1964,7 @@ class ThinkingPromptSession:
         """
         from .dialog import _button_dialog
         dialog = _button_dialog(title, text, options, self._resolve_placement(placement), max_height)
-        return cast(Optional[str], await self._dialogs.show(dialog))
+        return cast(str | None, await self._dialogs.show(dialog))
 
     async def choice_dialog(
         self,
@@ -2014,7 +2013,7 @@ class ThinkingPromptSession:
         """
         from .dialog import _choice_dialog
         dialog = _choice_dialog(title, text, options, default, self._resolve_placement(placement), max_height)
-        return cast(Optional[str], await self._dialogs.show(dialog))
+        return cast(str | None, await self._dialogs.show(dialog))
 
     async def checklist_dialog(
         self,

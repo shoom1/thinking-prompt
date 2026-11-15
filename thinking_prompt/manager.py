@@ -9,8 +9,9 @@ from __future__ import annotations
 
 import asyncio
 import threading
+from collections.abc import Callable
 from functools import partial
-from typing import TYPE_CHECKING, Any, Callable, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from prompt_toolkit.application.current import get_app
 from prompt_toolkit.layout import HSplit, Window

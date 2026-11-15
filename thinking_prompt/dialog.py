@@ -37,12 +37,11 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import (
     TYPE_CHECKING,
     Any,
-    Callable,
     Literal,
     cast,
 )

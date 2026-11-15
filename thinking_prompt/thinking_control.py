@@ -6,8 +6,8 @@ from __future__ import annotations
 import logging
 import re
 import threading
+from collections.abc import Callable
 from functools import lru_cache
-from typing import Callable
 
 from prompt_toolkit.formatted_text import (
     ANSI,

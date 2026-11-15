@@ -8,8 +8,9 @@ a box dialog looks, where it floats and how tall it is.
 from __future__ import annotations
 
 import textwrap
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Callable, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from prompt_toolkit.application.current import get_app
 from prompt_toolkit.filters import Condition, is_done
@@ -269,7 +270,7 @@ class _ButtonRows(Container):
             ends = [*starts[1:], len(self.buttons)]
             rows = [
                 VSplit(self.buttons[start:end], padding=1, align=HorizontalAlign.CENTER)
-                for start, end in zip(starts, ends)
+                for start, end in zip(starts, ends, strict=True)
             ]
             blank = Dimension(min=0, preferred=1, max=1)
             layout = HSplit([Window(height=blank), *rows, Window(height=blank)])
