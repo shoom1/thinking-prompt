@@ -145,6 +145,121 @@ class TestThemeFactories:
         assert ThinkingPromptStyles.light().code_theme == "default"
 
 
+# Class stacks as the session draws them: a box dialog's body, its title,
+# its focused button, a text area in it, a scrollbar (its cells carry only
+# the scrollbar's classes); the completion menu, with a FuzzyCompleter's
+# match classes; a dropdown's option, in its framed menu.
+_DRAWN = [
+    "class:dialog class:dialog.body",
+    "class:dialog class:frame.label",
+    "class:dialog class:dialog.body class:button class:button.focused",
+    "class:dialog class:dialog.body class:text-area",
+    "class:scrollbar.background",
+    "class:scrollbar.button",
+    "class:completion-menu class:completion-menu.completion",
+    "class:completion-menu class:completion-menu.completion.current",
+    "class:completion-menu class:completion-menu.meta.completion",
+    "class:completion-menu class:completion-menu.meta.completion.current",
+    "class:completion-menu class:completion-menu.completion class:fuzzymatch.outside",
+    "class:completion-menu class:completion-menu.completion.current class:fuzzymatch.outside",
+    "class:field-dropdown-border class:field-dropdown class:field-dropdown-item",
+]
+
+
+def _drawn(theme: ThinkingPromptStyles, classes: str):  # type: ignore[no-untyped-def]
+    """The attributes a cell with ``classes`` gets: prompt_toolkit's own
+    default style under the theme's, as the Application merges them."""
+    from prompt_toolkit.styles import default_ui_style, merge_styles
+
+    return merge_styles([default_ui_style(), theme.to_style()]).get_attrs_for_style_str(classes)
+
+
+class TestNoPromptToolkitColors:
+    """prompt_toolkit's default style paints its widgets (a white dialog
+    body, a red title, a gray completion menu); a theme without those
+    colors (an empty token: the terminal's own) must not let them show."""
+
+    @pytest.mark.parametrize("theme", ["terminal", "mono"])
+    @pytest.mark.parametrize("classes", _DRAWN)
+    def test_no_color_comes_from_prompt_toolkit(self, theme: str, classes: str):
+        import re
+
+        attrs = _drawn(resolve_theme(theme), classes)
+        for color in (attrs.color, attrs.bgcolor):
+            assert not re.fullmatch(r"[0-9a-f]{6}", color or ""), (classes, attrs)
+
+    def test_a_focused_button_still_stands_out(self):
+        attrs = _drawn(ThinkingPromptStyles(), _DRAWN[2])
+        assert attrs.reverse and attrs.bold
+
+    def test_the_current_completion_still_stands_out(self):
+        attrs = _drawn(ThinkingPromptStyles(), _DRAWN[7])
+        assert attrs.reverse
+
+    def test_the_terminals_own_color_is_no_color(self):
+        """An empty color, not "default": prompt_toolkit's legacy Windows
+        console output draws "default" black (it keeps the console's own
+        colors only for an empty one)."""
+        for theme in ("terminal", "mono"):
+            for classes in _DRAWN:
+                attrs = _drawn(resolve_theme(theme), classes)
+                assert "default" not in (attrs.color, attrs.bgcolor), (theme, classes)
+
+    def test_a_fuzzy_completers_unmatched_letters_are_muted(self):
+        """prompt_toolkit's #444444 was readable on its own gray menu, not
+        on a dark terminal's background."""
+        s = ThinkingPromptStyles()
+        assert _drawn(s, _DRAWN[10]).color == s.color_text_muted
+
+    def test_a_dropdowns_options_are_the_terminals_own_color(self):
+        """Not the border's muted color, which the frame passes on."""
+        assert _drawn(ThinkingPromptStyles(), _DRAWN[12]).color == ""
+
+    def test_an_explicit_selection_isnt_reversed_by_prompt_toolkit(self):
+        """prompt_toolkit's current completion is reverse video: a selection
+        set by colors came out swapped, in the completion menu only."""
+        s = ThinkingPromptStyles(menu_item_selected="bg:#222222 fg:ansiyellow")
+        assert not _drawn(s, _DRAWN[7]).reverse
+
+    @pytest.mark.parametrize("theme", ["dark", "light"])
+    def test_themes_with_colors_keep_them(self, theme: str):
+        s = resolve_theme(theme)
+        body = _drawn(s, _DRAWN[0])
+        assert body.bgcolor == s.color_bg_dialog.lstrip("#") and body.color == s.color_text.lstrip("#")
+
+
+class TestSelectionStyles:
+    """A selection (the current completion, a dropdown's pick, the focused
+    button) derives from the tokens like every element: the accent on the
+    selection's background color when the theme has one, else reverse
+    video. A field set explicitly still wins."""
+
+    def test_the_fields_hold_no_override_by_default(self):
+        s = ThinkingPromptStyles()
+        assert (s.menu_item_selected, s.menu_meta_selected, s.dialog_button_focused) == ("", "", "")
+
+    def test_a_selection_background_token_colors_the_selection(self):
+        d = ThinkingPromptStyles(color_accent="#ff6600", color_bg_selected="#222222").to_style_dict()
+        for name in ("completion-menu.completion.current", "field-dropdown-selected"):
+            words = d[name].split()
+            assert "fg:#ff6600" in words and "bg:#222222" in words and "reverse" not in words
+
+    def test_a_button_token_colors_the_focused_button(self):
+        words = ThinkingPromptStyles(color_accent_button="#0066cc").to_style_dict()["button.focused"].split()
+        assert "bg:#0066cc" in words and "reverse" not in words
+
+    @pytest.mark.parametrize("theme", ["terminal", "mono"])
+    def test_without_them_selections_are_reverse_video(self, theme: str):
+        d = resolve_theme(theme).to_style_dict()
+        assert "reverse" in d["completion-menu.completion.current"].split()
+        assert {"bold", "reverse"} <= set(d["button.focused"].split())
+
+    def test_an_explicit_selection_style_wins(self):
+        d = ThinkingPromptStyles(color_bg_selected="#222222", menu_item_selected="underline").to_style_dict()
+        assert "underline" in d["completion-menu.completion.current"].split()
+        assert "bg:#222222" not in d["completion-menu.completion.current"].split()
+
+
 class TestResolveTheme:
     def test_instance_passthrough(self):
         s = ThinkingPromptStyles.light()

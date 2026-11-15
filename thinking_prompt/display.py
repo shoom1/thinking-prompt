@@ -21,8 +21,9 @@ from prompt_toolkit.formatted_text import (
     to_formatted_text,
 )
 from prompt_toolkit.renderer import print_formatted_text as print_to_output
-from prompt_toolkit.styles import Style, default_pygments_style, default_ui_style, merge_styles
+from prompt_toolkit.styles import BaseStyle, default_pygments_style, default_ui_style, merge_styles
 
+from ._text import styled_lines
 from .rich_utils import (
     _highlight_code,
     _is_rich_renderable,
@@ -49,7 +50,7 @@ class Display:
 
     def __init__(
         self,
-        get_style: Callable[[], Style],
+        get_style: Callable[[], BaseStyle],
         thinking_styles: ThinkingPromptStyles | None = None,
         get_color_depth: Callable[[], ColorDepth | None] = lambda: None,
         transcript_limit: int | None = None,
@@ -142,7 +143,7 @@ class Display:
     def _output_styled(self, style: str, text: str) -> None:
         """Output styled text to the transcript and console."""
         self._transcript.append(style, text)
-        self._print_to_console(FormattedText([(style, text)]))
+        self._print_to_console(FormattedText(styled_lines(style, text)))
 
     def _output_ansi(self, content: str) -> None:
         """Output baked ANSI string to console and transcript.
@@ -171,15 +172,14 @@ class Display:
         # would be reprinted separately (each print adds a trailing newline, and
         # the prefix has none of its own), splitting ">>> hello" across
         # lines. One input is also one transcript_limit entry this way.
-        self._transcript.append_formatted([
-            ("class:transcript.user-prefix", prompt),
-            ("class:transcript.user-message", f"{text}\n"),
-        ])
+        # The newlines unstyled: the theme's background ends with the text.
+        echo = [
+            *styled_lines("class:transcript.user-prefix", prompt),
+            *styled_lines("class:transcript.user-message", f"{text}\n"),
+        ]
+        self._transcript.append_formatted(echo)
         # Print as single formatted output
-        self._print_to_console(FormattedText([
-            ("class:transcript.user-prefix", prompt),
-            ("class:transcript.user-message", f"{text}\n"),
-        ]))
+        self._print_to_console(FormattedText(echo))
 
     def thinking(
         self,
@@ -311,13 +311,15 @@ class Display:
 
     def formatted(self, formatted_text: FormattedText) -> None:
         """
-        Output pre-formatted FormattedText directly.
+        Output pre-formatted FormattedText directly, ended as a str
+        response is (with a newline, so a blank line follows it).
 
         Args:
             formatted_text: A FormattedText object with (style, text) pairs.
         """
-        self._transcript.append_formatted(formatted_text)
-        self._print_to_console(formatted_text)
+        ended = FormattedText([*formatted_text, ("", "\n")])
+        self._transcript.append_formatted(ended)
+        self._print_to_console(ended)
 
     def rich(self, renderable: Any) -> None:
         """

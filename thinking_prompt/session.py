@@ -51,7 +51,7 @@ from prompt_toolkit.layout import AnyContainer, ConditionalContainer, DynamicCon
 from prompt_toolkit.layout.controls import FormattedTextControl, UIContent, UIControl
 from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.output import ColorDepth, Output
-from prompt_toolkit.styles import DynamicStyle, Style
+from prompt_toolkit.styles import BaseStyle, DynamicStyle, Style, merge_styles
 
 from ._text import format_exception_detail
 from .app_info import AppInfo
@@ -59,7 +59,7 @@ from .display import Display
 from .frames import POLL_INTERVAL, FrameScheduler
 from .layout import create_layout
 from .manager import ThinkingBoxManager
-from .resize import ShrinkRepaint
+from .resize import ResizeRepaint
 from .rich_utils import _is_rich_renderable
 from .spinner import Spinner
 from .styles import ThinkingPromptStyles, resolve_theme
@@ -108,6 +108,17 @@ def _response_fragments(content: object) -> FormattedText:
                 ) from None
         return FormattedText(content)
     raise ValueError(f"add_response() takes {_FORMATTED_TEXT}; got {content!r}")
+
+
+# Reverse video on what shows the cursor in a list or a dialog, for 1-bit
+# rendering (see ThinkingPromptSession._theme_style), after the theme.
+_ONE_BIT_SELECTIONS = Style.from_dict({
+    "completion-menu.completion.current": "reverse",
+    "completion-menu.meta.completion.current": "reverse",
+    "field-dropdown-selected": "reverse",
+    "button.focused": "bold reverse",
+    "scrollbar.button": "reverse",
+})
 
 
 class _RoomControl(UIControl):
@@ -298,7 +309,7 @@ class ThinkingPromptSession:
         self._completions_menu_height = completions_menu_height
 
         # Convert styles dataclass to prompt_toolkit Style
-        self._style = self._styles.to_style()
+        self._style = self._theme_style(self._styles)
 
         # Display handles all output to console and transcript
         self._display = Display(
@@ -314,8 +325,8 @@ class ThinkingPromptSession:
         # Redraws on demand: writes redraw now, animations ask for their
         # next frame; nothing redraws on a timer (see _create_application).
         self._frames = FrameScheduler(lambda: self.app.invalidate())
-        # A repaint once the terminal stops shrinking (see resize.py).
-        self._shrinks = ShrinkRepaint(self._repaint_after_shrink)
+        # A repaint once the terminal stops changing size (see resize.py).
+        self._resizes = ResizeRepaint(self._repaint_after_resize)
 
         # Thinking box manager: the boxes on screen, and their echo when
         # they end. expand_key flows through to each box so the truncation
@@ -602,8 +613,8 @@ class ThinkingPromptSession:
             min_redraw_interval=1 / 30,
             color_depth=self._effective_color_depth,
         )
-        # Every resize redraws: each draw tells _shrinks the terminal's size.
-        app.before_render += lambda sender: self._shrinks.seen(sender.output.get_size())
+        # Every resize redraws: each draw tells _resizes the terminal's size.
+        app.before_render += lambda sender: self._resizes.seen(sender.output.get_size())
         return app
 
     def _create_key_bindings(self) -> KeyBindings:
@@ -716,6 +727,16 @@ class ThinkingPromptSession:
 
         return kb
 
+    def _theme_style(self, styles: ThinkingPromptStyles) -> BaseStyle:
+        """``styles`` as a prompt_toolkit style. At 1 bit (NO_COLOR, a
+        1-bit theme), where colors show nothing, with reverse video on the
+        selections, the focused button and a scrollbar's thumb: made of
+        colors alone, they'd vanish (a dropdown's rows have no ❯)."""
+        style = styles.to_style()
+        if self._no_color or styles.color_depth is ColorDepth.DEPTH_1_BIT:
+            return merge_styles([style, _ONE_BIT_SELECTIONS])
+        return style
+
     def _effective_color_depth(self) -> ColorDepth | None:
         """NO_COLOR (env, at construction) wins; else the theme's hint."""
         if self._no_color:
@@ -760,7 +781,7 @@ class ThinkingPromptSession:
         resolved = resolve_theme(theme)
         # Built before anything is switched, so a theme that can't be built
         # leaves styles, the style and the Display as they were.
-        style = resolved.to_style()
+        style = self._theme_style(resolved)
         self._display.set_theme(resolved)
         self._styles = resolved
         self._style = style
@@ -799,9 +820,9 @@ class ThinkingPromptSession:
         else:
             job(get_app_session().output)
 
-    def _repaint_after_shrink(self) -> None:
-        """Repaint once the terminal stopped shrinking, which left rows of
-        the live UI behind (see resize.py)."""
+    def _repaint_after_resize(self) -> None:
+        """Repaint once the terminal stopped changing size, which left rows
+        of the live UI behind (see resize.py)."""
         if self.app and self.app.is_running:
             self._repaint_console()
 
@@ -1373,7 +1394,7 @@ class ThinkingPromptSession:
             self._manager.finish_owned_by(self._app_task)
             self._app_task = None
             self._frames.cancel()
-            self._shrinks.cancel()
+            self._resizes.cancel()
         error = None if run.cancelled() else run.exception()
         if error is not None and exc_info[1] is None:
             raise error

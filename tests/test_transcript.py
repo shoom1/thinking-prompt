@@ -3,7 +3,7 @@ Tests for Transcript.
 """
 from __future__ import annotations
 
-from prompt_toolkit.formatted_text import FormattedText
+from prompt_toolkit.formatted_text import FormattedText, fragment_list_to_text
 
 from thinking_prompt.transcript import Transcript
 
@@ -118,8 +118,7 @@ class TestTranscriptEdgeCases:
         """Should handle multiline content."""
         transcript.append("class:test", "Line 1\nLine 2\nLine 3")
         formatted = transcript.get_formatted_text()
-        fragments = list(formatted)
-        assert "\n" in fragments[0][1]
+        assert fragment_list_to_text(formatted) == "Line 1\nLine 2\nLine 3"
 
     def test_get_formatted_text_returns_copy(self, transcript: Transcript):
         """get_formatted_text should return a copy, not the internal list."""
@@ -190,5 +189,6 @@ class TestTypedEntries:
         h.append("class:x", "hello\n")
         h.append_formatted([("bold", "world")])
         frags = list(h.get_formatted_text())
-        assert ("class:x", "hello\n") in frags
+        # The styled entry's newline unstyled (a background ends with the text).
+        assert [("class:x", "hello"), ("", "\n")] == frags[:2]
         assert ("bold", "world") in frags

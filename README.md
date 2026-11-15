@@ -327,11 +327,12 @@ idle prompt costs no CPU:
 - Text that can't say when it changes is re-read every 0.1 s while it's
   shown: a content callback passed to `start_thinking()`, and a prompt
   `message` or `status_text` given as a callable.
-- When the terminal gets narrower or shorter, the session repaints once
-  the size holds for 0.25 s: it clears the screen and scrollback and prints
-  the transcript again, as `set_theme(repaint=True)` does. A narrower
-  window re-wraps the UI's full-width rows and a shorter one pushes its top
-  into scrollback, so the old frame can't be erased row by row. Shell
+- When the terminal changes size, the session repaints once the size
+  holds for 0.25 s: it clears the screen and scrollback and prints the
+  transcript again, as `set_theme(repaint=True)` does. A narrower window
+  re-wraps the UI's full-width rows, a shorter one pushes its top into
+  scrollback, and a terminal that re-wraps as it widens (many do) joins
+  rows back up, so the old frame can't be erased row by row. Shell
   output from before the session, anything printed outside it (plain
   `print()`) and entries `transcript_limit` dropped don't come back.
 
@@ -513,6 +514,13 @@ session.add_warning("Rate limit approaching")
 session.add_error("Connection failed")
 session.add_system("Connecting to server...")
 ```
+
+A link, in markdown or Rich's `[link=…]` markup, shows its text and then
+its URL, `the docs (https://…)`, whole on its line for the terminal to open
+(a link whose text is its URL shows it once): a terminal hyperlink (OSC 8)
+hides the URL where the terminal doesn't support them. Rich output, markdown
+and code reach the terminal with no escapes but colors, so text in them (a
+model's answer) can't set the window title or the clipboard.
 
 The session sometimes puts a hint in the status bar in place of your
 status: `Busy — press Ctrl+C to cancel` when Enter (or Ctrl+D) is pressed
@@ -875,12 +883,17 @@ session = ThinkingPromptSession(theme="dark")   # or "light", "mono", "terminal"
 
 A fixed palette assumes the terminal's background: `light` on a dark
 terminal (or `dark` on a light one) is hard to read. `NO_COLOR` drops the
-colors of any theme.
+colors of any theme; selections, the focused button and scrollbar thumbs
+then show in reverse video, as they do in `mono`.
 
 Custom themes are `ThinkingPromptStyles` instances (`theme=` accepts them
 too). All element styles derive from the `color_*` tokens, so overriding
-tokens restyles the whole UI consistently. Derivation happens at render
-time, so tweaking a built-in theme works too:
+tokens restyles the whole UI consistently. An empty token (`""`) is the
+terminal's own color, in dialogs and menus too. A selection (the current
+completion, a dropdown's pick) shows `color_accent` on `color_bg_selected`,
+and the focused button `color_accent_button` behind it; with those empty,
+both show in reverse video. Derivation happens at render time, so
+tweaking a built-in theme works too:
 
 ```python
 import dataclasses

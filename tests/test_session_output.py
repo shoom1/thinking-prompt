@@ -62,7 +62,8 @@ class TestStyledLines:
         (entry,) = _entries(session)
         assert (entry.kind, entry.style, entry.text) == ("styled", style, text)
         (printed,) = session._display.kept
-        assert to_formatted_text(printed) == [(style, text)]
+        # The newline unstyled: a background ends with the text.
+        assert to_formatted_text(printed) == [(style, text.rstrip("\n")), ("", "\n")]
 
 
 class TestInputEcho:
@@ -72,7 +73,8 @@ class TestInputEcho:
 
         fragments = [
             ("class:transcript.user-prefix", "you> "),
-            ("class:transcript.user-message", "hello\n"),
+            ("class:transcript.user-message", "hello"),
+            ("", "\n"),
         ]
         (entry,) = _entries(session)
         assert (entry.kind, entry.fragments) == ("formatted", fragments)
@@ -87,14 +89,16 @@ class TestAddResponse:
     @pytest.mark.parametrize(
         "content", [FormattedText(_FRAGMENTS), list(_FRAGMENTS)], ids=["FormattedText", "list"]
     )
-    def test_formatted_text_is_printed_and_kept_as_given(self, content):
+    def test_formatted_text_is_printed_and_kept_with_a_newline(self, content):
         session = _session()
         session.add_response(content)
 
+        # Ended as a str response is: a newline (a blank line after it).
+        ended = [*_FRAGMENTS, ("", "\n")]
         (entry,) = _entries(session)
-        assert (entry.kind, entry.fragments) == ("formatted", _FRAGMENTS)
+        assert (entry.kind, entry.fragments) == ("formatted", ended)
         (printed,) = session._display.kept
-        assert to_formatted_text(printed) == _FRAGMENTS
+        assert to_formatted_text(printed) == ended
 
     @pytest.mark.parametrize(
         "content",
@@ -120,7 +124,19 @@ class TestAddResponse:
         assert "Title: Content" in printed
         assert "(" not in printed
         (entry,) = _entries(session)
-        assert fragment_list_to_text(entry.fragments) == "Title: Content"
+        assert fragment_list_to_text(entry.fragments) == "Title: Content\n"
+
+    @pytest.mark.parametrize(
+        "content",
+        [FormattedText([("", "answer")]), [("bold", "answer")], HTML("answer"), ANSI("answer")],
+        ids=["FormattedText", "list", "HTML", "ANSI"],
+    )
+    def test_formatted_text_is_spaced_as_a_str_is(self, content):
+        """A blank line after it, as after every message: it had none."""
+        def printed(given: Any) -> str:
+            return _shown(_terminal(lambda s: s.add_response(given)))
+
+        assert printed(content) == printed("answer")
 
     @pytest.mark.parametrize(
         "content",
@@ -153,7 +169,7 @@ class TestAddResponse:
         session = _session()
         session.add_response((("bold", "Title: "), ("", "Content")))
         (entry,) = _entries(session)
-        assert entry.fragments == _FRAGMENTS
+        assert entry.fragments == [*_FRAGMENTS, ("", "\n")]
 
     def test_markdown_is_printed_rendered_and_kept_as_its_source(self):
         pytest.importorskip("rich")
@@ -207,6 +223,126 @@ class TestAddRich:
         assert "boxed" in echoed(session._display)[0]
         (entry,) = _entries(session)
         assert (entry.kind, entry.source) == ("ansi", printed.value)
+
+
+def _terminal(action: Any, **session: Any) -> str:
+    """What ``action(session)`` writes to a real (vt100) terminal, for a
+    session made with ``session``."""
+    terminal = io.StringIO()
+    output = Vt100_Output(terminal, lambda: Size(rows=24, columns=80), term="xterm")
+    with create_app_session(output=output):
+        action(ThinkingPromptSession(**session))
+    return terminal.getvalue()
+
+
+def _shown(raw: str) -> str:
+    """``raw`` as the terminal shows it: its color codes dropped."""
+    return re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", raw)
+
+
+# Text that, written raw, sets the terminal's window title.
+_INJECTED = "\x01\x1b]0;pwned\x07\x02"
+
+
+class TestBackgroundsEndWithTheirLine:
+    """A newline written with a background color set makes the terminal
+    fill the next line with it: a full-width bar after the line (the input
+    echo, in the dark and light themes)."""
+
+    @staticmethod
+    def _bg_across_a_newline(raw: str) -> bool:
+        """True if a newline in ``raw`` comes after a background color
+        (48;…) with no color code between."""
+        return re.search(r"\x1b\[[0-9;]*48;[0-9;]*m[^\x1b]*\n", raw) is not None
+
+    @pytest.mark.parametrize("theme", ["dark", "light"])
+    def test_the_input_echo(self, theme: str):
+        raw = _terminal(lambda s: s._display.user_input(">>> ", "hello"), theme=theme)
+        assert "hello" in raw and not self._bg_across_a_newline(raw), repr(raw)
+
+    def test_a_message_with_a_background(self):
+        from thinking_prompt import ThinkingPromptStyles
+
+        theme = ThinkingPromptStyles.dark()
+        theme.system_message = "bg:#202020 fg:#ffffff"
+        raw = _terminal(lambda s: s.add_system("note"), theme=theme)
+        assert "note" in raw and not self._bg_across_a_newline(raw), repr(raw)
+
+
+class TestEscapesInRichOutput:
+    """Rich writes a link as an OSC 8 hyperlink, which prompt_toolkit's ANSI
+    parser doesn't know (it printed "8;id=…;URL" as text); and prompt_toolkit
+    writes what's between \x01 and \x02 to the terminal raw, so text (a
+    model's answer) could set the window title or the clipboard."""
+
+    def test_a_markdown_link_shows_its_text_and_url(self):
+        pytest.importorskip("rich")
+        raw = _terminal(lambda s: s.add_response("See [the docs](https://example.com/docs) for more.", markdown=True))
+        assert "\x1b]" not in raw and "8;id=" not in raw
+        assert "the docs (https://example.com/docs)" in _shown(raw)
+
+    def test_rich_link_markup_shows_its_text_and_url(self):
+        pytest.importorskip("rich")
+        from rich.text import Text
+
+        raw = _terminal(lambda s: s.add_rich(Text.from_markup("[link=https://e.com]site[/link] here")))
+        assert "\x1b]" not in raw and "8;id=" not in raw
+        assert "site (https://e.com) here" in _shown(raw)
+
+    def test_a_link_keeps_its_url_where_rich_sees_a_legacy_windows_console(self, monkeypatch):
+        """Rich writes no hyperlinks for a legacy Windows console, so the
+        URL was lost on Windows: the session's output isn't one (it goes
+        through prompt_toolkit)."""
+        pytest.importorskip("rich")
+        import rich.console
+
+        monkeypatch.setattr(rich.console, "detect_legacy_windows", lambda: True)
+        raw = _terminal(lambda s: s.add_response("See [the docs](https://example.com/docs) for more.", markdown=True))
+        assert "the docs (https://example.com/docs)" in _shown(raw)
+        raw = _terminal(lambda s: s.add_rich("[link=https://e.com]site[/link] here"))
+        assert "site (https://e.com) here" in _shown(raw)
+
+    def test_a_link_whose_text_is_its_url_shows_it_once(self):
+        pytest.importorskip("rich")
+        raw = _terminal(lambda s: s.add_response("Docs: <https://example.com/x>", markdown=True))
+        assert _shown(raw).count("https://example.com/x") == 1
+
+    def test_a_links_formatted_text_keeps_its_format(self):
+        pytest.importorskip("rich")
+        raw = _terminal(lambda s: s.add_response("See [**the** docs](https://e.com) now.", markdown=True))
+        assert "the docs (https://e.com) now." in _shown(raw)
+        assert re.search(r"\x1b\[[0-9;]*1[0-9;]*mthe", raw)  # "the" bold
+
+    def test_a_long_url_isnt_broken_by_a_newline(self):
+        """The terminal finds a URL on its line: one cut by a newline opens
+        a wrong page."""
+        pytest.importorskip("rich")
+        url = "https://example.com/" + "a" * 100
+        raw = _terminal(lambda s: s.add_response(f"See [the docs]({url}) for more.", markdown=True))
+        assert url in _shown(raw)
+
+    @pytest.mark.parametrize("path", ["markdown", "rich", "code"])
+    @pytest.mark.parametrize("injected", [_INJECTED, "\x9d0;pwned\x07"], ids=["marked", "C1"])
+    def test_escapes_in_the_text_never_reach_the_terminal_raw(self, path: str, injected: str):
+        """Nor C1 controls (U+009D starts an OSC, U+009B a CSI)."""
+        pytest.importorskip("rich")
+        pytest.importorskip("pygments")
+        text = f"a {injected} b"
+        if path == "markdown":
+            raw = _terminal(lambda s: s.add_response(text, markdown=True))
+        elif path == "rich":
+            raw = _terminal(lambda s: s.add_rich(text))
+        else:
+            raw = _terminal(lambda s: s.add_code(f"x = '{text}'"))
+        assert "\x1b]0;" not in raw and "\x01" not in raw and "\x9d" not in raw
+
+    def test_a_boxs_rich_text_keeps_no_escapes(self):
+        pytest.importorskip("rich")
+        session = _session()
+        box = session.start_thinking()
+        box.append_rich(f"[link=https://e.com]site[/link] {_INJECTED}\n")
+        assert "\x1b]" not in box.text and "\x01" not in box.text
+        assert "site (https://e.com)" in box.text
 
 
 class TestRichWidth:
