@@ -10,8 +10,9 @@ following the cursor; ↑↓ read the body around its rows on the way
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING
 
 from prompt_toolkit.application.current import get_app
 from prompt_toolkit.formatted_text import FormattedText
@@ -193,7 +194,7 @@ def build_inline(dialog: Dialog) -> InlineView:
 
     # Initial cursor: a ButtonConfig(focused=True) action, else where the
     # body's cursor starts, else the first stop.
-    focused = next((a for a, cfg in zip(actions, configs) if cfg.focused), None)
+    focused = next((a for a, cfg in zip(actions, configs, strict=True) if cfg.focused), None)
     first = stops()
     if focused is not None:
         focus: Container | None = focused.window

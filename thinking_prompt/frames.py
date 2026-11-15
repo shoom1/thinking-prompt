@@ -7,7 +7,7 @@ next frame, never on a fixed timer: an idle prompt isn't redrawn at all.
 from __future__ import annotations
 
 import asyncio
-from typing import Callable
+from collections.abc import Callable
 
 # How often text that can't say when it changes (a content callback, a
 # callable prompt message or status) is re-read while it's drawn.

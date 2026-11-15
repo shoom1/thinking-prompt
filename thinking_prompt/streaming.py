@@ -4,7 +4,8 @@ StreamingContent: thread-safe text for a thinking box.
 from __future__ import annotations
 
 import threading
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 
 class StreamingContent:

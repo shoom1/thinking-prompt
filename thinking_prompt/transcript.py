@@ -8,9 +8,8 @@ re-render markdown/code from source. A repaint prints them again.
 from __future__ import annotations
 
 import threading
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
-from typing import Callable, Optional
 
 from prompt_toolkit.formatted_text import ANSI, FormattedText, to_formatted_text
 from prompt_toolkit.formatted_text.base import OneStyleAndTextTuple
@@ -28,12 +27,7 @@ class _Entry:
     fragments: list[OneStyleAndTextTuple] = field(default_factory=list)
     source: str = ""
     language: str = ""
-    # Deliberately `Optional[...]` rather than `X | None`: annotations are
-    # deferred (PEP 563 future import) so `X | None` would define fine, but
-    # resolving this dataclass's hints at runtime on the Python 3.9 floor
-    # (typing.get_type_hints(), dataclass introspection tooling) raises
-    # TypeError for `X | None` pre-3.10; Optional stays resolvable.
-    cache: Optional[list[OneStyleAndTextTuple]] = None  # noqa: UP045
+    cache: list[OneStyleAndTextTuple] | None = None
 
 
 class Transcript:

@@ -9,7 +9,8 @@ Provides functions to create the UI layout components:
 from __future__ import annotations
 
 import time
-from typing import TYPE_CHECKING, Callable, Literal
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Literal
 
 from prompt_toolkit.application.current import get_app
 from prompt_toolkit.buffer import Buffer

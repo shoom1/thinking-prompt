@@ -8,8 +8,8 @@ Pygments are used through rich_utils.
 """
 from __future__ import annotations
 
-from collections.abc import Sequence
-from typing import TYPE_CHECKING, Any, Callable
+from collections.abc import Callable, Sequence
+from typing import TYPE_CHECKING, Any
 
 from prompt_toolkit import print_formatted_text
 from prompt_toolkit.formatted_text import (

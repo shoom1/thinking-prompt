@@ -4,12 +4,10 @@ package's signatures use.
 """
 from __future__ import annotations
 
-from collections.abc import Coroutine
+from collections.abc import Callable, Coroutine
 from typing import (
     Any,
-    Callable,
     Literal,
-    Union,
 )
 
 # =============================================================================
@@ -68,6 +66,4 @@ ContentCallback = Callable[[], str]
 
 # Handles one line of submitted input: a function, or an async function
 # (the session runs its coroutine as a task that Ctrl+C can cancel).
-InputHandler = Union[
-    Callable[[str], None], Callable[[str], Coroutine[Any, Any, None]]
-]
+InputHandler = Callable[[str], None] | Callable[[str], Coroutine[Any, Any, None]]
