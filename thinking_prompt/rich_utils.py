@@ -136,7 +136,9 @@ def _rich_to_ansi(renderable: Any, theme: Any = None, width: int | None = None) 
 
         from rich.console import Console
         file = StringIO()
-        console = Console(file=file, force_terminal=True, theme=theme, width=width)
+        console = Console(
+            file=file, force_terminal=True, legacy_windows=False, theme=theme, width=width
+        )
         console.print(renderable)
         return _ansi_safe(file.getvalue())
     except ImportError:
@@ -168,6 +170,9 @@ def _renderable_to_ansi(renderable: Any, theme: Any = None, width: int | None = 
         console = Console(
             file=f,
             force_terminal=True,
+            # The output goes through prompt_toolkit, never to a legacy
+            # Windows console: Rich would drop links (and colors) for one.
+            legacy_windows=False,
             no_color=False,
             width=width,
             theme=theme,
@@ -238,7 +243,9 @@ def _markdown_to_ansi(
 
         markdown_cls = _get_markdown_cls()
         file = StringIO()
-        console = Console(file=file, force_terminal=True, theme=theme, width=width)
+        console = Console(
+            file=file, force_terminal=True, legacy_windows=False, theme=theme, width=width
+        )
         console.print(markdown_cls(content, code_theme=code_theme))
         return _ansi_safe(file.getvalue())
     except ImportError:

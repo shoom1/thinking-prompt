@@ -289,6 +289,19 @@ class TestEscapesInRichOutput:
         assert "\x1b]" not in raw and "8;id=" not in raw
         assert "site (https://e.com) here" in _shown(raw)
 
+    def test_a_link_keeps_its_url_where_rich_sees_a_legacy_windows_console(self, monkeypatch):
+        """Rich writes no hyperlinks for a legacy Windows console, so the
+        URL was lost on Windows: the session's output isn't one (it goes
+        through prompt_toolkit)."""
+        pytest.importorskip("rich")
+        import rich.console
+
+        monkeypatch.setattr(rich.console, "detect_legacy_windows", lambda: True)
+        raw = _terminal(lambda s: s.add_response("See [the docs](https://example.com/docs) for more.", markdown=True))
+        assert "the docs (https://example.com/docs)" in _shown(raw)
+        raw = _terminal(lambda s: s.add_rich("[link=https://e.com]site[/link] here"))
+        assert "site (https://e.com) here" in _shown(raw)
+
     def test_a_link_whose_text_is_its_url_shows_it_once(self):
         pytest.importorskip("rich")
         raw = _terminal(lambda s: s.add_response("Docs: <https://example.com/x>", markdown=True))
