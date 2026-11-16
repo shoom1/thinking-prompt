@@ -233,7 +233,7 @@ class TestPromptAsync:
         assert threads == [threading.get_ident()]
 
     async def test_input_closing_ends_the_block_as_ctrl_d_does(self):
-        """A closed input (a pipe that ran out, stdin from /dev/null) woke
+        """Stdin closing (stdin from /dev/null, say) woke
         prompt_async() with EOFError, then the block raised it again: a
         traceback and exit status 1 after the README's loop had ended."""
         raised: list[str] = []

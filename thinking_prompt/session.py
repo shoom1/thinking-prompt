@@ -1410,10 +1410,10 @@ class ThinkingPromptSession:
     async def __aenter__(self) -> ThinkingPromptSession:
         """Run the session until the block ends: print the welcome, then
         start the Application. Inputs are read with prompt_async(), and
-        query() runs one input's work. The input ending (a closed stdin)
-        stops the app at once, as exit() from outside the query does: a
-        running query is cancelled, queued lines are dropped,
-        prompt_async() raises EOFError, and the block ends normally.
+        query() runs one input's work. Stdin closing stops the app at
+        once, as exit() from outside the query does: a running query is
+        cancelled, queued lines are dropped, prompt_async() raises
+        EOFError, and the block ends normally.
 
         Raises:
             RuntimeError: If the session is already running.
@@ -1463,8 +1463,8 @@ class ThinkingPromptSession:
             self._frames.cancel()
             self._resizes.cancel()
         error = None if run.cancelled() else run.exception()
-        # The input ending (a closed stdin) stops the app: prompt_async()
-        # has raised EOFError for it already.
+        # Stdin closing stops the app with EOFError, which prompt_async()
+        # has raised already.
         if error is not None and not isinstance(error, EOFError) and exc_info[1] is None:
             raise error
 
@@ -1494,7 +1494,7 @@ class ThinkingPromptSession:
             EOFError: On Ctrl+D at an empty, idle prompt, and on any call
                 once the app has stopped or been told to stop (Ctrl+D,
                 exit(), also while the query that called exit() finishes,
-                or the input ending: a pipe that ran out, /dev/null).
+                or stdin closing).
                 Ctrl+C never exits: it stops the running query, or clears
                 an idle prompt.
             RuntimeError: Outside ``async with session:``, or while another

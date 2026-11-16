@@ -259,7 +259,7 @@ async with session:                        # the app runs until the block ends
     while True:
         try:
             text = await session.prompt_async()
-        except EOFError:                       # Ctrl+D, exit(), or the input ended
+        except EOFError:                       # Ctrl+D, exit(), or stdin closed
             break
         if text.strip() in ("/exit", "/quit"):
             break
@@ -267,10 +267,11 @@ async with session:                        # the app runs until the block ends
 ```
 
 `prompt_async()` raises `EOFError` on Ctrl+D at an idle prompt, after
-`exit()`, and when the input ends (input piped in runs out, or stdin is
-`/dev/null`); the block then ends normally, as `run_async()` does. The
-input ending stops the app at once, as `exit()` from outside the query
-does: a query still running is cancelled, and queued lines are dropped.
+`exit()`, and when stdin closes (stdin from `/dev/null`, say); the block
+then ends normally, as `run_async()` does. Stdin closing stops the app at
+once, as `exit()` from outside the query does: a query still running is
+cancelled, and queued lines are dropped. The session reads a terminal, not
+piped input.
 
 `query()` runs one input's work as the query Ctrl+C cancels. Boxes it
 leaves open end with it. It returns the coroutine's result, or `None`
