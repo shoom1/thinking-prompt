@@ -38,7 +38,7 @@ import asyncio
 import inspect
 import logging
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import KW_ONLY, dataclass, replace
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -96,8 +96,11 @@ class ButtonConfig:
             ``result``. It decides what happens: call ``set_result(...)`` or
             ``cancel()`` on the dialog to close it, or return without closing
             (e.g. while input fails validation).
+
+    ``text`` can be passed by position; the rest by name.
     """
     text: str
+    _: KW_ONLY
     result: Any = None
     focused: bool = False
     style: str = ""

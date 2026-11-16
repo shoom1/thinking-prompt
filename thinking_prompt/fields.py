@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterable, Sequence
-from dataclasses import dataclass
+from dataclasses import KW_ONLY, dataclass
 from typing import Any, Generic, Literal, TypeVar
 
 from prompt_toolkit.buffer import Buffer
@@ -54,14 +54,17 @@ class Field(ABC):
             with no label and no description shows just its options.
         description: Shown under the label (optional).
         default: The field's starting value.
+
+    ``key`` and ``label`` can be passed by position; the rest by name.
     """
     key: str
     label: str
+    _: KW_ONLY
     description: str = ""
     default: Any = None
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class SelectField(Field):
     """One of ``options``, stepped through in place with ←/→ (``◀ medium ▶``)."""
     options: Sequence[str] = ()
@@ -71,7 +74,7 @@ class SelectField(Field):
         object.__setattr__(self, "options", _own_options(self, self.options))
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class DropdownField(Field):
     """One of ``options``: Enter (or Space) opens a menu of them under the
     row, in a box and inline alike. ``height``: the menu's rows; ``width``:
@@ -89,13 +92,13 @@ class DropdownField(Field):
         _check_size(self, "max_width", self.max_width, optional=True)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class CheckboxField(Field):
     """True or false, toggled with Space, Enter or ←/→."""
     default: bool = False
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class TextField(Field):
     """Free text, edited in place with Enter; ``password`` shows it as dots.
     ``width``: the edit field's columns."""
@@ -107,7 +110,7 @@ class TextField(Field):
         _check_size(self, "width", self.width)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class ChecklistField(Field):
     """Any number of options, one per line; the value is the checked ones, in option order."""
     options: Sequence[str] = ()
@@ -123,7 +126,7 @@ class ChecklistField(Field):
         object.__setattr__(self, "default", tuple(self.default))
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class RadioField(Field):
     """One of several options, one per line; with no default nothing is picked."""
     options: Sequence[str] = ()
@@ -133,7 +136,7 @@ class RadioField(Field):
         object.__setattr__(self, "options", _own_options(self, self.options))
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class ChoiceField(Field):
     """One of ``options``, one per line, like prompt_toolkit's choice(): a
     radio list with no marks, the pick in bold. It starts on ``default``

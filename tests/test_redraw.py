@@ -86,7 +86,7 @@ class TestFrameScheduler:
 
 class TestSpinnerFrames:
     def test_frames_step_once_per_interval_from_the_first(self, clock: _Clock):
-        header = ThinkingHeader(text="T", spinner=Spinner(("a", "b", "c"), 0.5))
+        header = ThinkingHeader(text="T", spinner=Spinner(("a", "b", "c"), interval=0.5))
         shown = []
         for now in (10.0, 10.5, 11.25, 11.5):
             clock.now = now
@@ -96,7 +96,7 @@ class TestSpinnerFrames:
     def test_drawing_asks_for_the_next_frame(self, clock: _Clock):
         asked: list[float] = []
         header = ThinkingHeader(
-            text="T", spinner=Spinner(("a", "b"), 0.5), request_frame=asked.append
+            text="T", spinner=Spinner(("a", "b"), interval=0.5), request_frame=asked.append
         )
         clock.now = 10.2
         header.get_formatted_text(40)

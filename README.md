@@ -961,9 +961,9 @@ The API is what `thinking_prompt` exports (its `__all__`), with the
 parameters and attributes their docstrings document (what `help()` shows),
 the fields of `ThinkingPromptStyles` among them. A dataclass's fields
 (`ThinkingPromptStyles`, `ButtonConfig`, the form fields, `AppInfo`,
-`Spinner`) are covered by name, and new ones can come between them: pass
-them by name, past the ones this README passes by position (a form field's
-`key` and `label`, a button's `text`, a spinner's `frames`). It doesn't
+`Spinner`) are covered by name, and new ones can come between them: they're
+passed by name, past a form field's `key` and `label`, a button's `text`
+and a spinner's `frames`. It doesn't
 cover private names (one leading `_`), the modules inside the package
 (import from `thinking_prompt` itself), the prompt_toolkit style classes
 the style fields are applied to (`to_style_dict()` lists them), or what's
@@ -983,6 +983,7 @@ removed:
 | `box.finish(echo_to_console=...)`, `session.thinking(echo_to_console=...)` | `echo=...` |
 | `add_to_history=` on `finish()` or `thinking()` | Drop it: `echo` alone decides (printed and kept for repaints, or neither) |
 | A flag passed by position: `box.finish(False)` (0.4's `add_to_history`), `set_theme(theme, True)` | By name: `box.finish(echo=...)`, `set_theme(theme, repaint=True)` |
+| A dataclass field passed by position, past a form field's `key` and `label`, a button's `text` and a spinner's `frames`: `TextField("name", "Name", "Shown to others")`, `ButtonConfig("OK", "ok")`, `Spinner(frames, 0.2)`, `AppInfo("MyApp")` | By name: `description=...`, `result=...`, `interval=...`, `name=...`; every field of `AppInfo` and `ThinkingPromptStyles` |
 | `box.get_content()` | `box.text` |
 | `session.set_status(x)` | `session.status_text = x` (a Rich renderable too) |
 | `session.add_message("system", x)` | `session.add_system(x)` |

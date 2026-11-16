@@ -50,7 +50,7 @@ def _own(rule: str, *, fg: bool = False, bg: bool = False, noreverse: bool = Fal
     return _style_str(*resets, rule)
 
 
-@dataclass
+@dataclass(kw_only=True)
 class ThinkingPromptStyles:
     """
     Customizable styles for ThinkingPromptSession.

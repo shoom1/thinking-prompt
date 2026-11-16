@@ -62,7 +62,7 @@ class TestOptions:
         assert _header(session).text == "Pondering"
         assert session.start_thinking(lambda: "y", title="Own")._header.text == "Own"
 
-    @pytest.mark.parametrize("spinner", [None, Spinner(("a", "b"), 0.25)])
+    @pytest.mark.parametrize("spinner", [None, Spinner(("a", "b"), interval=0.25)])
     def test_spinner_and_its_position_reach_every_header(self, spinner):
         header = _header(ThinkingPromptSession(spinner=spinner, spinner_position="after"))
         assert header.spinner is spinner

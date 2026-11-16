@@ -67,7 +67,7 @@ class TestCreation:
         assert box._header is None
 
     def test_headers_use_the_managers_spinner_settings(self):
-        spinner = Spinner(("a", "b"), 0.25)
+        spinner = Spinner(("a", "b"), interval=0.25)
         mgr = make_manager(spinner=spinner, spinner_position="after")
         header = mgr.create_box(lambda: "x", title="T")._header
         assert header.spinner is spinner

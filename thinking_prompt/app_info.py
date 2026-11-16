@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from typing import Any
 
 
-@dataclass
+@dataclass(kw_only=True)
 class AppInfo:
     """
     The banner printed when the session starts: the app's name and version,
