@@ -254,12 +254,16 @@ async with session:                        # the app runs until the block ends
     while True:
         try:
             text = await session.prompt_async()
-        except EOFError:                       # Ctrl+D at an empty prompt
+        except EOFError:                       # Ctrl+D, or the input ended
             break
         if text.strip() in ("/exit", "/quit"):
             break
         await session.query(respond(text))     # Ctrl+C cancels this, not the loop
 ```
+
+`prompt_async()` raises `EOFError` on Ctrl+D at an idle prompt, after
+`exit()`, and when the input ends (input piped in runs out, or stdin is
+`/dev/null`); the block then ends normally, as `run_async()` does.
 
 `query()` runs one input's work as the query Ctrl+C cancels. Boxes it
 leaves open end with it. It returns the coroutine's result, or `None`

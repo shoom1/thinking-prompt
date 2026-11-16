@@ -207,6 +207,33 @@ class TestPromptAsync:
             await run_loop(session, body, script)
         assert raised == ["eof", "eof"]
 
+    async def test_input_closing_ends_the_block_as_ctrl_d_does(self):
+        """A closed input (a pipe that ran out, stdin from /dev/null) woke
+        prompt_async() with EOFError, then the block raised it again: a
+        traceback and exit status 1 after the README's loop had ended."""
+        raised: list[str] = []
+        with piped_session() as (session, inp):
+
+            async def body() -> None:
+                try:
+                    await session.prompt_async()
+                except EOFError:
+                    raised.append("eof")
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.close()
+                await finished(run)
+
+            await run_loop(session, body, script)
+        assert raised == ["eof"]
+
+    async def test_input_closing_ends_run_async(self):
+        with piped_session() as (session, inp):
+            run = asyncio.create_task(session.run_async(lambda text: None))
+            await wait_until(lambda: waiting_for_input(session))
+            inp.close()
+            await asyncio.wait_for(run, timeout=2)
+
     async def test_exit_wakes_a_waiting_prompt_with_eof_error(self):
         raised: list[str] = []
         with piped_session() as (session, inp):

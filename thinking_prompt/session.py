@@ -1364,7 +1364,9 @@ class ThinkingPromptSession:
     async def __aenter__(self) -> ThinkingPromptSession:
         """Run the session until the block ends: print the welcome, then
         start the Application. Inputs are read with prompt_async(), and
-        query() runs one input's work.
+        query() runs one input's work. The input ending (a closed stdin)
+        stops the app as Ctrl+D does: prompt_async() raises EOFError, and
+        the block ends normally.
 
         Raises:
             RuntimeError: If the session is already running.
@@ -1414,7 +1416,9 @@ class ThinkingPromptSession:
             self._frames.cancel()
             self._resizes.cancel()
         error = None if run.cancelled() else run.exception()
-        if error is not None and exc_info[1] is None:
+        # The input ending (a closed stdin) stops the app as Ctrl+D does:
+        # prompt_async() has raised EOFError for it already.
+        if error is not None and not isinstance(error, EOFError) and exc_info[1] is None:
             raise error
 
     def _app_stopped(self, run: asyncio.Future[Any]) -> None:
@@ -1442,7 +1446,8 @@ class ThinkingPromptSession:
         Raises:
             EOFError: On Ctrl+D at an empty, idle prompt, and on any call
                 once the app has stopped or been told to stop (Ctrl+D,
-                exit(), also while the query that called exit() finishes).
+                exit(), also while the query that called exit() finishes,
+                or the input ending: a pipe that ran out, /dev/null).
                 Ctrl+C never exits: it stops the running query, or clears
                 an idle prompt.
             RuntimeError: Outside ``async with session:``, or while another
