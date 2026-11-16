@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import threading
 import time
 from unittest.mock import MagicMock
 
 import pytest
+from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.keys import Keys
 
 from thinking_prompt import ThinkingBox, ThinkingPromptSession, ThinkingPromptStyles
@@ -91,6 +93,14 @@ class TestTitle:
         calls.clear()
         box.set_title("New")
         assert calls == [1]
+
+    @pytest.mark.parametrize("title", [None, 5, HTML("<b>x</b>")], ids=["None", "int", "HTML"])
+    def test_set_title_takes_a_str(self, title):
+        """HTML showed its repr in the header; None cleared the title."""
+        box = make_manager().create_box(title="Start")
+        with pytest.raises(ValueError, match=rf"^title must be a str, got {re.escape(repr(title))}$"):
+            box.set_title(title)
+        assert box.title == "Start"
 
     def test_a_box_without_a_header_has_no_title(self):
         box = make_manager().create_box()
@@ -280,13 +290,17 @@ class TestRich:
         box.append_rich("[markdown.h1]x[/markdown.h1]")
         assert "\x1b[31m" in box.text
 
-    def test_an_explicit_theme_wins(self):
-        pytest.importorskip("rich")
-        from rich.theme import Theme
-
+    @pytest.mark.parametrize("write", [
+        lambda box: box.append_rich("x", theme="dark"),
+        lambda box: box.set_line_rich(0, "x", theme="dark"),
+    ], ids=["append_rich", "set_line_rich"])
+    def test_a_rich_write_takes_no_theme(self, write):
+        """theme= was a Rich Theme, where everywhere else a theme is a name
+        or a ThinkingPromptStyles: theme="dark" raised from inside Rich."""
         box = make_manager().create_box()
-        box.append_rich("[accent]x[/accent]", theme=Theme({"accent": "green"}))
-        assert "\x1b[32m" in box.text
+        with pytest.raises(TypeError, match="theme"):
+            write(box)
+        assert box.text == ""
 
 
 class TestSessionBoxes:

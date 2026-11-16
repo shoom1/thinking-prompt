@@ -60,6 +60,15 @@ def check_flag(name: str, value: object, *, optional: bool = False) -> None:
     raise ValueError(f"{name} must be True or False{none}, got {value!r}")
 
 
+def check_text(name: str, value: object, *, optional: bool = False) -> None:
+    """Raise ValueError unless ``value`` is a str, or None when
+    ``optional``: anything else showed as its repr."""
+    if isinstance(value, str) or (optional and value is None):
+        return
+    none = " (or None)" if optional else ""
+    raise ValueError(f"{name} must be a str{none}, got {value!r}")
+
+
 def check_key(name: str, value: object) -> None:
     """Raise ValueError unless ``value`` names a key prompt_toolkit binds
     ("c-t", "f5", "x")."""

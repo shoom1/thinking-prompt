@@ -23,12 +23,13 @@ class Spinner:
         ThinkingPromptSession(spinner=Spinner(("◐", "◓", "◑", "◒"), interval=0.15))
 
     Args:
-        frames: The frames, in order (any sequence of strings; kept as a
-            tuple). One frame is a static mark.
+        frames: The frames, in order: a sequence of strs (a list or a
+            tuple; kept as a tuple). One frame is a static mark.
         interval: Seconds each frame is shown (passed by name).
 
     Raises:
-        ValueError: If there are no frames, or ``interval`` isn't a
+        ValueError: If ``frames`` isn't a sequence of strs (a str isn't:
+            one frame is ``("|",)``) or is empty, or ``interval`` isn't a
             positive, finite number.
     """
 
@@ -41,8 +42,16 @@ class Spinner:
     ELLIPSIS: ClassVar[Spinner]
 
     def __post_init__(self) -> None:
+        frames = self.frames
+        # A str would be taken as its letters, a set in no fixed order.
+        if (
+            isinstance(frames, str)
+            or not isinstance(frames, Sequence)
+            or not all(isinstance(frame, str) for frame in frames)
+        ):
+            raise ValueError(f"a Spinner's frames must be a sequence of str, got {frames!r}")
         # Kept as a tuple, so a spinner is frozen (and hashable) through and through.
-        object.__setattr__(self, "frames", tuple(self.frames))
+        object.__setattr__(self, "frames", tuple(frames))
         if not self.frames:
             raise ValueError("a Spinner needs frames; pass spinner=None for no spinner")
         interval = self.interval

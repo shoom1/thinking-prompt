@@ -8,7 +8,7 @@ import threading
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
-from .types import check_flag
+from .types import check_flag, check_text
 
 if TYPE_CHECKING:
     import asyncio
@@ -144,35 +144,32 @@ class ThinkingBox:
         if content is not None:
             content.clear()
 
-    def append_rich(self, renderable: Any, *, theme: Any = None) -> None:
+    def append_rich(self, renderable: Any) -> None:
         """Append a Rich renderable or markup string; the box switches to ANSI
         (thread-safe).
 
         Text keeps its whitespace and wraps in the box like plain text; a
-        Panel or Table is laid out at the session's width.
+        Panel or Table is laid out at the session's width. Both are in the
+        session's theme.
 
         Args:
             renderable: Rich markup string or Rich renderable object.
-            theme: Rich Theme for this write (default: the session's
-                current theme).
         """
         content = self._writable("append_rich")
         if content is not None:
             self._as_ansi(lambda: content.append_rich(
                 renderable,
-                theme=theme or self._manager.rich_theme,
+                theme=self._manager.rich_theme,
                 width=self._manager.output_width,
             ))
 
-    def set_line_rich(self, index: int, renderable: Any, *, theme: Any = None) -> None:
-        """Replace one line with a Rich renderable; the box switches to ANSI
-        (thread-safe).
+    def set_line_rich(self, index: int, renderable: Any) -> None:
+        """Replace one line with a Rich renderable, in the session's theme;
+        the box switches to ANSI (thread-safe).
 
         Args:
             index: Line index (negative counts from the end).
             renderable: Rich markup string or Rich renderable object.
-            theme: Rich Theme for this write (default: the session's
-                current theme).
 
         Raises:
             ValueError: If it renders to more than one line.
@@ -183,7 +180,7 @@ class ThinkingBox:
             self._as_ansi(lambda: content.set_line_rich(
                 index,
                 renderable,
-                theme=theme or self._manager.rich_theme,
+                theme=self._manager.rich_theme,
                 width=self._manager.output_width,
             ))
 
@@ -243,7 +240,12 @@ class ThinkingBox:
         return self._header.text if self._header is not None else ""
 
     def set_title(self, text: str) -> None:
-        """Set the title on the box's header line (thread-safe)."""
+        """Set the title on the box's header line (thread-safe).
+
+        Raises:
+            ValueError: If ``text`` isn't a str ("" for none).
+        """
+        check_text("title", text)
         if self._finished:
             self._warn_finished("set_title")
             return

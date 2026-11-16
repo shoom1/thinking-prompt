@@ -165,9 +165,15 @@ Every argument after `message` is keyword-only. Keys and the thinking
 header are under [Session Options](#session-options). Options are checked
 when they're passed (the session's here, a box's in `start_thinking()`, a
 field's or a dialog's when it's made): one of the wrong kind (a count
-that isn't an int, a flag that isn't `True` or `False`, a `spinner` that
-isn't a `Spinner`), out of range, or not one of its choices raises
-`ValueError`.
+that isn't an int, a flag that isn't `True` or `False`, text that isn't a
+str), out of range, or not one of its choices raises `ValueError`. An
+argument that isn't the kind of object it must be (a `Dialog` for
+`show_dialog()`, a dialog's fields and `ButtonConfig`s, a mapping for
+`values=`, a `Spinner`, an `AppInfo`, a theme name or
+`ThinkingPromptStyles`, a coroutine for `query()`, a function for a
+handler or a callback) raises `TypeError`.
+Options and a spinner's frames are a list or a tuple of strs: a set (its
+order changes from run to run) or a generator raises `ValueError`.
 
 ### Thinking API
 
@@ -193,7 +199,11 @@ box.finish()
 
 To show text you already hold, pass a content callback instead. The box
 re-reads it while it's drawn (every 0.1 s). You can read such a box
-(`box.text` is what it shows), but writing to it raises `TypeError`:
+(`box.text` is what it shows), but writing to it raises `TypeError`. The
+callback returns a str: one that returns anything else, or raises, shows
+nothing, and its error is logged when it's first drawn, not at every
+redraw (so is a callable `message` or `status_text` that doesn't return
+text):
 
 ```python
 status = {"line": "starting"}
@@ -531,6 +541,12 @@ session.add_error("Connection failed")
 session.add_system("Connecting to server...")
 ```
 
+The four status messages take what `add_response()` takes, a str or
+formatted text: `add_error(HTML("<b>disk</b> full"))` shows in the error
+style with "disk" bold. For an exception, `add_error(str(exc))`.
+
+`status_text` and the prompt's `message` are checked when set: a value
+that isn't text (`status_text = 2`) raises `ValueError`.
 `session.status_text` reads back what you set, a Rich renderable too. While
 the session shows a hint in the status bar (`Busy — press Ctrl+C to
 cancel`), it still reads your text; setting a status replaces the hint.
@@ -826,10 +842,17 @@ listed once, and a default is one of them (or `None`): anything else raises
 `ValueError` when the field is made, and so do a `key`, `label` or
 `description` that isn't a str. `button_dialog()`, `choice_dialog()` and
 `checklist_dialog()` check their options and default the same way, as
-`Dialog` its `title` (a str) and `body` (text or a container), and
-`ButtonConfig` its `text` and `style` (strs). A `Dialog` subclass's own
-`title` and `body` (class attributes, or properties) are checked when
-it's shown.
+`Dialog` its `title` (a str) and `body` (text or a container; formatted
+text with a style prompt_toolkit can't use, such as an ANSI color over
+255, raises `ValueError` as in `add_response()`), and `ButtonConfig` its
+`text` and `style`. A button's `style` is a prompt_toolkit style string
+(`"fg:ansired bold"`, not Rich's `"bright_red"`): one prompt_toolkit can't
+use raises `ValueError` when the button is made. A `Dialog` subclass's own
+`title`, `body` and `buttons` (class attributes, or properties), and
+attributes set after a dialog is made, are checked when it's shown; a
+subclass's own `fields` when it's made too, since the form is built from
+them then. A callable body whose result isn't text draws nothing (logged
+once), as a callable `status_text` does.
 
 **Keys:** in a box, ↑↓ move a row at a time and Tab / Shift+Tab a field at a
 time (Tab on to the buttons after the last field, Shift+Tab from the buttons
@@ -869,7 +892,8 @@ session = ThinkingPromptSession(
 ```
 
 A `Spinner` is its frames and the seconds each is shown:
-`Spinner(("◐", "◓", "◑", "◒"), interval=0.15)`. One frame makes a static mark.
+`Spinner(("◐", "◓", "◑", "◒"), interval=0.15)`. The frames are a list or a
+tuple of strs; one frame (`("●",)`) makes a static mark.
 
 **Upgrading from 0.3:** full screen (Ctrl+E with
 `AppInfo(fullscreen_enabled=True)`) was removed: drop `fullscreen_enabled=`
@@ -937,8 +961,15 @@ styles = dataclasses.replace(ThinkingPromptStyles.light(), color_accent="#c2410c
 session = ThinkingPromptSession(theme=styles)
 ```
 
-Element fields you set explicitly (e.g. `error_message="fg:red"`) win over
-the tokens; `styles.to_style_dict()` shows the resolved result.
+Element fields you set explicitly (e.g. `error_message="fg:ansired bold"`,
+in prompt_toolkit's style format) win over the tokens;
+`styles.to_style_dict()` shows the resolved result. The `markdown_*` fields
+are Rich style strings (`markdown_link="bold red on white"`), since Rich
+draws markdown: Rich's `red` is the terminal's red, prompt_toolkit's is
+`#ff0000`. A field the session can't use (a style neither can parse, a
+`color_depth` that isn't a `ColorDepth` or `None`, a `code_theme` that
+isn't a str) raises `ValueError` naming it when the session takes the
+theme (`theme=`, `set_theme()`).
 
 Code highlighting — fenced code in markdown and `add_code()` alike —
 follows the theme's `code_theme`: `"ansi_dark"` by default, the
@@ -1019,6 +1050,9 @@ removed:
 | A flag passed by position: `box.finish(False)` (0.4's `add_to_history`), `set_theme(theme, True)` | By name: `box.finish(echo=...)`, `set_theme(theme, repaint=True)` |
 | A flag given as `0`/`1` or a str (`thinking_echo="no"` turned echo on) | `True` or `False`: anything else raises `ValueError` |
 | A dialog `title` that isn't a str (`HTML(...)` showed in a box, not inline), `title=None`, `ButtonConfig(style=None)` | A str (`""` for none): anything else raises `ValueError` |
+| `add_error()`, `add_warning()`, `add_success()` given something that isn't text: `add_error(exc)` printed `str(exc)` (`HTML(...)`, which printed its repr, is now shown formatted) | A str or formatted text (`add_error(str(exc))`): anything else raises `ValueError` |
+| A box title that isn't a str (`thinking_title=`, `title=`, `set_title()`): `set_title(None)` cleared it | A str (`""` for none; `title=None` still means the session's `thinking_title`): anything else raises `ValueError` |
+| `Spinner("abc")` (three frames), or frames that aren't strs | A list or tuple of strs (`("|",)` for one frame): anything else raises `ValueError` |
 | A dataclass field passed by position, past a form field's `key` and `label`, a button's `text` and a spinner's `frames`: `TextField("name", "Name", "Shown to others")`, `ButtonConfig("OK", "ok")`, `Spinner(frames, 0.2)`, `AppInfo("MyApp")` | By name: `description=...`, `result=...`, `interval=...`, `name=...`; every field of `AppInfo` and `ThinkingPromptStyles` |
 | `box.get_content()` | `box.text` |
 | `session.set_status(x)` | `session.status_text = x` (a Rich renderable too) |
@@ -1031,7 +1065,11 @@ removed:
 | `TextField(edit_width=N)` | `width=N` |
 | `Dialog(width=0)`, `Dialog(width=-1)` (or a subclass's `width`) | `width=None` (fit the content), `width="full"` |
 | A field's `options`: the list you passed | A tuple of the field's own (`list(field.options)` for a list) |
-| Options that aren't strs (`SelectField(..., options=[1, 2, 3])` returned the int), no options, or a default that isn't an option (`values=` too) | Strs (`[str(n) for n in ...]`, and `int()` the value back), at least one, and a default among them or `None`: the rest raise `ValueError` |
+| Options that aren't strs (`SelectField(..., options=[1, 2, 3])` returned the int), no options, an option listed twice, or a default that isn't an option (`values=` too) | Strs (`[str(n) for n in ...]`, and `int()` the value back), at least one, each once, and a default among them or `None`: the rest raise `ValueError` |
+| Options, or a checklist's default, as a set or a generator | A list or a tuple (`sorted(options)` for a set): the rest raise `ValueError` |
+| An option field without `options=` (`SelectField("k", "Level")` raised `ValueError`) | `options=` is required: leaving it out raises `TypeError` |
+| An `AppInfo` changed after it's made (`app_info.welcome_message = ...`) | `AppInfo` is frozen, as `ButtonConfig` and the fields are: make a new one, or pass a callable `welcome_message`, called each time the banner prints |
+| A dialog's `fields` or `buttons` that aren't a list or tuple of fields or `ButtonConfig`s, or `values=` that isn't a mapping (`values=[("k", 1)]` was ignored) | Raise `TypeError` when the dialog is made, or when it's shown for one set after |
 | `session.layout` | `session.app.layout` |
 | `session.default_buffer` | `session.app.layout.get_buffer_by_name(DEFAULT_BUFFER)` (prompt_toolkit's, `from prompt_toolkit.enums import DEFAULT_BUFFER`) |
 | `StreamingContent`, `ThinkingHeader` | Drop them: write with a box's methods; the header comes from `thinking_title`, `spinner` and `spinner_position` |
@@ -1040,6 +1078,7 @@ removed:
 | `theme="auto"` | Drop it: the default follows the terminal |
 | `styles.to_rich_theme_dict()` | Drop it: the session's Rich output uses its theme already |
 | `rich_to_ansi(renderable)` | Drop it: a box's `append_rich()` and `set_line_rich()`, and the session's `add_rich()`, take Rich markup and renderables |
+| `box.append_rich(x, theme=rich_theme)`, `box.set_line_rich(i, x, theme=rich_theme)` | Drop `theme=`: a box's Rich writes use the session's theme, as `add_rich()` does; style the renderable itself (`Text(x, style="green")`, `[green]…[/green]`) |
 | `ThinkingPromptSession(editing_mode=...)` | Drop it: the keys are prompt_toolkit's default (Emacs) ones, which the dialogs and fields are built for |
 | Ctrl+C at an idle prompt exits | Ctrl+C never exits (it clears the line): Ctrl+D exits, or your own `/exit` command |
 | Ctrl+D while a handler runs: exits | Stop the handler with Ctrl+C first: Ctrl+D exits at an idle prompt |

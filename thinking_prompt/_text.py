@@ -5,9 +5,12 @@ dialogs (internal).
 from __future__ import annotations
 
 import re
+from functools import lru_cache
 from itertools import groupby
 
+from prompt_toolkit.formatted_text import AnyFormattedText, FormattedText, to_formatted_text
 from prompt_toolkit.formatted_text.base import OneStyleAndTextTuple
+from prompt_toolkit.styles import Style
 from prompt_toolkit.utils import get_cwidth
 
 
@@ -49,6 +52,65 @@ def cut(text: str, columns: int) -> str:
             break
         kept += char
     return kept.rstrip() + "…"
+
+
+FORMATTED_TEXT = "a str, or formatted text: (style, text) pairs, such as a FormattedText, or HTML or ANSI"
+
+
+@lru_cache(maxsize=1024)
+def _style_problem(style: str) -> str | None:
+    """Why prompt_toolkit can't use the fragment style ``style`` (None if it
+    can), read as it reads one when it prints it: class names (looked up,
+    here in no rules), then colors and attributes. Cached: a callable's
+    text is checked at every draw."""
+    try:
+        Style([]).get_attrs_for_style_str(style)
+    except (ValueError, AssertionError) as exc:
+        return str(exc)
+    return None
+
+
+def checked_fragments(content: object, takes: str) -> FormattedText:
+    """``content``, formatted text, as a FormattedText; anything else raises
+    ValueError, its message led by ``takes`` ("add_response() takes").
+    Checked before anything keeps it: a bad fragment kept in the transcript,
+    or in a dialog, fails every redraw after it."""
+    if hasattr(content, "__pt_formatted_text__") and not isinstance(content, list):
+        content = to_formatted_text(content)
+    if isinstance(content, (list, tuple)):
+        for fragment in content:
+            if not (
+                isinstance(fragment, tuple)
+                and len(fragment) in (2, 3)
+                and isinstance(fragment[0], str)
+                and isinstance(fragment[1], str)
+            ):
+                raise ValueError(f"{takes} {FORMATTED_TEXT}; got the fragment {fragment!r}")
+            problem = _style_problem(fragment[0])
+            if problem is not None:
+                raise ValueError(
+                    f"{takes} {FORMATTED_TEXT}; the fragment {fragment!r} has a "
+                    f"style prompt_toolkit can't use: {problem}"
+                )
+        return FormattedText(content)
+    raise ValueError(f"{takes} {FORMATTED_TEXT}; got {content!r}")
+
+
+def drawn_text(result: object, takes: str) -> AnyFormattedText:
+    """What a callable returned (a status, a prompt, a dialog body), as text
+    to draw: a str or None as it is; anything else read as prompt_toolkit
+    reads formatted text, a callable it returns called in turn
+    (merge_formatted_text() returns one), and checked. ValueError, led by
+    ``takes``, when it isn't text; whatever the callables raise, raised."""
+    if result is None or isinstance(result, str):
+        return result
+    if isinstance(result, tuple):
+        result = list(result)
+    try:
+        fragments = to_formatted_text(result)  # type: ignore[arg-type]
+    except ValueError:
+        raise ValueError(f"{takes} {FORMATTED_TEXT}; got {result!r}") from None
+    return checked_fragments(fragments, takes)
 
 
 def styled_lines(style: str, text: str) -> list[OneStyleAndTextTuple]:

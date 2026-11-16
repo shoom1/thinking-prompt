@@ -96,9 +96,91 @@ class TestSetThemeRefused:
         session = ThinkingPromptSession(theme="dark")
         display = session._display
         before = (session.styles, session._style, display._thinking_styles, display.rich_theme)
-        with pytest.raises(Exception, match="notacolour|not-a-colour"):
+        with pytest.raises(ValueError, match="notacolour|not-a-colour"):
             session.set_theme(ThinkingPromptStyles(**{field: value}))
         assert (session.styles, session._style, display._thinking_styles, display.rich_theme) == before
+
+
+_BAD_FIELDS = [
+    ("color_accent", "bright_red"),  # Rich's name, not prompt_toolkit's
+    ("dialog_button_focused", "danger"),
+    ("error_message", 5),
+    ("markdown_link", "fg:ansired"),  # prompt_toolkit's syntax in a Rich field
+    ("markdown_h1", "bold redd"),
+    ("markdown_code", None),
+]
+
+
+class TestThemeFieldsChecked:
+    """A field neither prompt_toolkit nor Rich can use is refused when the
+    session takes the theme, naming the field: prompt_toolkit's error
+    named only the color ("Wrong color format 'danger'"), and a markdown
+    field raised Rich's own StyleSyntaxError."""
+
+    @pytest.mark.parametrize("field,value", _BAD_FIELDS, ids=[f for f, _ in _BAD_FIELDS])
+    def test_the_constructor_names_the_field(self, field, value):
+        if field.startswith("markdown"):
+            pytest.importorskip("rich")
+        with pytest.raises(ValueError, match=rf"^ThinkingPromptStyles {field}: "):
+            ThinkingPromptSession(theme=ThinkingPromptStyles(**{field: value}))
+
+    @pytest.mark.parametrize("field,value", _BAD_FIELDS, ids=[f for f, _ in _BAD_FIELDS])
+    def test_set_theme_names_the_field(self, field, value):
+        if field.startswith("markdown"):
+            pytest.importorskip("rich")
+        session = ThinkingPromptSession()
+        with pytest.raises(ValueError, match=rf"^ThinkingPromptStyles {field}: "):
+            session.set_theme(ThinkingPromptStyles(**{field: value}))
+
+    @pytest.mark.parametrize("field,value,message", [
+        ("color_depth", 256, "must be a ColorDepth or None, got 256"),
+        ("color_depth", "DEPTH_8_BIT", "must be a ColorDepth or None, got 'DEPTH_8_BIT'"),
+        ("code_theme", None, "must be a str, got None"),
+    ], ids=["depth 256", "depth str", "code theme None"])
+    def test_the_rendering_hints_are_checked(self, field, value, message):
+        """color_depth=256 was taken: the next redraw raised KeyError,
+        prompt_toolkit's "Press ENTER" screen at every key after. A
+        code_theme of None switched the theme, then raised."""
+        session = ThinkingPromptSession(theme="dark")
+        before = session.styles
+        with pytest.raises(ValueError, match=f"^ThinkingPromptStyles {field}: {re.escape(message)}$"):
+            session.set_theme(ThinkingPromptStyles(**{field: value}))
+        assert session.styles is before
+        with pytest.raises(ValueError, match=f"^ThinkingPromptStyles {field}: "):
+            ThinkingPromptSession(theme=ThinkingPromptStyles(**{field: value}))
+
+    @pytest.mark.parametrize("theme", ["terminal", "dark", "light", "mono"])
+    def test_every_built_in_theme_passes(self, theme):
+        """By instance, so the check runs (a name is trusted): code_theme
+        "monokai" is a Pygments name, not a style."""
+        styles = getattr(ThinkingPromptStyles, theme)()
+        assert ThinkingPromptSession(theme=styles).styles is styles
+
+    def test_a_subclass_own_fields_arent_styles(self):
+        """Checked as styles, "Acme" was refused as one."""
+        import dataclasses as dc
+
+        @dc.dataclass(kw_only=True)
+        class Branded(ThinkingPromptStyles):
+            brand_name: str = "Acme"
+
+        styles = Branded()
+        assert ThinkingPromptSession(theme=styles).styles is styles
+
+    def test_the_color_depth_changes_with_set_theme(self, monkeypatch):
+        """It was read from the theme live: changed on session.styles, it
+        took effect at once, unlike every other field."""
+        monkeypatch.delenv("NO_COLOR", raising=False)
+        session = ThinkingPromptSession(theme="dark")
+        session.styles.color_depth = ColorDepth.DEPTH_1_BIT
+        assert session._effective_color_depth() is None
+        session.set_theme(session.styles)
+        assert session._effective_color_depth() is ColorDepth.DEPTH_1_BIT
+
+    def test_the_markdown_fields_take_rich_styles(self):
+        pytest.importorskip("rich")
+        styles = ThinkingPromptStyles(markdown_link="bold red on white", markdown_h1="underline #ff8800")
+        assert ThinkingPromptSession(theme=styles).styles is styles
 
 
 class TestEffectiveColorDepth:

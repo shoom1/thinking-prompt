@@ -48,13 +48,14 @@ from typing import (
 
 from prompt_toolkit.application.current import get_app
 from prompt_toolkit.filters import Condition
-from prompt_toolkit.formatted_text import AnyFormattedText
+from prompt_toolkit.formatted_text import AnyFormattedText, FormattedText
 from prompt_toolkit.key_binding import KeyBindings, merge_key_bindings
 from prompt_toolkit.layout import AnyContainer, Container, Float, HSplit, Window, to_container
 from prompt_toolkit.layout.containers import is_container
+from prompt_toolkit.styles import Style
 from prompt_toolkit.widgets import Label
 
-from ._text import format_exception_detail
+from ._text import checked_fragments, drawn_text, format_exception_detail
 from .dialog_box import BoxPresenter
 from .dialog_inline import InlinePresenter, InlineView
 from .dialog_scroll import (
@@ -113,11 +114,24 @@ class ButtonConfig:
             value = getattr(self, name)
             if not isinstance(value, str):
                 raise ValueError(f"ButtonConfig {name} must be a str, got {value!r}")
+        try:
+            # As prompt_toolkit reads it on the button's text: a style it
+            # can't use raised at every redraw of the dialog.
+            Style([]).get_attrs_for_style_str(self.style)
+        except (ValueError, AssertionError) as exc:
+            raise ValueError(
+                f"ButtonConfig {self.text!r}: style {self.style!r} isn't one "
+                f"prompt_toolkit can use: {exc}"
+            ) from None
         check_flag("ButtonConfig focused", self.focused)
         if self.handler is not None and self.result is not None:
             raise ValueError(
                 "ButtonConfig takes a result or a handler, not both: a handler "
                 "decides the result itself (dialog.set_result(...))."
+            )
+        if self.handler is not None and not callable(self.handler):
+            raise TypeError(
+                f"ButtonConfig {self.text!r}: handler must be a function (or None), got {self.handler!r}"
             )
         if inspect.iscoroutinefunction(self.handler):
             raise TypeError(
@@ -195,8 +209,14 @@ class Dialog:
     then; each value is checked as the field's default is.
 
     The arguments are checked when the dialog is created; a subclass's own
-    ``title``, ``body`` and ``escapable`` (class attributes, or properties
-    reading what its ``__init__`` sets) when it's shown.
+    ``title``, ``body``, ``escapable`` and ``buttons`` (class attributes, or
+    properties reading what its ``__init__`` sets), and attributes set after
+    it's made, when it's shown (a subclass's own ``fields`` when it's made
+    too: the form is built from them then). A callable body whose result
+    isn't text draws nothing (logged once), as a callable status does. ``fields`` and
+    ``buttons`` must be sequences (a list or a tuple) of fields and of
+    ButtonConfigs, and ``values`` a mapping, else TypeError; a value of the
+    right kind that isn't one an option takes raises ValueError.
 
     Example:
         # Built with arguments
@@ -280,14 +300,13 @@ class Dialog:
             self.body if not isinstance(body, _NotPassed) else "",
             self.escapable if not isinstance(escapable, _NotPassed) else True,
         )
-        check_count("max_height", self.max_height, 1, optional=True)
-        if not (
-            self.width is None
-            or self.width == "full"
-            or (isinstance(self.width, int) and not isinstance(self.width, bool) and self.width >= 1)
-        ):
-            raise ValueError(f'width must be at least 1, "full" or None, got {self.width!r}')
-        _check_align_values(self.align_values)
+        # A subclass's own fields too: the form is built from them now.
+        _check_parts(self.fields, self.buttons if not isinstance(buttons, _NotPassed) else ())
+        if values is not None and not isinstance(values, Mapping):
+            raise TypeError(
+                f"Dialog values must be a mapping of field keys to values (or None), got {values!r}"
+            )
+        _check_sizes(self)
         # Not an attribute: one named values would hide the values property.
         self._start_values = values
         # One control per field, holding its value (values) until the next
@@ -299,6 +318,8 @@ class Dialog:
 
         self._result_future: asyncio.Future | None = None
         self._manager: DialogManager | None = None
+        # A callable body that failed is logged once (_drawn_body).
+        self._body_failed = False
         # The placement this dialog is (or was last) shown with, resolved by
         # DialogManager; _content() lays the fields out for it.
         self._placement: Placement = "box"
@@ -314,7 +335,24 @@ class Dialog:
         body = self.body
         if is_container(body):
             return body
+        if callable(body):
+            return Label(text=lambda: self._drawn_body(body))
+        if isinstance(body, tuple):
+            # Pairs, checked: a Label draws only a list.
+            return Label(text=FormattedText(body))
         return Label(text=cast("AnyFormattedText", body))
+
+    def _drawn_body(self, body: Callable[[], Any]) -> AnyFormattedText:
+        """A callable body's text: "" when what it returns isn't text, or
+        it raises (logged once per dialog), since either raised at every
+        redraw."""
+        try:
+            return drawn_text(body(), "a callable Dialog body must return")
+        except Exception:
+            if not self._body_failed:
+                self._body_failed = True
+                logger.exception("Dialog %r: its callable body failed; it's drawn as empty", self.title)
+            return ""
 
     @property
     def values(self) -> dict[str, Any]:
@@ -419,13 +457,9 @@ class Dialog:
         with a hint wherever it's shown.
         """
         configs = self.get_buttons()
-        for cfg in configs:
-            if not isinstance(cfg, ButtonConfig):
-                raise TypeError(
-                    "get_buttons() must return ButtonConfig items; got "
-                    f"{type(cfg).__name__}. Use ButtonConfig(label, "
-                    "handler=...) instead of (label, handler)."
-                )
+        if isinstance(configs, str) or not isinstance(configs, Sequence):
+            raise TypeError(f"get_buttons() must return a sequence of ButtonConfig, got {configs!r}")
+        _check_button_items(configs, "get_buttons() must return")
         return configs
 
     def _accept_choice(self) -> None:
@@ -472,6 +506,8 @@ class Dialog:
         """Prepare the dialog for showing (called by DialogManager): the
         fields start afresh, from ``values=`` or their defaults."""
         _check_shown(self.title, self.body, self.escapable)
+        _check_parts(self.fields, self.buttons)
+        _check_sizes(self)
         self._manager = manager
         self._placement = placement
         self._form = self._new_form()
@@ -615,21 +651,55 @@ def _check_shown(title: object, body: object, escapable: object) -> None:
     check_flag("Dialog escapable", escapable)
 
 
+def _check_sizes(dialog: Dialog) -> None:
+    """A dialog's max_height is an int of at least 1 or None, its width one
+    too or "full", and align_values one it takes: checked when it's made
+    and again when it's shown (one set after failed at every redraw)."""
+    check_count("Dialog max_height", dialog.max_height, 1, optional=True)
+    width = dialog.width
+    if not (
+        width is None
+        or width == "full"
+        or (isinstance(width, int) and not isinstance(width, bool) and width >= 1)
+    ):
+        raise ValueError(f'Dialog width must be at least 1, "full" or None, got {width!r}')
+    _check_align_values(dialog.align_values)
+
+
+def _check_parts(fields: object, buttons: object) -> None:
+    """A dialog's fields and buttons are sequences (of fields: _Form checks
+    each's class; of ButtonConfigs): TypeError naming the part. A generator
+    of fields was used up by the first form, and showed an empty one."""
+    if isinstance(fields, str) or not isinstance(fields, Sequence):
+        raise TypeError(f"Dialog fields must be a sequence of fields, got {fields!r}")
+    if isinstance(buttons, str) or not isinstance(buttons, Sequence):
+        raise TypeError(f"Dialog buttons must be a sequence of ButtonConfig, got {buttons!r}")
+    _check_button_items(buttons, "Dialog buttons must be")
+
+
+def _check_button_items(buttons: Sequence[object], lead: str) -> None:
+    """Each of ``buttons`` is a ButtonConfig: TypeError led by ``lead``, with
+    a hint for a dialog built for 0.3."""
+    for cfg in buttons:
+        if not isinstance(cfg, ButtonConfig):
+            raise TypeError(
+                f"{lead} ButtonConfig items; got {type(cfg).__name__}. Use "
+                "ButtonConfig(label, handler=...) instead of (label, handler)."
+            )
+
+
 def _check_body(body: object) -> None:
     """A dialog's body is text (formatted text, or a callable returning
-    it) or a prompt_toolkit container: anything else failed each redraw."""
-    if (
-        body is None
-        or isinstance(body, str)
-        or callable(body)
-        or hasattr(body, "__pt_formatted_text__")
-        or is_container(body)
-    ):
+    it) or a prompt_toolkit container: anything else failed each redraw.
+    Formatted text is checked as add_response() checks it, so a style
+    prompt_toolkit can't use (an ANSI color over 255) is refused here."""
+    if body is None or isinstance(body, str) or callable(body) or is_container(body):
         return
-    # A list of (style, text) pairs (a handler may follow the text).
-    if isinstance(body, list) and all(
-        isinstance(pair, tuple) and len(pair) in (2, 3) for pair in body
+    # HTML, ANSI, or (style, text) pairs (a handler may follow the text).
+    if hasattr(body, "__pt_formatted_text__") or (
+        isinstance(body, (list, tuple)) and all(isinstance(pair, tuple) for pair in body)
     ):
+        checked_fragments(body, "Dialog body must be")
         return
     raise ValueError(
         "Dialog body must be text (str, HTML, ANSI, FormattedText) or a "
@@ -828,7 +898,8 @@ class DialogManager:
                 opened from a background task). A dialog the running query
                 awaits, itself or through the tasks it awaits, is cancelled
                 with it instead: the app stopping cancels the query.
-            TypeError: If ``dialog`` isn't a Dialog.
+            TypeError: If ``dialog`` isn't a Dialog, or its fields or
+                buttons aren't a sequence of fields or of ButtonConfigs.
             ValueError: If the dialog has nothing focusable (e.g. no buttons
                 and a text body), its placement isn't 'box' or 'inline', a
                 subclass's own title, body or escapable isn't one it takes,

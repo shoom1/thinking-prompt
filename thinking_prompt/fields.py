@@ -73,7 +73,7 @@ class Field(ABC):
 @dataclass(frozen=True, kw_only=True)
 class SelectField(Field):
     """One of ``options``, stepped through in place with ←/→ (``◀ medium ▶``)."""
-    options: Sequence[str] = ()
+    options: Sequence[str]
     default: str | None = None
 
     def __post_init__(self) -> None:
@@ -86,7 +86,7 @@ class DropdownField(Field):
     """One of ``options``: Enter (or Space) opens a menu of them under the
     row, in a box and inline alike. ``height``: the menu's rows; ``width``:
     its columns (None: the widest option's, at most ``max_width``)."""
-    options: Sequence[str] = ()
+    options: Sequence[str]
     default: str | None = None
     height: int = 4
     width: int | None = 15
@@ -127,7 +127,7 @@ class TextField(Field):
 @dataclass(frozen=True, kw_only=True)
 class ChecklistField(Field):
     """Any number of options, one per line; the value is the checked ones, in option order."""
-    options: Sequence[str] = ()
+    options: Sequence[str]
     default: Sequence[str] = ()
 
     def __post_init__(self) -> None:
@@ -139,7 +139,7 @@ class ChecklistField(Field):
 @dataclass(frozen=True, kw_only=True)
 class RadioField(Field):
     """One of several options, one per line; with no default nothing is picked."""
-    options: Sequence[str] = ()
+    options: Sequence[str]
     default: str | None = None
 
     def __post_init__(self) -> None:
@@ -157,7 +157,7 @@ class ChoiceField(Field):
     dialog's only field, with nothing in the body taking focus, Enter then
     also presses the dialog's first button (with no buttons, the dialog
     closes with the pick)."""
-    options: Sequence[str] = ()
+    options: Sequence[str]
     default: str | None = None
 
     def __post_init__(self) -> None:
@@ -182,11 +182,11 @@ def _own_options(item: Field, options: object, single: bool = True) -> tuple[str
 
 
 def _checked_options(owner: str, options: object) -> tuple[str, ...]:
-    """``options`` as a tuple: a sequence (any iterable but a str) of at
-    least one str, each once (two rows of one option would be checked
-    together, and its value returned twice). Raise ValueError naming
-    ``owner``."""
-    if isinstance(options, str) or not isinstance(options, Iterable):
+    """``options`` as a tuple: a sequence (a list or a tuple, not a str, a
+    set or an iterator: a set's order changes from run to run) of at least
+    one str, each once (two rows of one option would be checked together,
+    and its value returned twice). Raise ValueError naming ``owner``."""
+    if isinstance(options, str) or not isinstance(options, Sequence):
         raise ValueError(f"{owner}: options must be a sequence of str, got {options!r}")
     kept = tuple(options)
     if not kept:
@@ -210,7 +210,7 @@ def _check_default(owner: str, default: object, options: tuple[str, ...]) -> Non
 def _checked_defaults(owner: str, default: object, options: tuple[str, ...]) -> tuple[str, ...]:
     """A checklist's default as a tuple: a sequence of ``options`` (a str
     would be taken letter by letter)."""
-    if isinstance(default, str) or not isinstance(default, Iterable):
+    if isinstance(default, str) or not isinstance(default, Sequence):
         raise ValueError(
             f"{owner}: default must be a sequence of options (() for none), got {default!r}"
         )
@@ -242,7 +242,7 @@ def _check_align_values(align: object) -> None:
     if isinstance(align, int) and not isinstance(align, bool) and align >= MIN_VALUE_COLUMN:
         return
     raise ValueError(
-        f'align_values must be "labels", "right" or a column of at least '
+        f'Dialog align_values must be "labels", "right" or a column of at least '
         f"{MIN_VALUE_COLUMN}, got {align!r}"
     )
 

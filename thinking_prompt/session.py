@@ -53,7 +53,7 @@ from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.output import ColorDepth, Output
 from prompt_toolkit.styles import BaseStyle, DynamicStyle, Style, merge_styles
 
-from ._text import format_exception_detail
+from ._text import checked_fragments, drawn_text, format_exception_detail
 from .app_info import AppInfo
 from .display import Display
 from .frames import POLL_INTERVAL, FrameScheduler
@@ -72,6 +72,7 @@ from .types import (
     check_input_while_busy,
     check_key,
     check_placement,
+    check_text,
 )
 
 logger = logging.getLogger(__name__)
@@ -86,38 +87,28 @@ _QUERY_MARK: contextvars.ContextVar[object | None] = contextvars.ContextVar(
 _HandlerT = TypeVar("_HandlerT", bound="InputHandler")
 _T = TypeVar("_T")
 
-_FORMATTED_TEXT = "a str, or formatted text: (style, text) pairs, such as a FormattedText, or HTML or ANSI"
+def _check_shown_text(name: str, value: object, *, rich: bool = False) -> None:
+    """``value`` is text the session draws (the prompt, the status): a str,
+    formatted text, a callable returning it (checked when drawn), None, or
+    with ``rich`` a Rich renderable. Raise ValueError naming ``name``:
+    anything else raised at every redraw."""
+    if value is None or isinstance(value, str) or callable(value):
+        return
+    if rich and _is_rich_renderable(value):
+        return
+    if hasattr(value, "__pt_formatted_text__") or isinstance(value, (list, tuple)):
+        checked_fragments(value, f"{name} must be")
+        return
+    kinds = "a str, formatted text (HTML, ANSI, FormattedText) or a callable returning it"
+    if rich:
+        kinds += ", or a Rich renderable"
+    raise ValueError(f"{name} must be {kinds}, got {value!r}")
 
 
-def _response_fragments(content: object) -> FormattedText:
-    """``content`` as a FormattedText, or ValueError: checked before anything
-    keeps it, since a bad fragment kept in the transcript fails every
-    repaint after it."""
-    if isinstance(content, (HTML, ANSI)):
-        content = to_formatted_text(content)
-    if isinstance(content, (list, tuple)):
-        for fragment in content:
-            if not (
-                isinstance(fragment, tuple)
-                and len(fragment) in (2, 3)
-                and isinstance(fragment[0], str)
-                and isinstance(fragment[1], str)
-            ):
-                raise ValueError(
-                    f"add_response() takes {_FORMATTED_TEXT}; got the fragment {fragment!r}"
-                )
-            try:
-                # As prompt_toolkit reads a fragment's style when it prints
-                # it: class names (looked up, here in no rules), then colors
-                # and attributes.
-                Style([]).get_attrs_for_style_str(fragment[0])
-            except (ValueError, AssertionError) as exc:
-                raise ValueError(
-                    f"add_response() takes {_FORMATTED_TEXT}; the fragment "
-                    f"{fragment!r} has a style prompt_toolkit can't use: {exc}"
-                ) from None
-        return FormattedText(content)
-    raise ValueError(f"add_response() takes {_FORMATTED_TEXT}; got {content!r}")
+def _note(content: object, takes: str) -> str | FormattedText:
+    """A system, error, warning or success line's content: a str, or
+    formatted text checked (see checked_fragments)."""
+    return content if isinstance(content, str) else checked_fragments(content, takes)
 
 
 # Reverse video on what shows the cursor in a list or a dialog, for 1-bit
@@ -273,17 +264,22 @@ class ThinkingPromptSession:
                 takes the newest queued line back to edit.
 
         Raises:
+            TypeError: If spinner isn't a Spinner or None, app_info an
+                AppInfo or None, or theme a str or a ThinkingPromptStyles.
             ValueError: If an option is out of range or of the wrong kind:
                 thinking_max_lines isn't an int of at least 0,
                 transcript_limit one of at least 0 (or None), or
-                completions_menu_height one of at least 1; spinner isn't a
-                Spinner or None; spinner_position isn't 'before' or
+                completions_menu_height one of at least 1; spinner_position isn't 'before' or
                 'after', dialog_placement 'box' or 'inline', or
                 input_while_busy 'refuse' or 'queue'; a flag
                 (thinking_echo, thinking_border, echo_input,
                 enable_status_bar, complete_while_typing) isn't True or
-                False; expand_key isn't a key prompt_toolkit knows; or
-                theme= names an unknown theme.
+                False; expand_key isn't a key prompt_toolkit knows;
+                thinking_title isn't a str; message or status_text isn't
+                text (a str, formatted text or a callable returning it; for
+                status_text a Rich renderable too); or theme= names an
+                unknown theme, or has a field that isn't a style the
+                session can use (named; see ThinkingPromptStyles).
         """
         for name, flag in (
             ("thinking_echo", thinking_echo),
@@ -299,10 +295,15 @@ class ThinkingPromptSession:
         check_count("completions_menu_height", completions_menu_height, 1)
         check_choice("spinner_position", spinner_position, ("before", "after"))
         if spinner is not None and not isinstance(spinner, Spinner):
-            raise ValueError(f"spinner must be a Spinner or None, got {spinner!r}")
+            raise TypeError(f"spinner must be a Spinner or None, got {spinner!r}")
+        if app_info is not None and not isinstance(app_info, AppInfo):
+            raise TypeError(f"app_info must be an AppInfo or None, got {app_info!r}")
 
+        _check_shown_text("message", message)
+        _check_shown_text("status_text", status_text, rich=True)
         self._message = message
         self._app_info = app_info
+        check_text("thinking_title", thinking_title)
         self._thinking_title = thinking_title
         check_placement(dialog_placement, name="dialog_placement")
         self._dialog_placement: Placement = dialog_placement
@@ -314,6 +315,9 @@ class ThinkingPromptSession:
         # A fresh instance per session: a shared one would let a tweak to
         # one session's styles restyle every other session.
         self._styles = resolve_theme(theme) if theme is not None else ThinkingPromptStyles()
+        # The theme's color depth as the session took it: a field changed on
+        # session.styles shows once it's passed to set_theme() again.
+        self._theme_depth = self._styles.color_depth
 
         # NO_COLOR is read once at construction (no-color.org: non-empty).
         self._no_color = bool(os.environ.get("NO_COLOR"))
@@ -328,6 +332,9 @@ class ThinkingPromptSession:
         # status until it's cleared, or until the app sets a status (see
         # _show_hint / _clear_hint / _status_now).
         self._hint: str | None = None
+        # The callable status_text and message that last failed, by name:
+        # each is logged once.
+        self._failed_texts: dict[str, object] = {}
         self._echo_input = echo_input
         self._completer = completer
         self._complete_while_typing = complete_while_typing
@@ -434,7 +441,7 @@ class ThinkingPromptSession:
     def _get_prompt_string(self) -> str:
         """Get the prompt's visible text (any AnyFormattedText form, e.g.
         HTML or ANSI objects, callables, fragment lists)."""
-        return fragment_list_to_text(to_formatted_text(self._message))
+        return fragment_list_to_text(to_formatted_text(self._text_of(self._message, "message")))
 
     def _input_wanted(self) -> bool:
         """True when submitted input would reach someone: a task is waiting
@@ -577,9 +584,9 @@ class ThinkingPromptSession:
         """Create the layout using the layout module."""
         return create_layout(
             default_buffer=self._default_buffer,
-            message=lambda: self._polled(self._message),
+            message=lambda: self._polled(self._message, "message"),
             thinking_max_lines=self._thinking_max_lines,
-            get_status_text=lambda: self._polled(self._status_now()),
+            get_status_text=lambda: self._polled(self._status_now(), "status_text"),
             is_status_bar_enabled=lambda: self._enable_status_bar,
             thinking_manager=self._manager,
             completions_menu_height=self._completions_menu_height,
@@ -620,12 +627,30 @@ class ThinkingPromptSession:
             filter=Condition(lambda: bool(self._queued)) & ~is_done,
         )
 
-    def _polled(self, text: AnyFormattedText) -> AnyFormattedText:
-        """Text about to be drawn. A callable is re-read every
-        POLL_INTERVAL while it's drawn: nothing says when its text changes."""
+    def _polled(self, text: AnyFormattedText, name: str) -> AnyFormattedText:
+        """Text about to be drawn, the session's ``name`` ("message",
+        "status_text"). A callable is re-read every POLL_INTERVAL while
+        it's drawn: nothing says when its text changes."""
         if callable(text):
             self._frames.redraw_in(POLL_INTERVAL)
-        return text
+        return self._text_of(text, name)
+
+    def _text_of(self, text: AnyFormattedText, name: str) -> AnyFormattedText:
+        """``text``, or a callable's result if it's text: "" when it isn't,
+        or when the callable raises (logged once per callable and
+        ``name``), since either raised at every redraw."""
+        if isinstance(text, tuple):
+            # Pairs, checked when set: prompt_toolkit draws only a list.
+            return FormattedText(text)
+        if not callable(text):
+            return text
+        try:
+            return drawn_text(text(), f"a callable {name} must return")
+        except Exception:
+            if self._failed_texts.get(name) is not text:
+                self._failed_texts[name] = text
+                logger.exception("The callable %s failed; it's drawn as empty", name)
+            return ""
 
     def _create_application(self) -> Application:
         """Create the Application object."""
@@ -771,7 +796,7 @@ class ThinkingPromptSession:
         """NO_COLOR (env, at construction) wins; else the theme's hint."""
         if self._no_color:
             return ColorDepth.DEPTH_1_BIT
-        return self._styles.color_depth
+        return self._theme_depth
 
     @property
     def styles(self) -> ThinkingPromptStyles:
@@ -804,10 +829,11 @@ class ThinkingPromptSession:
                 still repaints fully.
 
         Raises:
+            TypeError: If theme is neither a str nor a ThinkingPromptStyles.
             ValueError: For unknown theme names, repaint that isn't True or
-                False, or a colour prompt_toolkit
-                can't parse. Rich raises its own error for one it can't.
-                Either way the session keeps the theme it had.
+                False, or a field that isn't a style the session can use
+                (named; see ThinkingPromptStyles). The session keeps the
+                theme it had.
         """
         check_flag("repaint", repaint)
         resolved = resolve_theme(theme)
@@ -816,6 +842,7 @@ class ThinkingPromptSession:
         style = self._theme_style(resolved)
         self._display.set_theme(resolved)
         self._styles = resolved
+        self._theme_depth = resolved.color_depth
         self._style = style
         if repaint:
             self._repaint_console()
@@ -922,10 +949,11 @@ class ThinkingPromptSession:
             ended by the session (see the README's "When a Box Ends").
 
         Raises:
-            ValueError: If max_lines isn't an int of at least 0 (or
-                None), order an int, border True, False or None,
-                content_format 'plain' or 'ansi', or overflow 'tail' or
-                'head'.
+            TypeError: If content_callback isn't a callable or None.
+            ValueError: If title isn't a str or None, max_lines an int of
+                at least 0 (or None), order an int, border True, False or
+                None, content_format 'plain' or 'ansi', or overflow 'tail'
+                or 'head'.
 
         Example:
             box = session.start_thinking(title="Processing")
@@ -935,6 +963,9 @@ class ThinkingPromptSession:
             box.append("Done!\\n")
             box.finish()
         """
+        if content_callback is not None and not callable(content_callback):
+            raise TypeError(f"content_callback must be a callable or None, got {content_callback!r}")
+        check_text("title", title, optional=True)
         check_flag("border", border, optional=True)
         # 0: the title line only; 1: the newest row, no hint.
         check_count("max_lines", max_lines, 0, optional=True)
@@ -1181,7 +1212,7 @@ class ThinkingPromptSession:
                 raise ValueError(f"add_response(markdown=True) takes a str, got {content!r}")
             # As a FormattedText: prompt_toolkit's print shows a plain list
             # as its repr.
-            self._display.formatted(_response_fragments(content))
+            self._display.formatted(checked_fragments(content, "add_response() takes"))
             return
 
         # Handle markdown
@@ -1192,57 +1223,81 @@ class ThinkingPromptSession:
         # Plain text
         self._display.response(content)
 
-    def add_system(self, content: str) -> None:
+    def add_system(self, content: str | Sequence[OneStyleAndTextTuple] | HTML | ANSI) -> None:
         """
         Print a system message: a note from the app rather than an answer
         (e.g. "Connecting..."), in the system style.
 
         Args:
-            content: The message.
+            content: The message: a str, or formatted text ((style, text)
+                pairs, such as a FormattedText, or HTML or ANSI), shown in
+                its own style over the system style.
+
+        Raises:
+            ValueError: If content is neither a str nor formatted text.
+                Nothing is printed or kept then.
 
         Example:
             session.add_system("Connecting to server...")
         """
-        self._display.system(content)
+        self._display.system(_note(content, "add_system() takes"))
 
-    def add_error(self, content: str) -> None:
+    def add_error(self, content: str | Sequence[OneStyleAndTextTuple] | HTML | ANSI) -> None:
         """
         Add an error message with [ERROR] prefix.
 
         Args:
-            content: The error message content.
+            content: The message: a str, or formatted text ((style, text)
+                pairs, such as a FormattedText, or HTML or ANSI), shown in
+                its own style over the error style.
+
+        Raises:
+            ValueError: If content is neither a str nor formatted text.
+                Nothing is printed or kept then.
 
         Example:
             session.add_error("Failed to connect to server")
             # Displays: [ERROR] Failed to connect to server
         """
-        self._display.error(content)
+        self._display.error(_note(content, "add_error() takes"))
 
-    def add_warning(self, content: str) -> None:
+    def add_warning(self, content: str | Sequence[OneStyleAndTextTuple] | HTML | ANSI) -> None:
         """
         Add a warning message with [WARN] prefix.
 
         Args:
-            content: The warning message content.
+            content: The message: a str, or formatted text ((style, text)
+                pairs, such as a FormattedText, or HTML or ANSI), shown in
+                its own style over the warning style.
+
+        Raises:
+            ValueError: If content is neither a str nor formatted text.
+                Nothing is printed or kept then.
 
         Example:
             session.add_warning("Rate limit approaching")
             # Displays: [WARN] Rate limit approaching
         """
-        self._display.warning(content)
+        self._display.warning(_note(content, "add_warning() takes"))
 
-    def add_success(self, content: str) -> None:
+    def add_success(self, content: str | Sequence[OneStyleAndTextTuple] | HTML | ANSI) -> None:
         """
         Add a success message with [OK] prefix.
 
         Args:
-            content: The success message content.
+            content: The message: a str, or formatted text ((style, text)
+                pairs, such as a FormattedText, or HTML or ANSI), shown in
+                its own style over the success style.
+
+        Raises:
+            ValueError: If content is neither a str nor formatted text.
+                Nothing is printed or kept then.
 
         Example:
             session.add_success("Operation completed")
             # Displays: [OK] Operation completed
         """
-        self._display.success(content)
+        self._display.success(_note(content, "add_success() takes"))
 
     def add_code(self, code: str, language: str = "python") -> None:
         """
@@ -1848,7 +1903,13 @@ class ThinkingPromptSession:
 
     @message.setter
     def message(self, value: AnyFormattedText) -> None:
-        """Set the prompt message."""
+        """Set the prompt message: a str, formatted text (HTML, ANSI,
+        FormattedText), or a callable returning it.
+
+        Raises:
+            ValueError: If it's none of those. The message is kept as it was.
+        """
+        _check_shown_text("message", value)
         self._message = value
         self._invalidate()
 
@@ -1862,7 +1923,12 @@ class ThinkingPromptSession:
     def status_text(self, value: Any) -> None:
         """Set the status bar text: plain or formatted text (FormattedText,
         HTML, ANSI, a callable), or a Rich renderable. It replaces a hint
-        the session is showing."""
+        the session is showing.
+
+        Raises:
+            ValueError: If it's none of those. The status is kept as it was.
+        """
+        _check_shown_text("status_text", value, rich=True)
         self._status_set = value
         self._status_text = self._display.to_ansi(value) if _is_rich_renderable(value) else value
         self._hint = None
@@ -2180,12 +2246,16 @@ class ThinkingPromptSession:
                 the session stopping cancels the query. A query Ctrl+C
                 already cancelled isn't cancelled again, so a dialog in its
                 cleanup gets EOFError.
-            TypeError: If ``dialog`` isn't a Dialog.
+            TypeError: If ``dialog`` isn't a Dialog, or its fields or
+                buttons, set after it was made or a subclass's own, aren't
+                a sequence of fields or of ButtonConfigs (get_buttons()'s
+                result too).
             ValueError: If the dialog has nothing to focus, its placement
-                isn't 'box' or 'inline', a subclass's own title, body or
-                escapable isn't one it takes, or a value its ``values=``
-                gives a field (read again at each show) isn't one the
-                field takes.
+                isn't 'box' or 'inline', its title, body, escapable,
+                max_height, width or align_values (set after it was made,
+                or a subclass's own) isn't one it takes, or a value its
+                ``values=`` gives a field (read again at each show) isn't
+                one the field takes.
 
         Example (built with arguments):
             from thinking_prompt import ButtonConfig, Dialog

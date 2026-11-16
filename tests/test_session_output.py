@@ -65,6 +65,53 @@ class TestStyledLines:
         # The newline unstyled: a background ends with the text.
         assert to_formatted_text(printed) == [(style, text.rstrip("\n")), ("", "\n")]
 
+    _NOTES = [
+        ("add_system", "class:transcript.system", ""),
+        ("add_error", "class:transcript.error", "[ERROR] "),
+        ("add_warning", "class:transcript.warning", "[WARN] "),
+        ("add_success", "class:transcript.success", "[OK] "),
+    ]
+
+    @pytest.mark.parametrize("method, style, prefix", _NOTES, ids=[n[0] for n in _NOTES])
+    @pytest.mark.parametrize(
+        "content",
+        [
+            HTML("<b>disk</b> full"),
+            FormattedText([("class:b", "disk"), ("", " full")]),
+            [("class:b", "disk"), ("", " full")],
+        ],
+        ids=["HTML", "FormattedText", "list"],
+    )
+    def test_formatted_text_is_shown_formatted_in_its_style(self, method, style, prefix, content):
+        """It printed its repr, HTML('<b>disk</b> full'): the note's style
+        under the text's own."""
+        session = _session()
+        getattr(session, method)(content)
+
+        fragments = [
+            *([(style, prefix)] if prefix else []),
+            (f"{style} class:b", "disk"),
+            (style, " full"),
+            ("", "\n"),
+        ]
+        (entry,) = _entries(session)
+        assert (entry.kind, entry.fragments) == ("formatted", fragments)
+        (printed,) = session._display.kept
+        assert to_formatted_text(printed) == fragments
+
+    @pytest.mark.parametrize("method", [n[0] for n in _NOTES])
+    @pytest.mark.parametrize(
+        "content",
+        [42, None, KeyError("k"), lambda: "hi", [("bold", 1)], ANSI("\x1b[38;2;300;0;0mX")],
+        ids=["int", "None", "exception", "callable", "text not a str", "ANSI color over 255"],
+    )
+    def test_something_that_isnt_text_is_refused_and_not_kept(self, method, content):
+        session = _session()
+        with pytest.raises(ValueError, match=rf"{method}\(\) takes"):
+            getattr(session, method)(content)
+        assert _entries(session) == []
+        assert session._display.kept == []
+
 
 class TestInputEcho:
     def test_an_echoed_input_is_the_prompt_and_the_text_on_one_line(self):

@@ -28,7 +28,7 @@ from thinking_prompt.dialog import (
     _yes_no_dialog,
 )
 from thinking_prompt.dialog_inline import build_inline
-from thinking_prompt.fields import ChoiceField
+from thinking_prompt.fields import ChoiceField, TextField
 
 _STILL_OPEN = object()  # _click() result when the click didn't close the dialog
 
@@ -64,6 +64,20 @@ class TestButtonConfig:
         with pytest.raises(ValueError, match=rf"^ButtonConfig {name} must be a str, got 5$"):
             ButtonConfig(**kwargs)
 
+    @pytest.mark.parametrize(
+        "style", ["danger", "bright_red", "red on white", "bold redd", "fg:#12"],
+        ids=["a word", "Rich's name", "Rich's syntax", "a typo", "short hex"],
+    )
+    def test_a_style_prompt_toolkit_cant_use_is_refused(self, style):
+        """Taken, it raised at every redraw of the dialog: prompt_toolkit's
+        "Press ENTER" screen came back after each key, and none got out."""
+        message = rf"^ButtonConfig 'Delete': style {re.escape(repr(style))} isn't one prompt_toolkit can use: "
+        with pytest.raises(ValueError, match=message):
+            ButtonConfig("Delete", style=style)
+
+    def test_a_style_can_name_classes(self):
+        assert ButtonConfig("Delete", style="class:danger fg:ansired bold").style == "class:danger fg:ansired bold"
+
     """Tests for ButtonConfig dataclass."""
 
     def test_button_config_defaults_and_values(self):
@@ -82,6 +96,13 @@ class TestButtonConfig:
     def test_result_and_handler_together_raise(self):
         with pytest.raises(ValueError, match="result or a handler, not both"):
             ButtonConfig(text="OK", result=1, handler=lambda: None)
+
+    @pytest.mark.parametrize("handler", [5, "go"], ids=["int", "str"])
+    def test_a_handler_is_callable(self, handler):
+        """Taken, a click showed "Dialog button error: TypeError"."""
+        message = rf"^ButtonConfig 'Go': handler must be a function \(or None\), got {re.escape(repr(handler))}$"
+        with pytest.raises(TypeError, match=message):
+            ButtonConfig("Go", handler=handler)
 
     def test_async_handler_raises_at_construction(self):
         async def fn() -> None:
@@ -209,12 +230,12 @@ class TestBuiltinDialogs:
         with pytest.raises(ValueError, match=r"^checklist_dialog\(\): default 'c' isn't one of its options"):
             _checklist_dialog("T", "B", ["a", "b"], default=["c"], placement=placement)
 
-    def test_options_from_an_iterator_are_all_kept(self):
-        """The duplicate check used them up: button_dialog() built no buttons."""
-        d = _button_dialog("T", "B", (option for option in ["a", "b"]))
-        assert [button.text for button in d.buttons] == ["a", "b"]
-        d = _checklist_dialog("T", "B", (option for option in ["a", "b"]))
-        assert d.fields[0].options == ("a", "b")
+    @pytest.mark.parametrize("build,call", HELPERS, ids=HELPER_IDS)
+    @pytest.mark.parametrize("options", [{"a", "b"}, (o for o in ["a", "b"])], ids=["set", "generator"])
+    def test_options_that_arent_a_sequence_are_refused_naming_the_call(self, build, call, options):
+        """A set's order changes from run to run."""
+        with pytest.raises(ValueError, match=rf"^{re.escape(call)}: options must be a sequence of str, got "):
+            build(options)
 
     def test_box_dropdown_is_a_choice_list_starting_on_the_default(self):
         d = _choice_dialog("Theme", "Select:", ["Light", "Dark", "System"], default="Dark")
@@ -450,6 +471,20 @@ class TestDialog:
     )
     def test_a_body_that_isnt_text_or_a_container_is_refused(self, body):
         with pytest.raises(ValueError, match=r"^Dialog body must be text \(str, HTML, ANSI, FormattedText\) or a prompt_toolkit container, got "):
+            Dialog("T", body, [ButtonConfig("OK")])
+
+    @pytest.mark.parametrize("body", [
+        [("", 5)],
+        [(1, "x")],
+        FormattedText([("fg:nope", "x")]),
+        HTML('<style fg="nope">x</style>'),
+        ANSI("tool output \x1b[38;2;300;0;0mred"),
+    ], ids=["text not a str", "style not a str", "bad style", "HTML bad color", "ANSI color over 255"])
+    def test_a_body_prompt_toolkit_cant_draw_is_refused(self, body):
+        """Taken, it raised at every redraw: yes_no_dialog("Run?",
+        ANSI(tool_output)) with a color over 255 locked the screen, as it
+        did a response before."""
+        with pytest.raises(ValueError, match=r"^Dialog body must be "):
             Dialog("T", body, [ButtonConfig("OK")])
 
     @pytest.mark.parametrize("body", [
@@ -734,6 +769,134 @@ class TestPlacement:
             )
         assert running_session._dialogs._current_dialog is None
         assert running_session._dialogs.inline_view is None
+
+
+class TestDialogParts:
+    """A dialog's fields, buttons and values= are checked when it's made,
+    and again when it's shown (they can be set after): the wrong kind of
+    object raises TypeError naming the part. It was Python's own TypeError,
+    one at show, or nothing: values=[("k", 1)] was ignored, and a generator
+    of fields showed an empty form."""
+
+    @pytest.mark.parametrize("kwargs,message", [
+        ({"fields": None}, r"^Dialog fields must be a sequence of fields, got None$"),
+        ({"fields": TextField("a", "A")}, r"^Dialog fields must be a sequence of fields, got TextField\("),
+        ({"fields": (f for f in [TextField("a", "A")])}, r"^Dialog fields must be a sequence of fields, got <generator"),
+        ({"fields": [("a", "b")]}, r"^Dialog fields must be TextField, .*; got tuple$"),
+        ({"buttons": None}, r"^Dialog buttons must be a sequence of ButtonConfig, got None$"),
+        ({"buttons": ButtonConfig("OK")}, r"^Dialog buttons must be a sequence of ButtonConfig, got ButtonConfig\("),
+        ({"buttons": [("OK", print)]}, r"^Dialog buttons must be ButtonConfig items; got tuple\. Use ButtonConfig"),
+        ({"values": 5}, r"^Dialog values must be a mapping of field keys to values \(or None\), got 5$"),
+        ({"values": "ab"}, r"^Dialog values must be a mapping of field keys to values \(or None\), got 'ab'$"),
+        ({"values": [("a", "x")]}, r"^Dialog values must be a mapping .*, got \[\('a', 'x'\)\]$"),
+    ], ids=["fields None", "one field", "fields generator", "fields of tuples", "buttons None",
+            "one button", "tuple buttons", "values int", "values str", "values pairs"])
+    def test_the_wrong_kind_of_part_raises_type_error(self, kwargs, message):
+        with pytest.raises(TypeError, match=message):
+            Dialog("T", **kwargs)
+
+    @pytest.mark.parametrize("name,value,message", [
+        ("fields", None, r"^Dialog fields must be a sequence of fields, got None$"),
+        ("buttons", [("OK", print)], r"^Dialog buttons must be ButtonConfig items; got tuple"),
+    ], ids=["fields", "buttons"])
+    def test_a_part_set_later_is_checked_when_shown(self, name, value, message):
+        dialog = Dialog("T", "B", [ButtonConfig("OK")])
+        setattr(dialog, name, value)
+        with pytest.raises(TypeError, match=message):
+            dialog._prepare(MagicMock())
+
+    def test_a_subclass_part_is_checked_when_shown(self):
+        class Old(Dialog):
+            buttons = [("OK", print)]
+
+        with pytest.raises(TypeError, match=r"^Dialog buttons must be ButtonConfig items; got tuple"):
+            Old()._prepare(MagicMock())
+
+    async def test_a_list_of_parts_is_read_again_at_each_show(self):
+        """Fields are read when the dialog is created and each time it's shown."""
+        fields = [TextField("a", "A")]
+        dialog = Dialog("T", fields=fields)
+        fields.append(TextField("b", "B"))
+        dialog._prepare(MagicMock())
+        assert list(dialog.values) == ["a", "b"]
+
+
+class TestCallableBody:
+    """A body is text, or a callable returning it: one that returns
+    something that isn't text drew nothing in a Label; it raised at every
+    redraw, as a callable status did."""
+
+    @staticmethod
+    def _shown(dialog: Dialog) -> str:
+        from prompt_toolkit.formatted_text import fragment_list_to_text, to_formatted_text
+
+        label = dialog.build_body()
+        return fragment_list_to_text(to_formatted_text(label.formatted_text_control.text))
+
+    @pytest.mark.parametrize("result", [5, [("fg:nope", "x")], object()], ids=["int", "bad style", "object"])
+    def test_a_result_that_isnt_text_draws_nothing_logged_once(self, result, caplog):
+        import logging
+
+        dialog = Dialog("Copying", lambda: result, [ButtonConfig("Hide")])
+        with caplog.at_level(logging.ERROR, logger="thinking_prompt"):
+            assert self._shown(dialog) == ""
+            assert self._shown(dialog) == ""
+        assert len([r for r in caplog.records if r.levelno >= logging.ERROR]) == 1
+
+    def test_a_result_that_is_text_is_drawn(self):
+        from prompt_toolkit.formatted_text import merge_formatted_text
+
+        count = {"n": 3}
+        dialog = Dialog("Copying", lambda: merge_formatted_text([HTML(f"<b>{count['n']}</b>"), " copied"]))
+        assert self._shown(dialog) == "3 copied"
+        count["n"] = 4
+        assert self._shown(dialog) == "4 copied"
+
+    def test_a_tuple_of_pairs_is_a_body(self):
+        """add_response() and the status take one: a body refused it."""
+        dialog = Dialog("T", (("bold", "3 jobs"), ("", " | idle")), [ButtonConfig("OK")])
+        assert self._shown(dialog) == "3 jobs | idle"
+
+
+class TestSubclassParts:
+    def test_a_subclass_fields_of_the_wrong_kind_are_named_when_made(self):
+        """They're read when the dialog is made: it raised Python's own
+        TypeError ("'NoneType' object is not iterable")."""
+        class Broken(Dialog):
+            fields = None  # type: ignore[assignment]
+
+        with pytest.raises(TypeError, match=r"^Dialog fields must be a sequence of fields, got None$"):
+            Broken()
+
+    def test_get_buttons_returns_a_sequence(self):
+        """A generator was used up by the check: the dialog had no buttons."""
+        class Gen(Dialog):
+            title = "Gen"
+
+            def get_buttons(self):
+                return (ButtonConfig(t) for t in ["A", "B"])
+
+        with pytest.raises(TypeError, match=r"^get_buttons\(\) must return a sequence of ButtonConfig, got <generator"):
+            Gen()._button_configs()
+
+
+class TestSizesSetLater:
+    """A size set after the dialog is made is checked when it's shown, as
+    one passed is when it's made: max_height="3" locked the screen at
+    every redraw, and width=-5 was taken."""
+
+    @pytest.mark.parametrize("name,value,message", [
+        ("max_height", "3", r"^Dialog max_height must be an int \(or None\), got '3'$"),
+        ("max_height", 0, r"^Dialog max_height must be at least 1 \(or None\), got 0$"),
+        ("width", "wide", r'^Dialog width must be at least 1, "full" or None, got \'wide\'$'),
+        ("width", -5, r'^Dialog width must be at least 1, "full" or None, got -5$'),
+        ("align_values", "left", r"^Dialog align_values must be "),
+    ], ids=["max_height str", "max_height 0", "width str", "width -5", "align_values"])
+    def test_it_is_checked_when_shown(self, name, value, message):
+        dialog = Dialog("T", "B", [ButtonConfig("OK")])
+        setattr(dialog, name, value)
+        with pytest.raises(ValueError, match=message):
+            dialog._prepare(MagicMock())
 
 
 class TestMaxHeight:
