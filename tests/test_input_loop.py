@@ -1584,3 +1584,68 @@ class TestQueue:
 
             await run_loop(session, self._loop(session, ran, started, release), script)
         assert ran == []
+
+
+class TestTypeahead:
+    """Keys typed before the session first asks for input, while the app
+    starts (imports, a client's setup): 0.4.1 ran the line and quit on a
+    Ctrl+D; the line was left unsent in the prompt, refused as Busy, and
+    the Ctrl+D dropped."""
+
+    @pytest.mark.parametrize("mode", ["refuse", "queue"])
+    async def test_a_line_typed_before_the_first_ask_is_its_answer(self, mode):
+        got: list[str] = []
+        with piped_session(input_while_busy=mode) as (session, inp):
+            inp.send_text("hello" + ENTER)  # typed while the app starts
+
+            async def client() -> None:
+                async with session:
+                    await asyncio.sleep(0.2)  # the app's own setup
+                    got.append(await session.prompt_async())
+
+            await asyncio.wait_for(client(), 3)
+        assert got == ["hello"]
+        assert echoed_inputs(session) == ["hello"]
+
+    async def test_a_ctrl_d_typed_before_the_first_ask_ends_the_loop_after_the_lines(self):
+        got: list[str] = []
+        with piped_session() as (session, inp):
+            inp.send_text("one" + ENTER + "two" + ENTER + CTRL_D)
+
+            async def client() -> None:
+                async with session:
+                    await asyncio.sleep(0.2)
+                    while True:
+                        try:
+                            got.append(await session.prompt_async())
+                        except EOFError:
+                            got.append("EOF")
+                            break
+
+            await asyncio.wait_for(client(), 3)
+        assert got == ["one", "two", "EOF"]
+
+    async def test_run_async_runs_the_typed_lines_then_ends(self):
+        handled: list[str] = []
+        with piped_session() as (session, inp):
+            inp.send_text("hello" + ENTER + CTRL_D)
+            await asyncio.wait_for(session.run_async(handled.append), 3)
+        assert handled == ["hello"]
+
+    async def test_a_line_typed_once_the_loop_has_asked_and_while_busy_is_still_refused(self):
+        """Typeahead is the keys before the first ask only: later, Enter
+        while nobody waits is refused, as documented."""
+        with piped_session() as (session, inp):
+
+            async def body() -> None:
+                await session.prompt_async()
+                await asyncio.sleep(0.5)  # busy outside query()
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("first" + ENTER)
+                await wait_until(lambda: echoed_inputs(session) == ["first"])
+                inp.send_text("second" + ENTER)
+                await wait_until(lambda: session._hint is not None)
+                assert session._default_buffer.text == "second"
+
+            await run_loop(session, body, script)

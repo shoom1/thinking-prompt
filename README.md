@@ -309,6 +309,12 @@ too, and no key stops it: Enter, Ctrl+C and Ctrl+D say `Busy`, and the
 boxes the loop opens stay its own. Run work you may need to stop (a
 startup connection, say) with `query()`: Ctrl+C cancels it.
 
+Keys typed before the loop first calls `prompt_async()`, while the app
+starts, are typeahead, as in a shell: each line typed then is kept, and
+`prompt_async()` returns them in order, whatever `input_while_busy` says;
+a Ctrl+D typed then ends the loop once they're read (`prompt_async()`
+raises `EOFError`).
+
 A line typed while a query runs is refused by default (`Busy`). With
 `ThinkingPromptSession(input_while_busy="queue")` it waits under the
 prompt and runs next; Up on an empty prompt takes it back to edit, and

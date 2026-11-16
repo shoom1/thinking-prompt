@@ -311,6 +311,12 @@ class ThinkingPromptSession:
         self._input_while_busy: InputWhileBusy = input_while_busy
         # Lines Enter took while nobody waited for input ("queue"), oldest first.
         self._queued: deque[str] = deque()
+        # Whether prompt_async() has been called in this run: keys typed
+        # before it (while the app starts) are typeahead, kept for it.
+        self._asked = False
+        # A Ctrl+D typed then: prompt_async() raises EOFError once the
+        # lines typed before it are read.
+        self._typed_eof = False
 
         # A fresh instance per session: a shared one would let a tweak to
         # one session's styles restyle every other session.
@@ -504,8 +510,10 @@ class ThinkingPromptSession:
 
     def _busy_enter(self) -> None:
         """Enter while nobody waits for input: queue the line, or refuse it
-        (it stays in the prompt, and the status bar says so)."""
-        if self._input_while_busy == "queue":
+        (it stays in the prompt, and the status bar says so). A line typed
+        before the session first asks, while the app starts, is typeahead:
+        kept for the first prompt_async() whatever input_while_busy says."""
+        if self._input_while_busy == "queue" or not self._asked:
             text = self._default_buffer.text
             if text.strip():
                 self._queued.append(text)
@@ -736,6 +744,11 @@ class ThinkingPromptSession:
         def exit_app(event: KeyPressEvent) -> None:
             """Exit the application: at an idle prompt, where someone waits
             for input and no query runs."""
+            if not self._asked and not self._input_wanted():
+                # Typed before the session first asks: the loop gets
+                # EOFError once it has read the lines typed before it.
+                self._typed_eof = True
+                return
             if self._query_running() or not self._input_wanted():
                 # Exiting doesn't stop work on the way out: Ctrl+C stops a
                 # query. The status bar says the session is busy while the
@@ -1479,6 +1492,7 @@ class ThinkingPromptSession:
             raise RuntimeError("The session is already running")
         self._print_welcome()
         self._app_task = asyncio.current_task()
+        self._asked = self._typed_eof = False
         started = asyncio.Event()
         run = asyncio.ensure_future(self.app.run_async(pre_run=started.set))
         run.add_done_callback(self._app_stopped)
@@ -1580,12 +1594,18 @@ class ThinkingPromptSession:
                 "line is one task's. A task beside the input loop asks with a "
                 "dialog (yes_no_dialog(), say)."
             )
+        self._asked = True
         if self._queued:
             text = self._queued.popleft()
             self._clear_hint()
             self._record_input(text)
             self._invalidate()
             return text
+        if self._typed_eof:
+            # A Ctrl+D typed before the first ask, after its lines: it
+            # quits, as at an idle prompt.
+            self._exit_app()
+            raise EOFError
         future: asyncio.Future[str] = asyncio.get_running_loop().create_future()
         self._pending_input = future
         # Input is wanted again: a status hint no longer applies.

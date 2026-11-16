@@ -212,6 +212,7 @@ class TestAcceptHandlerWhileBusy:
             taken = loop.create_future()
             taken.set_result("earlier")
             session._pending_input = taken
+            session._asked = True  # the loop asked: this isn't typeahead
             session._default_buffer.text = "queued"
 
             session._default_buffer.validate_and_handle()
