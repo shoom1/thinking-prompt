@@ -7,6 +7,7 @@ from __future__ import annotations
 import re
 from functools import lru_cache
 from itertools import groupby
+from typing import NamedTuple
 
 from prompt_toolkit.formatted_text import AnyFormattedText, FormattedText, to_formatted_text
 from prompt_toolkit.formatted_text.base import OneStyleAndTextTuple
@@ -169,11 +170,27 @@ def _color_code(parameters: str) -> str:
     return f"\x1b[{';'.join(numbers)}m"
 
 
-def fixed_sequences(text: str, *, colors_only: bool = False, after_run: bool = False) -> tuple[str, str]:
+# Where prompt_toolkit's parser is when a text ends: outside zero-width
+# text, just after a run (it reads a \x01 next as text), or inside a run
+# passed on before it closed (what comes next is the run's, up to \x02).
+OUTSIDE, AFTER_RUN, IN_RUN = "outside", "after a run", "in a run"
+
+
+class Fixed(NamedTuple):
+    """fixed_sequences()'s result: the text made safe, what it cuts short
+    at its end, and where the parser is once it has read the text."""
+
+    text: str
+    cut: str
+    state: str
+
+
+def fixed_sequences(text: str, *, colors_only: bool = False, state: str = OUTSIDE) -> Fixed:
     """``text`` read as prompt_toolkit's ANSI parser reads it, each control
-    sequence made safe for the parser, and what the text cuts short at its
-    end (a sequence, ESC alone, zero-width text not yet closed), which the
-    next text goes on.
+    sequence made safe for the parser; what the text cuts short at its end
+    (a sequence, ESC alone, zero-width text not yet closed), which the next
+    text goes on; and where the parser is then, for the next text's
+    ``state`` (the parser at the start of this one).
 
     The parser raised on a digit that isn't ASCII (int("²")), so a
     sequence with one is dropped; a color code's numbers are at most 255.
@@ -182,11 +199,16 @@ def fixed_sequences(text: str, *, colors_only: bool = False, after_run: bool = F
     \x01 right after a run is text to the parser, and so it is here).
     ``colors_only``: only color codes are kept, every other sequence (a
     cursor move; one the grammar allows but the parser doesn't read, "?25l"
-    too) and escape is dropped. ``after_run``: the text the parser read
-    before this one ended a zero-width run, so a \x01 this text starts
-    with is text."""
+    too) and escape is dropped."""
     pieces: list[str] = []
     pos = 0
+    if state == IN_RUN:
+        close = text.find("\x02")
+        if close < 0:
+            return Fixed(text, "", IN_RUN)
+        pos = close + 1
+        pieces.append(text[:pos])
+    after_run = state != OUTSIDE
     while (found := _SPECIAL.search(text, pos)) is not None:
         start = found.start()
         if start > pos:
@@ -203,15 +225,19 @@ def fixed_sequences(text: str, *, colors_only: bool = False, after_run: bool = F
                 pos, after_run = start + 1, False
                 continue
             close = text.find("\x02", start)
-            if close < 0 and len(text) - start <= _LONGEST_ZERO_WIDTH:
-                return "".join(pieces), text[start:]
-            pos = len(text) if close < 0 else close + 1
+            if close < 0:
+                if len(text) - start <= _LONGEST_ZERO_WIDTH:
+                    return Fixed("".join(pieces), text[start:], OUTSIDE)
+                # Passed on open: the parser is inside the run.
+                pieces.append(text[start:])
+                return Fixed("".join(pieces), "", IN_RUN)
+            pos = close + 1
             pieces.append(text[start:pos])
-            after_run = close >= 0
+            after_run = True
             continue
         if char == "\x1b":
             if start + 1 == len(text):
-                return "".join(pieces), text[start:]
+                return Fixed("".join(pieces), text[start:], AFTER_RUN if after_run else OUTSIDE)
             if text[start + 1] != "[":
                 pos = start + 2
                 if not colors_only:
@@ -222,7 +248,9 @@ def fixed_sequences(text: str, *, colors_only: bool = False, after_run: bool = F
         end = _parameters_end(text, begin, _ANY_PARAMETERS if colors_only else _PARAMETERS)
         if end == len(text):
             cut = text[start:]
-            return "".join(pieces), cut if len(cut) <= _LONGEST_CUT else ""
+            return Fixed(
+                "".join(pieces), cut if len(cut) <= _LONGEST_CUT else "", AFTER_RUN if after_run else OUTSIDE
+            )
         parameters, final, pos = text[begin:end], text[end], end + 1
         if final == "m" and _PARAMETERS.fullmatch(parameters):
             pieces.append(_color_code(parameters))
@@ -230,5 +258,7 @@ def fixed_sequences(text: str, *, colors_only: bool = False, after_run: bool = F
         elif not colors_only and parameters.replace(";", "").isascii():
             pieces.append(text[start:pos])
             after_run = False
-    pieces.append(text[pos:])
-    return "".join(pieces), ""
+    if pos < len(text):
+        pieces.append(text[pos:])
+        after_run = False
+    return Fixed("".join(pieces), "", AFTER_RUN if after_run else OUTSIDE)

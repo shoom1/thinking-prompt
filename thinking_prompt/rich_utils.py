@@ -41,7 +41,7 @@ def _ansi_safe(text: str) -> str:
     was made (see _print_linked)."""
     text = _LINK.sub(lambda link: link.group(3), text.translate(_RAW_MARKS))
     # A sequence cut short at the end the parser would never finish.
-    return fixed_sequences(_OSC.sub("", text), colors_only=True)[0]
+    return fixed_sequences(_OSC.sub("", text), colors_only=True).text
 
 
 def _is_url(text: str, url: str) -> bool:
