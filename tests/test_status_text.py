@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import pytest
 
-from prompt_toolkit.formatted_text import ANSI, FormattedText
+from prompt_toolkit.formatted_text import ANSI, HTML, FormattedText
 from prompt_toolkit.styles import Style
 
 from thinking_prompt.display import Display
@@ -165,3 +165,91 @@ class TestSessionStatusText:
         assert session._status_now() == "initial | 2 jobs"  # the app's text replaces the hint
         session._clear_hint()
         assert session._status_now() == "initial | 2 jobs"
+
+
+# =============================================================================
+# Text the session draws: checked when set, a callable's result when drawn
+# =============================================================================
+
+_NOT_TEXT = [2, object(), [("bold", 1)], HTML('<style fg="nope">x</style>'), ANSI("\x1b[38;2;300;0;0mX")]
+_NOT_TEXT_IDS = ["int", "object", "text not a str", "HTML bad color", "ANSI color over 255"]
+
+
+class TestStatusAndPromptChecked:
+    """status_text = 2 (a job count) or message = 7, taken, raised at every
+    redraw: prompt_toolkit's "Press ENTER" screen came back after each key,
+    and none got out."""
+
+    @pytest.mark.parametrize("name", ["status_text", "message"])
+    @pytest.mark.parametrize("value", _NOT_TEXT, ids=_NOT_TEXT_IDS)
+    def test_set_on_the_session_it_is_refused(self, name, value):
+        from thinking_prompt import ThinkingPromptSession
+
+        session = ThinkingPromptSession(**{name: "kept"})
+        with pytest.raises(ValueError, match=rf"^{name} must be "):
+            setattr(session, name, value)
+        assert getattr(session, name) == "kept"
+
+    @pytest.mark.parametrize("name", ["status_text", "message"])
+    @pytest.mark.parametrize("value", _NOT_TEXT, ids=_NOT_TEXT_IDS)
+    def test_passed_to_the_session_it_is_refused(self, name, value):
+        from thinking_prompt import ThinkingPromptSession
+
+        with pytest.raises(ValueError, match=rf"^{name} must be "):
+            ThinkingPromptSession(**{name: value})
+
+    @pytest.mark.parametrize("name", ["status_text", "message"])
+    @pytest.mark.parametrize(
+        "value",
+        ["text", HTML("<b>x</b>"), ANSI("\x1b[1mx"), FormattedText([("bold", "x")]), [("bold", "x")], lambda: "x", None],
+        ids=["str", "HTML", "ANSI", "FormattedText", "pairs", "callable", "None"],
+    )
+    def test_text_of_every_kind_is_taken(self, name, value):
+        from thinking_prompt import ThinkingPromptSession
+
+        session = ThinkingPromptSession()
+        setattr(session, name, value)
+        assert getattr(session, name) is value
+        ThinkingPromptSession(**{name: value})
+
+    def test_the_prompt_takes_no_rich_renderable(self):
+        pytest.importorskip("rich")
+        from rich.text import Text
+
+        from thinking_prompt import ThinkingPromptSession
+
+        with pytest.raises(ValueError, match=r"^message must be "):
+            ThinkingPromptSession(message=Text("> "))
+
+
+class TestCallablesThatDontReturnText:
+    """A callable can't be checked when it's set: what it returns is, when
+    it's drawn. One that returns something that isn't text draws nothing,
+    as one that raises does, and is logged once."""
+
+    async def test_the_app_keeps_drawing(self, caplog):
+        import asyncio
+        import logging
+
+        from tests.test_end_to_end import piped_session, run_with, screen_lines, wait_until
+
+        state = {"n": 0}
+        with piped_session(rows=12) as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                with caplog.at_level(logging.ERROR, logger="thinking_prompt"):
+                    session.status_text = lambda: state["n"]
+                    session.message = lambda: state["n"]
+                    box = session.start_thinking(lambda: state["n"], title="Progress")
+                    for n in range(3):
+                        state["n"] = n
+                        await asyncio.sleep(0.15)
+                    assert box.finish() == ""
+                    session.status_text = "Ready"
+                    await wait_until(lambda: "Ready" in screen_lines(session))
+                assert run.done() is False
+                errors = [r for r in caplog.records if r.levelno >= logging.ERROR]
+                # One line per callable: the status, the prompt and the box.
+                assert len(errors) == 3, [r.getMessage() for r in errors]
+
+            await run_with(session, lambda text: None, script)

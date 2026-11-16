@@ -197,7 +197,10 @@ box.finish()
 
 To show text you already hold, pass a content callback instead. The box
 re-reads it while it's drawn (every 0.1 s). You can read such a box
-(`box.text` is what it shows), but writing to it raises `TypeError`:
+(`box.text` is what it shows), but writing to it raises `TypeError`. The
+callback returns a str: one that returns anything else, or raises, shows
+nothing, and is logged once (so is a callable `message` or `status_text`
+that doesn't return text):
 
 ```python
 status = {"line": "starting"}
@@ -539,6 +542,8 @@ The four status messages take what `add_response()` takes, a str or
 formatted text: `add_error(HTML("<b>disk</b> full"))` shows in the error
 style with "disk" bold. For an exception, `add_error(str(exc))`.
 
+`status_text` and the prompt's `message` are checked when set: a value
+that isn't text (`status_text = 2`) raises `ValueError`.
 `session.status_text` reads back what you set, a Rich renderable too. While
 the session shows a hint in the status bar (`Busy — press Ctrl+C to
 cancel`), it still reads your text; setting a status replaces the hint.

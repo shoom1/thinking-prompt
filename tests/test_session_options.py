@@ -161,6 +161,15 @@ class TestOptionChecks:
             session.start_thinking(title=title)
         assert not session.is_thinking
 
+    @pytest.mark.parametrize("callback", [5, "text"], ids=["int", "str"])
+    def test_a_content_callback_is_callable(self, callback):
+        """Taken, it raised at every redraw of the box."""
+        session = ThinkingPromptSession()
+        message = rf"^content_callback must be a callable or None, got {re.escape(repr(callback))}$"
+        with pytest.raises(TypeError, match=message):
+            session.start_thinking(callback)
+        assert not session.is_thinking
+
     async def test_thinkings_title_is_checked_before_the_block(self):
         session = ThinkingPromptSession()
         with pytest.raises(ValueError, match=r"^title must be a str \(or None\), got 5$"):

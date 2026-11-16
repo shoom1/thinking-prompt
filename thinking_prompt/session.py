@@ -87,6 +87,24 @@ _QUERY_MARK: contextvars.ContextVar[object | None] = contextvars.ContextVar(
 _HandlerT = TypeVar("_HandlerT", bound="InputHandler")
 _T = TypeVar("_T")
 
+def _check_shown_text(name: str, value: object, *, rich: bool = False) -> None:
+    """``value`` is text the session draws (the prompt, the status): a str,
+    formatted text, a callable returning it (checked when drawn), None, or
+    with ``rich`` a Rich renderable. Raise ValueError naming ``name``:
+    anything else raised at every redraw."""
+    if value is None or isinstance(value, str) or callable(value):
+        return
+    if rich and _is_rich_renderable(value):
+        return
+    if hasattr(value, "__pt_formatted_text__") or isinstance(value, (list, tuple)):
+        checked_fragments(value, f"{name} must be")
+        return
+    kinds = "a str, formatted text (HTML, ANSI, FormattedText) or a callable returning it"
+    if rich:
+        kinds += ", or a Rich renderable"
+    raise ValueError(f"{name} must be {kinds}, got {value!r}")
+
+
 def _note(content: object, takes: str) -> str | FormattedText:
     """A system, error, warning or success line's content: a str, or
     formatted text checked (see checked_fragments)."""
@@ -276,6 +294,8 @@ class ThinkingPromptSession:
         if spinner is not None and not isinstance(spinner, Spinner):
             raise ValueError(f"spinner must be a Spinner or None, got {spinner!r}")
 
+        _check_shown_text("message", message)
+        _check_shown_text("status_text", status_text, rich=True)
         self._message = message
         self._app_info = app_info
         check_text("thinking_title", thinking_title)
@@ -304,6 +324,9 @@ class ThinkingPromptSession:
         # status until it's cleared, or until the app sets a status (see
         # _show_hint / _clear_hint / _status_now).
         self._hint: str | None = None
+        # The callable status_text and message that last failed, by name:
+        # each is logged once.
+        self._failed_texts: dict[str, object] = {}
         self._echo_input = echo_input
         self._completer = completer
         self._complete_while_typing = complete_while_typing
@@ -410,7 +433,7 @@ class ThinkingPromptSession:
     def _get_prompt_string(self) -> str:
         """Get the prompt's visible text (any AnyFormattedText form, e.g.
         HTML or ANSI objects, callables, fragment lists)."""
-        return fragment_list_to_text(to_formatted_text(self._message))
+        return fragment_list_to_text(to_formatted_text(self._text_of(self._message, "message")))
 
     def _input_wanted(self) -> bool:
         """True when submitted input would reach someone: a task is waiting
@@ -553,9 +576,9 @@ class ThinkingPromptSession:
         """Create the layout using the layout module."""
         return create_layout(
             default_buffer=self._default_buffer,
-            message=lambda: self._polled(self._message),
+            message=lambda: self._polled(self._message, "message"),
             thinking_max_lines=self._thinking_max_lines,
-            get_status_text=lambda: self._polled(self._status_now()),
+            get_status_text=lambda: self._polled(self._status_now(), "status_text"),
             is_status_bar_enabled=lambda: self._enable_status_bar,
             thinking_manager=self._manager,
             completions_menu_height=self._completions_menu_height,
@@ -596,12 +619,30 @@ class ThinkingPromptSession:
             filter=Condition(lambda: bool(self._queued)) & ~is_done,
         )
 
-    def _polled(self, text: AnyFormattedText) -> AnyFormattedText:
-        """Text about to be drawn. A callable is re-read every
-        POLL_INTERVAL while it's drawn: nothing says when its text changes."""
+    def _polled(self, text: AnyFormattedText, name: str) -> AnyFormattedText:
+        """Text about to be drawn, the session's ``name`` ("message",
+        "status_text"). A callable is re-read every POLL_INTERVAL while
+        it's drawn: nothing says when its text changes."""
         if callable(text):
             self._frames.redraw_in(POLL_INTERVAL)
-        return text
+        return self._text_of(text, name)
+
+    def _text_of(self, text: AnyFormattedText, name: str) -> AnyFormattedText:
+        """``text``, or a callable's result if it's text: "" when it isn't,
+        or when the callable raises (logged once per callable and
+        ``name``), since either raised at every redraw."""
+        if not callable(text):
+            return text
+        try:
+            result = text()
+            if result is None or isinstance(result, str):
+                return result
+            return checked_fragments(result, f"a callable {name} must return")
+        except Exception:
+            if self._failed_texts.get(name) is not text:
+                self._failed_texts[name] = text
+                logger.exception("The callable %s failed; it's drawn as empty", name)
+            return ""
 
     def _create_application(self) -> Application:
         """Create the Application object."""
@@ -898,10 +939,11 @@ class ThinkingPromptSession:
             ended by the session (see the README's "When a Box Ends").
 
         Raises:
-            ValueError: If max_lines isn't an int of at least 0 (or
-                None), order an int, border True, False or None,
-                content_format 'plain' or 'ansi', or overflow 'tail' or
-                'head'.
+            TypeError: If content_callback isn't a callable or None.
+            ValueError: If title isn't a str or None, max_lines an int of
+                at least 0 (or None), order an int, border True, False or
+                None, content_format 'plain' or 'ansi', or overflow 'tail'
+                or 'head'.
 
         Example:
             box = session.start_thinking(title="Processing")
@@ -911,6 +953,8 @@ class ThinkingPromptSession:
             box.append("Done!\\n")
             box.finish()
         """
+        if content_callback is not None and not callable(content_callback):
+            raise TypeError(f"content_callback must be a callable or None, got {content_callback!r}")
         check_text("title", title, optional=True)
         check_flag("border", border, optional=True)
         # 0: the title line only; 1: the newest row, no hint.
@@ -1849,7 +1893,13 @@ class ThinkingPromptSession:
 
     @message.setter
     def message(self, value: AnyFormattedText) -> None:
-        """Set the prompt message."""
+        """Set the prompt message: a str, formatted text (HTML, ANSI,
+        FormattedText), or a callable returning it.
+
+        Raises:
+            ValueError: If it's none of those. The message is kept as it was.
+        """
+        _check_shown_text("message", value)
         self._message = value
         self._invalidate()
 
@@ -1863,7 +1913,12 @@ class ThinkingPromptSession:
     def status_text(self, value: Any) -> None:
         """Set the status bar text: plain or formatted text (FormattedText,
         HTML, ANSI, a callable), or a Rich renderable. It replaces a hint
-        the session is showing."""
+        the session is showing.
+
+        Raises:
+            ValueError: If it's none of those. The status is kept as it was.
+        """
+        _check_shown_text("status_text", value, rich=True)
         self._status_set = value
         self._status_text = self._display.to_ansi(value) if _is_rich_renderable(value) else value
         self._hint = None

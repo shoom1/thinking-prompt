@@ -667,9 +667,13 @@ class ThinkingBoxControl(FormattedTextControl):
 
     @property
     def content(self) -> str:
-        """The text to draw ("" if get_text raises; logged once per box)."""
+        """The text to draw ("" if get_text raises or returns something
+        that isn't a str; logged once per box)."""
         try:
-            return self._get_text()
+            text = self._get_text()
+            if not isinstance(text, str):
+                raise TypeError(f"a content callback must return a str, got {text!r}")
+            return text
         except Exception:
             if not self._callback_failed:
                 self._callback_failed = True
