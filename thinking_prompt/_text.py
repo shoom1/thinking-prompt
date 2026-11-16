@@ -169,7 +169,7 @@ def _color_code(parameters: str) -> str:
     return f"\x1b[{';'.join(numbers)}m"
 
 
-def fixed_sequences(text: str, *, colors_only: bool = False) -> tuple[str, str]:
+def fixed_sequences(text: str, *, colors_only: bool = False, after_run: bool = False) -> tuple[str, str]:
     """``text`` read as prompt_toolkit's ANSI parser reads it, each control
     sequence made safe for the parser, and what the text cuts short at its
     end (a sequence, ESC alone, zero-width text not yet closed), which the
@@ -178,22 +178,36 @@ def fixed_sequences(text: str, *, colors_only: bool = False) -> tuple[str, str]:
     The parser raised on a digit that isn't ASCII (int("²")), so a
     sequence with one is dropped; a color code's numbers are at most 255.
     An escape that isn't a sequence (ESC and the character after it) is
-    kept, for the parser to drop; zero-width text is kept as it is.
+    kept, for the parser to drop; zero-width text is kept as it is (a
+    \x01 right after a run is text to the parser, and so it is here).
     ``colors_only``: only color codes are kept, every other sequence (a
     cursor move; one the grammar allows but the parser doesn't read, "?25l"
-    too) and escape is dropped."""
+    too) and escape is dropped. ``after_run``: the text the parser read
+    before this one ended a zero-width run, so a \x01 this text starts
+    with is text."""
     pieces: list[str] = []
     pos = 0
     while (found := _SPECIAL.search(text, pos)) is not None:
         start = found.start()
-        pieces.append(text[pos:start])
+        if start > pos:
+            pieces.append(text[pos:start])
+            after_run = False
         char = text[start]
         if char == "\x01":
+            if after_run:
+                # The parser reads the character after a run itself,
+                # checking it only for an escape: a \x01 it reads next (a
+                # sequence dropped between them, too) is text, and what
+                # follows it is parsed, so it's read on here.
+                pieces.append("\x01")
+                pos, after_run = start + 1, False
+                continue
             close = text.find("\x02", start)
             if close < 0 and len(text) - start <= _LONGEST_ZERO_WIDTH:
                 return "".join(pieces), text[start:]
             pos = len(text) if close < 0 else close + 1
             pieces.append(text[start:pos])
+            after_run = close >= 0
             continue
         if char == "\x1b":
             if start + 1 == len(text):
@@ -202,6 +216,7 @@ def fixed_sequences(text: str, *, colors_only: bool = False) -> tuple[str, str]:
                 pos = start + 2
                 if not colors_only:
                     pieces.append(text[start:pos])
+                    after_run = False
                 continue
         begin = start + (1 if char == "\x9b" else 2)
         end = _parameters_end(text, begin, _ANY_PARAMETERS if colors_only else _PARAMETERS)
@@ -211,7 +226,9 @@ def fixed_sequences(text: str, *, colors_only: bool = False) -> tuple[str, str]:
         parameters, final, pos = text[begin:end], text[end], end + 1
         if final == "m" and _PARAMETERS.fullmatch(parameters):
             pieces.append(_color_code(parameters))
+            after_run = False
         elif not colors_only and parameters.replace(";", "").isascii():
             pieces.append(text[start:pos])
+            after_run = False
     pieces.append(text[pos:])
     return "".join(pieces), ""

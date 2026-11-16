@@ -632,6 +632,10 @@ _BAD_CODES = {
     "ESC before a bad digit": "\x1b\x1b[²m[²m",
     # int() refuses a string of more than 4,300 digits.
     "5,000 digits": "\x1b[" + "1" * 5000 + "m",
+    # The parser takes a \x01 right after a run's \x02 as text, and parses
+    # what follows it.
+    "a bad digit after a run": "\x01\x02\x01\x1b[²m\x02",
+    "color over 255 after a run": "\x01\x1b[1m\x02\x01\x1b[38;2;300;0;0m\x02",
 }
 
 

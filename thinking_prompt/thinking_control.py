@@ -136,16 +136,24 @@ class _AnsiStream:
         self._parser = self._ansi._parse_corot()
         self._parser.send(None)  # type: ignore[arg-type]
         self._cut = ""  # a control sequence the text so far cut short
+        # The text parsed so far ended a zero-width run: the parser reads a
+        # \x01 that comes next as text (see fixed_sequences).
+        self._after_run = False
 
     def feed(self, text: str) -> StyleAndTextTuples:
         """Parse ``text``: the fragments it makes, a character each."""
-        text, self._cut = fixed_sequences(self._cut + text)
+        text, self._cut = fixed_sequences(self._cut + text, after_run=self._after_run)
         send = self._parser.send
         for char in text:
             send(char)
         made = self._ansi._formatted_text
         fragments = list(made)
         made.clear()  # the parser appends to this very list
+        if text:
+            # A run's \x02 makes its fragment; a \x02 outside one is text.
+            self._after_run = (
+                text.endswith("\x02") and bool(fragments) and fragments[-1][0] == "[ZeroWidthEscape]"
+            )
         return fragments
 
 

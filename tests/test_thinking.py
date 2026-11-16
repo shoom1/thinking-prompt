@@ -560,6 +560,28 @@ class TestParsedOnce:
             state["text"] = text[:cut]
             self._assert_shows_whole_parse(control, state["text"], "ansi")
 
+    @pytest.mark.parametrize("code", ["\x1b[²m", "\x1b[38;2;300;0;0m", "\x9b²m"])
+    def test_a_run_right_after_a_run_is_text_whole_or_streamed(self, code: str):
+        """The parser reads the character after a run's \\x02 itself and
+        checks it only for an escape: a \\x01 there is text, and what
+        follows is parsed. Taken for more zero-width text, a bad code in it
+        reached the parser unchecked, and it raised at every frame."""
+        text = f"a\x01\x02\x01{code}b\x02c\n"
+        state, control = self._streamed("ansi")
+        for cut in range(1, len(text) + 1):
+            state["text"] = text[:cut]
+            self._assert_shows_whole_parse(control, state["text"], "ansi")
+
+    def test_a_run_after_a_run_and_a_dropped_sequence_is_text(self):
+        """A sequence dropped between them leaves the \\x01 right after the
+        run for the parser: text it shows, streamed or not."""
+        text = "a\x01\x02\x1b[1²m\x01b300\n"
+        state, control = self._streamed("ansi")
+        for cut in range(1, len(text) + 1):
+            state["text"] = text[:cut]
+            self._assert_shows_whole_parse(control, state["text"], "ansi")
+        assert "b300" in "".join(char for _, char in _whole_parse(text, "ansi"))
+
     @pytest.mark.parametrize("escape", _OTHER_ESCAPES)
     def test_lines_after_another_escape_show_what_a_whole_parse_shows(self, escape: str):
         """An escape other than a color code can swallow a newline, so the
