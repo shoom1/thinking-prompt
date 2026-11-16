@@ -970,14 +970,17 @@ class ThinkingPromptSession:
             self._announce_task_cancel(task, bool(ended) or owed)
 
     def _in_query_sub_task(self, task: asyncio.Task[Any] | None) -> bool:
-        """True for a task the running query started, or one those started
-        (they inherit its context), not the query itself. Read in the
-        task's context: in it, or in a done callback it added."""
+        """True for a task the foreground query started, or one those
+        started (they inherit its context), not the query itself, until the
+        query's cleanup (the query may have just ended: a sub-task's done
+        callbacks can run before the cleanup). Read in the task's context:
+        in it, or in a done callback it added."""
+        mark = self._query_mark
         return (
-            task is not None
+            mark is not None
+            and task is not None
             and task is not self._foreground
-            and self._query_running()
-            and _QUERY_MARK.get() is self._query_mark
+            and _QUERY_MARK.get() is mark
         )
 
     def _announce_task_cancel(self, task: asyncio.Task[Any] | None, ended: bool) -> None:

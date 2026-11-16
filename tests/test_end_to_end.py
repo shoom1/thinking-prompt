@@ -632,7 +632,9 @@ class TestBoxLifecycle:
                 await asyncio.sleep(0.05)  # the tool task's done callbacks
                 transcript = transcript_texts(session._display)
                 assert "Operation cancelled...\n" not in transcript, transcript
-                assert "final answer" in transcript[-1]
+                # A start_thinking() box ends with its task: on 3.12+ that
+                # can be after the answer.
+                assert "final answer\n" in transcript
 
             await run_with(session, handler, script)
 
