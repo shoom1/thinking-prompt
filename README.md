@@ -834,10 +834,14 @@ listed once, and a default is one of them (or `None`): anything else raises
 `ValueError` when the field is made, and so do a `key`, `label` or
 `description` that isn't a str. `button_dialog()`, `choice_dialog()` and
 `checklist_dialog()` check their options and default the same way, as
-`Dialog` its `title` (a str) and `body` (text or a container), and
-`ButtonConfig` its `text` and `style` (strs). A `Dialog` subclass's own
-`title` and `body` (class attributes, or properties) are checked when
-it's shown.
+`Dialog` its `title` (a str) and `body` (text or a container; formatted
+text with a style prompt_toolkit can't use, such as an ANSI color over
+255, raises `ValueError` as in `add_response()`), and `ButtonConfig` its
+`text` and `style`. A button's `style` is a prompt_toolkit style string
+(`"fg:ansired bold"`, not Rich's `"bright_red"`): one prompt_toolkit can't
+use raises `ValueError` when the button is made. A `Dialog` subclass's own
+`title`, `body`, `fields` and `buttons` (class attributes, or properties)
+are checked when it's shown.
 
 **Keys:** in a box, ↑↓ move a row at a time and Tab / Shift+Tab a field at a
 time (Tab on to the buttons after the last field, Shift+Tab from the buttons

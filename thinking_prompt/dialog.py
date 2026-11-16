@@ -52,9 +52,10 @@ from prompt_toolkit.formatted_text import AnyFormattedText
 from prompt_toolkit.key_binding import KeyBindings, merge_key_bindings
 from prompt_toolkit.layout import AnyContainer, Container, Float, HSplit, Window, to_container
 from prompt_toolkit.layout.containers import is_container
+from prompt_toolkit.styles import Style
 from prompt_toolkit.widgets import Label
 
-from ._text import format_exception_detail
+from ._text import checked_fragments, format_exception_detail
 from .dialog_box import BoxPresenter
 from .dialog_inline import InlinePresenter, InlineView
 from .dialog_scroll import (
@@ -113,6 +114,15 @@ class ButtonConfig:
             value = getattr(self, name)
             if not isinstance(value, str):
                 raise ValueError(f"ButtonConfig {name} must be a str, got {value!r}")
+        try:
+            # As prompt_toolkit reads it on the button's text: a style it
+            # can't use raised at every redraw of the dialog.
+            Style([]).get_attrs_for_style_str(self.style)
+        except (ValueError, AssertionError) as exc:
+            raise ValueError(
+                f"ButtonConfig {self.text!r}: style {self.style!r} isn't one "
+                f"prompt_toolkit can use: {exc}"
+            ) from None
         check_flag("ButtonConfig focused", self.focused)
         if self.handler is not None and self.result is not None:
             raise ValueError(
@@ -646,19 +656,16 @@ def _check_button_items(buttons: Sequence[object], lead: str) -> None:
 
 def _check_body(body: object) -> None:
     """A dialog's body is text (formatted text, or a callable returning
-    it) or a prompt_toolkit container: anything else failed each redraw."""
-    if (
-        body is None
-        or isinstance(body, str)
-        or callable(body)
-        or hasattr(body, "__pt_formatted_text__")
-        or is_container(body)
-    ):
+    it) or a prompt_toolkit container: anything else failed each redraw.
+    Formatted text is checked as add_response() checks it, so a style
+    prompt_toolkit can't use (an ANSI color over 255) is refused here."""
+    if body is None or isinstance(body, str) or callable(body) or is_container(body):
         return
-    # A list of (style, text) pairs (a handler may follow the text).
-    if isinstance(body, list) and all(
-        isinstance(pair, tuple) and len(pair) in (2, 3) for pair in body
+    # HTML, ANSI, or (style, text) pairs (a handler may follow the text).
+    if hasattr(body, "__pt_formatted_text__") or (
+        isinstance(body, list) and all(isinstance(pair, tuple) for pair in body)
     ):
+        checked_fragments(body, "Dialog body must be")
         return
     raise ValueError(
         "Dialog body must be text (str, HTML, ANSI, FormattedText) or a "

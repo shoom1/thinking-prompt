@@ -64,6 +64,20 @@ class TestButtonConfig:
         with pytest.raises(ValueError, match=rf"^ButtonConfig {name} must be a str, got 5$"):
             ButtonConfig(**kwargs)
 
+    @pytest.mark.parametrize(
+        "style", ["danger", "bright_red", "red on white", "bold redd", "fg:#12"],
+        ids=["a word", "Rich's name", "Rich's syntax", "a typo", "short hex"],
+    )
+    def test_a_style_prompt_toolkit_cant_use_is_refused(self, style):
+        """Taken, it raised at every redraw of the dialog: prompt_toolkit's
+        "Press ENTER" screen came back after each key, and none got out."""
+        message = rf"^ButtonConfig 'Delete': style {re.escape(repr(style))} isn't one prompt_toolkit can use: "
+        with pytest.raises(ValueError, match=message):
+            ButtonConfig("Delete", style=style)
+
+    def test_a_style_can_name_classes(self):
+        assert ButtonConfig("Delete", style="class:danger fg:ansired bold").style == "class:danger fg:ansired bold"
+
     """Tests for ButtonConfig dataclass."""
 
     def test_button_config_defaults_and_values(self):
@@ -450,6 +464,20 @@ class TestDialog:
     )
     def test_a_body_that_isnt_text_or_a_container_is_refused(self, body):
         with pytest.raises(ValueError, match=r"^Dialog body must be text \(str, HTML, ANSI, FormattedText\) or a prompt_toolkit container, got "):
+            Dialog("T", body, [ButtonConfig("OK")])
+
+    @pytest.mark.parametrize("body", [
+        [("", 5)],
+        [(1, "x")],
+        FormattedText([("fg:nope", "x")]),
+        HTML('<style fg="nope">x</style>'),
+        ANSI("tool output \x1b[38;2;300;0;0mred"),
+    ], ids=["text not a str", "style not a str", "bad style", "HTML bad color", "ANSI color over 255"])
+    def test_a_body_prompt_toolkit_cant_draw_is_refused(self, body):
+        """Taken, it raised at every redraw: yes_no_dialog("Run?",
+        ANSI(tool_output)) with a color over 255 locked the screen, as it
+        did a response before."""
+        with pytest.raises(ValueError, match=r"^Dialog body must be "):
             Dialog("T", body, [ButtonConfig("OK")])
 
     @pytest.mark.parametrize("body", [
