@@ -56,6 +56,12 @@ class _CurrentStdout:
     def encoding(self) -> str:
         return getattr(sys.stdout, "encoding", None) or "utf-8"
 
+    @property
+    def buffer(self) -> Any:
+        """Its bytes: a stdout that can't encode a character is written
+        through it (pytest -s on a cp1252 console)."""
+        return sys.stdout.buffer
+
 
 @pytest.fixture(autouse=True, scope="session")
 def _the_default_output_follows_stdout() -> None:

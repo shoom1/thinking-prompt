@@ -506,6 +506,13 @@ class TestLinks:
         assert listed.count("(https://") == 1
         assert " ".join(listed.split()).startswith("the documentation for this very long link text")
 
+    def test_a_rich_link_showing_its_url_with_an_escaped_space_decoded_keeps_the_url(self):
+        """Its text is the URL decoded, which the terminal can't open
+        whole: the URL as written follows it."""
+        pytest.importorskip("rich")
+        raw = _terminal(lambda s: s.add_rich("[link=https://e.com/a%20b]https://e.com/a b[/link] end"))
+        assert "https://e.com/a b (https://e.com/a%20b) end" in _shown(raw)
+
     @pytest.mark.parametrize("source", [
         "See [](https://e.com/empty) here.",
         "See [ ](https://e.com/empty) here.",

@@ -368,6 +368,29 @@ class TestStyledButtonFocus:
 
             await run_with(session, lambda text: None, script)
 
+    @pytest.mark.parametrize("theme", ["dark", "terminal"])
+    async def test_a_reversed_style_shows_focus_by_turning_it_off(self, theme):
+        """Reverse twice is reverse: a "reverse" button looked the same
+        focused or not."""
+        from tests.test_end_to_end import LEFT, piped_session, run_with, wait_until
+
+        with piped_session(rows=20, theme=theme) as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                dialog = Dialog("T", "B", [
+                    ButtonConfig("Delete", result=1, style="bold reverse"),
+                    ButtonConfig("Keep", result=2, focused=True),
+                ])
+                shown = asyncio.ensure_future(session.show_dialog(dialog))
+                await wait_until(lambda: "Keep" in "".join(_rows(session)))
+                assert self._attrs(session, "Delete").reverse is True
+                inp.send_text(LEFT)
+                await wait_until(lambda: self._attrs(session, "Delete").reverse is False)
+                dialog.cancel()
+                await shown
+
+            await run_with(session, lambda text: None, script)
+
     async def test_an_unstyled_focused_button_keeps_the_accent(self):
         from tests.test_end_to_end import piped_session, run_with, wait_until
 

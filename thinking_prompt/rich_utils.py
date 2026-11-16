@@ -48,7 +48,12 @@ def _is_url(text: str, url: str) -> bool:
     """True if a link showing ``text`` shows its URL already ("x@y" shows
     "mailto:x@y", and an autolink markdown-it's decoding of the URL it
     encoded): the URL isn't shown again."""
-    return text in (url, url.split(":", 1)[-1], _decoded(url))
+    decoded = _decoded(url)
+    # Decoded, an escaped space would split the URL for the terminal: that
+    # text doesn't show the URL.
+    return text in (url, url.split(":", 1)[-1]) or (
+        text == decoded and not any(char.isspace() for char in decoded)
+    )
 
 
 def _decoded(url: str) -> str:
@@ -317,10 +322,10 @@ def _get_markdown_cls() -> Any:
         if not shown:
             return styled("link_url", [text(url)])
         if _is_url(shown, url):
-            # An escaped space decoded would split the URL for the terminal.
-            if shown != url and any(char.isspace() for char in shown):
-                return styled("link_url", [text(url)])
             return styled("link_url", tokens)
+        if shown == _decoded(url):
+            # An autolink with an escaped space: the URL as written, once.
+            return styled("link_url", [text(url)])
         return [*styled("link", tokens), text(" ("), *styled("link_url", [text(url)]), text(")")]
 
     def links_shown(tokens: list[Token], listed: list[tuple[str, str]] | None) -> list[Token]:

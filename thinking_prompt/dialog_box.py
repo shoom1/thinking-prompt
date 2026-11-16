@@ -214,8 +214,13 @@ class _Button(Button):
             self.window.style = lambda: f"class:button {style}{self._focus()}"
 
     def _focus(self) -> str:
-        """What a styled button adds to its style while it has focus."""
-        return " reverse" if get_app().layout.has_focus(self) else ""
+        """What a styled button adds to its style while it has focus: its
+        colors swapped, so a style that's reversed already turns it off."""
+        if not get_app().layout.has_focus(self):
+            return ""
+        words = self._style.split()
+        reversed_ = "reverse" in words and "noreverse" not in words[words.index("reverse"):]
+        return " noreverse" if reversed_ else " reverse"
 
     def fit(self, columns: int) -> None:
         """Draw it at most ``columns`` wide (12 at least)."""
