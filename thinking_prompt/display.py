@@ -39,6 +39,25 @@ if TYPE_CHECKING:
 
 __all__ = ["Display"]
 
+# Control characters a terminal acts on, which prompt_toolkit's print writes
+# as they are (it replaces only ESC): C0 but newline and tab (BEL rings, BS
+# moves back, SO switches character sets, CR goes to the line's start), and
+# C1 (U+009D starts an OSC, which can set the window title; U+009B a CSI).
+_CONTROLS = str.maketrans(
+    "", "", "".join(chr(code) for code in [*range(0x09), *range(0x0B, 0x20), *range(0x80, 0xA0)])
+)
+
+
+def _shown_safe(content: AnyFormattedText) -> FormattedText:
+    """``content`` as fragments with no control character in their text,
+    but in an escape the app marked zero-width (\\x01...\\x02 in an ANSI()),
+    which prompt_toolkit writes as given: the app's own (a hyperlink)."""
+    return FormattedText(
+        fragment if "[ZeroWidthEscape]" in fragment[0]
+        else (fragment[0], fragment[1].translate(_CONTROLS), *fragment[2:])
+        for fragment in to_formatted_text(content, auto_convert=True)
+    )
+
 
 class Display:
     """
@@ -135,9 +154,10 @@ class Display:
     # =========================================================================
 
     def _print_to_console(self, content: AnyFormattedText) -> None:
-        """Print to the console."""
+        """Print to the console, with no control character the terminal
+        would act on (see _shown_safe)."""
         print_formatted_text(
-            content, style=self._get_style(), color_depth=self._get_color_depth()
+            _shown_safe(content), style=self._get_style(), color_depth=self._get_color_depth()
         )
 
     def _output_styled(self, style: str, text: str) -> None:
@@ -405,12 +425,13 @@ class Display:
 
     def print_now(self, output: Output, contents: list[AnyFormattedText]) -> None:
         """Print ``contents`` to ``output`` at once, each as _print_to_console
-        would (print_formatted_text's style and newline), for a caller that
-        has the terminal to itself: a run_in_terminal job, or no app running.
-        print_formatted_text itself queues one run_in_terminal job per call
-        while an app runs, each redrawing the app."""
+        would (print_formatted_text's style and newline, no control
+        characters), for a caller that has the terminal to itself: a
+        run_in_terminal job, or no app running. print_formatted_text itself
+        queues one run_in_terminal job per call while an app runs, each
+        redrawing the app."""
         style = merge_styles([default_ui_style(), default_pygments_style(), self._get_style()])
         color_depth = self._get_color_depth() or output.get_default_color_depth()
         for content in contents:
-            fragments = [*to_formatted_text(content, auto_convert=True), ("", "\n")]
+            fragments = [*_shown_safe(content), ("", "\n")]
             print_to_output(output, fragments, style, color_depth=color_depth)

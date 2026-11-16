@@ -215,6 +215,13 @@ class TestNoPromptToolkitColors:
         """Not the border's muted color, which the frame passes on."""
         assert _drawn(ThinkingPromptStyles(), _DRAWN[12]).color == ""
 
+    @pytest.mark.parametrize("theme", ["terminal", "mono"])
+    def test_a_dropdowns_pick_is_the_terminals_own_color_reversed(self, theme: str):
+        """It was the border's muted color reversed: a gray bar, which
+        doesn't show where bright black is the terminal's background."""
+        attrs = _drawn(resolve_theme(theme), "class:field-dropdown-border class:field-dropdown class:field-dropdown-selected")
+        assert attrs.reverse and attrs.color == "" and attrs.bgcolor == ""
+
     def test_an_explicit_selection_isnt_reversed_by_prompt_toolkit(self):
         """prompt_toolkit's current completion is reverse video: a selection
         set by colors came out swapped, in the completion menu only."""
@@ -243,6 +250,28 @@ class TestSelectionStyles:
         for name in ("completion-menu.completion.current", "field-dropdown-selected"):
             words = d[name].split()
             assert "fg:#ff6600" in words and "bg:#222222" in words and "reverse" not in words
+
+    @pytest.mark.parametrize("theme", ["dark", "light"])
+    @pytest.mark.parametrize("part", ["button.text", "button.arrow"])
+    def test_a_focused_buttons_label_and_arrows_are_in_its_colors(self, theme: str, part: str):
+        """They carry the button class again, so the button rule painted
+        over the focused one: the focused button looked like the others,
+        but bold."""
+        s = resolve_theme(theme)
+        attrs = _drawn(s, f"class:dialog class:dialog.body class:button.focused class:{part}")
+        assert attrs.bgcolor == s.color_accent_button.lstrip("#")
+        assert attrs.color == "ffffff" and attrs.bold
+
+    @pytest.mark.parametrize("accent, label", [("#aa0000", "#ffffff"), ("#ffd700", "#000000")])
+    @pytest.mark.parametrize("theme", ["dark", "light"])
+    def test_the_focused_label_is_white_or_black_whichever_reads_on_the_accent(self, theme, accent, label):
+        """light() set its own focused button, so a color_accent_button
+        override didn't reach it."""
+        import dataclasses
+
+        styles = dataclasses.replace(resolve_theme(theme), color_accent_button=accent)
+        words = styles.to_style_dict()["button.focused"].split()
+        assert f"bg:{accent}" in words and f"fg:{label}" in words
 
     def test_a_button_token_colors_the_focused_button(self):
         words = ThinkingPromptStyles(color_accent_button="#0066cc").to_style_dict()["button.focused"].split()

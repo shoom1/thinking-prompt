@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "thinking-prompt"
 version = "0.4.1"
-description = "A prompt_toolkit extension that adds a thinking box above the prompt"
+description = "A prompt_toolkit extension for AI CLIs: thinking boxes above the prompt, dialogs and form fields"
 # README.md, with its relative img/ links made absolute (below), so PyPI shows them.
 dynamic = ["readme"]
 license = "MIT"
@@ -13,7 +13,7 @@ requires-python = ">=3.10"
 authors = [
     { name = "Andrey Shiryaev"},
 ]
-keywords = ["prompt_toolkit", "cli", "terminal", "thinking", "ai"]
+keywords = ["prompt_toolkit", "cli", "terminal", "thinking", "ai", "llm", "agent", "chat", "dialog"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",
@@ -28,6 +28,7 @@ classifiers = [
     "Programming Language :: Python :: 3.14",
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Topic :: Terminals",
+    "Typing :: Typed",
 ]
 dependencies = [
     # 3.0.36: floor verified by installing into a clean venv and running the
@@ -37,20 +38,24 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=7.0",
-    "pytest-asyncio>=0.21",
+    # The lowest the suite runs clean on (pytest 7.0 and pytest-asyncio 0.21
+    # gave 6 errors).
+    "pytest>=8.2",
+    "pytest-asyncio>=1.1",
     "pytest-cov>=4.0",
     "mypy>=1.0",
     "ruff>=0.1.0",
     "types-Pygments",
 ]
-rich = ["rich>=13.2,<16"]
+rich = ["rich>=13.4.1,<16"]
 pygments = ["pygments>=2.15.0"]
-all = ["rich>=13.2,<16", "pygments>=2.15.0"]
+all = ["rich>=13.4.1,<16", "pygments>=2.15.0"]
 
 [project.urls]
 Homepage = "https://github.com/shoom1/thinking-prompt"
 Repository = "https://github.com/shoom1/thinking-prompt"
+Changelog = "https://github.com/shoom1/thinking-prompt/blob/main/CHANGELOG.md"
+Issues = "https://github.com/shoom1/thinking-prompt/issues"
 
 [tool.hatch.metadata.hooks.fancy-pypi-readme]
 content-type = "text/markdown"

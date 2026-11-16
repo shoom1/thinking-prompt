@@ -94,7 +94,7 @@ def _response_fragments(content: object) -> FormattedText:
     keeps it, since a bad fragment kept in the transcript fails every
     repaint after it."""
     if isinstance(content, (HTML, ANSI)):
-        return to_formatted_text(content)
+        content = to_formatted_text(content)
     if isinstance(content, (list, tuple)):
         for fragment in content:
             if not (
@@ -107,8 +107,10 @@ def _response_fragments(content: object) -> FormattedText:
                     f"add_response() takes {_FORMATTED_TEXT}; got the fragment {fragment!r}"
                 )
             try:
-                # The parser prompt_toolkit uses for a fragment's style.
-                Style([("fragment", fragment[0])])
+                # As prompt_toolkit reads a fragment's style when it prints
+                # it: class names (looked up, here in no rules), then colors
+                # and attributes.
+                Style([]).get_attrs_for_style_str(fragment[0])
             except (ValueError, AssertionError) as exc:
                 raise ValueError(
                     f"add_response() takes {_FORMATTED_TEXT}; the fragment "
