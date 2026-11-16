@@ -505,6 +505,49 @@ class TestMalformedColorCodes:
         assert "inside after" in fragment_list_to_text(fragments)
 
 
+# Control characters a terminal acts on: U+009D starts an OSC (this one
+# sets the window title), U+009B a CSI (this one clears the screen); BEL
+# rings, BS moves back, SO switches to the line-drawing set, CR to the
+# line's start.
+_CONTROLS = "\x9d0;pwned\x9c \x9b2J \x07 \x08 \x0e \r"
+
+
+def _plain_box(session: ThinkingPromptSession, text: str) -> None:
+    box = session.start_thinking()
+    box.append(text)
+    box.finish()
+
+
+class TestControlCharactersInPlainText:
+    """prompt_toolkit's print replaces only ESC: C1 controls, and C0 ones
+    but newline and tab, reached the terminal raw from plain text."""
+
+    @pytest.mark.parametrize("print_it", [
+        lambda s, text: s.add_response(text),
+        lambda s, text: s.add_system(text),
+        lambda s, text: s.add_error(text),
+        lambda s, text: s.add_response(FormattedText([("bold", text)])),
+        lambda s, text: s._display.user_input(">>> ", text),
+        _plain_box,
+    ], ids=["response", "system", "error", "formatted text", "input echo", "plain box echo"])
+    def test_none_reaches_the_terminal(self, print_it):
+        def print_and_repaint(session: ThinkingPromptSession) -> None:
+            print_it(session, f"before {_CONTROLS} after\tend")
+            session._display.print_now(session.app.output, session._display.printed_contents())
+
+        raw = _terminal(print_and_repaint, thinking_echo=True)
+        for control in "\x9d\x9c\x9b\x07\x08\x0e\r":
+            assert control not in raw.replace("\r\n", "\n"), repr(control)
+        assert _shown(raw).count("after\tend") == 2
+
+    def test_an_escape_the_app_marks_zero_width_is_its_own(self):
+        """prompt_toolkit writes the text between \\x01 and \\x02 of an
+        ANSI() as given: an app's own hyperlink, say."""
+        link = "\x1b]8;;https://e.com\x1b\\"
+        raw = _terminal(lambda s: s.add_response(ANSI(f"\x01{link}\x02site")))
+        assert link in raw
+
+
 class TestRichWidth:
     """Rich lays its output out at the width of the session's terminal,
     which needn't be the process's (here there's none: Rich alone would
