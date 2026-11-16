@@ -788,7 +788,7 @@ be unique.
 | `CheckboxField` | `true` / `false` | Space, Enter or ←→ to toggle |
 | `ChecklistField` | One `[x]` option per line; value: the checked ones, in option order | ↑↓ between options, Space/Enter to toggle |
 | `RadioField` | One `(•)` option per line; value: the picked one | ↑↓ between options, Space/Enter to pick |
-| `ChoiceField` | A radio list drawn like prompt_toolkit's `choice()`: no marks, the pick in bold; value: the picked one | ↑↓ between options, Space/Enter to pick. As a dialog's only field (with nothing in the body taking focus), Enter also presses the first button, or with no buttons closes the dialog with the pick |
+| `ChoiceField` | A radio list that looks like prompt_toolkit's `choice()`, with no marks: the pick in the accent color (bold), the cursor a `❯` that, unlike `choice()`'s, doesn't pick; value: the picked one | ↑↓ between options, Space/Enter to pick. As a dialog's only field (with nothing in the body taking focus), Enter also presses the first button, or with no buttons closes the dialog with the pick |
 
 Every field takes `key`, `label`, `description` and `default`. A check,
 radio or choice list with no label and no description shows just its options.

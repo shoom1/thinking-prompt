@@ -144,12 +144,14 @@ class RadioField(Field):
 
 @dataclass(frozen=True, kw_only=True)
 class ChoiceField(Field):
-    """One of ``options``, one per line, like prompt_toolkit's choice(): a
-    radio list with no marks, the pick in bold. It starts on ``default``
-    (the first option without one). ↑↓ move the cursor and Space or
-    Enter picks the option under it. As a dialog's only field, with nothing
-    in the body taking focus, Enter then also presses the dialog's first
-    button (with no buttons, the dialog closes with the pick)."""
+    """One of ``options``, one per line: a radio list that looks like
+    prompt_toolkit's choice(), with no marks. The pick is in the accent
+    color (bold); the cursor is the ``❯`` alone, and unlike choice()'s it
+    doesn't pick. It starts on ``default`` (the first option without one).
+    ↑↓ move the cursor and Space or Enter picks the option under it. As a
+    dialog's only field, with nothing in the body taking focus, Enter then
+    also presses the dialog's first button (with no buttons, the dialog
+    closes with the pick)."""
     options: Sequence[str] = ()
     default: str | None = None
 

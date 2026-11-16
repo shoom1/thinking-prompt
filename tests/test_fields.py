@@ -1445,7 +1445,8 @@ def _app_on(control: OptionsFieldControl, option: int) -> Application:
 
 
 class TestChoiceField:
-    """A radio list drawn like prompt_toolkit's choice(): no marks, the pick in bold."""
+    """A radio list that looks like prompt_toolkit's choice(): no marks, the
+    pick in its own style, the cursor the marker alone."""
 
     def test_needs_options(self):
         with pytest.raises(ValueError, match="'c' needs at least one option"):
@@ -1489,12 +1490,14 @@ class TestChoiceField:
         with set_app(_app_on(control, cursor)):
             return draw()
 
-    def test_the_cursor_on_another_option_and_the_pick_in_bold(self):
+    def test_the_cursor_on_another_option_is_the_marker_alone(self):
+        """Only the pick is in the accent: a cursor row in it too looked like a
+        second pick, and Enter on OK returned the other one."""
         assert self._lines(_choice(), cursor=2) == [
             [("", "  "), ("class:field-label-selected", "Answers")],
             [("", "  "), ("", "  "), ("class:field-label", "x")],
             [("", "  "), ("", "  "), ("class:dialog-choice-selected", "y")],
-            [("class:field-indicator", "❯ "), ("", "  "), ("class:field-label-selected", "z")],
+            [("class:field-indicator", "❯ "), ("", "  "), ("class:field-label", "z")],
         ]
 
     def test_the_cursor_on_the_pick(self):
