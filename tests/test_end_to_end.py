@@ -503,6 +503,42 @@ class TestBoxLifecycle:
 
             await run_with(session, lambda text: None, script)
 
+    @staticmethod
+    async def _agent_with_a_started_box(session: ThinkingPromptSession) -> None:
+        """As _agent, with the outer box a start_thinking() box it leaves for
+        its task's end: no thinking() block of its ends after the cancel."""
+        outer = session.start_thinking(title="Agent")
+        outer.append("planning\n")
+        me = asyncio.current_task()
+        assert me is not None
+        try:
+            async with session.thinking(title="Tool") as tool:
+                tool.append("tool running\n")
+                asyncio.get_running_loop().call_soon(me.cancel)
+                await asyncio.sleep(3600)
+        except asyncio.CancelledError:
+            if hasattr(me, "uncancel"):  # 3.11+
+                me.uncancel()
+        outer.append("tool timed out; going on\n")
+        session.add_response("final answer")
+
+    @pytest.mark.parametrize("where", ["task", "query"])
+    async def test_a_caught_cancel_under_a_started_box_says_nothing(self, where):
+        """The box ends with its task, which wasn't cancelled: no line."""
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                if where == "task":
+                    await asyncio.create_task(self._agent_with_a_started_box(session))
+                else:
+                    await session.query(self._agent_with_a_started_box(session))
+                await asyncio.sleep(0.05)  # the task's done callbacks
+                transcript = transcript_texts(session._display)
+                assert "Operation cancelled...\n" not in transcript, transcript
+                assert not session.is_thinking
+
+            await run_with(session, lambda text: None, script)
+
     async def test_a_caught_cancel_owes_no_line_to_a_later_cancel(self):
         """The task caught the inner block's cancel and its outer block
         ended: cancelled later with no box open, it ends nothing, so
