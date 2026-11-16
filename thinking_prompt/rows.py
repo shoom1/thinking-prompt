@@ -193,8 +193,9 @@ class OptionRow(RowControl):
             ("", " " * self.indent),
         ]
         if not self.group.marks:
-            # The pick in bold, as prompt_toolkit's choice() shows it.
-            line.append(("class:dialog-choice-selected" if marked else label_style, self.option))
+            # The pick, and only the pick, in its style: the marker alone
+            # shows the cursor, so a cursor row can't pass for a second pick.
+            line.append(("class:dialog-choice-selected" if marked else "class:field-label", self.option))
         else:
             mark = (
                 ("[x]" if marked else "[ ]")

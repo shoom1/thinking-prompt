@@ -9,7 +9,7 @@ import logging
 import threading
 from collections.abc import Awaitable
 from contextlib import suppress
-from typing import Callable
+from typing import Any, Callable
 
 import pytest
 
@@ -207,6 +207,58 @@ class TestPromptAsync:
             await run_loop(session, body, script)
         assert raised == ["eof", "eof"]
 
+    async def test_exit_from_a_thread_stops_the_app_on_its_loop(self):
+        """exit() from a thread called app.exit() there, off the event loop:
+        under asyncio's debug mode that raised RuntimeError in the thread
+        and the app never stopped; else it stopped at the next size poll."""
+        threads: list[int] = []
+        with piped_session() as (session, inp):
+            app_exit = session.app.exit
+
+            def exit_spy(*args: Any, **kwargs: Any) -> Any:
+                threads.append(threading.get_ident())
+                return app_exit(*args, **kwargs)
+
+            session.app.exit = exit_spy  # type: ignore[method-assign]
+
+            async def body() -> None:
+                with suppress(EOFError):
+                    await session.prompt_async()
+
+            async def script(run: asyncio.Task[None]) -> None:
+                await asyncio.to_thread(session.exit)
+                await finished(run)
+
+            await run_loop(session, body, script)
+        assert threads == [threading.get_ident()]
+
+    async def test_input_closing_ends_the_block_as_ctrl_d_does(self):
+        """Stdin closing (stdin from /dev/null, say) woke
+        prompt_async() with EOFError, then the block raised it again: a
+        traceback and exit status 1 after the README's loop had ended."""
+        raised: list[str] = []
+        with piped_session() as (session, inp):
+
+            async def body() -> None:
+                try:
+                    await session.prompt_async()
+                except EOFError:
+                    raised.append("eof")
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.close()
+                await finished(run)
+
+            await run_loop(session, body, script)
+        assert raised == ["eof"]
+
+    async def test_input_closing_ends_run_async(self):
+        with piped_session() as (session, inp):
+            run = asyncio.create_task(session.run_async(lambda text: None))
+            await wait_until(lambda: waiting_for_input(session))
+            inp.close()
+            await asyncio.wait_for(run, timeout=2)
+
     async def test_exit_wakes_a_waiting_prompt_with_eof_error(self):
         raised: list[str] = []
         with piped_session() as (session, inp):
@@ -233,7 +285,7 @@ class TestPromptAsync:
 
             async def script(run: asyncio.Task[None]) -> None:
                 inp.send_text(CTRL_C)
-                await wait_until(lambda: session.status_text == session._IDLE_STATUS)
+                await wait_until(lambda: session._status_now() == session._IDLE_STATUS)
                 assert session.app.is_running and waiting_for_input(session)
                 inp.send_text("hello" + ENTER)
                 await finished(run)
@@ -253,7 +305,7 @@ class TestPromptAsync:
                 await wait_until(lambda: session._default_buffer.text == "draft")
                 inp.send_text(CTRL_C + "x")  # "x" lands once the Ctrl+C is handled
                 await wait_until(lambda: session._default_buffer.text == "x")
-                assert session.status_text == "READY"
+                assert session._status_now() == "READY"
                 inp.send_text(ENTER)
                 await finished(run)
 
@@ -277,7 +329,7 @@ class TestPromptAsync:
                 inp.send_text(CTRL_C + ENTER)  # Enter presses OK once the Ctrl+C is handled
                 await asyncio.wait_for(shown, 2)
                 assert session._default_buffer.text == "draft"
-                assert session.status_text == "READY"
+                assert session._status_now() == "READY"
 
             await run_loop(session, body, script)
 
@@ -548,7 +600,7 @@ class TestQuery:
                 inp.send_text("go" + ENTER)
                 await wait_until(lambda: started == ["go"])
                 inp.send_text(CTRL_D)
-                await wait_until(lambda: session.status_text == session._BUSY_STATUS)
+                await wait_until(lambda: session._status_now() == session._BUSY_STATUS)
                 assert session.app.is_running and not run.done()
                 inp.send_text(CTRL_C)
                 await finished(run)
@@ -1079,7 +1131,7 @@ class TestConcurrent:
                 await wait_until(lambda: started == ["a", "b"])
                 assert session._manager.active_count == 2
                 inp.send_text(CTRL_C)  # an idle prompt with live tasks' boxes
-                await wait_until(lambda: session.status_text == session._BACKGROUND_STATUS)
+                await wait_until(lambda: session._status_now() == session._BACKGROUND_STATUS)
                 assert session._manager.active_count == 2
                 release.set()
                 await wait_until(lambda: session._manager.active_count == 0)
@@ -1122,7 +1174,7 @@ class TestQueue:
                 inp.send_text("slow" + ENTER)
                 await wait_until(lambda: started == ["slow"])
                 inp.send_text("next" + ENTER)
-                await wait_until(lambda: session.status_text == session._BUSY_STATUS)
+                await wait_until(lambda: session._status_now() == session._BUSY_STATUS)
                 assert session._default_buffer.text == "next"
                 assert not session._queued
                 release.set()
@@ -1151,7 +1203,7 @@ class TestQueue:
                     await wait_until(lambda: started == ["slow"])
                     inp.send_text("next" + ENTER)
                     await wait_until(lambda: session._hint is not None)
-                    assert session.status_text == "Busy"
+                    assert session._status_now() == "Busy"
                     assert session._default_buffer.text == "next"
                 finally:
                     release.set()  # the app stopping doesn't end the loop's own work
@@ -1189,7 +1241,7 @@ class TestQueue:
                     await started.wait()
                     inp.send_text("draft" + CTRL_C)
                     await wait_until(lambda: session._hint is not None)
-                    assert session.status_text == "Busy"
+                    assert session._status_now() == "Busy"
                     assert session.is_thinking
                     assert session._default_buffer.text == "draft"
                 finally:
@@ -1235,7 +1287,7 @@ class TestQueue:
                     await started.wait()
                     inp.send_text(CTRL_D)
                     await wait_until(lambda: session._hint is not None)
-                    assert session.status_text == "Busy"
+                    assert session._status_now() == "Busy"
                     assert session.app.is_running
                 finally:
                     release.set()

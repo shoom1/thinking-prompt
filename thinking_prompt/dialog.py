@@ -38,7 +38,7 @@ import asyncio
 import inspect
 import logging
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import KW_ONLY, dataclass, replace
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -70,11 +70,13 @@ from .fields import (
     ChoiceField,
     Field,
     _check_align_values,
-    _check_once,
+    _check_default,
+    _checked_defaults,
+    _checked_options,
     _Form,
 )
 from .rows import RowControl
-from .types import Placement, check_count, check_placement
+from .types import Placement, check_count, check_flag, check_placement
 
 if TYPE_CHECKING:
     from .session import ThinkingPromptSession
@@ -96,14 +98,22 @@ class ButtonConfig:
             ``result``. It decides what happens: call ``set_result(...)`` or
             ``cancel()`` on the dialog to close it, or return without closing
             (e.g. while input fails validation).
+
+    ``text`` can be passed by position; the rest by name.
     """
     text: str
+    _: KW_ONLY
     result: Any = None
     focused: bool = False
     style: str = ""
     handler: Callable[[], None] | None = None
 
     def __post_init__(self) -> None:
+        for name in ("text", "style"):
+            value = getattr(self, name)
+            if not isinstance(value, str):
+                raise ValueError(f"ButtonConfig {name} must be a str, got {value!r}")
+        check_flag("ButtonConfig focused", self.focused)
         if self.handler is not None and self.result is not None:
             raise ValueError(
                 "ButtonConfig takes a result or a handler, not both: a handler "
@@ -144,10 +154,10 @@ class Dialog:
     override them per instance, subclasses override them as class attributes.
 
     Attributes:
-        title: Title, shown in the box's frame or as the first inline row
-            (default: none).
-        body: Text (str, HTML, ANSI, FormattedText), shown in a Label, or
-            any prompt_toolkit container.
+        title: Title (a str), shown in the box's frame or as the first
+            inline row (default: none).
+        body: Text (str, HTML, ANSI, FormattedText, or a callable returning
+            one), shown in a Label, or any prompt_toolkit container.
         buttons: ButtonConfigs (default: none). A dialog needs something to
             focus: at least one button, fields, or a focusable body (e.g. a
             TextArea, closed with Escape).
@@ -182,7 +192,11 @@ class Dialog:
     an earlier show left, cancelled edits too, is gone. The mapping is read
     when the dialog is created and again each time it's shown, so a dialog
     kept for reuse with ``values=config`` starts from the config as it is
-    then.
+    then; each value is checked as the field's default is.
+
+    The arguments are checked when the dialog is created; a subclass's own
+    ``title``, ``body`` and ``escapable`` (class attributes, or properties
+    reading what its ``__init__`` sets) when it's shown.
 
     Example:
         # Built with arguments
@@ -258,6 +272,14 @@ class Dialog:
         for name, value in passed.items():
             if not isinstance(value, _NotPassed):
                 setattr(self, name, value)
+        # What's passed is checked now; a subclass's own (a class attribute,
+        # or a property reading what its __init__ sets after this one) when
+        # it's shown (_prepare).
+        _check_shown(
+            self.title if not isinstance(title, _NotPassed) else "",
+            self.body if not isinstance(body, _NotPassed) else "",
+            self.escapable if not isinstance(escapable, _NotPassed) else True,
+        )
         check_count("max_height", self.max_height, 1, optional=True)
         if not (
             self.width is None
@@ -307,7 +329,7 @@ class Dialog:
         (when the mapping has its key), else at its default."""
         start = self._start_values or {}
         return _Form([
-            replace(field, default=start[field.key])
+            _started(field, start[field.key])
             if isinstance(field, Field) and field.key in start else field
             for field in self.fields
         ])
@@ -449,6 +471,7 @@ class Dialog:
     def _prepare(self, manager: DialogManager, placement: Placement = "box") -> asyncio.Future:
         """Prepare the dialog for showing (called by DialogManager): the
         fields start afresh, from ``values=`` or their defaults."""
+        _check_shown(self.title, self.body, self.escapable)
         self._manager = manager
         self._placement = placement
         self._form = self._new_form()
@@ -495,9 +518,7 @@ def _button_dialog(
     max_height: int | None = None,
 ) -> Dialog:
     """One button per option, returning its text; Escape returns None."""
-    if not options:
-        raise ValueError("button_dialog() needs at least one option")
-    _check_once("button_dialog()", options)
+    options = _checked_options("button_dialog()", options)
     return Dialog(
         title,
         text,
@@ -519,12 +540,11 @@ def _choice_dialog(
 
     Box: a choice list field with OK / Cancel: Enter on an option returns
     it, and OK returns the pick. Inline: one numbered action per option.
-    Either way the cursor starts on ``default`` (the first option if it
-    isn't one).
+    Either way the cursor starts on ``default`` (the first option without
+    one).
     """
-    if not options:
-        raise ValueError("choice_dialog() needs at least one option")
-    _check_once("choice_dialog()", options)
+    options = _checked_options("choice_dialog()", options)
+    _check_default("choice_dialog()", default, options)
     if placement == "inline":
         return Dialog(
             title,
@@ -538,7 +558,7 @@ def _choice_dialog(
     dialog = Dialog(
         title,
         text,
-        fields=[ChoiceField("choice", "", options=list(options), default=default)],
+        fields=[ChoiceField("choice", "", options=options, default=default)],
         placement="box",
         max_height=max_height,
     )
@@ -560,19 +580,12 @@ def _checklist_dialog(
 ) -> Dialog:
     """Check any number of options, one per line: OK returns the checked ones
     (in option order), Cancel and Escape None."""
-    if not options:
-        raise ValueError("checklist_dialog() needs at least one option")
-    _check_once("checklist_dialog()", options)
-    if default is None or isinstance(default, str):
-        # A str would be taken letter by letter, none of them an option.
-        raise ValueError(
-            f"checklist_dialog() default must be a sequence of options "
-            f"(() for none), got {default!r}"
-        )
+    options = _checked_options("checklist_dialog()", options)
+    default = _checked_defaults("checklist_dialog()", default, options)
     dialog = Dialog(
         title,
         text,
-        fields=[ChecklistField("checked", "", options=list(options), default=tuple(default))],
+        fields=[ChecklistField("checked", "", options=options, default=default)],
         placement=placement,
         max_height=max_height,
     )
@@ -582,6 +595,46 @@ def _checklist_dialog(
         ButtonConfig("Cancel"),
     ]
     return dialog
+
+
+def _started(field: Field, value: object) -> Field:
+    """``field`` starting at ``value``, from a dialog's ``values=``: checked
+    as its default is."""
+    try:
+        return replace(field, default=value)
+    except ValueError as exc:
+        raise ValueError(f"{exc} (given by values=)") from None
+
+
+def _check_shown(title: object, body: object, escapable: object) -> None:
+    """A dialog's title is a str, its body text or a container, and
+    escapable a flag: anything else failed each redraw, or did nothing."""
+    if not isinstance(title, str):
+        raise ValueError(f"Dialog title must be a str, got {title!r}")
+    _check_body(body)
+    check_flag("Dialog escapable", escapable)
+
+
+def _check_body(body: object) -> None:
+    """A dialog's body is text (formatted text, or a callable returning
+    it) or a prompt_toolkit container: anything else failed each redraw."""
+    if (
+        body is None
+        or isinstance(body, str)
+        or callable(body)
+        or hasattr(body, "__pt_formatted_text__")
+        or is_container(body)
+    ):
+        return
+    # A list of (style, text) pairs (a handler may follow the text).
+    if isinstance(body, list) and all(
+        isinstance(pair, tuple) and len(pair) in (2, 3) for pair in body
+    ):
+        return
+    raise ValueError(
+        "Dialog body must be text (str, HTML, ANSI, FormattedText) or a "
+        f"prompt_toolkit container, got {body!r}"
+    )
 
 
 def _nothing_to_focus(dialog: Dialog) -> str:
@@ -777,7 +830,9 @@ class DialogManager:
                 with it instead: the app stopping cancels the query.
             TypeError: If ``dialog`` isn't a Dialog.
             ValueError: If the dialog has nothing focusable (e.g. no buttons
-                and a text body), or its placement isn't 'box' or 'inline'.
+                and a text body), its placement isn't 'box' or 'inline', a
+                subclass's own title, body or escapable isn't one it takes,
+                or a value ``values=`` gives a field isn't one it takes.
 
         Whatever the dialog raises while being built or opened, the
         manager is left closed, so later dialogs can still be shown.

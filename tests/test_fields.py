@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import re
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -75,11 +76,11 @@ class TestFieldClasses:
             "k", "L", description="", default="", password=False, width=15
         )
         assert CheckboxField("k", "L").default is False
-        assert (DropdownField("k", "L").height, DropdownField("k", "L").width) == (4, 15)
-        assert DropdownField("k", "L").max_width is None
-        assert ChecklistField("k", "L").default == ()
-        assert RadioField("k", "L").default is None
-        assert SelectField("k", "L").default is None
+        dropdown = DropdownField("k", "L", options=["a"])
+        assert (dropdown.height, dropdown.width, dropdown.max_width) == (4, 15, None)
+        assert ChecklistField("k", "L", options=["a"]).default == ()
+        assert RadioField("k", "L", options=["a"]).default is None
+        assert SelectField("k", "L", options=["a"]).default is None
         assert ChoiceField("k", "L", options=["a"]).default is None
 
     @pytest.mark.parametrize("make,message", [
@@ -133,6 +134,84 @@ class TestFieldClasses:
         """Two rows of one option would be checked together, and its value returned twice."""
         with pytest.raises(ValueError, match=rf"{cls.__name__} 'k': option 'a' is listed twice"):
             cls("k", "L", options=["a", "b", "a"])
+
+    @pytest.mark.parametrize("cls", OPTION_FIELDS, ids=lambda cls: cls.__name__)
+    @pytest.mark.parametrize("options", [[8080, 8081], ["a", None]], ids=["ints", "None"])
+    def test_an_option_that_isnt_a_str_is_refused(self, cls, options):
+        """Radio, checklist and choice rows raised TypeError at every redraw,
+        a loop no key got out of; a dropdown failed when shown."""
+        bad = next(option for option in options if not isinstance(option, str))
+        message = rf"{cls.__name__} 'k': options must be str, got {re.escape(repr(bad))}"
+        with pytest.raises(ValueError, match=message):
+            cls("k", "L", options=options)
+
+    @pytest.mark.parametrize("cls", OPTION_FIELDS, ids=lambda cls: cls.__name__)
+    def test_options_given_as_one_str_are_refused(self, cls):
+        """Taken letter by letter, "abc" made three options."""
+        with pytest.raises(ValueError, match=rf"{cls.__name__} 'k': options must be a sequence of str, got 'abc'"):
+            cls("k", "L", options="abc")
+
+    @pytest.mark.parametrize("cls", OPTION_FIELDS, ids=lambda cls: cls.__name__)
+    def test_no_options_are_refused(self, cls):
+        with pytest.raises(ValueError, match=rf"{cls.__name__} 'k' needs at least one option"):
+            cls("k", "L")
+
+    @pytest.mark.parametrize("cls", [SelectField, DropdownField, RadioField, ChoiceField],
+                             ids=lambda cls: cls.__name__)
+    def test_a_default_that_isnt_an_option_is_refused(self, cls):
+        """A select, dropdown or radio list returned it; a choice list started
+        on its first option."""
+        with pytest.raises(ValueError, match=rf"{cls.__name__} 'k': default 'c' isn't one of its options"):
+            cls("k", "L", options=["a", "b"], default="c")
+
+    @pytest.mark.parametrize("cls", [SelectField, DropdownField, RadioField, ChoiceField],
+                             ids=lambda cls: cls.__name__)
+    def test_no_default_is_fine(self, cls):
+        assert cls("k", "L", options=["a"]).default is None
+
+    def test_a_checklist_default_that_isnt_an_option_is_refused(self):
+        with pytest.raises(ValueError, match=r"ChecklistField 'k': default 'c' isn't one of its options"):
+            ChecklistField("k", "L", options=["a", "b"], default=["a", "c"])
+
+    def test_a_starting_value_that_isnt_an_option_is_refused(self):
+        """values= gives a field its default for the dialog."""
+        field = SelectField("k", "L", options=["a", "b"])
+        message = r"^SelectField 'k': default 'c' isn't one of its options \(given by values=\)$"
+        with pytest.raises(ValueError, match=message):
+            Dialog("T", fields=[field], values={"k": "c"})
+
+    async def test_values_are_checked_again_when_shown(self):
+        """values= is read again at each show: a config changed since."""
+        config = {"k": "a"}
+        dialog = Dialog("T", fields=[SelectField("k", "L", options=["a", "b"])], values=config)
+        config["k"] = "c"
+        with pytest.raises(ValueError, match=r"default 'c' isn't one of its options \(given by values=\)$"):
+            dialog._prepare(MagicMock())
+
+    @pytest.mark.parametrize("make,message", [
+        (lambda: CheckboxField("k", "L", default="no"), "CheckboxField 'k': default must be True or False, got 'no'"),
+        (lambda: CheckboxField("k", "L", default=1), "CheckboxField 'k': default must be True or False, got 1"),
+        (lambda: TextField("k", "L", password="no"), "TextField 'k': password must be True or False, got 'no'"),
+        (lambda: Dialog("T", fields=[CheckboxField("k", "L")], values={"k": "yes"}),
+         "CheckboxField 'k': default must be True or False, got 'yes' (given by values=)"),
+    ], ids=["checkbox no", "checkbox 1", "password", "values="])
+    def test_a_flag_is_true_or_false(self, make, message):
+        """CheckboxField(default="no") started checked."""
+        with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
+            make()
+
+    ALL_FIELDS = [TextField, CheckboxField, *OPTION_FIELDS]
+
+    @pytest.mark.parametrize("cls", ALL_FIELDS, ids=lambda cls: cls.__name__)
+    @pytest.mark.parametrize("name", ["key", "label", "description"])
+    def test_a_fields_text_is_a_str(self, cls, name):
+        """A label or description that isn't a str raised TypeError at every redraw."""
+        kwargs = {"key": "k", "label": "L"}
+        if cls in self.OPTION_FIELDS:
+            kwargs["options"] = ["a"]
+        kwargs[name] = 5
+        with pytest.raises(ValueError, match=rf"^{cls.__name__} .*: {name} must be a str, got 5$"):
+            cls(**kwargs)
 
     @pytest.mark.parametrize("default", [None, "a"], ids=["None", "a str"])
     def test_a_checklist_default_is_a_sequence_of_options(self, default):
@@ -463,13 +542,11 @@ class TestSelectControl:
         control.cycle(-1)
         assert control.value == "a"  # clamped at start
 
-    @pytest.mark.parametrize("default", [None, "not-an-option"])
     @pytest.mark.parametrize("delta", [1, -1])
-    def test_first_press_without_selection_selects_first_option(self, default, delta):
-        """With no current selection (no default, or a default that isn't
-        an option), the first press selects the first option instead of
-        skipping over it."""
-        item = SelectField(key="m", label="M", options=["a", "b", "c"], default=default)
+    def test_first_press_without_selection_selects_first_option(self, delta):
+        """With no default, the first press selects the first option instead
+        of skipping over it."""
+        item = SelectField(key="m", label="M", options=["a", "b", "c"])
         control = SelectFieldControl(item)
 
         control.cycle(delta)
@@ -738,12 +815,6 @@ class TestOptionLists:
         (
             lambda: DropdownFieldControl(DropdownField(key="a", label="A", options=["x"], width=20)),
             20 + len(" ▼"),
-        ),
-        (
-            lambda: SelectFieldControl(
-                SelectField(key="a", label="A", options=["S", "M"], default="Not an option")
-            ),
-            len("◀ Not an option ▶"),
         ),
         (lambda: TextFieldControl(TextField(key="a", label="A", width=12)), 12),
         (lambda: TextFieldControl(TextField(key="a", label="A", width=5)), len("(empty)")),
@@ -1267,9 +1338,8 @@ class TestDropdownMenuKeys:
         assert control.is_editing is True
         assert self._menu(control) == (["o0", "o1", "o2", "o3"], "o2")
 
-    @pytest.mark.parametrize("default", [None, "not-an-option"])
-    def test_without_a_value_among_the_options_the_menu_opens_on_the_first(self, default):
-        control = DropdownFieldControl(DropdownField("m", "M", options=self.OPTIONS, default=default))
+    def test_without_a_value_the_menu_opens_on_the_first(self):
+        control = DropdownFieldControl(DropdownField("m", "M", options=self.OPTIONS))
         kb = control.get_key_bindings()
         _press(kb, Keys.ControlM, None)
         assert self._menu(control) == (["o0", "o1", "o2", "o3"], "o0")
@@ -1396,13 +1466,14 @@ def _app_on(control: OptionsFieldControl, option: int) -> Application:
 
 
 class TestChoiceField:
-    """A radio list drawn like prompt_toolkit's choice(): no marks, the pick in bold."""
+    """A radio list that looks like prompt_toolkit's choice(): no marks, the
+    pick in its own style, the cursor the marker alone."""
 
     def test_needs_options(self):
         with pytest.raises(ValueError, match="'c' needs at least one option"):
             ChoiceField("c", "C")
 
-    @pytest.mark.parametrize("default,value", [("y", "y"), ("nope", "x"), (None, "x")])
+    @pytest.mark.parametrize("default,value", [("y", "y"), (None, "x")])
     def test_the_pick_is_the_default_else_the_first_option(self, default, value):
         assert _choice(default=default).value == value
 
@@ -1440,12 +1511,14 @@ class TestChoiceField:
         with set_app(_app_on(control, cursor)):
             return draw()
 
-    def test_the_cursor_on_another_option_and_the_pick_in_bold(self):
+    def test_the_cursor_on_another_option_is_the_marker_alone(self):
+        """Only the pick is in the accent: a cursor row in it too looked like a
+        second pick, and Enter on OK returned the other one."""
         assert self._lines(_choice(), cursor=2) == [
             [("", "  "), ("class:field-label-selected", "Answers")],
             [("", "  "), ("", "  "), ("class:field-label", "x")],
             [("", "  "), ("", "  "), ("class:dialog-choice-selected", "y")],
-            [("class:field-indicator", "❯ "), ("", "  "), ("class:field-label-selected", "z")],
+            [("class:field-indicator", "❯ "), ("", "  "), ("class:field-label", "z")],
         ]
 
     def test_the_cursor_on_the_pick(self):

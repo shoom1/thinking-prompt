@@ -8,6 +8,8 @@ import threading
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
+from .types import check_flag
+
 if TYPE_CHECKING:
     import asyncio
 
@@ -264,5 +266,6 @@ class ThinkingBox:
             The box's final text. Finishing again (or after the session
             finished the box) returns it again and echoes nothing.
         """
+        check_flag("echo", echo, optional=True)
         self._manager.finish(self, echo=echo)
         return self._final_text

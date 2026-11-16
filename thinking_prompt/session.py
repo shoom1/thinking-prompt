@@ -8,6 +8,7 @@ can be expanded to show all of its content.
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import logging
 import os
 from collections import deque
@@ -67,11 +68,19 @@ from .types import (
     Placement,
     check_choice,
     check_count,
+    check_flag,
     check_input_while_busy,
+    check_key,
     check_placement,
 )
 
 logger = logging.getLogger(__name__)
+
+# Set in the foreground query's context, so the tasks it starts (wait_for()
+# before 3.12, gather(), create_task()) inherit it: see _in_query.
+_QUERY_MARK: contextvars.ContextVar[object | None] = contextvars.ContextVar(
+    "thinking_prompt_query", default=None
+)
 
 # on_input() returns the handler it registers with its own type.
 _HandlerT = TypeVar("_HandlerT", bound="InputHandler")
@@ -228,7 +237,8 @@ class ThinkingPromptSession:
             complete_while_typing: Show completions automatically while typing.
             completions_menu_height: Maximum height of completions dropdown menu.
             enable_status_bar: Whether to show status bar.
-            status_text: Text to display in status bar.
+            status_text: Text to display in status bar: plain or formatted
+                text, or a Rich renderable (see the status_text property).
             expand_key: Expands/collapses thinking boxes.
                 Default: "c-t" (Ctrl+T).
             thinking_max_lines: The rows a box shows collapsed, below its title,
@@ -240,7 +250,7 @@ class ThinkingPromptSession:
                 ("── ⠋ Thinking ───") or is just the spinner and the title
                 ("⠋ Thinking"), unless the box says. Default: True.
             spinner: The thinking header's spinner: a preset such as
-                ``Spinner.LINE``, your own ``Spinner(frames, interval)``,
+                ``Spinner.LINE``, your own ``Spinner(frames, interval=...)``,
                 or None for none. Default: ``Spinner.DOTS``.
             spinner_position: The spinner "before" (default) or "after" the
                 title.
@@ -267,9 +277,21 @@ class ThinkingPromptSession:
                 completions_menu_height one of at least 1; spinner isn't a
                 Spinner or None; spinner_position isn't 'before' or
                 'after', dialog_placement 'box' or 'inline', or
-                input_while_busy 'refuse' or 'queue'; or theme= names an
-                unknown theme.
+                input_while_busy 'refuse' or 'queue'; a flag
+                (thinking_echo, thinking_border, echo_input,
+                enable_status_bar, complete_while_typing) isn't True or
+                False; expand_key isn't a key prompt_toolkit knows; or
+                theme= names an unknown theme.
         """
+        for name, flag in (
+            ("thinking_echo", thinking_echo),
+            ("thinking_border", thinking_border),
+            ("echo_input", echo_input),
+            ("enable_status_bar", enable_status_bar),
+            ("complete_while_typing", complete_while_typing),
+        ):
+            check_flag(name, flag)
+        check_key("expand_key", expand_key)
         check_count("thinking_max_lines", thinking_max_lines, 0)
         check_count("transcript_limit", transcript_limit, 0, optional=True)
         check_count("completions_menu_height", completions_menu_height, 1)
@@ -296,12 +318,14 @@ class ThinkingPromptSession:
 
         self._thinking_max_lines = thinking_max_lines
         self._enable_status_bar = enable_status_bar
-        self._status_text = status_text
-        # A status hint ("Busy", "Background work") replaces the status
-        # until it's cleared, and the status it replaced comes back (see
+        # The status as the app set it (status_text reads it back), and as
+        # it's drawn: a Rich renderable is drawn as ANSI.
+        self._status_set: Any = status_text
+        self._status_text: AnyFormattedText = status_text
+        # A status hint ("Busy", "Background work") is drawn in place of the
+        # status until it's cleared, or until the app sets a status (see
         # _show_hint / _clear_hint / _status_now).
         self._hint: str | None = None
-        self._status_under_hint: AnyFormattedText = None
         self._echo_input = echo_input
         self._completer = completer
         self._complete_while_typing = complete_while_typing
@@ -356,6 +380,12 @@ class ThinkingPromptSession:
         # The foreground query has been cancelled (see _cancel_query): it's
         # unwinding, and the session doesn't cancel it again.
         self._query_cancelled: bool = False
+        # What the foreground query's context holds in _QUERY_MARK, and
+        # whether a cancel ended boxes in it (its task or one it started):
+        # "Operation cancelled..." waits for the query (see
+        # _announce_task_cancel).
+        self._query_mark: object | None = None
+        self._query_cancel_owed: bool = False
         # The foreground query called exit(): the app stops when it ends
         # (see _run_query), and no input is read meanwhile.
         self._exit_after_query: bool = False
@@ -395,6 +425,9 @@ class ThinkingPromptSession:
         # Create components
         self._default_buffer = self._create_default_buffer()
         self.app = self._create_application()
+        if _is_rich_renderable(status_text):
+            # Drawn as ANSI, as the status_text setter draws one.
+            self._status_text = self._display.to_ansi(status_text)
 
     def _get_prompt_string(self) -> str:
         """Get the prompt's visible text (any AnyFormattedText form, e.g.
@@ -482,28 +515,24 @@ class ThinkingPromptSession:
             self._show_hint(self._BUSY_NO_QUERY_STATUS)
 
     def _show_hint(self, hint: str) -> None:
-        """Show a status hint, keeping the status it replaces."""
-        if self._hint is None or self._status_text != self._hint:
-            self._status_under_hint = self._status_text
+        """Draw a status hint in place of the status."""
         self._hint = hint
-        self.status_text = hint
+        self._invalidate()
 
     def _clear_hint(self) -> None:
-        """Restore the status the hint replaced — unless something set a new
-        status meanwhile (e.g. the handler reporting its result)."""
+        """Draw the status again (a status the app set meanwhile, such as
+        the handler reporting its result, has cleared the hint already)."""
         if self._hint is None:
             return
-        if self._status_text == self._hint:
-            self.status_text = self._status_under_hint
         self._hint = None
-        self._status_under_hint = None
+        self._invalidate()
 
     def _status_now(self) -> AnyFormattedText:
-        """The status to show. The background hint lasts only while a box
-        is open: once the last one ends, the status it replaced is back."""
+        """The status to draw: the hint, while one shows. The background
+        hint lasts only while a box is open."""
         if self._hint == self._BACKGROUND_STATUS and not self._manager.has_active_boxes:
-            self._clear_hint()
-        return self._status_text
+            self._hint = None
+        return self._status_text if self._hint is None else self._hint
 
     def _create_default_buffer(self) -> Buffer:
         """Create the main input buffer."""
@@ -773,10 +802,12 @@ class ThinkingPromptSession:
                 still repaints fully.
 
         Raises:
-            ValueError: For unknown theme names, or a colour prompt_toolkit
+            ValueError: For unknown theme names, repaint that isn't True or
+                False, or a colour prompt_toolkit
                 can't parse. Rich raises its own error for one it can't.
                 Either way the session keeps the theme it had.
         """
+        check_flag("repaint", repaint)
         resolved = resolve_theme(theme)
         # Built before anything is switched, so a theme that can't be built
         # leaves styles, the style and the Display as they were.
@@ -890,8 +921,9 @@ class ThinkingPromptSession:
 
         Raises:
             ValueError: If max_lines isn't an int of at least 0 (or
-                None), order an int, content_format 'plain' or 'ansi', or
-                overflow 'tail' or 'head'.
+                None), order an int, border True, False or None,
+                content_format 'plain' or 'ansi', or overflow 'tail' or
+                'head'.
 
         Example:
             box = session.start_thinking(title="Processing")
@@ -901,6 +933,7 @@ class ThinkingPromptSession:
             box.append("Done!\\n")
             box.finish()
         """
+        check_flag("border", border, optional=True)
         # 0: the title line only; 1: the newest row, no hint.
         check_count("max_lines", max_lines, 0, optional=True)
         # Any int sorts; anything else would fail the next redraw's sort.
@@ -939,7 +972,29 @@ class ThinkingPromptSession:
         # A cancel the task caught (a time limit on an inner block, say)
         # cancelled nothing: the task went on.
         if task.cancelled():
-            self._announce_cancel(bool(ended) or owed)
+            self._announce_task_cancel(task, bool(ended) or owed)
+
+    def _in_query(self, task: asyncio.Task[Any] | None) -> bool:
+        """True for the foreground query's task, and the tasks it started or
+        those started (they inherit its context), until the query's cleanup
+        (a sub-task's done callbacks can run after the query has ended,
+        before its cleanup). Read in the task's context: in it, or in a
+        done callback it added."""
+        mark = self._query_mark
+        return mark is not None and task is not None and _QUERY_MARK.get() is mark
+
+    def _announce_task_cancel(self, task: asyncio.Task[Any] | None, ended: bool) -> None:
+        """Say "Operation cancelled..." after the boxes a cancel of ``task``
+        ended. In the running query, its own task or one it started, the
+        line waits for the query: a time limit the query catches cancels a
+        block (in its own task with asyncio.timeout(), and with wait_for()
+        on 3.12+; in a task of its own with wait_for() before 3.12, and
+        gather()), not the query. The query's cleanup says it, once, if the
+        query ends cancelled."""
+        if ended and self._in_query(task):
+            self._query_cancel_owed = True
+            return
+        self._announce_cancel(ended)
 
     def _announce_cancel(self, ended: bool) -> None:
         """Say "Operation cancelled..." after the boxes a cancel ended.
@@ -1006,8 +1061,8 @@ class ThinkingPromptSession:
             ThinkingBox: the box, to write to and retitle.
 
         Raises:
-            ValueError: As start_thinking() raises it (before the block
-                runs).
+            ValueError: As start_thinking() raises it, or if echo isn't
+                True, False or None (before the block runs).
 
         Example:
             async with session.thinking(title="Processing") as box:
@@ -1036,6 +1091,7 @@ class ThinkingPromptSession:
             content; if it raises, the exception propagates after the box
             is finished.
         """
+        check_flag("echo", echo, optional=True)
         box = self.start_thinking(
             title=title,
             border=border,
@@ -1057,9 +1113,9 @@ class ThinkingPromptSession:
             elif task is not None and task in self._cancel_owed:
                 # Its last box: the line owed for its inner blocks is this one.
                 self._cancel_owed.discard(task)
-                self._announce_cancel(True)
+                self._announce_task_cancel(task, True)
             else:
-                self._announce_cancel(ended)
+                self._announce_task_cancel(task, ended)
             raise
         except BaseException:
             box.finish(echo=echo)
@@ -1101,8 +1157,9 @@ class ThinkingPromptSession:
 
         Raises:
             ValueError: If content is neither a str nor formatted text (a
-                pair whose style prompt_toolkit can't use included), or
-                markdown=True comes with formatted text. Nothing is printed
+                pair whose style prompt_toolkit can't use included),
+                markdown isn't True or False, or markdown=True comes with
+                formatted text. Nothing is printed
                 or kept then.
 
         Examples:
@@ -1116,6 +1173,7 @@ class ThinkingPromptSession:
             formatted = FormattedText([("bold", "Title: "), ("", "Content")])
             session.add_response(formatted)
         """
+        check_flag("markdown", markdown)
         if not isinstance(content, str):
             if markdown:
                 raise ValueError(f"add_response(markdown=True) takes a str, got {content!r}")
@@ -1266,9 +1324,10 @@ class ThinkingPromptSession:
         anywhere else (another task, a dialog's button, a key binding), it
         stops the app now, cancelling a running query.
 
-        Open boxes are handled as on any exit (see run_async()). Calling it
-        again from the query, or once the app is stopping or has stopped,
-        does nothing.
+        From a thread (one the running query waits on too) it's handed to
+        the session's event loop, and stops the app there at once. Open boxes are handled as on any exit (see
+        run_async()). Calling it again from the query, or once the app is
+        stopping or has stopped, does nothing.
 
         Example:
             @session.on_input
@@ -1281,10 +1340,16 @@ class ThinkingPromptSession:
         """
         if not self.app.is_running:
             return
+        run = self._app_run
         try:
-            caller = asyncio.current_task()
+            running = asyncio.get_running_loop()
         except RuntimeError:  # no event loop in this thread
-            caller = None
+            running = None
+        if run is not None and running is not run.get_loop():
+            # From a thread: the app stops on its own loop.
+            run.get_loop().call_soon_threadsafe(self.exit)
+            return
+        caller = asyncio.current_task() if running is not None else None
         if caller is not None and caller is self._foreground:
             self._exit_after_query = True
             # No more input: a task already waiting for some is told so.
@@ -1345,7 +1410,10 @@ class ThinkingPromptSession:
     async def __aenter__(self) -> ThinkingPromptSession:
         """Run the session until the block ends: print the welcome, then
         start the Application. Inputs are read with prompt_async(), and
-        query() runs one input's work.
+        query() runs one input's work. Stdin closing stops the app at
+        once, as exit() from outside the query does: a running query is
+        cancelled, queued lines are dropped, prompt_async() raises
+        EOFError, and the block ends normally.
 
         Raises:
             RuntimeError: If the session is already running.
@@ -1395,7 +1463,9 @@ class ThinkingPromptSession:
             self._frames.cancel()
             self._resizes.cancel()
         error = None if run.cancelled() else run.exception()
-        if error is not None and exc_info[1] is None:
+        # Stdin closing stops the app with EOFError, which prompt_async()
+        # has raised already.
+        if error is not None and not isinstance(error, EOFError) and exc_info[1] is None:
             raise error
 
     def _app_stopped(self, run: asyncio.Future[Any]) -> None:
@@ -1423,7 +1493,8 @@ class ThinkingPromptSession:
         Raises:
             EOFError: On Ctrl+D at an empty, idle prompt, and on any call
                 once the app has stopped or been told to stop (Ctrl+D,
-                exit(), also while the query that called exit() finishes).
+                exit(), also while the query that called exit() finishes,
+                or stdin closing).
                 Ctrl+C never exits: it stops the running query, or clears
                 an idle prompt.
             RuntimeError: Outside ``async with session:``, or while another
@@ -1539,9 +1610,16 @@ class ThinkingPromptSession:
                 "A query is already running: one at a time "
                 "(start a task for work beside it)"
             )
-        task: asyncio.Task[_T] = asyncio.ensure_future(coro)
+        mark = object()
+        context = contextvars.copy_context()
+        context.run(_QUERY_MARK.set, mark)
+        # Made in that context: the query's task holds the mark, and the
+        # tasks it starts inherit it.
+        task: asyncio.Task[_T] = context.run(asyncio.ensure_future, coro)
         self._foreground = task
+        self._query_mark = mark
         self._query_cancelled = False
+        self._query_cancel_owed = False
         try:
             try:
                 # wait() rather than await: the query's cancellation (Ctrl+C,
@@ -1571,7 +1649,9 @@ class ThinkingPromptSession:
             return task.result()
         finally:
             self._foreground = None
+            self._query_mark = None
             self._query_cancelled = False
+            self._query_cancel_owed = False
             if self._exit_after_query:
                 # The query called exit(): it has ended, so the app stops.
                 self._exit_after_query = False
@@ -1737,6 +1817,8 @@ class ThinkingPromptSession:
         owed = owner is not None and owner in self._cancel_owed
         if owner is not None:
             self._cancel_owed.discard(owner)
+        # The foreground query's: a cancel ended boxes in it.
+        owed = owed or (owner is self._foreground and self._query_cancel_owed)
         if cancelled:
             self._announce_cancel(bool(ended) or owed)
 
@@ -1769,17 +1851,19 @@ class ThinkingPromptSession:
         self._invalidate()
 
     @property
-    def status_text(self) -> AnyFormattedText:
-        """Get the current status bar text (a hint, while one shows)."""
-        return self._status_now()
+    def status_text(self) -> Any:
+        """The status bar text, as last set. A hint the session draws in its
+        place ("Busy — press Ctrl+C to cancel") isn't read back."""
+        return self._status_set
 
     @status_text.setter
     def status_text(self, value: Any) -> None:
         """Set the status bar text: plain or formatted text (FormattedText,
-        HTML, ANSI, a callable), or a Rich renderable."""
-        if _is_rich_renderable(value):
-            value = self._display.to_ansi(value)
-        self._status_text = value
+        HTML, ANSI, a callable), or a Rich renderable. It replaces a hint
+        the session is showing."""
+        self._status_set = value
+        self._status_text = self._display.to_ansi(value) if _is_rich_renderable(value) else value
+        self._hint = None
         self._invalidate()
 
     # =========================================================================
@@ -1875,6 +1959,8 @@ class ThinkingPromptSession:
                 another event loop than the session's.
             EOFError: If the session stops while the dialog is open (see
                 show_dialog()).
+            ValueError: If ``title`` or a button's text isn't a str, or
+                ``text`` isn't text.
 
         Example:
             if await session.yes_no_dialog("Confirm", "Delete this file?"):
@@ -1912,6 +1998,8 @@ class ThinkingPromptSession:
                 another event loop than the session's.
             EOFError: If the session stops while the dialog is open (see
                 show_dialog()).
+            ValueError: If ``title`` or ``ok_text`` isn't a str, or ``text``
+                isn't text.
 
         Example:
             await session.message_dialog("Info", "Operation completed.")
@@ -1935,7 +2023,7 @@ class ThinkingPromptSession:
         Args:
             title: Dialog title.
             text: Dialog body text.
-            options: The options, each a button.
+            options: The options (str), each a button.
             placement: "box" or "inline"; None (default) uses the session's
                 dialog_placement.
             max_height: The most rows the dialog takes; what doesn't fit
@@ -1951,7 +2039,9 @@ class ThinkingPromptSession:
                 another event loop than the session's.
             EOFError: If the session stops while the dialog is open (see
                 show_dialog()).
-            ValueError: If ``options`` is empty, or an option is listed twice.
+            ValueError: If ``options`` is empty, isn't a sequence of str,
+                or lists an option twice, or ``title`` isn't a str or
+                ``text`` isn't text.
 
         Example:
             action = await session.button_dialog(
@@ -1983,7 +2073,7 @@ class ThinkingPromptSession:
         Args:
             title: Dialog title.
             text: Dialog body text.
-            options: List of options to choose from.
+            options: The options (str) to choose from.
             default: The option selected, with the cursor on it, when the
                 dialog opens (optional; the first option otherwise).
             placement: "box" or "inline"; None (default) uses the session's
@@ -2001,7 +2091,9 @@ class ThinkingPromptSession:
                 another event loop than the session's.
             EOFError: If the session stops while the dialog is open (see
                 show_dialog()).
-            ValueError: If ``options`` is empty, or an option is listed twice.
+            ValueError: If ``options`` is empty, isn't a sequence of str,
+                or lists an option twice, ``default`` isn't one of them,
+                ``title`` isn't a str or ``text`` isn't text.
 
         Example:
             theme = await session.choice_dialog(
@@ -2031,8 +2123,8 @@ class ThinkingPromptSession:
         Args:
             title: Dialog title.
             text: Text above the options ("" for none).
-            options: The options to check.
-            default: Options checked at first (others are ignored).
+            options: The options (str) to check.
+            default: Options checked at first.
             placement: "box" or "inline"; None (default) uses the session's
                 dialog_placement.
             max_height: The most rows the dialog takes; what doesn't fit
@@ -2048,8 +2140,10 @@ class ThinkingPromptSession:
                 another event loop than the session's.
             EOFError: If the session stops while the dialog is open (see
                 show_dialog()).
-            ValueError: If ``options`` is empty, an option is listed twice,
-                or ``default`` is a str or None rather than a sequence.
+            ValueError: If ``options`` is empty, isn't a sequence of str,
+                or lists an option twice, ``default`` isn't a sequence of
+                them (a str or None), ``title`` isn't a str or ``text``
+                isn't text.
 
         Example:
             tools = await session.checklist_dialog(
@@ -2085,8 +2179,11 @@ class ThinkingPromptSession:
                 already cancelled isn't cancelled again, so a dialog in its
                 cleanup gets EOFError.
             TypeError: If ``dialog`` isn't a Dialog.
-            ValueError: If the dialog has nothing to focus, or its
-                placement isn't 'box' or 'inline'.
+            ValueError: If the dialog has nothing to focus, its placement
+                isn't 'box' or 'inline', a subclass's own title, body or
+                escapable isn't one it takes, or a value its ``values=``
+                gives a field (read again at each show) isn't one the
+                field takes.
 
         Example (built with arguments):
             from thinking_prompt import ButtonConfig, Dialog

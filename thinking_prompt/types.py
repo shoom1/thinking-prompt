@@ -10,6 +10,8 @@ from typing import (
     Literal,
 )
 
+from prompt_toolkit.key_binding import KeyBindings
+
 # =============================================================================
 # Type Aliases
 # =============================================================================
@@ -47,6 +49,27 @@ def check_count(name: str, value: object, least: int, *, optional: bool = False)
         raise ValueError(f"{name} must be an int{none}, got {value!r}")
     if value < least:
         raise ValueError(f"{name} must be at least {least}{none}, got {value!r}")
+
+
+def check_flag(name: str, value: object, *, optional: bool = False) -> None:
+    """Raise ValueError unless ``value`` is True or False, or None when
+    ``optional``: "no" would pass for true."""
+    if isinstance(value, bool) or (optional and value is None):
+        return
+    none = " (or None)" if optional else ""
+    raise ValueError(f"{name} must be True or False{none}, got {value!r}")
+
+
+def check_key(name: str, value: object) -> None:
+    """Raise ValueError unless ``value`` names a key prompt_toolkit binds
+    ("c-t", "f5", "x")."""
+    if isinstance(value, str):
+        try:
+            KeyBindings().add(value)
+            return
+        except ValueError:
+            pass
+    raise ValueError(f'{name} must be a key such as "c-t", got {value!r}')
 
 
 def check_input_while_busy(value: object) -> None:

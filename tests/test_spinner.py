@@ -13,7 +13,7 @@ BRAILLE = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
 
 class TestSpinner:
     def test_holds_frames_and_interval(self):
-        spinner = Spinner(("a", "b"), 0.25)
+        spinner = Spinner(("a", "b"), interval=0.25)
         assert spinner.frames == ("a", "b")
         assert spinner.interval == 0.25
 
@@ -37,21 +37,21 @@ class TestSpinner:
     @pytest.mark.parametrize("interval", ["0.1", None, True])
     def test_an_interval_that_is_not_a_number_raises(self, interval):
         with pytest.raises(ValueError, match="interval must be a number of seconds"):
-            Spinner(("a", "b"), interval)
+            Spinner(("a", "b"), interval=interval)
 
     @pytest.mark.parametrize("interval", [0, -0.1, math.nan, math.inf])
     def test_an_interval_that_is_not_positive_and_finite_raises(self, interval):
         with pytest.raises(ValueError, match="interval must be positive and finite"):
-            Spinner(("a", "b"), interval)
+            Spinner(("a", "b"), interval=interval)
 
 
 class TestPresets:
     def test_dots_is_the_braille_spinner(self):
-        assert Spinner(BRAILLE, 0.1) == Spinner.DOTS
+        assert Spinner(BRAILLE, interval=0.1) == Spinner.DOTS
 
     def test_line_is_ascii(self):
-        assert Spinner(("-", "\\", "|", "/"), 0.13) == Spinner.LINE
+        assert Spinner(("-", "\\", "|", "/"), interval=0.13) == Spinner.LINE
 
     def test_ellipsis(self):
-        assert Spinner((".  ", ".. ", "..."), 0.3) == Spinner.ELLIPSIS
+        assert Spinner((".  ", ".. ", "..."), interval=0.3) == Spinner.ELLIPSIS
 

@@ -503,6 +503,42 @@ class TestBoxLifecycle:
 
             await run_with(session, lambda text: None, script)
 
+    @staticmethod
+    async def _agent_with_a_started_box(session: ThinkingPromptSession) -> None:
+        """As _agent, with the outer box a start_thinking() box it leaves for
+        its task's end: no thinking() block of its ends after the cancel."""
+        outer = session.start_thinking(title="Agent")
+        outer.append("planning\n")
+        me = asyncio.current_task()
+        assert me is not None
+        try:
+            async with session.thinking(title="Tool") as tool:
+                tool.append("tool running\n")
+                asyncio.get_running_loop().call_soon(me.cancel)
+                await asyncio.sleep(3600)
+        except asyncio.CancelledError:
+            if hasattr(me, "uncancel"):  # 3.11+
+                me.uncancel()
+        outer.append("tool timed out; going on\n")
+        session.add_response("final answer")
+
+    @pytest.mark.parametrize("where", ["task", "query"])
+    async def test_a_caught_cancel_under_a_started_box_says_nothing(self, where):
+        """The box ends with its task, which wasn't cancelled: no line."""
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                if where == "task":
+                    await asyncio.create_task(self._agent_with_a_started_box(session))
+                else:
+                    await session.query(self._agent_with_a_started_box(session))
+                await asyncio.sleep(0.05)  # the task's done callbacks
+                transcript = transcript_texts(session._display)
+                assert "Operation cancelled...\n" not in transcript, transcript
+                assert not session.is_thinking
+
+            await run_with(session, lambda text: None, script)
+
     async def test_a_caught_cancel_owes_no_line_to_a_later_cancel(self):
         """The task caught the inner block's cancel and its outer block
         ended: cancelled later with no box open, it ends nothing, so
@@ -543,6 +579,168 @@ class TestBoxLifecycle:
                 transcript = transcript_texts(session._display)
                 assert "Operation cancelled...\n" not in transcript, transcript
                 assert "final answer" in transcript[-1]
+
+            await run_with(session, handler, script)
+
+    @staticmethod
+    async def _agent_with_tool_timeout(session: ThinkingPromptSession, how: str) -> None:
+        """An outer box, and a tool box under a time limit that runs out in a
+        task of its own (wait_for() runs it in one before 3.12; gather() and
+        a task always do). The query catches the timeout and answers."""
+
+        async def tool() -> None:
+            async with session.thinking(title="Tool") as box:
+                box.append("tool running\n")
+                await asyncio.sleep(3600)
+
+        async def started_tool() -> None:
+            session.start_thinking(title="Tool").append("tool running\n")
+            await asyncio.sleep(3600)
+
+        async with session.thinking(title="Agent") as outer:
+            outer.append("planning\n")
+            try:
+                if how == "wait_for":
+                    await asyncio.wait_for(tool(), 0.05)
+                elif how == "gather":
+                    await asyncio.gather(asyncio.wait_for(tool(), 0.05))
+                elif how == "task":
+                    await asyncio.wait_for(asyncio.ensure_future(tool()), 0.05)
+                else:  # a start_thinking() box, ended with its task
+                    await asyncio.wait_for(asyncio.ensure_future(started_tool()), 0.05)
+            except asyncio.TimeoutError:
+                outer.append("tool timed out; going on\n")
+        session.add_response("final answer")
+
+    @pytest.mark.parametrize("how", ["wait_for", "gather", "task", "start_thinking"])
+    async def test_a_tool_timeout_a_query_catches_says_nothing(self, how):
+        """The time limit cancelled the tool's own task, whose box said
+        "Operation cancelled...", though the query caught the timeout and
+        answered."""
+
+        async def handler(text: str) -> None:
+            await self._agent_with_tool_timeout(session, how)
+
+        with piped_session() as (session, inp):
+
+            def answered() -> bool:
+                return any("final answer" in text for text in transcript_texts(session._display))
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: answered() and waiting_for_input(session))
+                await asyncio.sleep(0.05)  # the tool task's done callbacks
+                transcript = transcript_texts(session._display)
+                assert "Operation cancelled...\n" not in transcript, transcript
+                # A start_thinking() box ends with its task: on 3.12+ that
+                # can be after the answer.
+                assert "final answer\n" in transcript
+
+            await run_with(session, handler, script)
+
+    @staticmethod
+    async def _lone_block_timeout(session: ThinkingPromptSession, how: str) -> None:
+        """A query's only box, under a time limit it catches: in its own task
+        ("self": it cancels itself, as asyncio.timeout() does, or wait_for()
+        on 3.12+), or wait_for()'s, whose task is the query's before 3.12."""
+
+        async def tool() -> None:
+            async with session.thinking(title="Tool") as box:
+                box.append("tool running\n")
+                if how == "self":
+                    me = asyncio.current_task()
+                    assert me is not None
+                    asyncio.get_running_loop().call_soon(me.cancel)
+                await asyncio.sleep(3600)
+
+        if how == "self":
+            try:
+                await tool()
+            except asyncio.CancelledError:
+                me = asyncio.current_task()
+                if me is not None and hasattr(me, "uncancel"):  # 3.11+
+                    me.uncancel()
+        else:
+            with suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(tool(), 0.05)
+        session.add_response("final answer")
+
+    @pytest.mark.parametrize("how", ["self", "wait_for"])
+    async def test_a_time_limit_a_query_catches_on_its_only_box_says_nothing(self, how):
+        """Said at once for the query's own task (wait_for() on 3.12+), and
+        not for wait_for()'s task before 3.12: one rule for both now."""
+
+        async def handler(text: str) -> None:
+            await self._lone_block_timeout(session, how)
+
+        with piped_session() as (session, inp):
+
+            def answered() -> bool:
+                return any("final answer" in text for text in transcript_texts(session._display))
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: answered() and waiting_for_input(session))
+                transcript = transcript_texts(session._display)
+                assert "Operation cancelled...\n" not in transcript, transcript
+
+            await run_with(session, handler, script)
+
+    async def test_the_app_stopping_ends_a_query_and_its_awaited_task_under_one_line(self):
+        """The query's own box said its line, then the task's box, ending
+        after it, owed another."""
+        opened = asyncio.Event()
+
+        async def tool() -> None:
+            session.start_thinking(title="Tool").append("tool running\n")
+            opened.set()
+            await asyncio.sleep(3600)
+
+        async def handler(text: str) -> None:
+            async with session.thinking(title="Agent") as outer:
+                outer.append("planning\n")
+                await asyncio.create_task(tool())
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await asyncio.wait_for(opened.wait(), 2)
+                session.exit()
+                await asyncio.wait_for(run, 2)
+                await asyncio.sleep(0.05)  # the task's done callbacks
+                transcript = transcript_texts(session._display)
+                assert transcript.count("Operation cancelled...\n") == 1, transcript
+                assert transcript[-1] == "Operation cancelled...\n"
+
+            await run_with(session, handler, script)
+
+    async def test_the_app_stopping_ends_a_querys_sub_task_boxes_under_one_line(self):
+        """Each sub-task box the stop ended said a line of its own."""
+        opened = asyncio.Event()
+
+        async def tool(name: str) -> None:
+            async with session.thinking(title=name) as box:
+                box.append(f"{name} running\n")
+                opened.set()
+                await asyncio.sleep(3600)
+
+        async def handler(text: str) -> None:
+            async with session.thinking(title="Agent") as outer:
+                outer.append("planning\n")
+                await asyncio.gather(tool("one"), tool("two"))
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await asyncio.wait_for(opened.wait(), 2)
+                await asyncio.sleep(0.05)  # both tools running
+                session.exit()
+                await asyncio.wait_for(run, 2)
+                transcript = transcript_texts(session._display)
+                assert transcript.count("Operation cancelled...\n") == 1, transcript
+                assert transcript[-1] == "Operation cancelled...\n"
 
             await run_with(session, handler, script)
 
@@ -1173,11 +1371,11 @@ class TestBusyHint:
                 inp.send_text("slow" + ENTER)
                 await wait_until(lambda: session._foreground is not None)
                 inp.send_text("x" + ENTER)
-                await wait_until(lambda: session.status_text == session._BUSY_STATUS)
+                await wait_until(lambda: session._status_now() == session._BUSY_STATUS)
 
                 release.set()
                 await wait_until(lambda: waiting_for_input(session))
-                assert session.status_text == "READY"
+                assert session._status_now() == "READY"
 
             await run_with(session, handler, script)
 
@@ -1199,7 +1397,7 @@ class TestBusyHint:
 
                 release.set()
                 await wait_until(lambda: waiting_for_input(session))
-                assert session.status_text == "READY"
+                assert session._status_now() == "READY"
                 await wait_until(lambda: on_screen(session, "READY"))
 
             await run_with(session, handler, script)
@@ -1217,11 +1415,11 @@ class TestBusyHint:
                 inp.send_text("slow" + ENTER)
                 await wait_until(lambda: session._foreground is not None)
                 inp.send_text("x" + ENTER)
-                await wait_until(lambda: session.status_text == session._BUSY_STATUS)
+                await wait_until(lambda: session._status_now() == session._BUSY_STATUS)
 
                 release.set()
                 await wait_until(lambda: waiting_for_input(session))
-                assert session.status_text == "DONE"
+                assert session._status_now() == "DONE"
 
             await run_with(session, handler, script)
 
@@ -1258,7 +1456,7 @@ class TestBackgroundHint:
                 gate.set()
                 await asyncio.wait_for(task, 2)
                 await wait_until(lambda: on_screen(session, "READY"))
-                assert session.status_text == "READY"
+                assert session._status_now() == "READY"
 
             await run_with(session, lambda text: None, script)
 
@@ -1274,7 +1472,7 @@ class TestBackgroundHint:
                 inp.send_text(CTRL_C + "x")  # "x" lands once the second Ctrl+C is handled
                 await wait_until(lambda: session._default_buffer.text == "x")
                 assert not run.done() and session.is_thinking
-                assert session.status_text == BACKGROUND_HINT
+                assert session._status_now() == BACKGROUND_HINT
                 assert "Operation cancelled...\n" not in transcript_texts(session._display)
                 gate.set()
                 await asyncio.wait_for(task, 2)
@@ -1295,10 +1493,10 @@ class TestBackgroundHint:
                 task = asyncio.create_task(_indexing(session, opened, gate))
                 await asyncio.wait_for(opened.wait(), 2)
                 inp.send_text(CTRL_C)
-                await wait_until(lambda: session.status_text == BACKGROUND_HINT)
+                await wait_until(lambda: session._status_now() == BACKGROUND_HINT)
                 inp.send_text("next" + ENTER)
                 await wait_until(lambda: delivered == ["next"])
-                assert session.status_text == "READY"  # while the handler still runs
+                assert session._status_now() == "READY"  # while the handler still runs
                 assert session.is_thinking  # the job's box is still open
                 release.set()
                 gate.set()
@@ -1314,12 +1512,12 @@ class TestBackgroundHint:
                 task = asyncio.create_task(_indexing(session, opened, gate))
                 await asyncio.wait_for(opened.wait(), 2)
                 inp.send_text(CTRL_C)
-                await wait_until(lambda: session.status_text == BACKGROUND_HINT)
+                await wait_until(lambda: session._status_now() == BACKGROUND_HINT)
                 session.status_text = "INDEXING 50%"
                 gate.set()
                 await asyncio.wait_for(task, 2)
                 await wait_until(lambda: on_screen(session, "INDEXING 50%"))
-                assert session.status_text == "INDEXING 50%"
+                assert session._status_now() == "INDEXING 50%"
 
             await run_with(session, lambda text: None, script)
 
@@ -4167,34 +4365,6 @@ class TestDialogFields:
                 inp.send_text(TAB + " ")             # into the field: check it
                 inp.send_text(TAB + ENTER)           # past the last field: OK
                 await wait_until(lambda: results == [("hi", {"on": True})])
-
-            await run_with(session, handler, script)
-
-    @pytest.mark.parametrize("key", [DOWN, TAB], ids=["down", "tab"])
-    async def test_a_list_with_no_options_is_skipped(self, key):
-        dialog = Dialog(
-            "T",
-            fields=[
-                SelectField("s", "Size", options=["a", "b"]),
-                RadioField("r", "Mode", options=[]),
-                CheckboxField("c", "Cache"),
-            ],
-            placement="box",
-        )
-        dialog.buttons = [ButtonConfig("OK", handler=lambda: dialog.set_result(dialog.values))]
-        results: list[Any] = []
-
-        async def handler(text: str) -> None:
-            results.append(await session.show_dialog(dialog))
-
-        with piped_session() as (session, inp):
-
-            async def script(run: asyncio.Task[None]) -> None:
-                inp.send_text("go" + ENTER)
-                await wait_until(lambda: dialog_rendered(session))
-                inp.send_text(key + " ")             # past the empty list: check Cache
-                inp.send_text(TAB + ENTER)           # OK
-                await wait_until(lambda: results == [{"s": None, "r": None, "c": True}])
 
             await run_with(session, handler, script)
 

@@ -274,7 +274,7 @@ class TestCtrlCKeyBinding:
 
         assert not session._pending_input.done()
         event.app.exit.assert_not_called()
-        assert session.status_text == session._IDLE_STATUS
+        assert session._status_now() == session._IDLE_STATUS
 
     async def test_ctrl_c_at_an_idle_run_async_prompt_keeps_the_session(self):
         """Input typed after it is still delivered."""
@@ -289,7 +289,7 @@ class TestCtrlCKeyBinding:
 
             async def script(run: asyncio.Task[None]) -> None:
                 inp.send_text(CTRL_C)
-                await wait_until(lambda: session.status_text == session._IDLE_STATUS)
+                await wait_until(lambda: session._status_now() == session._IDLE_STATUS)
                 inp.send_text("hello" + ENTER)
                 await wait_until(lambda: delivered == ["hello"])
                 assert not run.done()

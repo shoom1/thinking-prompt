@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import KW_ONLY, dataclass
 from typing import ClassVar
 
 
@@ -25,7 +25,7 @@ class Spinner:
     Args:
         frames: The frames, in order (any sequence of strings; kept as a
             tuple). One frame is a static mark.
-        interval: Seconds each frame is shown.
+        interval: Seconds each frame is shown (passed by name).
 
     Raises:
         ValueError: If there are no frames, or ``interval`` isn't a
@@ -33,6 +33,7 @@ class Spinner:
     """
 
     frames: Sequence[str]
+    _: KW_ONLY
     interval: float = 0.1
 
     DOTS: ClassVar[Spinner]
@@ -52,6 +53,6 @@ class Spinner:
             raise ValueError(f"a Spinner's interval must be positive and finite, got {self.interval!r}")
 
 
-Spinner.DOTS = Spinner(("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"), 0.1)
-Spinner.LINE = Spinner(("-", "\\", "|", "/"), 0.13)
-Spinner.ELLIPSIS = Spinner((".  ", ".. ", "..."), 0.3)
+Spinner.DOTS = Spinner(("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"), interval=0.1)
+Spinner.LINE = Spinner(("-", "\\", "|", "/"), interval=0.13)
+Spinner.ELLIPSIS = Spinner((".  ", ".. ", "..."), interval=0.3)

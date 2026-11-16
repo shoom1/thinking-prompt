@@ -260,3 +260,36 @@ def test_whether_input_is_queued_is_read_only():
 
 def test_the_welcome_stays_a_customization_point():
     assert AppInfo(name="app", welcome_message="hi").get_welcome_content() == "hi"
+
+
+# The fields each exported dataclass takes by position; the rest are passed
+# by name, so a field added later can't shift a positional argument.
+POSITIONAL_FIELDS = {
+    "Field": ["key", "label"],
+    "TextField": ["key", "label"],
+    "CheckboxField": ["key", "label"],
+    "SelectField": ["key", "label"],
+    "DropdownField": ["key", "label"],
+    "ChecklistField": ["key", "label"],
+    "RadioField": ["key", "label"],
+    "ChoiceField": ["key", "label"],
+    "ButtonConfig": ["text"],
+    "Spinner": ["frames"],
+    "ThinkingPromptStyles": [],
+    "AppInfo": [],
+}
+
+
+def test_each_exported_dataclass_says_what_it_takes_by_position():
+    exported = {
+        name for name in thinking_prompt.__all__
+        if dataclasses.is_dataclass(getattr(thinking_prompt, name))
+    }
+    assert exported == set(POSITIONAL_FIELDS)
+
+
+@pytest.mark.parametrize("name", sorted(POSITIONAL_FIELDS))
+def test_a_dataclass_takes_its_other_fields_by_name(name: str):
+    """TextField("name", "Name", "bob") made "bob" the description."""
+    params = inspect.signature(getattr(thinking_prompt, name)).parameters.values()
+    assert [p.name for p in params if p.kind is not p.KEYWORD_ONLY] == POSITIONAL_FIELDS[name]

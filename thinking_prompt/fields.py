@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterable, Sequence
-from dataclasses import dataclass
+from dataclasses import KW_ONLY, dataclass
 from typing import Any, Generic, Literal, TypeVar
 
 from prompt_toolkit.buffer import Buffer
@@ -38,7 +38,7 @@ from prompt_toolkit.widgets import Frame
 
 from ._text import cut
 from .rows import MARKER, NO_MARKER, OptionGroup, RowControl, RowNavigator, has_focus
-from .types import Placement, check_count
+from .types import Placement, check_count, check_flag
 
 
 @dataclass(frozen=True)
@@ -54,24 +54,34 @@ class Field(ABC):
             with no label and no description shows just its options.
         description: Shown under the label (optional).
         default: The field's starting value.
+
+    ``key`` and ``label`` can be passed by position; the rest by name.
     """
     key: str
     label: str
+    _: KW_ONLY
     description: str = ""
     default: Any = None
 
+    def __post_init__(self) -> None:
+        for name in ("key", "label", "description"):
+            value = getattr(self, name)
+            if not isinstance(value, str):
+                raise ValueError(f"{_owner(self)}: {name} must be a str, got {value!r}")
 
-@dataclass(frozen=True)
+
+@dataclass(frozen=True, kw_only=True)
 class SelectField(Field):
     """One of ``options``, stepped through in place with ←/→ (``◀ medium ▶``)."""
     options: Sequence[str] = ()
     default: str | None = None
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "options", _own_options(self, self.options))
+        super().__post_init__()
+        _own_options(self, self.options)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class DropdownField(Field):
     """One of ``options``: Enter (or Space) opens a menu of them under the
     row, in a box and inline alike. ``height``: the menu's rows; ``width``:
@@ -83,19 +93,24 @@ class DropdownField(Field):
     max_width: int | None = None
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "options", _own_options(self, self.options))
+        super().__post_init__()
+        _own_options(self, self.options)
         _check_size(self, "height", self.height)
         _check_size(self, "width", self.width, optional=True)
         _check_size(self, "max_width", self.max_width, optional=True)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class CheckboxField(Field):
     """True or false, toggled with Space, Enter or ←/→."""
     default: bool = False
 
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        check_flag(f"{_owner(self)}: default", self.default)
 
-@dataclass(frozen=True)
+
+@dataclass(frozen=True, kw_only=True)
 class TextField(Field):
     """Free text, edited in place with Enter; ``password`` shows it as dots.
     ``width``: the edit field's columns."""
@@ -104,72 +119,111 @@ class TextField(Field):
     width: int = 15
 
     def __post_init__(self) -> None:
+        super().__post_init__()
+        check_flag(f"{_owner(self)}: password", self.password)
         _check_size(self, "width", self.width)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class ChecklistField(Field):
     """Any number of options, one per line; the value is the checked ones, in option order."""
     options: Sequence[str] = ()
     default: Sequence[str] = ()
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "options", _own_options(self, self.options))
-        if self.default is None or isinstance(self.default, str):
-            raise ValueError(
-                f"ChecklistField {self.key!r}: default must be a sequence of options "
-                f"(() for none), got {self.default!r}"
-            )
-        object.__setattr__(self, "default", tuple(self.default))
+        super().__post_init__()
+        options = _own_options(self, self.options, single=False)
+        object.__setattr__(self, "default", _checked_defaults(_owner(self), self.default, options))
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class RadioField(Field):
     """One of several options, one per line; with no default nothing is picked."""
     options: Sequence[str] = ()
     default: str | None = None
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "options", _own_options(self, self.options))
+        super().__post_init__()
+        _own_options(self, self.options)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class ChoiceField(Field):
-    """One of ``options``, one per line, like prompt_toolkit's choice(): a
-    radio list with no marks, the pick in bold. It starts on ``default``
-    (the first option if that isn't one). ↑↓ move the cursor and Space or
-    Enter picks the option under it. As a dialog's only field, with nothing
-    in the body taking focus, Enter then also presses the dialog's first
-    button (with no buttons, the dialog closes with the pick)."""
+    """One of ``options``, one per line: a radio list that looks like
+    prompt_toolkit's choice(), with no marks. The pick is in the accent
+    color (bold); the cursor is the ``❯`` alone, and unlike choice()'s it
+    doesn't pick. It starts on ``default`` (the first option without one).
+    ↑↓ move the cursor and Space or Enter picks the option under it. As a
+    dialog's only field, with nothing in the body taking focus, Enter then
+    also presses the dialog's first button (with no buttons, the dialog
+    closes with the pick)."""
     options: Sequence[str] = ()
     default: str | None = None
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "options", _own_options(self, self.options))
-        if not self.options:
-            raise ValueError(f"ChoiceField {self.key!r} needs at least one option")
+        super().__post_init__()
+        _own_options(self, self.options)
 
 
-def _own_options(item: Field, options: Iterable[str]) -> tuple[str, ...]:
-    """``options`` as a tuple of the field's own, each option once: two rows
-    of one option would be checked together, and its value returned twice."""
-    kept = tuple(options)
-    _check_once(f"{type(item).__name__} {item.key!r}", kept)
+def _owner(item: Field) -> str:
+    """How an error names ``item``: its class and key."""
+    return f"{type(item).__name__} {item.key!r}"
+
+
+def _own_options(item: Field, options: object, single: bool = True) -> tuple[str, ...]:
+    """Check ``item``'s ``options`` and keep them as a tuple of its own; with
+    ``single``, its default too, None or one of them (a checklist checks
+    its own). Raise ValueError naming the field."""
+    kept = _checked_options(_owner(item), options)
+    object.__setattr__(item, "options", kept)
+    if single:
+        _check_default(_owner(item), item.default, kept)
     return kept
 
 
-def _check_once(owner: str, options: Iterable[str]) -> None:
-    """Raise ValueError if an option is listed twice, naming ``owner``."""
+def _checked_options(owner: str, options: object) -> tuple[str, ...]:
+    """``options`` as a tuple: a sequence (any iterable but a str) of at
+    least one str, each once (two rows of one option would be checked
+    together, and its value returned twice). Raise ValueError naming
+    ``owner``."""
+    if isinstance(options, str) or not isinstance(options, Iterable):
+        raise ValueError(f"{owner}: options must be a sequence of str, got {options!r}")
+    kept = tuple(options)
+    if not kept:
+        raise ValueError(f"{owner} needs at least one option")
     seen: set[str] = set()
-    for option in options:
+    for option in kept:
+        if not isinstance(option, str):
+            raise ValueError(f"{owner}: options must be str, got {option!r}")
         if option in seen:
             raise ValueError(f"{owner}: option {option!r} is listed twice")
         seen.add(option)
+    return kept
+
+
+def _check_default(owner: str, default: object, options: tuple[str, ...]) -> None:
+    """A single choice's default is None or one of ``options``."""
+    if default is not None and default not in options:
+        raise ValueError(f"{owner}: default {default!r} isn't one of its options")
+
+
+def _checked_defaults(owner: str, default: object, options: tuple[str, ...]) -> tuple[str, ...]:
+    """A checklist's default as a tuple: a sequence of ``options`` (a str
+    would be taken letter by letter)."""
+    if isinstance(default, str) or not isinstance(default, Iterable):
+        raise ValueError(
+            f"{owner}: default must be a sequence of options (() for none), got {default!r}"
+        )
+    kept = tuple(default)
+    for option in kept:
+        if option not in options:
+            raise ValueError(f"{owner}: default {option!r} isn't one of its options")
+    return kept
 
 
 def _check_size(item: Field, name: str, value: int | None, optional: bool = False) -> None:
     """A field's size (rows or columns) is an int of at least 1; None too if ``optional``."""
-    check_count(f"{type(item).__name__} {item.key!r}: {name}", value, 1, optional=optional)
+    check_count(f"{_owner(item)}: {name}", value, 1, optional=optional)
 
 
 T = TypeVar("T", bound=Field)
@@ -321,12 +375,9 @@ def _layout_row(
 def _cycled(options: Sequence[str], value: Any, delta: int) -> Any:
     """The option ``delta`` steps from ``value``, clamped to the ends.
 
-    With no current selection (no default, or a default that isn't an
-    option) any step selects the first option: moving from index 0 would
-    skip over it.
+    With no current selection (no default) any step selects the first
+    option: moving from index 0 would skip over it.
     """
-    if not options:
-        return value
     try:
         idx = options.index(value)
     except ValueError:
@@ -1143,9 +1194,8 @@ class _Form:
 
     def start(self) -> Container | None:
         """Where the cursor starts in the fields: the first field's start (a
-        radio list's picked option); None with no stops."""
-        entered = self._enterable()
-        return entered[0].start_stop() if entered else None
+        radio list's picked option); None without fields."""
+        return self.controls[0].start_stop() if self.controls else None
 
     def set_alone(self, nothing_else: bool, accept: Callable[[], None]) -> None:
         """A ChoiceField that's the only field, with ``nothing_else`` in the
@@ -1180,10 +1230,6 @@ class _Form:
         """The dropdown menus, to float over the whole screen, not the form,
         so each is sized by the room the terminal has around its row."""
         return [c.get_float() for c in self.controls if isinstance(c, DropdownFieldControl)]
-
-    def _enterable(self) -> list[FieldControl]:
-        """The fields the cursor can enter (a list with no options can't)."""
-        return [control for control in self.controls if control.get_stops()]
 
     def _value_column(self, align_values: AlignValues) -> _ValueColumn | None:
         """Where values start (align_values); None: the row's right edge."""
@@ -1230,7 +1276,7 @@ class _Form:
 
         def groups() -> list[tuple[list[Container], Container]]:
             found: list[tuple[list[Container], Container]] = [([w], w) for w in before()]
-            found.extend((c.get_stops(), c.start_stop()) for c in self._enterable())
+            found.extend((c.get_stops(), c.start_stop()) for c in self.controls)
             return found
 
         def current(layout: Layout, found: list[tuple[list[Container], Container]]) -> int | None:
@@ -1285,7 +1331,7 @@ class _Form:
     def _enter_at_start(self, layout: Layout) -> None:
         """With the cursor just moved into a field, move it to the field's
         start (a radio list's picked option)."""
-        for control in self._enterable():
+        for control in self.controls:
             if any(layout.has_focus(stop) for stop in control.get_stops()):
                 layout.focus(control.start_stop())
                 return

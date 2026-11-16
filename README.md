@@ -163,8 +163,9 @@ Every argument after `message` is keyword-only. Keys and the thinking
 header are under [Session Options](#session-options). Options are checked
 when they're passed (the session's here, a box's in `start_thinking()`, a
 field's or a dialog's when it's made): one of the wrong kind (a count
-that isn't an int, a `spinner` that isn't a `Spinner`), out of range, or
-not one of its choices raises `ValueError`.
+that isn't an int, a flag that isn't `True` or `False`, a `spinner` that
+isn't a `Spinner`), out of range, or not one of its choices raises
+`ValueError`.
 
 ### Thinking API
 
@@ -206,7 +207,12 @@ normal finish:
 
 - **Cancelled** (Ctrl+C, or the task that opened it is cancelled): the
   content, then one `Operation cancelled...` line after all the boxes that
-  the cancel ended.
+  the cancel ended. A box of the running query (a handler, what `query()`
+  runs, and the tasks they start) gets its line when the query ends, and
+  only if the query ends cancelled (Ctrl+C, the app stopping): a cancel
+  the query catches, a tool's time limit (`asyncio.timeout()`,
+  `wait_for()`) say, or another task cancelling a job the query started,
+  says nothing.
 - **The handler raises**: the content, then the `[ERROR] Handler error: ...`
   line. A query's error is raised by `query()`, after the content.
 - **Left open** by a task that returns (a handler, a query, a background
@@ -253,12 +259,19 @@ async with session:                        # the app runs until the block ends
     while True:
         try:
             text = await session.prompt_async()
-        except EOFError:                       # Ctrl+D at an empty prompt
+        except EOFError:                       # Ctrl+D, exit(), or stdin closed
             break
         if text.strip() in ("/exit", "/quit"):
             break
         await session.query(respond(text))     # Ctrl+C cancels this, not the loop
 ```
+
+`prompt_async()` raises `EOFError` on Ctrl+D at an idle prompt, after
+`exit()`, and when stdin closes (stdin from `/dev/null`, say); the block
+then ends normally, as `run_async()` does. Stdin closing stops the app at
+once, as `exit()` from outside the query does: a query still running is
+cancelled, and queued lines are dropped. The session reads a terminal, not
+piped input.
 
 `query()` runs one input's work as the query Ctrl+C cancels. Boxes it
 leaves open end with it. It returns the coroutine's result, or `None`
@@ -339,7 +352,8 @@ idle prompt costs no CPU:
 ### Threads
 
 The session runs on its asyncio event loop, and its calls belong there,
-with one exception: a box's writes work from any thread. A worker thread
+with two exceptions: a box's writes work from any thread, and so does
+`session.exit()` (it stops the app on the loop). A worker thread
 can stream into a box the loop opened (`append`, `set_line`, `clear`,
 `append_rich`, `set_line_rich`, `set_title`) and read it (`text`,
 `len(box)`, `is_finished`). Opening and finishing boxes, the `add_*`
@@ -514,6 +528,10 @@ session.add_warning("Rate limit approaching")
 session.add_error("Connection failed")
 session.add_system("Connecting to server...")
 ```
+
+`session.status_text` reads back what you set, a Rich renderable too. While
+the session shows a hint in the status bar (`Busy — press Ctrl+C to
+cancel`), it still reads your text; setting a status replaces the hint.
 
 A link, in markdown or Rich's `[link=…]` markup, shows its text and then
 its URL, `the docs (https://…)`, whole on its line for the terminal to open
@@ -788,15 +806,21 @@ be unique.
 | `CheckboxField` | `true` / `false` | Space, Enter or ←→ to toggle |
 | `ChecklistField` | One `[x]` option per line; value: the checked ones, in option order | ↑↓ between options, Space/Enter to toggle |
 | `RadioField` | One `(•)` option per line; value: the picked one | ↑↓ between options, Space/Enter to pick |
-| `ChoiceField` | A radio list drawn like prompt_toolkit's `choice()`: no marks, the pick in bold; value: the picked one | ↑↓ between options, Space/Enter to pick. As a dialog's only field (with nothing in the body taking focus), Enter also presses the first button, or with no buttons closes the dialog with the pick |
+| `ChoiceField` | A radio list that looks like prompt_toolkit's `choice()`, with no marks: the pick in the accent color (bold), the cursor a `❯` that, unlike `choice()`'s, doesn't pick; value: the picked one | ↑↓ between options, Space/Enter to pick. As a dialog's only field (with nothing in the body taking focus), Enter also presses the first button, or with no buttons closes the dialog with the pick |
 
 Every field takes `key`, `label`, `description` and `default`. A check,
 radio or choice list with no label and no description shows just its options.
 A field keeps its `options` (and a checklist its `default`, a sequence of
 options: `()` for none) as a tuple of its own, so changing the list you
-passed doesn't change the field. An option listed twice raises
-`ValueError`, in a field and in `button_dialog()`, `choice_dialog()` and
-`checklist_dialog()`.
+passed doesn't change the field. Options are strs, at least one, each
+listed once, and a default is one of them (or `None`): anything else raises
+`ValueError` when the field is made, and so do a `key`, `label` or
+`description` that isn't a str. `button_dialog()`, `choice_dialog()` and
+`checklist_dialog()` check their options and default the same way, as
+`Dialog` its `title` (a str) and `body` (text or a container), and
+`ButtonConfig` its `text` and `style` (strs). A `Dialog` subclass's own
+`title` and `body` (class attributes, or properties) are checked when
+it's shown.
 
 **Keys:** in a box, ↑↓ move a row at a time and Tab / Shift+Tab a field at a
 time (Tab on to the buttons after the last field, Shift+Tab from the buttons
@@ -961,9 +985,9 @@ The API is what `thinking_prompt` exports (its `__all__`), with the
 parameters and attributes their docstrings document (what `help()` shows),
 the fields of `ThinkingPromptStyles` among them. A dataclass's fields
 (`ThinkingPromptStyles`, `ButtonConfig`, the form fields, `AppInfo`,
-`Spinner`) are covered by name, and new ones can come between them: pass
-them by name, past the ones this README passes by position (a form field's
-`key` and `label`, a button's `text`, a spinner's `frames`). It doesn't
+`Spinner`) are covered by name, and new ones can come between them: they're
+passed by name, past a form field's `key` and `label`, a button's `text`
+and a spinner's `frames`. It doesn't
 cover private names (one leading `_`), the modules inside the package
 (import from `thinking_prompt` itself), the prompt_toolkit style classes
 the style fields are applied to (`to_style_dict()` lists them), or what's
@@ -983,6 +1007,9 @@ removed:
 | `box.finish(echo_to_console=...)`, `session.thinking(echo_to_console=...)` | `echo=...` |
 | `add_to_history=` on `finish()` or `thinking()` | Drop it: `echo` alone decides (printed and kept for repaints, or neither) |
 | A flag passed by position: `box.finish(False)` (0.4's `add_to_history`), `set_theme(theme, True)` | By name: `box.finish(echo=...)`, `set_theme(theme, repaint=True)` |
+| A flag given as `0`/`1` or a str (`thinking_echo="no"` turned echo on) | `True` or `False`: anything else raises `ValueError` |
+| A dialog `title` that isn't a str (`HTML(...)` showed in a box, not inline), `title=None`, `ButtonConfig(style=None)` | A str (`""` for none): anything else raises `ValueError` |
+| A dataclass field passed by position, past a form field's `key` and `label`, a button's `text` and a spinner's `frames`: `TextField("name", "Name", "Shown to others")`, `ButtonConfig("OK", "ok")`, `Spinner(frames, 0.2)`, `AppInfo("MyApp")` | By name: `description=...`, `result=...`, `interval=...`, `name=...`; every field of `AppInfo` and `ThinkingPromptStyles` |
 | `box.get_content()` | `box.text` |
 | `session.set_status(x)` | `session.status_text = x` (a Rich renderable too) |
 | `session.add_message("system", x)` | `session.add_system(x)` |
@@ -994,6 +1021,7 @@ removed:
 | `TextField(edit_width=N)` | `width=N` |
 | `Dialog(width=0)`, `Dialog(width=-1)` (or a subclass's `width`) | `width=None` (fit the content), `width="full"` |
 | A field's `options`: the list you passed | A tuple of the field's own (`list(field.options)` for a list) |
+| Options that aren't strs (`SelectField(..., options=[1, 2, 3])` returned the int), no options, or a default that isn't an option (`values=` too) | Strs (`[str(n) for n in ...]`, and `int()` the value back), at least one, and a default among them or `None`: the rest raise `ValueError` |
 | `session.layout` | `session.app.layout` |
 | `session.default_buffer` | `session.app.layout.get_buffer_by_name(DEFAULT_BUFFER)` (prompt_toolkit's, `from prompt_toolkit.enums import DEFAULT_BUFFER`) |
 | `StreamingContent`, `ThinkingHeader` | Drop them: write with a box's methods; the header comes from `thinking_title`, `spinner` and `spinner_position` |
