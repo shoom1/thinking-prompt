@@ -296,12 +296,14 @@ class ThinkingPromptSession:
 
         self._thinking_max_lines = thinking_max_lines
         self._enable_status_bar = enable_status_bar
-        self._status_text = status_text
-        # A status hint ("Busy", "Background work") replaces the status
-        # until it's cleared, and the status it replaced comes back (see
+        # The status as the app set it (status_text reads it back), and as
+        # it's drawn: a Rich renderable is drawn as ANSI.
+        self._status_set: Any = status_text
+        self._status_text: AnyFormattedText = status_text
+        # A status hint ("Busy", "Background work") is drawn in place of the
+        # status until it's cleared, or until the app sets a status (see
         # _show_hint / _clear_hint / _status_now).
         self._hint: str | None = None
-        self._status_under_hint: AnyFormattedText = None
         self._echo_input = echo_input
         self._completer = completer
         self._complete_while_typing = complete_while_typing
@@ -482,28 +484,24 @@ class ThinkingPromptSession:
             self._show_hint(self._BUSY_NO_QUERY_STATUS)
 
     def _show_hint(self, hint: str) -> None:
-        """Show a status hint, keeping the status it replaces."""
-        if self._hint is None or self._status_text != self._hint:
-            self._status_under_hint = self._status_text
+        """Draw a status hint in place of the status."""
         self._hint = hint
-        self.status_text = hint
+        self._invalidate()
 
     def _clear_hint(self) -> None:
-        """Restore the status the hint replaced — unless something set a new
-        status meanwhile (e.g. the handler reporting its result)."""
+        """Draw the status again (a status the app set meanwhile, such as
+        the handler reporting its result, has cleared the hint already)."""
         if self._hint is None:
             return
-        if self._status_text == self._hint:
-            self.status_text = self._status_under_hint
         self._hint = None
-        self._status_under_hint = None
+        self._invalidate()
 
     def _status_now(self) -> AnyFormattedText:
-        """The status to show. The background hint lasts only while a box
-        is open: once the last one ends, the status it replaced is back."""
+        """The status to draw: the hint, while one shows. The background
+        hint lasts only while a box is open."""
         if self._hint == self._BACKGROUND_STATUS and not self._manager.has_active_boxes:
-            self._clear_hint()
-        return self._status_text
+            self._hint = None
+        return self._status_text if self._hint is None else self._hint
 
     def _create_default_buffer(self) -> Buffer:
         """Create the main input buffer."""
@@ -1769,17 +1767,19 @@ class ThinkingPromptSession:
         self._invalidate()
 
     @property
-    def status_text(self) -> AnyFormattedText:
-        """Get the current status bar text (a hint, while one shows)."""
-        return self._status_now()
+    def status_text(self) -> Any:
+        """The status bar text, as last set. A hint the session draws in its
+        place ("Busy — press Ctrl+C to cancel") isn't read back."""
+        return self._status_set
 
     @status_text.setter
     def status_text(self, value: Any) -> None:
         """Set the status bar text: plain or formatted text (FormattedText,
-        HTML, ANSI, a callable), or a Rich renderable."""
-        if _is_rich_renderable(value):
-            value = self._display.to_ansi(value)
-        self._status_text = value
+        HTML, ANSI, a callable), or a Rich renderable. It replaces a hint
+        the session is showing."""
+        self._status_set = value
+        self._status_text = self._display.to_ansi(value) if _is_rich_renderable(value) else value
+        self._hint = None
         self._invalidate()
 
     # =========================================================================

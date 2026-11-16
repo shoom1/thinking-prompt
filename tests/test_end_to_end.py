@@ -1173,11 +1173,11 @@ class TestBusyHint:
                 inp.send_text("slow" + ENTER)
                 await wait_until(lambda: session._foreground is not None)
                 inp.send_text("x" + ENTER)
-                await wait_until(lambda: session.status_text == session._BUSY_STATUS)
+                await wait_until(lambda: session._status_now() == session._BUSY_STATUS)
 
                 release.set()
                 await wait_until(lambda: waiting_for_input(session))
-                assert session.status_text == "READY"
+                assert session._status_now() == "READY"
 
             await run_with(session, handler, script)
 
@@ -1199,7 +1199,7 @@ class TestBusyHint:
 
                 release.set()
                 await wait_until(lambda: waiting_for_input(session))
-                assert session.status_text == "READY"
+                assert session._status_now() == "READY"
                 await wait_until(lambda: on_screen(session, "READY"))
 
             await run_with(session, handler, script)
@@ -1217,11 +1217,11 @@ class TestBusyHint:
                 inp.send_text("slow" + ENTER)
                 await wait_until(lambda: session._foreground is not None)
                 inp.send_text("x" + ENTER)
-                await wait_until(lambda: session.status_text == session._BUSY_STATUS)
+                await wait_until(lambda: session._status_now() == session._BUSY_STATUS)
 
                 release.set()
                 await wait_until(lambda: waiting_for_input(session))
-                assert session.status_text == "DONE"
+                assert session._status_now() == "DONE"
 
             await run_with(session, handler, script)
 
@@ -1258,7 +1258,7 @@ class TestBackgroundHint:
                 gate.set()
                 await asyncio.wait_for(task, 2)
                 await wait_until(lambda: on_screen(session, "READY"))
-                assert session.status_text == "READY"
+                assert session._status_now() == "READY"
 
             await run_with(session, lambda text: None, script)
 
@@ -1274,7 +1274,7 @@ class TestBackgroundHint:
                 inp.send_text(CTRL_C + "x")  # "x" lands once the second Ctrl+C is handled
                 await wait_until(lambda: session._default_buffer.text == "x")
                 assert not run.done() and session.is_thinking
-                assert session.status_text == BACKGROUND_HINT
+                assert session._status_now() == BACKGROUND_HINT
                 assert "Operation cancelled...\n" not in transcript_texts(session._display)
                 gate.set()
                 await asyncio.wait_for(task, 2)
@@ -1295,10 +1295,10 @@ class TestBackgroundHint:
                 task = asyncio.create_task(_indexing(session, opened, gate))
                 await asyncio.wait_for(opened.wait(), 2)
                 inp.send_text(CTRL_C)
-                await wait_until(lambda: session.status_text == BACKGROUND_HINT)
+                await wait_until(lambda: session._status_now() == BACKGROUND_HINT)
                 inp.send_text("next" + ENTER)
                 await wait_until(lambda: delivered == ["next"])
-                assert session.status_text == "READY"  # while the handler still runs
+                assert session._status_now() == "READY"  # while the handler still runs
                 assert session.is_thinking  # the job's box is still open
                 release.set()
                 gate.set()
@@ -1314,12 +1314,12 @@ class TestBackgroundHint:
                 task = asyncio.create_task(_indexing(session, opened, gate))
                 await asyncio.wait_for(opened.wait(), 2)
                 inp.send_text(CTRL_C)
-                await wait_until(lambda: session.status_text == BACKGROUND_HINT)
+                await wait_until(lambda: session._status_now() == BACKGROUND_HINT)
                 session.status_text = "INDEXING 50%"
                 gate.set()
                 await asyncio.wait_for(task, 2)
                 await wait_until(lambda: on_screen(session, "INDEXING 50%"))
-                assert session.status_text == "INDEXING 50%"
+                assert session._status_now() == "INDEXING 50%"
 
             await run_with(session, lambda text: None, script)
 

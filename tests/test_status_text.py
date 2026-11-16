@@ -125,9 +125,29 @@ class TestSessionStatusText:
         assert session.status_text is ft
 
     def test_status_text_setter_rich_renderable(self, session):
-        """A Rich renderable is converted to ANSI."""
+        """A Rich renderable is shown as ANSI, and read back as itself."""
         pytest.importorskip("rich")
         from rich.text import Text
-        session.status_text = Text("Rich status", style="bold")
-        assert isinstance(session.status_text, ANSI)
-        assert "Rich status" in session.status_text.value
+        text = Text("Rich status", style="bold")
+        session.status_text = text
+        assert session.status_text is text
+        shown = session._status_now()
+        assert isinstance(shown, ANSI)
+        assert "Rich status" in shown.value
+
+    def test_a_hint_is_shown_but_not_read(self, session):
+        """While the session's hint shows, status_text is still the app's."""
+        session._show_hint(session._BUSY_STATUS)
+        assert session._status_now() == session._BUSY_STATUS
+        assert session.status_text == "initial"
+        session._clear_hint()
+        assert session._status_now() == "initial"
+
+    def test_adding_to_the_status_under_a_hint_keeps_the_apps_text(self, session):
+        """status_text += ... while Busy showed kept the hint for good."""
+        session._show_hint(session._BUSY_STATUS)
+        session.status_text += " | 2 jobs"
+        assert session.status_text == "initial | 2 jobs"
+        assert session._status_now() == "initial | 2 jobs"  # the app's text replaces the hint
+        session._clear_hint()
+        assert session._status_now() == "initial | 2 jobs"

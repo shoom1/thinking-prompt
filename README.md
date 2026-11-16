@@ -515,6 +515,10 @@ session.add_error("Connection failed")
 session.add_system("Connecting to server...")
 ```
 
+`session.status_text` reads back what you set, a Rich renderable too. While
+the session shows a hint in the status bar (`Busy — press Ctrl+C to
+cancel`), it still reads your text; setting a status replaces the hint.
+
 A link, in markdown or Rich's `[link=…]` markup, shows its text and then
 its URL, `the docs (https://…)`, whole on its line for the terminal to open
 (a link whose text is its URL shows it once): a terminal hyperlink (OSC 8)

@@ -233,7 +233,7 @@ class TestPromptAsync:
 
             async def script(run: asyncio.Task[None]) -> None:
                 inp.send_text(CTRL_C)
-                await wait_until(lambda: session.status_text == session._IDLE_STATUS)
+                await wait_until(lambda: session._status_now() == session._IDLE_STATUS)
                 assert session.app.is_running and waiting_for_input(session)
                 inp.send_text("hello" + ENTER)
                 await finished(run)
@@ -253,7 +253,7 @@ class TestPromptAsync:
                 await wait_until(lambda: session._default_buffer.text == "draft")
                 inp.send_text(CTRL_C + "x")  # "x" lands once the Ctrl+C is handled
                 await wait_until(lambda: session._default_buffer.text == "x")
-                assert session.status_text == "READY"
+                assert session._status_now() == "READY"
                 inp.send_text(ENTER)
                 await finished(run)
 
@@ -277,7 +277,7 @@ class TestPromptAsync:
                 inp.send_text(CTRL_C + ENTER)  # Enter presses OK once the Ctrl+C is handled
                 await asyncio.wait_for(shown, 2)
                 assert session._default_buffer.text == "draft"
-                assert session.status_text == "READY"
+                assert session._status_now() == "READY"
 
             await run_loop(session, body, script)
 
@@ -548,7 +548,7 @@ class TestQuery:
                 inp.send_text("go" + ENTER)
                 await wait_until(lambda: started == ["go"])
                 inp.send_text(CTRL_D)
-                await wait_until(lambda: session.status_text == session._BUSY_STATUS)
+                await wait_until(lambda: session._status_now() == session._BUSY_STATUS)
                 assert session.app.is_running and not run.done()
                 inp.send_text(CTRL_C)
                 await finished(run)
@@ -1079,7 +1079,7 @@ class TestConcurrent:
                 await wait_until(lambda: started == ["a", "b"])
                 assert session._manager.active_count == 2
                 inp.send_text(CTRL_C)  # an idle prompt with live tasks' boxes
-                await wait_until(lambda: session.status_text == session._BACKGROUND_STATUS)
+                await wait_until(lambda: session._status_now() == session._BACKGROUND_STATUS)
                 assert session._manager.active_count == 2
                 release.set()
                 await wait_until(lambda: session._manager.active_count == 0)
@@ -1122,7 +1122,7 @@ class TestQueue:
                 inp.send_text("slow" + ENTER)
                 await wait_until(lambda: started == ["slow"])
                 inp.send_text("next" + ENTER)
-                await wait_until(lambda: session.status_text == session._BUSY_STATUS)
+                await wait_until(lambda: session._status_now() == session._BUSY_STATUS)
                 assert session._default_buffer.text == "next"
                 assert not session._queued
                 release.set()
@@ -1151,7 +1151,7 @@ class TestQueue:
                     await wait_until(lambda: started == ["slow"])
                     inp.send_text("next" + ENTER)
                     await wait_until(lambda: session._hint is not None)
-                    assert session.status_text == "Busy"
+                    assert session._status_now() == "Busy"
                     assert session._default_buffer.text == "next"
                 finally:
                     release.set()  # the app stopping doesn't end the loop's own work
@@ -1189,7 +1189,7 @@ class TestQueue:
                     await started.wait()
                     inp.send_text("draft" + CTRL_C)
                     await wait_until(lambda: session._hint is not None)
-                    assert session.status_text == "Busy"
+                    assert session._status_now() == "Busy"
                     assert session.is_thinking
                     assert session._default_buffer.text == "draft"
                 finally:
@@ -1235,7 +1235,7 @@ class TestQueue:
                     await started.wait()
                     inp.send_text(CTRL_D)
                     await wait_until(lambda: session._hint is not None)
-                    assert session.status_text == "Busy"
+                    assert session._status_now() == "Busy"
                     assert session.app.is_running
                 finally:
                     release.set()
