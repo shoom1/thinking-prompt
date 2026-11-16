@@ -76,7 +76,7 @@ from .fields import (
     _Form,
 )
 from .rows import RowControl
-from .types import Placement, check_count, check_placement
+from .types import Placement, check_count, check_flag, check_placement
 
 if TYPE_CHECKING:
     from .session import ThinkingPromptSession
@@ -113,6 +113,7 @@ class ButtonConfig:
             value = getattr(self, name)
             if not isinstance(value, str):
                 raise ValueError(f"ButtonConfig {name} must be a str, got {value!r}")
+        check_flag("ButtonConfig focused", self.focused)
         if self.handler is not None and self.result is not None:
             raise ValueError(
                 "ButtonConfig takes a result or a handler, not both: a handler "
@@ -270,6 +271,7 @@ class Dialog:
         if not isinstance(self.title, str):
             raise ValueError(f"Dialog title must be a str, got {self.title!r}")
         _check_body(self.body)
+        check_flag("Dialog escapable", self.escapable)
         check_count("max_height", self.max_height, 1, optional=True)
         if not (
             self.width is None

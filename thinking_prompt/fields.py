@@ -38,7 +38,7 @@ from prompt_toolkit.widgets import Frame
 
 from ._text import cut
 from .rows import MARKER, NO_MARKER, OptionGroup, RowControl, RowNavigator, has_focus
-from .types import Placement, check_count
+from .types import Placement, check_count, check_flag
 
 
 @dataclass(frozen=True)
@@ -105,6 +105,10 @@ class CheckboxField(Field):
     """True or false, toggled with Space, Enter or ←/→."""
     default: bool = False
 
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        check_flag(f"{_owner(self)}: default", self.default)
+
 
 @dataclass(frozen=True, kw_only=True)
 class TextField(Field):
@@ -116,6 +120,7 @@ class TextField(Field):
 
     def __post_init__(self) -> None:
         super().__post_init__()
+        check_flag(f"{_owner(self)}: password", self.password)
         _check_size(self, "width", self.width)
 
 

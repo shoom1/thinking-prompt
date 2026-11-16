@@ -163,8 +163,9 @@ Every argument after `message` is keyword-only. Keys and the thinking
 header are under [Session Options](#session-options). Options are checked
 when they're passed (the session's here, a box's in `start_thinking()`, a
 field's or a dialog's when it's made): one of the wrong kind (a count
-that isn't an int, a `spinner` that isn't a `Spinner`), out of range, or
-not one of its choices raises `ValueError`.
+that isn't an int, a flag that isn't `True` or `False`, a `spinner` that
+isn't a `Spinner`), out of range, or not one of its choices raises
+`ValueError`.
 
 ### Thinking API
 
@@ -991,6 +992,7 @@ removed:
 | `box.finish(echo_to_console=...)`, `session.thinking(echo_to_console=...)` | `echo=...` |
 | `add_to_history=` on `finish()` or `thinking()` | Drop it: `echo` alone decides (printed and kept for repaints, or neither) |
 | A flag passed by position: `box.finish(False)` (0.4's `add_to_history`), `set_theme(theme, True)` | By name: `box.finish(echo=...)`, `set_theme(theme, repaint=True)` |
+| A flag given as `0`/`1` or a str (`thinking_echo="no"` turned echo on) | `True` or `False`: anything else raises `ValueError` |
 | A dataclass field passed by position, past a form field's `key` and `label`, a button's `text` and a spinner's `frames`: `TextField("name", "Name", "Shown to others")`, `ButtonConfig("OK", "ok")`, `Spinner(frames, 0.2)`, `AppInfo("MyApp")` | By name: `description=...`, `result=...`, `interval=...`, `name=...`; every field of `AppInfo` and `ThinkingPromptStyles` |
 | `box.get_content()` | `box.text` |
 | `session.set_status(x)` | `session.status_text = x` (a Rich renderable too) |

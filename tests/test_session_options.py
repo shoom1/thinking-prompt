@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import dataclasses
+import re
 
 import pytest
 from prompt_toolkit.keys import Keys
@@ -100,6 +101,43 @@ class TestOptionChecks:
     def test_a_bad_value_is_refused(self, kwargs, message):
         with pytest.raises(ValueError, match=message):
             ThinkingPromptSession(**kwargs)
+
+    @pytest.mark.parametrize("name", [
+        "thinking_echo", "thinking_border", "echo_input", "enable_status_bar", "complete_while_typing",
+    ])
+    @pytest.mark.parametrize("value", ["no", 0, None], ids=["no", "0", "None"])
+    def test_a_flag_is_true_or_false(self, name, value):
+        """thinking_echo="no" turned echo on: a str that isn't empty is true."""
+        message = rf"^{name} must be True or False, got {re.escape(repr(value))}$"
+        with pytest.raises(ValueError, match=message):
+            ThinkingPromptSession(**{name: value})
+
+    @pytest.mark.parametrize("key", [123, None, "", "bogus"], ids=["int", "None", "empty", "unknown"])
+    def test_expand_key_is_a_key(self, key):
+        """An int raised prompt_toolkit's TypeError."""
+        message = rf'^expand_key must be a key such as "c-t", got {re.escape(repr(key))}$'
+        with pytest.raises(ValueError, match=message):
+            ThinkingPromptSession(expand_key=key)
+
+    @pytest.mark.parametrize("call,message", [
+        (lambda s: s.start_thinking(border="no"), "border must be True or False (or None), got 'no'"),
+        (lambda s: s.add_response("x", markdown="no"), "markdown must be True or False, got 'no'"),
+        (lambda s: s.set_theme("dark", repaint="no"), "repaint must be True or False, got 'no'"),
+        (lambda s: s.start_thinking().finish(echo="no"), "echo must be True or False (or None), got 'no'"),
+    ], ids=["start_thinking border", "add_response markdown", "set_theme repaint", "finish echo"])
+    def test_a_methods_flag_is_true_or_false(self, call, message):
+        session = ThinkingPromptSession()
+        with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
+            call(session)
+
+    @pytest.mark.parametrize("name", ["border", "echo"])
+    async def test_thinkings_flags_are_checked_before_the_block(self, name):
+        session = ThinkingPromptSession()
+        message = rf"^{name} must be True or False \(or None\), got 'no'$"
+        with pytest.raises(ValueError, match=message):
+            async with session.thinking(**{name: "no"}):
+                pytest.fail("the block ran")
+        assert not session.is_thinking
 
     def test_the_least_values_are_fine(self):
         ThinkingPromptSession(transcript_limit=0, completions_menu_height=1, thinking_max_lines=0)

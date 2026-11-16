@@ -67,7 +67,9 @@ from .types import (
     Placement,
     check_choice,
     check_count,
+    check_flag,
     check_input_while_busy,
+    check_key,
     check_placement,
 )
 
@@ -267,9 +269,21 @@ class ThinkingPromptSession:
                 completions_menu_height one of at least 1; spinner isn't a
                 Spinner or None; spinner_position isn't 'before' or
                 'after', dialog_placement 'box' or 'inline', or
-                input_while_busy 'refuse' or 'queue'; or theme= names an
-                unknown theme.
+                input_while_busy 'refuse' or 'queue'; a flag
+                (thinking_echo, thinking_border, echo_input,
+                enable_status_bar, complete_while_typing) isn't True or
+                False; expand_key isn't a key prompt_toolkit knows; or
+                theme= names an unknown theme.
         """
+        for name, flag in (
+            ("thinking_echo", thinking_echo),
+            ("thinking_border", thinking_border),
+            ("echo_input", echo_input),
+            ("enable_status_bar", enable_status_bar),
+            ("complete_while_typing", complete_while_typing),
+        ):
+            check_flag(name, flag)
+        check_key("expand_key", expand_key)
         check_count("thinking_max_lines", thinking_max_lines, 0)
         check_count("transcript_limit", transcript_limit, 0, optional=True)
         check_count("completions_menu_height", completions_menu_height, 1)
@@ -771,10 +785,12 @@ class ThinkingPromptSession:
                 still repaints fully.
 
         Raises:
-            ValueError: For unknown theme names, or a colour prompt_toolkit
+            ValueError: For unknown theme names, repaint that isn't True or
+                False, or a colour prompt_toolkit
                 can't parse. Rich raises its own error for one it can't.
                 Either way the session keeps the theme it had.
         """
+        check_flag("repaint", repaint)
         resolved = resolve_theme(theme)
         # Built before anything is switched, so a theme that can't be built
         # leaves styles, the style and the Display as they were.
@@ -888,8 +904,9 @@ class ThinkingPromptSession:
 
         Raises:
             ValueError: If max_lines isn't an int of at least 0 (or
-                None), order an int, content_format 'plain' or 'ansi', or
-                overflow 'tail' or 'head'.
+                None), order an int, border True, False or None,
+                content_format 'plain' or 'ansi', or overflow 'tail' or
+                'head'.
 
         Example:
             box = session.start_thinking(title="Processing")
@@ -899,6 +916,7 @@ class ThinkingPromptSession:
             box.append("Done!\\n")
             box.finish()
         """
+        check_flag("border", border, optional=True)
         # 0: the title line only; 1: the newest row, no hint.
         check_count("max_lines", max_lines, 0, optional=True)
         # Any int sorts; anything else would fail the next redraw's sort.
@@ -1004,8 +1022,8 @@ class ThinkingPromptSession:
             ThinkingBox: the box, to write to and retitle.
 
         Raises:
-            ValueError: As start_thinking() raises it (before the block
-                runs).
+            ValueError: As start_thinking() raises it, or if echo isn't
+                True, False or None (before the block runs).
 
         Example:
             async with session.thinking(title="Processing") as box:
@@ -1034,6 +1052,7 @@ class ThinkingPromptSession:
             content; if it raises, the exception propagates after the box
             is finished.
         """
+        check_flag("echo", echo, optional=True)
         box = self.start_thinking(
             title=title,
             border=border,
@@ -1099,8 +1118,9 @@ class ThinkingPromptSession:
 
         Raises:
             ValueError: If content is neither a str nor formatted text (a
-                pair whose style prompt_toolkit can't use included), or
-                markdown=True comes with formatted text. Nothing is printed
+                pair whose style prompt_toolkit can't use included),
+                markdown isn't True or False, or markdown=True comes with
+                formatted text. Nothing is printed
                 or kept then.
 
         Examples:
@@ -1114,6 +1134,7 @@ class ThinkingPromptSession:
             formatted = FormattedText([("bold", "Title: "), ("", "Content")])
             session.add_response(formatted)
         """
+        check_flag("markdown", markdown)
         if not isinstance(content, str):
             if markdown:
                 raise ValueError(f"add_response(markdown=True) takes a str, got {content!r}")

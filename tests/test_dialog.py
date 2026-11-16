@@ -53,6 +53,10 @@ def _click(dialog: Any, index: int) -> Any:
 # =============================================================================
 
 class TestButtonConfig:
+    def test_focused_is_true_or_false(self):
+        with pytest.raises(ValueError, match=r"^ButtonConfig focused must be True or False, got 'no'$"):
+            ButtonConfig("OK", focused="no")  # type: ignore[arg-type]
+
     @pytest.mark.parametrize("name", ["text", "style"])
     def test_its_text_and_style_are_strs(self, name):
         """A label that isn't a str failed when the dialog was shown."""
@@ -403,6 +407,11 @@ class TestDialog:
         """Dialog(title=5) opened, then raised TypeError at every redraw."""
         with pytest.raises(ValueError, match=r"^Dialog title must be a str, got 5$"):
             Dialog(5, "B", [ButtonConfig("OK")])  # type: ignore[arg-type]
+
+    def test_escapable_is_true_or_false(self):
+        """escapable="no" left Escape working."""
+        with pytest.raises(ValueError, match=r"^Dialog escapable must be True or False, got 'no'$"):
+            Dialog("T", "B", [ButtonConfig("OK")], escapable="no")  # type: ignore[arg-type]
 
     def test_a_subclasss_title_is_checked_too(self):
         class Bad(Dialog):

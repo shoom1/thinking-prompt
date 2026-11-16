@@ -179,6 +179,18 @@ class TestFieldClasses:
         with pytest.raises(ValueError, match=r"SelectField 'k': default 'c' isn't one of its options"):
             Dialog("T", fields=[field], values={"k": "c"})
 
+    @pytest.mark.parametrize("make,message", [
+        (lambda: CheckboxField("k", "L", default="no"), "CheckboxField 'k': default must be True or False, got 'no'"),
+        (lambda: CheckboxField("k", "L", default=1), "CheckboxField 'k': default must be True or False, got 1"),
+        (lambda: TextField("k", "L", password="no"), "TextField 'k': password must be True or False, got 'no'"),
+        (lambda: Dialog("T", fields=[CheckboxField("k", "L")], values={"k": "yes"}),
+         "CheckboxField 'k': default must be True or False, got 'yes'"),
+    ], ids=["checkbox no", "checkbox 1", "password", "values="])
+    def test_a_flag_is_true_or_false(self, make, message):
+        """CheckboxField(default="no") started checked."""
+        with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
+            make()
+
     ALL_FIELDS = [TextField, CheckboxField, *OPTION_FIELDS]
 
     @pytest.mark.parametrize("cls", ALL_FIELDS, ids=lambda cls: cls.__name__)
