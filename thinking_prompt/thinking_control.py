@@ -21,7 +21,7 @@ from prompt_toolkit.layout.controls import FormattedTextControl, UIContent
 from prompt_toolkit.layout.screen import Char
 from prompt_toolkit.output.vt100 import BG_ANSI_COLORS, FG_ANSI_COLORS
 
-from ._text import coalesce, fixed_sequences
+from ._text import OUTSIDE, coalesce, fixed_sequences
 from .types import ContentCallback, ContentFormat, Overflow
 
 logger = logging.getLogger(__name__)
@@ -136,12 +136,15 @@ class _AnsiStream:
         self._parser = self._ansi._parse_corot()
         self._parser.send(None)  # type: ignore[arg-type]
         self._cut = ""  # a control sequence the text so far cut short
+        # Where the parser is after the text so far (see fixed_sequences).
+        self._state = OUTSIDE
 
     def feed(self, text: str) -> StyleAndTextTuples:
         """Parse ``text``: the fragments it makes, a character each."""
-        text, self._cut = fixed_sequences(self._cut + text)
+        fixed = fixed_sequences(self._cut + text, state=self._state)
+        self._cut, self._state = fixed.cut, fixed.state
         send = self._parser.send
-        for char in text:
+        for char in fixed.text:
             send(char)
         made = self._ansi._formatted_text
         fragments = list(made)

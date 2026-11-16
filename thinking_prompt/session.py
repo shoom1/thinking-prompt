@@ -11,6 +11,8 @@ import asyncio
 import contextvars
 import logging
 import os
+import select
+import sys
 from collections import deque
 from collections.abc import AsyncIterator, Callable, Coroutine, Sequence
 from contextlib import asynccontextmanager, suppress
@@ -45,6 +47,7 @@ from prompt_toolkit.formatted_text import (
 )
 from prompt_toolkit.formatted_text.base import OneStyleAndTextTuple
 from prompt_toolkit.history import History, InMemoryHistory
+from prompt_toolkit.input import Input
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.key_binding.key_processor import KeyPressEvent
 from prompt_toolkit.layout import AnyContainer, ConditionalContainer, DynamicContainer, Window
@@ -103,6 +106,25 @@ def _check_shown_text(name: str, value: object, *, rich: bool = False) -> None:
     if rich:
         kinds += ", or a Rich renderable"
     raise ValueError(f"{name} must be {kinds}, got {value!r}")
+
+
+def _keys_waiting(inp: Input) -> bool:
+    """Whether ``inp`` holds keys nobody has read yet, as when they were
+    typed before the app started reading it. False when that can't be told
+    (an input with no descriptor or handle)."""
+    try:
+        if sys.platform == "win32":
+            from ctypes import windll
+
+            # The console's input handle, or a pipe input's event: signaled
+            # while input waits. Only Windows inputs have one (an Input in
+            # general doesn't: AttributeError, below).
+            handle = cast("Any", inp).handle
+            return bool(windll.kernel32.WaitForSingleObject(handle, 0) == 0)
+        ready, _, _ = select.select([inp.fileno()], [], [], 0)
+        return bool(ready)
+    except Exception:
+        return False
 
 
 def _note(content: object, takes: str) -> str | FormattedText:
@@ -311,6 +333,13 @@ class ThinkingPromptSession:
         self._input_while_busy: InputWhileBusy = input_while_busy
         # Lines Enter took while nobody waited for input ("queue"), oldest first.
         self._queued: deque[str] = deque()
+        # Typeahead: the keys the terminal held from before the app started,
+        # which it reads first. Its lines are kept for prompt_async()
+        # whatever input_while_busy says; a Ctrl+D typed then makes
+        # prompt_async() raise EOFError once they're read.
+        self._typeahead = False
+        self._typeahead_ending = False
+        self._typed_eof = False
 
         # A fresh instance per session: a shared one would let a tweak to
         # one session's styles restyle every other session.
@@ -434,6 +463,7 @@ class ThinkingPromptSession:
         # Create components
         self._default_buffer = self._create_default_buffer()
         self.app = self._create_application()
+        self.app.key_processor.after_key_press += self._key_read
         if _is_rich_renderable(status_text):
             # Drawn as ANSI, as the status_text setter draws one.
             self._status_text = self._display.to_ansi(status_text)
@@ -502,10 +532,23 @@ class ThinkingPromptSession:
             if self._echo_input:
                 self._display.user_input(self._get_prompt_string(), text)
 
+    def _key_read(self, _processor: object) -> None:
+        """A key processed. The app's first read of its input brings the
+        keys the terminal held from before it started, all at once:
+        typeahead, if there were any, ends once they're processed."""
+        if self._typeahead and not self._typeahead_ending:
+            self._typeahead_ending = True
+            asyncio.get_running_loop().call_soon(self._end_typeahead)
+
+    def _end_typeahead(self) -> None:
+        self._typeahead = False
+
     def _busy_enter(self) -> None:
         """Enter while nobody waits for input: queue the line, or refuse it
-        (it stays in the prompt, and the status bar says so)."""
-        if self._input_while_busy == "queue":
+        (it stays in the prompt, and the status bar says so). A line typed
+        before the app was up is typeahead: kept for prompt_async()
+        whatever input_while_busy says."""
+        if self._input_while_busy == "queue" or self._typeahead:
             text = self._default_buffer.text
             if text.strip():
                 self._queued.append(text)
@@ -694,6 +737,8 @@ class ThinkingPromptSession:
                     self._show_busy()
                 return
             dropped = bool(self._queued)
+            # A Ctrl+D typed before the app was up goes with the typed lines.
+            self._typed_eof = False
             if dropped:
                 self._queued.clear()
                 self._invalidate()
@@ -736,6 +781,11 @@ class ThinkingPromptSession:
         def exit_app(event: KeyPressEvent) -> None:
             """Exit the application: at an idle prompt, where someone waits
             for input and no query runs."""
+            if self._typeahead and not self._input_wanted():
+                # Typed before the app was up: the loop gets EOFError once
+                # it has read the lines typed before it.
+                self._typed_eof = True
+                return
             if self._query_running() or not self._input_wanted():
                 # Exiting doesn't stop work on the way out: Ctrl+C stops a
                 # query. The status bar says the session is busy while the
@@ -1479,8 +1529,15 @@ class ThinkingPromptSession:
             raise RuntimeError("The session is already running")
         self._print_welcome()
         self._app_task = asyncio.current_task()
+        self._typeahead = self._typeahead_ending = self._typed_eof = False
         started = asyncio.Event()
-        run = asyncio.ensure_future(self.app.run_async(pre_run=started.set))
+        def pre_run() -> None:
+            # Keys the terminal holds from before the app started reading
+            # (typed while it imported and started) are typeahead.
+            self._typeahead = _keys_waiting(self.app.input)
+            started.set()
+
+        run = asyncio.ensure_future(self.app.run_async(pre_run=pre_run))
         run.add_done_callback(self._app_stopped)
         self._app_run = run
         waiting = asyncio.ensure_future(started.wait())
@@ -1586,6 +1643,15 @@ class ThinkingPromptSession:
             self._record_input(text)
             self._invalidate()
             return text
+        if self._typed_eof:
+            # A Ctrl+D typed before the app was up, after its lines: it
+            # quits, as exit() does (a query asking this follow-up goes on
+            # to its end). The typed lines' prints go first: the app's
+            # last frame is drawn when it stops.
+            self._typed_eof = False
+            await run_in_terminal(lambda: None)
+            self.exit()
+            raise EOFError
         future: asyncio.Future[str] = asyncio.get_running_loop().create_future()
         self._pending_input = future
         # Input is wanted again: a status hint no longer applies.

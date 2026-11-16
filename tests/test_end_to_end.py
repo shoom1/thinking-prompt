@@ -470,6 +470,65 @@ class TestBoxLifecycle:
 
             await run_with(session, handler, script)
 
+    async def test_nested_blocks_under_a_caught_time_limit_say_nothing(self):
+        """Two nested thinking() blocks under one time limit the query
+        catches both end cancelled; the query answers. The query didn't end
+        cancelled, so no "Operation cancelled..." line."""
+
+        async def tool() -> None:
+            async with session.thinking(title="Outer"):
+                async with session.thinking(title="Inner") as box:
+                    box.append("working\n")
+                    await asyncio.sleep(3600)
+
+        async def handler(text: str) -> None:
+            try:
+                await asyncio.wait_for(tool(), 0.05)
+            except asyncio.TimeoutError:
+                pass
+            session.add_response("final answer")
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(
+                    lambda: "final answer\n" in transcript_texts(session._display) and waiting_for_input(session)
+                )
+                await asyncio.sleep(0.05)
+                assert "Operation cancelled...\n" not in transcript_texts(session._display)
+
+            await run_with(session, handler, script)
+
+    async def test_a_task_the_query_left_running_says_its_line_when_cancelled_later(self):
+        """A task the query started inherits its context, and outlives it:
+        cancelled after the query ended, its box ends with the line."""
+        left: list[asyncio.Task[None]] = []
+
+        async def worker() -> None:
+            async with session.thinking(title="Background") as box:
+                box.append("still going\n")
+                await asyncio.sleep(3600)
+
+        async def handler(text: str) -> None:
+            left.append(asyncio.ensure_future(worker()))
+            await asyncio.sleep(0.05)
+            session.add_response("query done")
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(
+                    lambda: "query done\n" in transcript_texts(session._display) and waiting_for_input(session)
+                )
+                left[0].cancel()
+                await wait_until(lambda: left[0].done())
+                await asyncio.sleep(0.05)
+                assert transcript_texts(session._display).count("Operation cancelled...\n") == 1
+
+            await run_with(session, handler, script)
+
     @staticmethod
     async def _agent(session: ThinkingPromptSession) -> None:
         """An outer box, and under it a tool box whose time limit runs out:

@@ -33,7 +33,7 @@ async def main() -> None:
         while True:
             try:
                 text = await session.prompt_async()
-            except EOFError:  # Ctrl+D at an empty prompt
+            except EOFError:  # Ctrl+D, exit(), or stdin closed
                 break
             if text.strip() in ("/exit", "/quit"):
                 break

@@ -313,3 +313,102 @@ class TestSmallestIsMeasuredOncePerDraw:
         presenter.rows(40, 24)
         presenter.rows(40, 10)
         assert calls == [(80, 24), (40, 24), (40, 10)]
+
+
+class TestStyledButtonFocus:
+    """A ButtonConfig's style colors its button in both states, and focus
+    swaps those colors (reverse video), as the terminal theme does for
+    every button. In dark and light, a focused "fg:ansired" button was red
+    on the accent blue, about 1.2:1, unreadable just as Enter would press
+    it; a style with a background hid focus but for the bold."""
+
+    @staticmethod
+    def _attrs(session, text: str):  # type: ignore[no-untyped-def]
+        """The attributes the first cell of ``text`` on screen is drawn with."""
+        from prompt_toolkit.styles import default_ui_style, merge_styles
+
+        from tests.test_end_to_end import screen_rows
+
+        screen = session.app.renderer.last_rendered_screen
+        for y, row in enumerate(screen_rows(session)):
+            if text in row:
+                x = row.index(text)
+                style = screen.data_buffer[y][x].style
+                return merge_styles([default_ui_style(), session._style]).get_attrs_for_style_str(style)
+        raise AssertionError(f"{text!r} isn't on screen")
+
+    @pytest.mark.parametrize("theme", ["dark", "light", "terminal"])
+    @pytest.mark.parametrize("style,color,bgcolor", [
+        ("fg:ansired", "ansired", None),
+        ("bg:ansiyellow fg:ansiblack", "ansiblack", "ansiyellow"),
+    ], ids=["foreground", "both"])
+    async def test_focus_swaps_the_styles_colors(self, theme, style, color, bgcolor):
+        from tests.test_end_to_end import LEFT, piped_session, run_with, wait_until
+
+        with piped_session(rows=20, theme=theme) as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                dialog = Dialog("T", "B", [
+                    ButtonConfig("Delete", result=1, style=style),
+                    ButtonConfig("Keep", result=2, focused=True),
+                ])
+                shown = asyncio.ensure_future(session.show_dialog(dialog))
+                await wait_until(lambda: "Keep" in "".join(_rows(session)))
+                plain = self._attrs(session, "Delete")
+                assert (plain.color, plain.reverse) == (color, False)
+                if bgcolor:
+                    assert plain.bgcolor == bgcolor
+                inp.send_text(LEFT)
+                await wait_until(lambda: self._attrs(session, "Delete").reverse is True)
+                focused = self._attrs(session, "Delete")
+                # The style's own colors, swapped: none of the theme's accent.
+                assert (focused.color, focused.bgcolor) == (plain.color, plain.bgcolor)
+                dialog.cancel()
+                await shown
+
+            await run_with(session, lambda text: None, script)
+
+    @pytest.mark.parametrize("theme", ["dark", "terminal"])
+    async def test_a_reversed_style_shows_focus_by_turning_it_off(self, theme):
+        """Reverse twice is reverse: a "reverse" button looked the same
+        focused or not."""
+        from tests.test_end_to_end import LEFT, piped_session, run_with, wait_until
+
+        with piped_session(rows=20, theme=theme) as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                dialog = Dialog("T", "B", [
+                    ButtonConfig("Delete", result=1, style="bold reverse"),
+                    ButtonConfig("Keep", result=2, focused=True),
+                ])
+                shown = asyncio.ensure_future(session.show_dialog(dialog))
+                await wait_until(lambda: "Keep" in "".join(_rows(session)))
+                assert self._attrs(session, "Delete").reverse is True
+                inp.send_text(LEFT)
+                await wait_until(lambda: self._attrs(session, "Delete").reverse is False)
+                dialog.cancel()
+                await shown
+
+            await run_with(session, lambda text: None, script)
+
+    async def test_an_unstyled_focused_button_keeps_the_accent(self):
+        from tests.test_end_to_end import piped_session, run_with, wait_until
+
+        with piped_session(rows=20, theme="dark") as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                dialog = Dialog("T", "B", [ButtonConfig("Keep", result=2, focused=True)])
+                shown = asyncio.ensure_future(session.show_dialog(dialog))
+                await wait_until(lambda: "Keep" in "".join(_rows(session)))
+                attrs = self._attrs(session, "Keep")
+                assert (attrs.color, attrs.bgcolor) == ("ffffff", session.styles.color_accent_button.lstrip("#"))
+                dialog.cancel()
+                await shown
+
+            await run_with(session, lambda text: None, script)
+
+
+def _rows(session) -> list[str]:  # type: ignore[no-untyped-def]
+    from tests.test_end_to_end import screen_rows
+
+    return screen_rows(session)

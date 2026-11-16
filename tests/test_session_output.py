@@ -231,15 +231,40 @@ class TestAddResponse:
         assert entry.fragments == [*_FRAGMENTS, ("", "\n")]
 
     def test_a_markdown_table_is_drawn_as_a_table(self):
-        """Before Rich 13.4 a table printed as one line of pipes: the
-        extras ask for 13.4.1 (13.4.0's markdown needs typing_extensions,
-        which it doesn't ask for on Python 3.9 and later)."""
+        """Before Rich 13.4 a table printed as one line of pipes."""
         pytest.importorskip("rich")
         session = _session()
         session.add_response("| Name | Size |\n|------|------|\n| docs | 12 |", markdown=True)
         (printed,) = echoed(session._display)
         assert "|" not in printed and "---" not in printed
         assert re.search(r"Name\s+Size", printed) and re.search(r"docs\s+12", printed)
+
+    def test_a_markdown_table_cell_keeps_all_its_pieces(self):
+        """Before Rich 13.5 a cell kept only its last inline piece:
+        `**bold** text` showed " text"."""
+        pytest.importorskip("rich")
+        session = _session()
+        session.add_response(
+            "| name | notes |\n|---|---|\n"
+            "| **bold** text | see [the docs](https://u.example) now |\n| `code` here | plain |",
+            markdown=True,
+        )
+        (printed,) = echoed(session._display)
+        assert re.search(r"bold text\s+see the docs now", printed), printed
+        assert re.search(r"code here\s+plain", printed), printed
+
+    def test_a_folded_word_beside_wide_characters_keeps_its_text(self):
+        """Before Rich 13.7 a word folded on a line holding CJK lost
+        characters: with a link's URL inline, a CJK sentence lost its end."""
+        pytest.importorskip("rich")
+        session = _session_at(80)
+        sentence = (
+            "请参阅[官方文档](https://docs.python.org/3/library/asyncio-task.html#asyncio.wait_for)"
+            "了解更多信息，这个函数在超时的时候会取消任务并抛出异常，所以你需要小心处理。"
+        )
+        session.add_response(sentence, markdown=True)
+        (printed,) = echoed(session._display)
+        assert "所以你需要小心处理。" in printed.replace("\n", "").replace(" ", "")
 
     def test_markdown_is_printed_rendered_and_kept_as_its_source(self):
         pytest.importorskip("rich")
@@ -395,6 +420,98 @@ class TestLinks:
         pytest.importorskip("rich")
         raw = _terminal(lambda s: s.add_response(source, markdown=True))
         assert _shown(raw).count(url) == 1
+
+    @pytest.mark.parametrize("source, shown, gone", [
+        ("<https://ja.wikipedia.org/wiki/日本>", "https://ja.wikipedia.org/wiki/日本", "%E6%97%A5"),
+        ("<https://münchen.de/straße>", "https://münchen.de/straße", "xn--"),
+        ("<https://example.com/a%20b>", "https://example.com/a%20b", "a b"),
+    ], ids=["non-ASCII path", "non-ASCII host", "an escaped space"])
+    def test_an_autolink_markdown_it_rewrites_shows_its_url_once(self, source, shown, gone):
+        """markdown-it encodes the URL it links to and decodes the text it
+        shows, so they differed and the URL showed twice: `…/日本
+        (…/%E6%97%A5%E6%9C%AC)`. Shown once, as written, but an escaped
+        space stays escaped: decoded, the terminal can't open it whole."""
+        pytest.importorskip("rich")
+        printed = _shown(_terminal(lambda s: s.add_response(f"See {source} now.", markdown=True)))
+        assert f"See {shown} now." in printed, printed
+        assert gone not in printed
+
+    @staticmethod
+    def _plain(ansi: str) -> str:
+        return re.sub(r"\x1b\[[0-9;]*m", "", ansi)
+
+    def test_an_image_shows_its_mark_alt_and_url(self):
+        pytest.importorskip("rich")
+        from thinking_prompt.rich_utils import _markdown_to_ansi
+
+        shown = self._plain(_markdown_to_ansi("![alt text](https://img.example/a.png)", width=60))
+        assert "🌆 alt text (https://img.example/a.png)" in shown
+
+    def test_an_image_inside_a_link_shows_the_links_url_only(self):
+        pytest.importorskip("rich")
+        from thinking_prompt.rich_utils import _markdown_to_ansi
+
+        shown = self._plain(_markdown_to_ansi("[![logo](https://img.example/logo.png)](https://example.com)", width=60))
+        assert "🌆 logo (https://example.com)" in shown
+        assert "img.example" not in shown
+
+    def test_an_image_in_a_table_is_listed_under_it(self):
+        pytest.importorskip("rich")
+        from thinking_prompt.rich_utils import _markdown_to_ansi
+
+        shown = self._plain(_markdown_to_ansi("| a | b |\n|---|---|\n| x | ![chart](https://e.com/c.png) |", width=60))
+        assert "🌆 chart" in shown
+        assert shown.rstrip().endswith("chart (https://e.com/c.png)")
+
+    def test_a_text_link_in_two_styled_pieces_gets_its_url_once(self):
+        pytest.importorskip("rich")
+        from rich.text import Text
+
+        from thinking_prompt.rich_utils import _renderable_to_ansi
+
+        text = Text.assemble(
+            ("the", "bold link https://example.com"), (" docs", "italic link https://example.com"), " end"
+        )
+        assert self._plain(_renderable_to_ansi(text, width=60)).strip() == "the docs (https://example.com) end"
+
+    def test_a_text_link_with_blank_text_shows_its_url_alone(self):
+        pytest.importorskip("rich")
+        from thinking_prompt.rich_utils import _renderable_to_ansi
+
+        shown = self._plain(_renderable_to_ansi("see [link=https://example.com] [/link] end", width=60))
+        assert "https://example.com end" in shown and "(" not in shown
+
+    @pytest.mark.parametrize("markup, line", [
+        ("see [link=https://example.com][b]the[/b] docs[/link] now", "the docs (https://example.com)"),
+        ("[link=https://example.com]docs[/link] and [link=https://example.com]docs[/link]",
+         "docs (https://example.com)"),
+    ], ids=["two styles", "the same link twice"])
+    def test_a_panels_link_is_listed_once(self, markup, line):
+        pytest.importorskip("rich")
+        from rich.panel import Panel
+
+        from thinking_prompt.rich_utils import _rich_to_ansi
+
+        listed = self._plain(_rich_to_ansi(Panel(markup), width=40)).split("╯", 1)[1].strip()
+        assert listed == line
+
+    def test_a_panels_link_rich_wrapped_is_listed_once(self):
+        pytest.importorskip("rich")
+        from rich.panel import Panel
+
+        from thinking_prompt.rich_utils import _rich_to_ansi
+
+        panel = Panel("[link=https://example.com/a/long/path]the documentation for this very long link text[/link]")
+        listed = self._plain(_rich_to_ansi(panel, width=30)).split("╯", 1)[1]
+        assert listed.count("(https://") == 1
+        assert " ".join(listed.split()).startswith("the documentation for this very long link text")
+
+    def test_a_rich_link_showing_its_url_with_an_escaped_space_decoded_keeps_the_url(self):
+        """Its text is the URL decoded, which the terminal can't open
+        whole: the URL as written follows it."""
+        pytest.importorskip("rich")
+        raw = _terminal(lambda s: s.add_rich("[link=https://e.com/a%20b]https://e.com/a b[/link] end"))
+        assert "https://e.com/a b (https://e.com/a%20b) end" in _shown(raw)
 
     @pytest.mark.parametrize("source", [
         "See [](https://e.com/empty) here.",
@@ -607,6 +724,13 @@ _BAD_CODES = {
     "ESC before a bad digit": "\x1b\x1b[²m[²m",
     # int() refuses a string of more than 4,300 digits.
     "5,000 digits": "\x1b[" + "1" * 5000 + "m",
+    # The parser takes a \x01 right after a run's \x02 as text, and parses
+    # what follows it.
+    # U+009B starts a sequence as ESC [ does.
+    "C1 CSI bad digit": "\x9b²m",
+    "C1 CSI color over 255": "\x9b38;2;300;0;0m",
+    "a bad digit after a run": "\x01\x02\x01\x1b[²m\x02",
+    "color over 255 after a run": "\x01\x1b[1m\x02\x01\x1b[38;2;300;0;0m\x02",
 }
 
 

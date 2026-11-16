@@ -41,13 +41,29 @@ def _ansi_safe(text: str) -> str:
     was made (see _print_linked)."""
     text = _LINK.sub(lambda link: link.group(3), text.translate(_RAW_MARKS))
     # A sequence cut short at the end the parser would never finish.
-    return fixed_sequences(_OSC.sub("", text), colors_only=True)[0]
+    return fixed_sequences(_OSC.sub("", text), colors_only=True).text
 
 
 def _is_url(text: str, url: str) -> bool:
     """True if a link showing ``text`` shows its URL already ("x@y" shows
-    "mailto:x@y"): the URL isn't shown again."""
-    return text in (url, url.split(":", 1)[-1])
+    "mailto:x@y", and an autolink markdown-it's decoding of the URL it
+    encoded): the URL isn't shown again."""
+    decoded = _decoded(url)
+    # Decoded, an escaped space would split the URL for the terminal: that
+    # text doesn't show the URL.
+    return text in (url, url.split(":", 1)[-1]) or (
+        text == decoded and not any(char.isspace() for char in decoded)
+    )
+
+
+def _decoded(url: str) -> str:
+    """``url`` as markdown-it shows an autolink's: percent escapes and
+    punycode decoded ("…/%E6%97%A5" is "…/日")."""
+    try:
+        from markdown_it.common.normalize_url import normalizeLinkText
+    except ImportError:
+        return url
+    return normalizeLinkText(url)
 
 
 def _print_linked(console: Any, renderable: Any, **kwargs: Any) -> None:
@@ -307,6 +323,9 @@ def _get_markdown_cls() -> Any:
             return styled("link_url", [text(url)])
         if _is_url(shown, url):
             return styled("link_url", tokens)
+        if shown == _decoded(url):
+            # An autolink with an escaped space: the URL as written, once.
+            return styled("link_url", [text(url)])
         return [*styled("link", tokens), text(" ("), *styled("link_url", [text(url)]), text(")")]
 
     def links_shown(tokens: list[Token], listed: list[tuple[str, str]] | None) -> list[Token]:

@@ -40,7 +40,8 @@ form fields on a prompt that stays inline, in the terminal's scrollback.
 pip install thinking-prompt
 ```
 
-For markdown and code highlighting support:
+For markdown and code highlighting support (Rich 13.7 or later, and
+Pygments):
 ```bash
 pip install "thinking-prompt[all]"
 ```
@@ -223,8 +224,8 @@ normal finish:
   runs, and the tasks they start) gets its line when the query ends, and
   only if the query ends cancelled (Ctrl+C, the app stopping): a cancel
   the query catches, a tool's time limit (`asyncio.timeout()`,
-  `wait_for()`) say, or another task cancelling a job the query started,
-  says nothing.
+  `wait_for()`) say, or another task cancelling a job the query started
+  and waits for, says nothing.
 - **The handler raises**: the content, then the `[ERROR] Handler error: ...`
   line. A query's error is raised by `query()`, after the content.
 - **Left open** by a task that returns (a handler, a query, a background
@@ -279,7 +280,7 @@ async with session:                        # the app runs until the block ends
 ```
 
 `prompt_async()` raises `EOFError` on Ctrl+D at an idle prompt, after
-`exit()`, and when stdin closes (stdin from `/dev/null`, say); the block
+`exit()`, and when stdin closes (its terminal closing, say); the block
 then ends normally, as `run_async()` does. Stdin closing stops the app at
 once, as `exit()` from outside the query does: a query still running is
 cancelled, and queued lines are dropped. The session reads a terminal, not
@@ -307,6 +308,14 @@ Work your loop does itself, outside `query()`, keeps the session busy
 too, and no key stops it: Enter, Ctrl+C and Ctrl+D say `Busy`, and the
 boxes the loop opens stay its own. Run work you may need to stop (a
 startup connection, say) with `query()`: Ctrl+C cancels it.
+
+Keys typed before the app is up (while it imports and starts) are
+typeahead, as in a shell: the terminal holds them, and the session reads
+them first. Each line typed then is kept, and `prompt_async()` returns
+them in order, whatever `input_while_busy` says; a Ctrl+D typed then ends
+the loop once they're read (`prompt_async()` raises `EOFError`, and stops
+the app as `exit()` does). Keys typed once the UI shows follow the rules
+above and below.
 
 A line typed while a query runs is refused by default (`Busy`). With
 `ThinkingPromptSession(input_while_busy="queue")` it waits under the
@@ -523,7 +532,7 @@ empty box raises `IndexError`.
 # Plain text response
 session.add_response("Hello, world!")
 
-# Markdown (requires rich)
+# Markdown (requires Rich 13.7 or later: the rich extra)
 session.add_response("# Title\n- Item 1\n- Item 2", markdown=True)
 
 # Syntax-highlighted code (requires pygments)
@@ -846,8 +855,14 @@ listed once, and a default is one of them (or `None`): anything else raises
 text with a style prompt_toolkit can't use, such as an ANSI color over
 255, raises `ValueError` as in `add_response()`), and `ButtonConfig` its
 `text` and `style`. A button's `style` is a prompt_toolkit style string
-(`"fg:ansired bold"`, not Rich's `"bright_red"`): one prompt_toolkit can't
-use raises `ValueError` when the button is made. A `Dialog` subclass's own
+(`"bg:ansired fg:ansiwhite bold"`, not Rich's `"bright_red"`): one
+prompt_toolkit can't use raises `ValueError` when the button is made. In a
+box it colors the button in every theme, focused or not, and focus swaps
+its colors (reverse video): that Delete is white on red, and red on white
+when focused. Give it both colors: a text color alone is drawn on the
+theme's button color (`fg:ansired` is red on gray in the dark theme, hard
+to read either way). Inline, it colors the action's row, and the `❯`
+shows focus. A `Dialog` subclass's own
 `title`, `body` and `buttons` (class attributes, or properties), and
 attributes set after a dialog is made, are checked when it's shown; a
 subclass's own `fields` when it's made too, since the form is built from
@@ -950,7 +965,8 @@ terminal's own color, in dialogs and menus too. A selection (the current
 completion, a dropdown's pick) shows `color_accent` on `color_bg_selected`,
 and the focused button `color_accent_button` behind its label (white or
 black, whichever reads better on it); with those empty, both show in
-reverse video. Derivation happens at render time, so
+reverse video. A box button with its own `ButtonConfig` style keeps its
+colors when focused, swapped. Derivation happens at render time, so
 tweaking a built-in theme works too:
 
 ```python
@@ -1042,6 +1058,7 @@ removed:
 
 | 0.4 | 0.5 |
 |---|---|
+| Python 3.9 | Python 3.10 or later |
 | `ThinkingPromptSession(max_thinking_height=N)` | `thinking_max_lines=N` |
 | `ThinkingPromptSession(echo_thinking=...)` | `thinking_echo=...` |
 | `ThinkingPromptSession(history_limit=N)` | `transcript_limit=N` |

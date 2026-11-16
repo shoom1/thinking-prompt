@@ -451,7 +451,8 @@ def _whole_lines(text: str, content_format: str) -> list[Any]:
     from thinking_prompt._text import fixed_sequences
 
     if content_format == "ansi":
-        fragments = to_formatted_text(ANSI("".join(fixed_sequences(text))))
+        fixed = fixed_sequences(text)
+        fragments = to_formatted_text(ANSI(fixed.text + fixed.cut))
     else:
         fragments = to_formatted_text([("class:thinking-box", text)])
     lines = [list(line) for line in split_lines(fragments)]
@@ -558,6 +559,46 @@ class TestParsedOnce:
         state, control = self._streamed("ansi")
         for cut in range(1, len(text) + 1):
             state["text"] = text[:cut]
+            self._assert_shows_whole_parse(control, state["text"], "ansi")
+
+    @pytest.mark.parametrize("code", ["\x1b[²m", "\x1b[38;2;300;0;0m", "\x9b²m"])
+    def test_a_run_right_after_a_run_is_text_whole_or_streamed(self, code: str):
+        """The parser reads the character after a run's \\x02 itself and
+        checks it only for an escape: a \\x01 there is text, and what
+        follows is parsed. Taken for more zero-width text, a bad code in it
+        reached the parser unchecked, and it raised at every frame."""
+        text = f"a\x01\x02\x01{code}b\x02c\n"
+        state, control = self._streamed("ansi")
+        for cut in range(1, len(text) + 1):
+            state["text"] = text[:cut]
+            self._assert_shows_whole_parse(control, state["text"], "ansi")
+
+    def test_a_run_after_a_run_and_a_dropped_sequence_is_text(self):
+        """A sequence dropped between them leaves the \\x01 right after the
+        run for the parser: text it shows, streamed or not."""
+        text = "a\x01\x02\x1b[1²m\x01b300\n"
+        state, control = self._streamed("ansi")
+        for cut in range(1, len(text) + 1):
+            state["text"] = text[:cut]
+            self._assert_shows_whole_parse(control, state["text"], "ansi")
+        assert "b300" in "".join(char for _, char in _whole_parse(text, "ansi"))
+
+    @pytest.mark.parametrize("chunks", [
+        ["\x01" + "x" * 5000, "\x02\x01\x1b[²m\x02 after\n"],
+        ["\x01" + "x" * 5000, "y\x02\x01\x1b[38;2;300;0;0m\x02red\n"],
+        ["\x01" + "x" * 3000, "x" * 2000, "\x02\x01\x1b[²m\x02 after\n"],
+        ["\x01a\x02\x1b[\x02", "\x01b\x02\x01\x1b[²m\x02 after\n"],
+        ["\x01a\x02\x1b\x02", "\x01b\x02\x01\x1b[²m\x02 after\n"],
+    ], ids=["long run left open", "long run, color over 255", "long run grown open",
+            "a CSI ending in \\x02", "an escape ending in \\x02"])
+    def test_the_parsers_state_carries_from_chunk_to_chunk(self, chunks: list[str]):
+        """A run past 4,096 characters is passed on open, the parser inside
+        it; a sequence ending in \\x02 after a run isn't the run's end.
+        Guessed from the fragments, the state was wrong for both, and a bad
+        code in the next chunk reached the parser: it raised at every frame."""
+        state, control = self._streamed("ansi")
+        for i in range(1, len(chunks) + 1):
+            state["text"] = "".join(chunks[:i])
             self._assert_shows_whole_parse(control, state["text"], "ansi")
 
     @pytest.mark.parametrize("escape", _OTHER_ESCAPES)
