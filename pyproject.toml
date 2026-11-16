@@ -39,12 +39,13 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     # The lowest the suite runs clean on (pytest 7.0 and pytest-asyncio 0.21
-    # gave 6 errors).
+    # gave 6 errors), and the lowest whose checks pass (mypy 1.15 and ruff
+    # 0.12 report errors).
     "pytest>=8.2",
     "pytest-asyncio>=1.1",
     "pytest-cov>=4.0",
-    "mypy>=1.0",
-    "ruff>=0.1.0",
+    "mypy>=1.16",
+    "ruff>=0.13",
     "types-Pygments",
 ]
 rich = ["rich>=13.7.0,<16"]
@@ -86,6 +87,8 @@ include = [
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+# Each async fixture's loop is its test's (pytest-asyncio warns unset).
+asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
 addopts = "-v --tb=short"
 
