@@ -10,6 +10,7 @@ from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator, Callable
 
 from prompt_toolkit.application import create_app_session
+from prompt_toolkit.application.current import get_app_session
 from prompt_toolkit.input import create_pipe_input
 from prompt_toolkit.output import DummyOutput, Output
 from prompt_toolkit.output import defaults as output_defaults
@@ -34,6 +35,36 @@ def _plain_text_when_stdout_is_not_a_terminal(monkeypatch: pytest.MonkeyPatch) -
         return real(stdout, always_prefer_tty)
 
     monkeypatch.setattr(output_defaults, "create_output", create_output)
+
+
+class _CurrentStdout:
+    """sys.stdout as it is at each write: a test's capsys while it runs."""
+
+    def write(self, data: str) -> int:
+        return sys.stdout.write(data)
+
+    def flush(self) -> None:
+        sys.stdout.flush()
+
+    def isatty(self) -> bool:
+        return sys.stdout.isatty()
+
+    def fileno(self) -> int:
+        return sys.stdout.fileno()
+
+    @property
+    def encoding(self) -> str:
+        return getattr(sys.stdout, "encoding", None) or "utf-8"
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _the_default_output_follows_stdout() -> None:
+    """prompt_toolkit's process-wide output, which a session made without
+    one prints through, is made at the first print and kept. Made under a
+    test's capsys, it wrote to a stream pytest closes after that test, and
+    every print after it failed ("I/O operation on closed file"): the suite
+    depended on the tests' order. It writes to stdout as it is now."""
+    get_app_session()._output = PlainTextOutput(_CurrentStdout())  # type: ignore[arg-type]
 
 
 @pytest.fixture

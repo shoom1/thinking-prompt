@@ -273,6 +273,13 @@ class TestSelectionStyles:
         words = styles.to_style_dict()["button.focused"].split()
         assert f"bg:{accent}" in words and f"fg:{label}" in words
 
+    @pytest.mark.parametrize("accent", ["ansiblue", "#abc"], ids=["name", "short hex"])
+    def test_a_button_token_that_isnt_six_digit_hex_works(self, accent):
+        """The label's white-or-black reads six-digit hex only; a name or a
+        short hex keeps the bright text color (and mustn't raise)."""
+        words = ThinkingPromptStyles(color_accent_button=accent).to_style_dict()["button.focused"].split()
+        assert f"bg:{accent}" in words
+
     def test_a_button_token_colors_the_focused_button(self):
         words = ThinkingPromptStyles(color_accent_button="#0066cc").to_style_dict()["button.focused"].split()
         assert "bg:#0066cc" in words and "reverse" not in words

@@ -436,6 +436,76 @@ class TestLinks:
         assert f"See {shown} now." in printed, printed
         assert gone not in printed
 
+    @staticmethod
+    def _plain(ansi: str) -> str:
+        return re.sub(r"\x1b\[[0-9;]*m", "", ansi)
+
+    def test_an_image_shows_its_mark_alt_and_url(self):
+        pytest.importorskip("rich")
+        from thinking_prompt.rich_utils import _markdown_to_ansi
+
+        shown = self._plain(_markdown_to_ansi("![alt text](https://img.example/a.png)", width=60))
+        assert "🌆 alt text (https://img.example/a.png)" in shown
+
+    def test_an_image_inside_a_link_shows_the_links_url_only(self):
+        pytest.importorskip("rich")
+        from thinking_prompt.rich_utils import _markdown_to_ansi
+
+        shown = self._plain(_markdown_to_ansi("[![logo](https://img.example/logo.png)](https://example.com)", width=60))
+        assert "🌆 logo (https://example.com)" in shown
+        assert "img.example" not in shown
+
+    def test_an_image_in_a_table_is_listed_under_it(self):
+        pytest.importorskip("rich")
+        from thinking_prompt.rich_utils import _markdown_to_ansi
+
+        shown = self._plain(_markdown_to_ansi("| a | b |\n|---|---|\n| x | ![chart](https://e.com/c.png) |", width=60))
+        assert "🌆 chart" in shown
+        assert shown.rstrip().endswith("chart (https://e.com/c.png)")
+
+    def test_a_text_link_in_two_styled_pieces_gets_its_url_once(self):
+        pytest.importorskip("rich")
+        from rich.text import Text
+
+        from thinking_prompt.rich_utils import _renderable_to_ansi
+
+        text = Text.assemble(
+            ("the", "bold link https://example.com"), (" docs", "italic link https://example.com"), " end"
+        )
+        assert self._plain(_renderable_to_ansi(text, width=60)).strip() == "the docs (https://example.com) end"
+
+    def test_a_text_link_with_blank_text_shows_its_url_alone(self):
+        pytest.importorskip("rich")
+        from thinking_prompt.rich_utils import _renderable_to_ansi
+
+        shown = self._plain(_renderable_to_ansi("see [link=https://example.com] [/link] end", width=60))
+        assert "https://example.com end" in shown and "(" not in shown
+
+    @pytest.mark.parametrize("markup, line", [
+        ("see [link=https://example.com][b]the[/b] docs[/link] now", "the docs (https://example.com)"),
+        ("[link=https://example.com]docs[/link] and [link=https://example.com]docs[/link]",
+         "docs (https://example.com)"),
+    ], ids=["two styles", "the same link twice"])
+    def test_a_panels_link_is_listed_once(self, markup, line):
+        pytest.importorskip("rich")
+        from rich.panel import Panel
+
+        from thinking_prompt.rich_utils import _rich_to_ansi
+
+        listed = self._plain(_rich_to_ansi(Panel(markup), width=40)).split("╯", 1)[1].strip()
+        assert listed == line
+
+    def test_a_panels_link_rich_wrapped_is_listed_once(self):
+        pytest.importorskip("rich")
+        from rich.panel import Panel
+
+        from thinking_prompt.rich_utils import _rich_to_ansi
+
+        panel = Panel("[link=https://example.com/a/long/path]the documentation for this very long link text[/link]")
+        listed = self._plain(_rich_to_ansi(panel, width=30)).split("╯", 1)[1]
+        assert listed.count("(https://") == 1
+        assert " ".join(listed.split()).startswith("the documentation for this very long link text")
+
     @pytest.mark.parametrize("source", [
         "See [](https://e.com/empty) here.",
         "See [ ](https://e.com/empty) here.",
@@ -649,6 +719,9 @@ _BAD_CODES = {
     "5,000 digits": "\x1b[" + "1" * 5000 + "m",
     # The parser takes a \x01 right after a run's \x02 as text, and parses
     # what follows it.
+    # U+009B starts a sequence as ESC [ does.
+    "C1 CSI bad digit": "\x9b²m",
+    "C1 CSI color over 255": "\x9b38;2;300;0;0m",
     "a bad digit after a run": "\x01\x02\x01\x1b[²m\x02",
     "color over 255 after a run": "\x01\x1b[1m\x02\x01\x1b[38;2;300;0;0m\x02",
 }

@@ -133,6 +133,16 @@ class TestLifetime:
             async with session:  # and it can run again
                 assert session.app.is_running
 
+    async def test_an_error_the_app_stops_with_leaves_the_block(self):
+        """Only stdin's EOFError ends the block quietly: any other error
+        the app stops with is raised from it."""
+        with piped_session() as (session, inp):
+            with pytest.raises(RuntimeError, match="boom"):
+                async with session:
+                    session.app.exit(exception=RuntimeError("boom"))
+                    with pytest.raises(EOFError):
+                        await session.prompt_async()
+
     async def test_a_box_the_loop_opens_ends_at_an_idle_ctrl_c(self):
         """The task in the block is the app's own: Ctrl+C ends its boxes,
         as it ends a startup box under run_async(), and doesn't exit."""
