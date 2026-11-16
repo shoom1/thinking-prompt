@@ -242,7 +242,7 @@ def _check_align_values(align: object) -> None:
     if isinstance(align, int) and not isinstance(align, bool) and align >= MIN_VALUE_COLUMN:
         return
     raise ValueError(
-        f'align_values must be "labels", "right" or a column of at least '
+        f'Dialog align_values must be "labels", "right" or a column of at least '
         f"{MIN_VALUE_COLUMN}, got {align!r}"
     )
 

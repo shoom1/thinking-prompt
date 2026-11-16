@@ -274,9 +274,11 @@ class ThinkingPromptSession:
                 (thinking_echo, thinking_border, echo_input,
                 enable_status_bar, complete_while_typing) isn't True or
                 False; expand_key isn't a key prompt_toolkit knows;
-                thinking_title isn't a str; or theme= names an unknown
-                theme, or has a field that isn't a style the session can
-                use (named; see ThinkingPromptStyles).
+                thinking_title isn't a str; message or status_text isn't
+                text (a str, formatted text or a callable returning it; for
+                status_text a Rich renderable too); or theme= names an
+                unknown theme, or has a field that isn't a style the
+                session can use (named; see ThinkingPromptStyles).
         """
         for name, flag in (
             ("thinking_echo", thinking_echo),
@@ -2238,12 +2240,14 @@ class ThinkingPromptSession:
                 cleanup gets EOFError.
             TypeError: If ``dialog`` isn't a Dialog, or its fields or
                 buttons, set after it was made or a subclass's own, aren't
-                a sequence of fields or of ButtonConfigs.
+                a sequence of fields or of ButtonConfigs (get_buttons()'s
+                result too).
             ValueError: If the dialog has nothing to focus, its placement
-                isn't 'box' or 'inline', a subclass's own title, body or
-                escapable isn't one it takes, or a value its ``values=``
-                gives a field (read again at each show) isn't one the
-                field takes.
+                isn't 'box' or 'inline', its title, body, escapable,
+                max_height, width or align_values (set after it was made,
+                or a subclass's own) isn't one it takes, or a value its
+                ``values=`` gives a field (read again at each show) isn't
+                one the field takes.
 
         Example (built with arguments):
             from thinking_prompt import ButtonConfig, Dialog

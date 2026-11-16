@@ -845,8 +845,11 @@ text with a style prompt_toolkit can't use, such as an ANSI color over
 `text` and `style`. A button's `style` is a prompt_toolkit style string
 (`"fg:ansired bold"`, not Rich's `"bright_red"`): one prompt_toolkit can't
 use raises `ValueError` when the button is made. A `Dialog` subclass's own
-`title`, `body`, `fields` and `buttons` (class attributes, or properties)
-are checked when it's shown.
+`title`, `body` and `buttons` (class attributes, or properties), and
+attributes set after a dialog is made, are checked when it's shown; a
+subclass's own `fields` when it's made too, since the form is built from
+them then. A callable body whose result isn't text draws nothing (logged
+once), as a callable `status_text` does.
 
 **Keys:** in a box, ↑↓ move a row at a time and Tab / Shift+Tab a field at a
 time (Tab on to the buttons after the last field, Shift+Tab from the buttons

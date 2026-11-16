@@ -821,17 +821,76 @@ class TestDialogParts:
         assert list(dialog.values) == ["a", "b"]
 
 
+class TestCallableBody:
+    """A body is text, or a callable returning it: one that returns
+    something that isn't text drew nothing in a Label; it raised at every
+    redraw, as a callable status did."""
+
+    @staticmethod
+    def _shown(dialog: Dialog) -> str:
+        from prompt_toolkit.formatted_text import fragment_list_to_text, to_formatted_text
+
+        label = dialog.build_body()
+        return fragment_list_to_text(to_formatted_text(label.formatted_text_control.text))
+
+    @pytest.mark.parametrize("result", [5, [("fg:nope", "x")], object()], ids=["int", "bad style", "object"])
+    def test_a_result_that_isnt_text_draws_nothing_logged_once(self, result, caplog):
+        import logging
+
+        dialog = Dialog("Copying", lambda: result, [ButtonConfig("Hide")])
+        with caplog.at_level(logging.ERROR, logger="thinking_prompt"):
+            assert self._shown(dialog) == ""
+            assert self._shown(dialog) == ""
+        assert len([r for r in caplog.records if r.levelno >= logging.ERROR]) == 1
+
+    def test_a_result_that_is_text_is_drawn(self):
+        from prompt_toolkit.formatted_text import merge_formatted_text
+
+        count = {"n": 3}
+        dialog = Dialog("Copying", lambda: merge_formatted_text([HTML(f"<b>{count['n']}</b>"), " copied"]))
+        assert self._shown(dialog) == "3 copied"
+        count["n"] = 4
+        assert self._shown(dialog) == "4 copied"
+
+    def test_a_tuple_of_pairs_is_a_body(self):
+        """add_response() and the status take one: a body refused it."""
+        dialog = Dialog("T", (("bold", "3 jobs"), ("", " | idle")), [ButtonConfig("OK")])
+        assert self._shown(dialog) == "3 jobs | idle"
+
+
+class TestSubclassParts:
+    def test_a_subclass_fields_of_the_wrong_kind_are_named_when_made(self):
+        """They're read when the dialog is made: it raised Python's own
+        TypeError ("'NoneType' object is not iterable")."""
+        class Broken(Dialog):
+            fields = None  # type: ignore[assignment]
+
+        with pytest.raises(TypeError, match=r"^Dialog fields must be a sequence of fields, got None$"):
+            Broken()
+
+    def test_get_buttons_returns_a_sequence(self):
+        """A generator was used up by the check: the dialog had no buttons."""
+        class Gen(Dialog):
+            title = "Gen"
+
+            def get_buttons(self):
+                return (ButtonConfig(t) for t in ["A", "B"])
+
+        with pytest.raises(TypeError, match=r"^get_buttons\(\) must return a sequence of ButtonConfig, got <generator"):
+            Gen()._button_configs()
+
+
 class TestSizesSetLater:
     """A size set after the dialog is made is checked when it's shown, as
     one passed is when it's made: max_height="3" locked the screen at
     every redraw, and width=-5 was taken."""
 
     @pytest.mark.parametrize("name,value,message", [
-        ("max_height", "3", r"^max_height must be an int \(or None\), got '3'$"),
-        ("max_height", 0, r"^max_height must be at least 1 \(or None\), got 0$"),
-        ("width", "wide", r'^width must be at least 1, "full" or None, got \'wide\'$'),
-        ("width", -5, r'^width must be at least 1, "full" or None, got -5$'),
-        ("align_values", "left", r"^align_values must be "),
+        ("max_height", "3", r"^Dialog max_height must be an int \(or None\), got '3'$"),
+        ("max_height", 0, r"^Dialog max_height must be at least 1 \(or None\), got 0$"),
+        ("width", "wide", r'^Dialog width must be at least 1, "full" or None, got \'wide\'$'),
+        ("width", -5, r'^Dialog width must be at least 1, "full" or None, got -5$'),
+        ("align_values", "left", r"^Dialog align_values must be "),
     ], ids=["max_height str", "max_height 0", "width str", "width -5", "align_values"])
     def test_it_is_checked_when_shown(self, name, value, message):
         dialog = Dialog("T", "B", [ButtonConfig("OK")])

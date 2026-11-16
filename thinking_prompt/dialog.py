@@ -48,14 +48,14 @@ from typing import (
 
 from prompt_toolkit.application.current import get_app
 from prompt_toolkit.filters import Condition
-from prompt_toolkit.formatted_text import AnyFormattedText
+from prompt_toolkit.formatted_text import AnyFormattedText, FormattedText
 from prompt_toolkit.key_binding import KeyBindings, merge_key_bindings
 from prompt_toolkit.layout import AnyContainer, Container, Float, HSplit, Window, to_container
 from prompt_toolkit.layout.containers import is_container
 from prompt_toolkit.styles import Style
 from prompt_toolkit.widgets import Label
 
-from ._text import checked_fragments, format_exception_detail
+from ._text import checked_fragments, drawn_text, format_exception_detail
 from .dialog_box import BoxPresenter
 from .dialog_inline import InlinePresenter, InlineView
 from .dialog_scroll import (
@@ -209,9 +209,11 @@ class Dialog:
     then; each value is checked as the field's default is.
 
     The arguments are checked when the dialog is created; a subclass's own
-    ``title``, ``body``, ``escapable``, ``fields`` and ``buttons`` (class
-    attributes, or properties reading what its ``__init__`` sets), and
-    attributes set after it's made, when it's shown. ``fields`` and
+    ``title``, ``body``, ``escapable`` and ``buttons`` (class attributes, or
+    properties reading what its ``__init__`` sets), and attributes set after
+    it's made, when it's shown (a subclass's own ``fields`` when it's made
+    too: the form is built from them then). A callable body whose result
+    isn't text draws nothing (logged once), as a callable status does. ``fields`` and
     ``buttons`` must be sequences (a list or a tuple) of fields and of
     ButtonConfigs, and ``values`` a mapping, else TypeError; a value of the
     right kind that isn't one an option takes raises ValueError.
@@ -298,10 +300,8 @@ class Dialog:
             self.body if not isinstance(body, _NotPassed) else "",
             self.escapable if not isinstance(escapable, _NotPassed) else True,
         )
-        _check_parts(
-            self.fields if not isinstance(fields, _NotPassed) else (),
-            self.buttons if not isinstance(buttons, _NotPassed) else (),
-        )
+        # A subclass's own fields too: the form is built from them now.
+        _check_parts(self.fields, self.buttons if not isinstance(buttons, _NotPassed) else ())
         if values is not None and not isinstance(values, Mapping):
             raise TypeError(
                 f"Dialog values must be a mapping of field keys to values (or None), got {values!r}"
@@ -318,6 +318,8 @@ class Dialog:
 
         self._result_future: asyncio.Future | None = None
         self._manager: DialogManager | None = None
+        # A callable body that failed is logged once (_drawn_body).
+        self._body_failed = False
         # The placement this dialog is (or was last) shown with, resolved by
         # DialogManager; _content() lays the fields out for it.
         self._placement: Placement = "box"
@@ -333,7 +335,24 @@ class Dialog:
         body = self.body
         if is_container(body):
             return body
+        if callable(body):
+            return Label(text=lambda: self._drawn_body(body))
+        if isinstance(body, tuple):
+            # Pairs, checked: a Label draws only a list.
+            return Label(text=FormattedText(body))
         return Label(text=cast("AnyFormattedText", body))
+
+    def _drawn_body(self, body: Callable[[], Any]) -> AnyFormattedText:
+        """A callable body's text: "" when what it returns isn't text, or
+        it raises (logged once per dialog), since either raised at every
+        redraw."""
+        try:
+            return drawn_text(body(), "a callable Dialog body must return")
+        except Exception:
+            if not self._body_failed:
+                self._body_failed = True
+                logger.exception("Dialog %r: its callable body failed; it's drawn as empty", self.title)
+            return ""
 
     @property
     def values(self) -> dict[str, Any]:
@@ -438,6 +457,8 @@ class Dialog:
         with a hint wherever it's shown.
         """
         configs = self.get_buttons()
+        if isinstance(configs, str) or not isinstance(configs, Sequence):
+            raise TypeError(f"get_buttons() must return a sequence of ButtonConfig, got {configs!r}")
         _check_button_items(configs, "get_buttons() must return")
         return configs
 
@@ -634,14 +655,14 @@ def _check_sizes(dialog: Dialog) -> None:
     """A dialog's max_height is an int of at least 1 or None, its width one
     too or "full", and align_values one it takes: checked when it's made
     and again when it's shown (one set after failed at every redraw)."""
-    check_count("max_height", dialog.max_height, 1, optional=True)
+    check_count("Dialog max_height", dialog.max_height, 1, optional=True)
     width = dialog.width
     if not (
         width is None
         or width == "full"
         or (isinstance(width, int) and not isinstance(width, bool) and width >= 1)
     ):
-        raise ValueError(f'width must be at least 1, "full" or None, got {width!r}')
+        raise ValueError(f'Dialog width must be at least 1, "full" or None, got {width!r}')
     _check_align_values(dialog.align_values)
 
 
@@ -676,7 +697,7 @@ def _check_body(body: object) -> None:
         return
     # HTML, ANSI, or (style, text) pairs (a handler may follow the text).
     if hasattr(body, "__pt_formatted_text__") or (
-        isinstance(body, list) and all(isinstance(pair, tuple) for pair in body)
+        isinstance(body, (list, tuple)) and all(isinstance(pair, tuple) for pair in body)
     ):
         checked_fragments(body, "Dialog body must be")
         return
