@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 
 from prompt_toolkit.output import ColorDepth
 from prompt_toolkit.styles import Style
@@ -73,10 +73,15 @@ class ThinkingPromptStyles:
     """
     Customizable styles for ThinkingPromptSession.
 
-    All style strings use prompt_toolkit style format:
-    - Colors: 'fg:#rrggbb' or 'bg:#rrggbb' or color names like 'red', 'blue'
+    The ``color_*`` tokens are colors ('#rrggbb', 'ansired'; "" for the
+    terminal's own). The element styles use prompt_toolkit's style format:
+    - Colors: 'fg:#rrggbb' or 'bg:#rrggbb' or color names like 'ansired'
     - Attributes: 'bold', 'italic', 'underline', 'reverse'
     - Combine with spaces: 'bg:#1a1a2e fg:#e0e0e0 italic'
+    The ``markdown_*`` fields are Rich style strings ('bold red on white'),
+    since Rich draws markdown: its 'red' is the terminal's red, where
+    prompt_toolkit's is #ff0000. A field neither can use raises ValueError,
+    naming it, when a session takes the theme.
 
     Base theme colors control the overall appearance:
     - Customize `menu_*` styles to change both dropdown and completion menus
@@ -220,7 +225,9 @@ class ThinkingPromptStyles:
     scrollbar_button: str = ""  # Defaults to color_text_dim
 
     # ==========================================================================
-    # Markdown styles (for Rich rendering)
+    # Markdown styles: Rich style strings ("bold red on white"), since Rich
+    # draws markdown. Rich's "red" is the terminal's red; prompt_toolkit's
+    # (in the fields above) is #ff0000.
     # ==========================================================================
     markdown_h1: str = "bold"
     markdown_h1_border: str = "dim"  # Underline below H1
@@ -551,13 +558,59 @@ THEMES: dict[str, Callable[[], ThinkingPromptStyles]] = {
 }
 
 
+# Fields that aren't style strings.
+_NOT_STYLES = ("color_depth", "code_theme")
+
+
+def _check_fields(styles: ThinkingPromptStyles) -> None:
+    """Raise ValueError naming the first field that isn't a style the
+    session can use: a color token a color, a markdown_* field a Rich style
+    (Rich draws markdown), any other a prompt_toolkit style. prompt_toolkit's
+    own error named only the color, and Rich raised its StyleSyntaxError."""
+    for field in fields(styles):
+        name = field.name
+        if name in _NOT_STYLES:
+            continue
+        value = getattr(styles, name)
+        if not isinstance(value, str):
+            raise ValueError(f"ThinkingPromptStyles {name}: must be a str, got {value!r}")
+        if name.startswith("markdown_"):
+            _check_rich_style(name, value)
+            continue
+        token = name.startswith("color_")
+        try:
+            Style([("", f"fg:{value}" if token and value else value)])
+        except (ValueError, AssertionError) as exc:
+            kind = "a color" if token else "a style"
+            raise ValueError(
+                f"ThinkingPromptStyles {name}: {value!r} isn't {kind} prompt_toolkit can use: {exc}"
+            ) from None
+
+
+def _check_rich_style(name: str, value: str) -> None:
+    """A markdown_* field is a Rich style ("bold red on white"); without
+    Rich, markdown isn't drawn and nothing is checked."""
+    try:
+        from rich.errors import StyleSyntaxError
+        from rich.style import Style as RichStyle
+    except ImportError:
+        return
+    try:
+        RichStyle.parse(value)
+    except StyleSyntaxError as exc:
+        raise ValueError(f"ThinkingPromptStyles {name}: {value!r} isn't a Rich style: {exc}") from None
+
+
 def resolve_theme(theme: str | ThinkingPromptStyles) -> ThinkingPromptStyles:
-    """Resolve a theme name or instance to a ThinkingPromptStyles.
+    """Resolve a theme name or instance to a ThinkingPromptStyles, its
+    fields checked.
 
     Raises:
-        ValueError: For unknown theme names.
+        ValueError: For unknown theme names, or a field that isn't a style
+            the session can use (named).
     """
     if isinstance(theme, ThinkingPromptStyles):
+        _check_fields(theme)
         return theme
     try:
         return THEMES[theme]()

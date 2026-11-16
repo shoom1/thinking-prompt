@@ -96,9 +96,46 @@ class TestSetThemeRefused:
         session = ThinkingPromptSession(theme="dark")
         display = session._display
         before = (session.styles, session._style, display._thinking_styles, display.rich_theme)
-        with pytest.raises(Exception, match="notacolour|not-a-colour"):
+        with pytest.raises(ValueError, match="notacolour|not-a-colour"):
             session.set_theme(ThinkingPromptStyles(**{field: value}))
         assert (session.styles, session._style, display._thinking_styles, display.rich_theme) == before
+
+
+_BAD_FIELDS = [
+    ("color_accent", "bright_red"),  # Rich's name, not prompt_toolkit's
+    ("dialog_button_focused", "danger"),
+    ("error_message", 5),
+    ("markdown_link", "fg:ansired"),  # prompt_toolkit's syntax in a Rich field
+    ("markdown_h1", "bold redd"),
+    ("markdown_code", None),
+]
+
+
+class TestThemeFieldsChecked:
+    """A field neither prompt_toolkit nor Rich can use is refused when the
+    session takes the theme, naming the field: prompt_toolkit's error
+    named only the color ("Wrong color format 'danger'"), and a markdown
+    field raised Rich's own StyleSyntaxError."""
+
+    @pytest.mark.parametrize("field,value", _BAD_FIELDS, ids=[f for f, _ in _BAD_FIELDS])
+    def test_the_constructor_names_the_field(self, field, value):
+        if field.startswith("markdown"):
+            pytest.importorskip("rich")
+        with pytest.raises(ValueError, match=rf"^ThinkingPromptStyles {field}: "):
+            ThinkingPromptSession(theme=ThinkingPromptStyles(**{field: value}))
+
+    @pytest.mark.parametrize("field,value", _BAD_FIELDS, ids=[f for f, _ in _BAD_FIELDS])
+    def test_set_theme_names_the_field(self, field, value):
+        if field.startswith("markdown"):
+            pytest.importorskip("rich")
+        session = ThinkingPromptSession()
+        with pytest.raises(ValueError, match=rf"^ThinkingPromptStyles {field}: "):
+            session.set_theme(ThinkingPromptStyles(**{field: value}))
+
+    def test_the_markdown_fields_take_rich_styles(self):
+        pytest.importorskip("rich")
+        styles = ThinkingPromptStyles(markdown_link="bold red on white", markdown_h1="underline #ff8800")
+        assert ThinkingPromptSession(theme=styles).styles is styles
 
 
 class TestEffectiveColorDepth:

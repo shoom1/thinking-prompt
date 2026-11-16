@@ -255,8 +255,10 @@ class ThinkingPromptSession:
                 input_while_busy 'refuse' or 'queue'; a flag
                 (thinking_echo, thinking_border, echo_input,
                 enable_status_bar, complete_while_typing) isn't True or
-                False; expand_key isn't a key prompt_toolkit knows; or
-                theme= names an unknown theme.
+                False; expand_key isn't a key prompt_toolkit knows;
+                thinking_title isn't a str; or theme= names an unknown
+                theme, or has a field that isn't a style the session can
+                use (named; see ThinkingPromptStyles).
         """
         for name, flag in (
             ("thinking_echo", thinking_echo),
@@ -779,9 +781,9 @@ class ThinkingPromptSession:
 
         Raises:
             ValueError: For unknown theme names, repaint that isn't True or
-                False, or a colour prompt_toolkit
-                can't parse. Rich raises its own error for one it can't.
-                Either way the session keeps the theme it had.
+                False, or a field that isn't a style the session can use
+                (named; see ThinkingPromptStyles). The session keeps the
+                theme it had.
         """
         check_flag("repaint", repaint)
         resolved = resolve_theme(theme)
