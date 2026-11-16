@@ -1191,15 +1191,25 @@ class TestInputLoopLifetime:
             except EOFError:
                 answers.append("EOF")
 
+        returned: list[str] = []
+
         async def handler(text: str) -> None:
             asyncio.ensure_future(confirm())
             await asyncio.sleep(0.05)
+            returned.append(text)
 
         with piped_session() as (session, inp):
 
             async def script(run: asyncio.Task[None]) -> None:
                 inp.send_text("/deploy" + ENTER)
-                await asyncio.sleep(0.15)  # the task asks; the handler returns
+                # The task asks and the handler returns: Ctrl+D while the
+                # handler still ran would stop nothing (a fixed sleep lost
+                # that race on a slow CI runner).
+                await wait_until(
+                    lambda: returned == ["/deploy"]
+                    and waiting_for_input(session)
+                    and not session._query_running()
+                )
                 inp.send_text(CTRL_D)
                 await asyncio.wait_for(asyncio.shield(run), 2)  # returns, no error
                 assert answers == ["EOF"]
