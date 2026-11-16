@@ -855,12 +855,14 @@ listed once, and a default is one of them (or `None`): anything else raises
 text with a style prompt_toolkit can't use, such as an ANSI color over
 255, raises `ValueError` as in `add_response()`), and `ButtonConfig` its
 `text` and `style`. A button's `style` is a prompt_toolkit style string
-(`"fg:ansired bold"`, not Rich's `"bright_red"`): one prompt_toolkit can't
-use raises `ValueError` when the button is made. In a box it colors the
-button in every theme, focused or not, and focus swaps its colors
-(reverse video): a focused `fg:ansired` Delete is a red bar, as in the
-terminal theme. Inline, it colors the action's row, and the `❯` shows
-focus. A `Dialog` subclass's own
+(`"bg:ansired fg:ansiwhite bold"`, not Rich's `"bright_red"`): one
+prompt_toolkit can't use raises `ValueError` when the button is made. In a
+box it colors the button in every theme, focused or not, and focus swaps
+its colors (reverse video): that Delete is white on red, and red on white
+when focused. Give it both colors: a text color alone is drawn on the
+theme's button color (`fg:ansired` is red on gray in the dark theme, hard
+to read either way). Inline, it colors the action's row, and the `❯`
+shows focus. A `Dialog` subclass's own
 `title`, `body` and `buttons` (class attributes, or properties), and
 attributes set after a dialog is made, are checked when it's shown; a
 subclass's own `fields` when it's made too, since the form is built from
