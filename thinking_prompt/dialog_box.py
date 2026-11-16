@@ -32,7 +32,7 @@ from prompt_toolkit.layout import (
 )
 from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.layout.layout import walk
-from prompt_toolkit.utils import get_cwidth
+from prompt_toolkit.utils import get_cwidth, to_str
 from prompt_toolkit.widgets import Box, Button, Frame, Label
 from prompt_toolkit.widgets import Dialog as _DialogWidget
 
@@ -129,8 +129,7 @@ def build_box(dialog: Dialog) -> BoxView:
     buttons: list[_Button] = []
     focused: _Button | None = None
     for cfg in dialog._button_configs():
-        button = _Button(cfg.text, dialog._click_handler(cfg))
-        _apply_button_style(button, cfg.style)
+        button = _Button(cfg.text, dialog._click_handler(cfg), style=cfg.style)
         if cfg.focused and focused is None:
             focused = button
         buttons.append(button)
@@ -198,13 +197,20 @@ class _Button(Button):
     """A box dialog's button: as wide as its label needs (prompt_toolkit's
     12 columns at least), but no wider than the room it's given (fit()),
     its label then cut with "…"; the label centred by its columns. (3.0.36
-    centred it by its characters, so wide characters overflowed it.)"""
+    centred it by its characters, so wide characters overflowed it.)
+    ``style`` (a ButtonConfig's) goes after the button's own style, on
+    its window and on its label and arrows, whose classes the theme's
+    button rule paints."""
 
-    def __init__(self, text: str, handler: Callable[[], None]) -> None:
+    def __init__(self, text: str, handler: Callable[[], None], style: str = "") -> None:
         # The width its label needs; ``width`` is what it's drawn at.
         self.natural = max(_LEAST_BUTTON, get_cwidth(text) + 4)
         super().__init__(text=text, handler=handler, width=self.natural)
         self.window.width = lambda: self.width
+        self._style = style
+        if style:
+            own = self.window.style
+            self.window.style = lambda: f"{to_str(own)} {style}"
 
     def fit(self, columns: int) -> None:
         """Draw it at most ``columns`` wide (12 at least)."""
@@ -222,6 +228,11 @@ class _Button(Button):
         fragments = super()._get_text_fragments()
         if len(fragments) == 4 and "button.text" in fragments[2][0]:
             fragments[2] = cast(OneStyleAndTextTuple, (fragments[2][0], label, *fragments[2][2:]))
+        if self._style:
+            fragments = [
+                cast(OneStyleAndTextTuple, (f"{f[0]} {self._style}", *f[1:])) if f[1] else f
+                for f in fragments
+            ]
         return fragments
 
 
@@ -335,24 +346,6 @@ class _ButtonRows(Container):
 
     def is_modal(self) -> bool:
         return False
-
-
-def _apply_button_style(button: Button, extra_style: str) -> None:
-    """Append ``extra_style`` to a Button's style classes.
-
-    The Button widget builds its own style callable that toggles between
-    ``class:button`` and ``class:button.focused`` based on focus. We wrap
-    that callable to append the user's style so focus styling still works.
-    """
-    if not extra_style:
-        return
-    original = button.window.style
-    if callable(original):
-        def combined() -> str:
-            return f"{original()} {extra_style}".strip()
-        button.window.style = combined
-    else:
-        button.window.style = f"{original} {extra_style}".strip()
 
 
 class _BoxOrNotice(Container):

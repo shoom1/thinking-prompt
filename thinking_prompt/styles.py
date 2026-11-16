@@ -282,6 +282,8 @@ class ThinkingPromptStyles:
             color_bg_button="#d1d5db",
             color_bg_selected="#cbd5e1",
             color_shadow="#9ca3af",
+            # White on the accent: color_text_bright, black, is about 3.8:1.
+            dialog_button_focused="bg:#0066cc fg:#ffffff bold",
             code_theme="default",
         )
 
@@ -430,6 +432,10 @@ class ThinkingPromptStyles:
             'dialog shadow': _own(r("dialog_shadow"), bg=True),
             'button': r("dialog_button"),
             'button.focused': _own(r("dialog_button_focused"), fg=True, bg=True),
+            # The label and arrows carry the button class again (button.text),
+            # which the button rule would paint over the focused one.
+            'button.focused button.text': _own(r("dialog_button_focused"), fg=True, bg=True),
+            'button.focused button.arrow': _own(r("dialog_button_focused"), fg=True, bg=True),
             'dialog-choice': r("dialog_choice"),
             'dialog-choice-selected': r("dialog_choice_selected"),
             'dialog-hint': r("dialog_hint"),

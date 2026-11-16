@@ -68,6 +68,14 @@ class TestBuildBox:
         view = build_box(Dialog("T", "B", [ButtonConfig("Danger", result=1, style="class:danger")]))
         assert "class:danger" in _resolved_style(view.buttons[0].window)
 
+    def test_button_style_is_added_to_its_label_and_arrows(self):
+        """After their own classes, which the theme's button rule paints:
+        its colors didn't show in the dark and light themes."""
+        view = build_box(Dialog("T", "B", [ButtonConfig("Danger", result=1, style="fg:ansired")]))
+        shown = [f for f in view.buttons[0]._get_text_fragments() if f[1]]
+        assert [f[1].strip() for f in shown] == ["<", "Danger", ">"]
+        assert all(f[0].endswith(" fg:ansired") for f in shown), shown
+
     def test_focused_and_style_apply_in_subclass_dialogs(self):
         class Styled(Dialog):
             def get_buttons(self):

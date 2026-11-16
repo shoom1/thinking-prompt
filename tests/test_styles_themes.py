@@ -244,6 +244,17 @@ class TestSelectionStyles:
             words = d[name].split()
             assert "fg:#ff6600" in words and "bg:#222222" in words and "reverse" not in words
 
+    @pytest.mark.parametrize("theme", ["dark", "light"])
+    @pytest.mark.parametrize("part", ["button.text", "button.arrow"])
+    def test_a_focused_buttons_label_and_arrows_are_in_its_colors(self, theme: str, part: str):
+        """They carry the button class again, so the button rule painted
+        over the focused one: the focused button looked like the others,
+        but bold."""
+        s = resolve_theme(theme)
+        attrs = _drawn(s, f"class:dialog class:dialog.body class:button.focused class:{part}")
+        assert attrs.bgcolor == s.color_accent_button.lstrip("#")
+        assert attrs.color == "ffffff" and attrs.bold
+
     def test_a_button_token_colors_the_focused_button(self):
         words = ThinkingPromptStyles(color_accent_button="#0066cc").to_style_dict()["button.focused"].split()
         assert "bg:#0066cc" in words and "reverse" not in words
