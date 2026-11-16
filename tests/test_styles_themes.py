@@ -215,6 +215,13 @@ class TestNoPromptToolkitColors:
         """Not the border's muted color, which the frame passes on."""
         assert _drawn(ThinkingPromptStyles(), _DRAWN[12]).color == ""
 
+    @pytest.mark.parametrize("theme", ["terminal", "mono"])
+    def test_a_dropdowns_pick_is_the_terminals_own_color_reversed(self, theme: str):
+        """It was the border's muted color reversed: a gray bar, which
+        doesn't show where bright black is the terminal's background."""
+        attrs = _drawn(resolve_theme(theme), "class:field-dropdown-border class:field-dropdown class:field-dropdown-selected")
+        assert attrs.reverse and attrs.color == "" and attrs.bgcolor == ""
+
     def test_an_explicit_selection_isnt_reversed_by_prompt_toolkit(self):
         """prompt_toolkit's current completion is reverse video: a selection
         set by colors came out swapped, in the completion menu only."""

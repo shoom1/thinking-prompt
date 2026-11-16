@@ -460,7 +460,7 @@ class ThinkingPromptStyles:
             'field-dropdown-border': r("menu_border"),
             # Not the frame's (the border's) muted color.
             'field-dropdown-item': _own(r("menu_item"), fg=True),
-            'field-dropdown-selected': r("menu_item_selected"),
+            'field-dropdown-selected': _own(r("menu_item_selected"), fg=True),
             # Completion menu (uses shared menu styles)
             'completion-menu': _own(r("menu_bg"), fg=True, bg=True),
             'completion-menu.completion': r("menu_item"),
