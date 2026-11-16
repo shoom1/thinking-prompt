@@ -167,6 +167,15 @@ class TestFieldClasses:
     @pytest.mark.parametrize("cls", OPTION_FIELDS, ids=lambda cls: cls.__name__)
     def test_no_options_are_refused(self, cls):
         with pytest.raises(ValueError, match=rf"{cls.__name__} 'k' needs at least one option"):
+            cls("k", "L", options=[])
+
+    @pytest.mark.parametrize("cls", OPTION_FIELDS, ids=lambda cls: cls.__name__)
+    def test_options_are_required(self, cls):
+        """They defaulted to (), which every option field refused."""
+        assert "options" not in {
+            f.name for f in dataclasses.fields(cls) if f.default is not dataclasses.MISSING
+        }
+        with pytest.raises(TypeError, match="options"):
             cls("k", "L")
 
     @pytest.mark.parametrize("cls", [SelectField, DropdownField, RadioField, ChoiceField],
@@ -1484,7 +1493,7 @@ class TestChoiceField:
 
     def test_needs_options(self):
         with pytest.raises(ValueError, match="'c' needs at least one option"):
-            ChoiceField("c", "C")
+            ChoiceField("c", "C", options=[])
 
     @pytest.mark.parametrize("default,value", [("y", "y"), (None, "x")])
     def test_the_pick_is_the_default_else_the_first_option(self, default, value):

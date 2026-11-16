@@ -27,6 +27,12 @@ class TestAppInfo:
         names = [field.name for field in dataclasses.fields(AppInfo)]
         assert names == ["name", "version", "welcome_message"]
 
+    def test_is_frozen(self):
+        """As ButtonConfig, the fields and Spinner are: a callable
+        welcome_message is the way to a banner that changes."""
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            AppInfo(name="App").name = "Other"  # type: ignore[misc]
+
 
 class TestDefaults:
     """A session with no AppInfo."""

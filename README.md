@@ -1050,6 +1050,8 @@ removed:
 | A field's `options`: the list you passed | A tuple of the field's own (`list(field.options)` for a list) |
 | Options that aren't strs (`SelectField(..., options=[1, 2, 3])` returned the int), no options, an option listed twice, or a default that isn't an option (`values=` too) | Strs (`[str(n) for n in ...]`, and `int()` the value back), at least one, each once, and a default among them or `None`: the rest raise `ValueError` |
 | Options, or a checklist's default, as a set or a generator | A list or a tuple (`sorted(options)` for a set): the rest raise `ValueError` |
+| An option field without `options=` (`SelectField("k", "Level")` raised `ValueError`) | `options=` is required: leaving it out raises `TypeError` |
+| An `AppInfo` changed after it's made (`app_info.welcome_message = ...`) | `AppInfo` is frozen, as `ButtonConfig` and the fields are: make a new one, or pass a callable `welcome_message`, called each time the banner prints |
 | A dialog's `fields` or `buttons` that aren't a list or tuple of fields or `ButtonConfig`s, or `values=` that isn't a mapping (`values=[("k", 1)]` was ignored) | Raise `TypeError` when the dialog is made, or when it's shown for one set after |
 | `session.layout` | `session.app.layout` |
 | `session.default_buffer` | `session.app.layout.get_buffer_by_name(DEFAULT_BUFFER)` (prompt_toolkit's, `from prompt_toolkit.enums import DEFAULT_BUFFER`) |
