@@ -117,8 +117,10 @@ def _keys_waiting(inp: Input) -> bool:
             from ctypes import windll
 
             # The console's input handle, or a pipe input's event: signaled
-            # while input waits.
-            return bool(windll.kernel32.WaitForSingleObject(inp.handle, 0) == 0)
+            # while input waits. Only Windows inputs have one (an Input in
+            # general doesn't: AttributeError, below).
+            handle = cast("Any", inp).handle
+            return bool(windll.kernel32.WaitForSingleObject(handle, 0) == 0)
         ready, _, _ = select.select([inp.fileno()], [], [], 0)
         return bool(ready)
     except Exception:
