@@ -8,6 +8,7 @@ can be expanded to show all of its content.
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import logging
 import os
 from collections import deque
@@ -74,6 +75,12 @@ from .types import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Set in the foreground query's context, so the tasks it starts (wait_for()
+# before 3.12, gather(), create_task()) inherit it: see _in_query_sub_task.
+_QUERY_MARK: contextvars.ContextVar[object | None] = contextvars.ContextVar(
+    "thinking_prompt_query", default=None
+)
 
 # on_input() returns the handler it registers with its own type.
 _HandlerT = TypeVar("_HandlerT", bound="InputHandler")
@@ -372,6 +379,11 @@ class ThinkingPromptSession:
         # The foreground query has been cancelled (see _cancel_query): it's
         # unwinding, and the session doesn't cancel it again.
         self._query_cancelled: bool = False
+        # What the foreground query's context holds in _QUERY_MARK, and
+        # whether a cancel ended boxes in a task it started: "Operation
+        # cancelled..." waits for the query (see _announce_task_cancel).
+        self._query_mark: object | None = None
+        self._query_cancel_owed: bool = False
         # The foreground query called exit(): the app stops when it ends
         # (see _run_query), and no input is read meanwhile.
         self._exit_after_query: bool = False
@@ -955,7 +967,33 @@ class ThinkingPromptSession:
         # A cancel the task caught (a time limit on an inner block, say)
         # cancelled nothing: the task went on.
         if task.cancelled():
-            self._announce_cancel(bool(ended) or owed)
+            self._announce_task_cancel(task, bool(ended) or owed)
+
+    def _in_query_sub_task(self, task: asyncio.Task[Any] | None) -> bool:
+        """True for a task the running query started, or one those started
+        (they inherit its context), not the query itself. Read in the
+        task's context: in it, or in a done callback it added."""
+        return (
+            task is not None
+            and task is not self._foreground
+            and self._query_running()
+            and _QUERY_MARK.get() is self._query_mark
+        )
+
+    def _announce_task_cancel(self, task: asyncio.Task[Any] | None, ended: bool) -> None:
+        """Say "Operation cancelled..." after the boxes a cancel of ``task``
+        ended. In a task the running query started, the line waits for the
+        query: a time limit the query catches cancels that task, not the
+        query (wait_for() runs its coroutine in a task of its own before
+        3.12, gather() always). The query's cleanup says it if the query
+        ends cancelled."""
+        if ended and self._in_query_sub_task(task):
+            self._query_cancel_owed = True
+            return
+        if ended and task is not None and task is self._foreground:
+            # The query's own line follows its sub-tasks' boxes too.
+            self._query_cancel_owed = False
+        self._announce_cancel(ended)
 
     def _announce_cancel(self, ended: bool) -> None:
         """Say "Operation cancelled..." after the boxes a cancel ended.
@@ -1074,9 +1112,9 @@ class ThinkingPromptSession:
             elif task is not None and task in self._cancel_owed:
                 # Its last box: the line owed for its inner blocks is this one.
                 self._cancel_owed.discard(task)
-                self._announce_cancel(True)
+                self._announce_task_cancel(task, True)
             else:
-                self._announce_cancel(ended)
+                self._announce_task_cancel(task, ended)
             raise
         except BaseException:
             box.finish(echo=echo)
@@ -1570,9 +1608,16 @@ class ThinkingPromptSession:
                 "A query is already running: one at a time "
                 "(start a task for work beside it)"
             )
-        task: asyncio.Task[_T] = asyncio.ensure_future(coro)
+        mark = object()
+        context = contextvars.copy_context()
+        context.run(_QUERY_MARK.set, mark)
+        # Made in that context: the query's task holds the mark, and the
+        # tasks it starts inherit it.
+        task: asyncio.Task[_T] = context.run(asyncio.ensure_future, coro)
         self._foreground = task
+        self._query_mark = mark
         self._query_cancelled = False
+        self._query_cancel_owed = False
         try:
             try:
                 # wait() rather than await: the query's cancellation (Ctrl+C,
@@ -1602,7 +1647,9 @@ class ThinkingPromptSession:
             return task.result()
         finally:
             self._foreground = None
+            self._query_mark = None
             self._query_cancelled = False
+            self._query_cancel_owed = False
             if self._exit_after_query:
                 # The query called exit(): it has ended, so the app stops.
                 self._exit_after_query = False
@@ -1768,6 +1815,8 @@ class ThinkingPromptSession:
         owed = owner is not None and owner in self._cancel_owed
         if owner is not None:
             self._cancel_owed.discard(owner)
+        # The foreground query's: a cancel ended boxes in tasks it started.
+        owed = owed or (owner is self._foreground and self._query_cancel_owed)
         if cancelled:
             self._announce_cancel(bool(ended) or owed)
 

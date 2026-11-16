@@ -546,6 +546,89 @@ class TestBoxLifecycle:
 
             await run_with(session, handler, script)
 
+    @staticmethod
+    async def _agent_with_tool_timeout(session: ThinkingPromptSession, how: str) -> None:
+        """An outer box, and a tool box under a time limit that runs out in a
+        task of its own (wait_for() runs it in one before 3.12; gather() and
+        a task always do). The query catches the timeout and answers."""
+
+        async def tool() -> None:
+            async with session.thinking(title="Tool") as box:
+                box.append("tool running\n")
+                await asyncio.sleep(3600)
+
+        async def started_tool() -> None:
+            session.start_thinking(title="Tool").append("tool running\n")
+            await asyncio.sleep(3600)
+
+        async with session.thinking(title="Agent") as outer:
+            outer.append("planning\n")
+            try:
+                if how == "wait_for":
+                    await asyncio.wait_for(tool(), 0.05)
+                elif how == "gather":
+                    await asyncio.gather(asyncio.wait_for(tool(), 0.05))
+                elif how == "task":
+                    await asyncio.wait_for(asyncio.ensure_future(tool()), 0.05)
+                else:  # a start_thinking() box, ended with its task
+                    await asyncio.wait_for(asyncio.ensure_future(started_tool()), 0.05)
+            except asyncio.TimeoutError:
+                outer.append("tool timed out; going on\n")
+        session.add_response("final answer")
+
+    @pytest.mark.parametrize("how", ["wait_for", "gather", "task", "start_thinking"])
+    async def test_a_tool_timeout_a_query_catches_says_nothing(self, how):
+        """The time limit cancelled the tool's own task, whose box said
+        "Operation cancelled...", though the query caught the timeout and
+        answered."""
+
+        async def handler(text: str) -> None:
+            await self._agent_with_tool_timeout(session, how)
+
+        with piped_session() as (session, inp):
+
+            def answered() -> bool:
+                return any("final answer" in text for text in transcript_texts(session._display))
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: answered() and waiting_for_input(session))
+                await asyncio.sleep(0.05)  # the tool task's done callbacks
+                transcript = transcript_texts(session._display)
+                assert "Operation cancelled...\n" not in transcript, transcript
+                assert "final answer" in transcript[-1]
+
+            await run_with(session, handler, script)
+
+    async def test_the_app_stopping_ends_a_querys_sub_task_boxes_under_one_line(self):
+        """Each sub-task box the stop ended said a line of its own."""
+        opened = asyncio.Event()
+
+        async def tool(name: str) -> None:
+            async with session.thinking(title=name) as box:
+                box.append(f"{name} running\n")
+                opened.set()
+                await asyncio.sleep(3600)
+
+        async def handler(text: str) -> None:
+            async with session.thinking(title="Agent") as outer:
+                outer.append("planning\n")
+                await asyncio.gather(tool("one"), tool("two"))
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await asyncio.wait_for(opened.wait(), 2)
+                await asyncio.sleep(0.05)  # both tools running
+                session.exit()
+                await asyncio.wait_for(run, 2)
+                transcript = transcript_texts(session._display)
+                assert transcript.count("Operation cancelled...\n") == 1, transcript
+                assert transcript[-1] == "Operation cancelled...\n"
+
+            await run_with(session, handler, script)
+
     async def test_ctrl_c_ends_a_querys_sub_task_boxes_under_one_line(self):
         """The query cancels its sub-task as it unwinds: the sub-task's box
         ends with it, and one "Operation cancelled..." follows all the boxes
