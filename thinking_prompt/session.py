@@ -312,6 +312,9 @@ class ThinkingPromptSession:
         # A fresh instance per session: a shared one would let a tweak to
         # one session's styles restyle every other session.
         self._styles = resolve_theme(theme) if theme is not None else ThinkingPromptStyles()
+        # The theme's color depth as the session took it: a field changed on
+        # session.styles shows once it's passed to set_theme() again.
+        self._theme_depth = self._styles.color_depth
 
         # NO_COLOR is read once at construction (no-color.org: non-empty).
         self._no_color = bool(os.environ.get("NO_COLOR"))
@@ -790,7 +793,7 @@ class ThinkingPromptSession:
         """NO_COLOR (env, at construction) wins; else the theme's hint."""
         if self._no_color:
             return ColorDepth.DEPTH_1_BIT
-        return self._styles.color_depth
+        return self._theme_depth
 
     @property
     def styles(self) -> ThinkingPromptStyles:
@@ -835,6 +838,7 @@ class ThinkingPromptSession:
         style = self._theme_style(resolved)
         self._display.set_theme(resolved)
         self._styles = resolved
+        self._theme_depth = resolved.color_depth
         self._style = style
         if repaint:
             self._repaint_console()

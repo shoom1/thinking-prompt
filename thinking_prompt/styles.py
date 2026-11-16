@@ -80,8 +80,9 @@ class ThinkingPromptStyles:
     - Combine with spaces: 'bg:#1a1a2e fg:#e0e0e0 italic'
     The ``markdown_*`` fields are Rich style strings ('bold red on white'),
     since Rich draws markdown: its 'red' is the terminal's red, where
-    prompt_toolkit's is #ff0000. A field neither can use raises ValueError,
-    naming it, when a session takes the theme.
+    prompt_toolkit's is #ff0000. ``color_depth`` is a ColorDepth or None,
+    ``code_theme`` a Pygments style name. A field the session can't use
+    raises ValueError, naming it, when a session takes the theme.
 
     Base theme colors control the overall appearance:
     - Customize `menu_*` styles to change both dropdown and completion menus
@@ -558,22 +559,26 @@ THEMES: dict[str, Callable[[], ThinkingPromptStyles]] = {
 }
 
 
-# Fields that aren't style strings.
-_NOT_STYLES = ("color_depth", "code_theme")
-
-
 def _check_fields(styles: ThinkingPromptStyles) -> None:
-    """Raise ValueError naming the first field that isn't a style the
-    session can use: a color token a color, a markdown_* field a Rich style
-    (Rich draws markdown), any other a prompt_toolkit style. prompt_toolkit's
-    own error named only the color, and Rich raised its StyleSyntaxError."""
-    for field in fields(styles):
+    """Raise ValueError naming the first field that isn't one the session
+    can use: a color token a color, a markdown_* field a Rich style (Rich
+    draws markdown), color_depth a ColorDepth or None, code_theme a str, any
+    other a prompt_toolkit style. prompt_toolkit's own error named only the
+    color, Rich raised its StyleSyntaxError, and a color_depth of 256 failed
+    at every redraw. Only this class's fields: a subclass's own aren't
+    styles."""
+    for field in fields(ThinkingPromptStyles):
         name = field.name
-        if name in _NOT_STYLES:
-            continue
         value = getattr(styles, name)
+        if name == "color_depth":
+            if value is not None and not isinstance(value, ColorDepth):
+                raise ValueError(f"ThinkingPromptStyles color_depth: must be a ColorDepth or None, got {value!r}")
+            continue
         if not isinstance(value, str):
             raise ValueError(f"ThinkingPromptStyles {name}: must be a str, got {value!r}")
+        if name == "code_theme":
+            # A Pygments style name; an unknown one falls back to "default".
+            continue
         if name.startswith("markdown_"):
             _check_rich_style(name, value)
             continue

@@ -963,8 +963,10 @@ in prompt_toolkit's style format) win over the tokens;
 `styles.to_style_dict()` shows the resolved result. The `markdown_*` fields
 are Rich style strings (`markdown_link="bold red on white"`), since Rich
 draws markdown: Rich's `red` is the terminal's red, prompt_toolkit's is
-`#ff0000`. A field neither can use raises `ValueError` naming it when the
-session takes the theme (`theme=`, `set_theme()`).
+`#ff0000`. A field the session can't use (a style neither can parse, a
+`color_depth` that isn't a `ColorDepth` or `None`, a `code_theme` that
+isn't a str) raises `ValueError` naming it when the session takes the
+theme (`theme=`, `set_theme()`).
 
 Code highlighting — fenced code in markdown and `add_code()` alike —
 follows the theme's `code_theme`: `"ansi_dark"` by default, the
