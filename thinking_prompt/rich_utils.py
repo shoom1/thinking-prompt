@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 from functools import lru_cache
+from itertools import pairwise
 from typing import Any
 
 # A hyperlink as Rich writes one (OSC 8): ESC ] 8 ; params ; URL ST, its
@@ -33,52 +34,89 @@ def _ansi_safe(text: str) -> str:
     """Rich's or Pygments' output, for prompt_toolkit's ANSI(): with no
     \x01, \x02 or C1 control (text between \x01 and \x02 would reach the
     terminal raw, so a model's answer could set the window title or the
-    clipboard), and no escapes but color codes. A hyperlink shows as its
-    text, then its URL (_links_as_text): prompt_toolkit's parser knows only
-    color codes, and printed the rest of one as text ("8;id=…;URL")."""
-    text = _links_as_text(text.translate(_RAW_MARKS))
+    clipboard), and no escapes but color codes. A hyperlink is left as its
+    text: prompt_toolkit's parser knows only color codes, and printed the
+    rest of one as text ("8;id=…;URL"). Its URL is shown as text where it
+    was made (see _print_linked)."""
+    text = _LINK.sub(lambda link: link.group(3), text.translate(_RAW_MARKS))
     return _STRAY_ESCAPE.sub("", _OSC.sub("", text))
 
 
-def _links_as_text(ansi: str) -> str:
-    """Rich's hyperlinks as their text, then " (URL)" after a link's last
-    piece, unless its text is the URL: a terminal shows a hyperlink's URL
-    only where it supports them, and one left open across the UI's partial
-    redraws could spread to what's drawn after it. A URL shown as text, on
-    its line, the terminal can open. It takes the spaces Rich padded the
-    end of its line with, where there are some."""
-    matches = list(_LINK.finditer(ansi))
-    if not matches:
-        return ansi
-    url_after: dict[int, str] = {}  # a link's last piece (its start) -> " (URL)"
-    for parts in _links(ansi, matches):
-        url = parts[0].group(2)
-        shown = _COLOR_CODE.sub("", "".join(part.group(3) for part in parts)).strip()
-        if url and shown not in (url, url.split(":", 1)[-1]):  # "x@y" for "mailto:x@y"
-            url_after[parts[-1].start()] = f" ({url})"
-    out: list[str] = []
-    added: list[tuple[int, int]] = []  # where a URL went in the output, how long
-    done, pos = 0, 0
-    for match in matches:
-        out.append(ansi[pos:match.start()] + match.group(3))
-        done += len(out[-1])
-        extra = url_after.get(match.start())
-        if extra:
-            out.append(extra)
-            added.append((done, len(extra)))
-            done += len(extra)
-        pos = match.end()
-    out.append(ansi[pos:])
-    text = "".join(out)
-    if not added:
+def _shown_once(text: str, url: str) -> bool:
+    """True if a link showing ``text`` shows its URL already, or nothing:
+    its URL is shown alone ("x@y" shows "mailto:x@y")."""
+    return not text or text in (url, url.split(":", 1)[-1])
+
+
+def _print_linked(console: Any, renderable: Any, **kwargs: Any) -> None:
+    """Print ``renderable`` to ``console`` (writing to a StringIO), each link
+    with its URL as text, since a terminal shows a hyperlink's URL only
+    where it supports them: a Text's after each link, in brackets, laid
+    out with the text; another renderable's (a Panel, a Table) listed under
+    it, a line each, since Rich lays them out inside it."""
+    from rich.text import Text
+
+    if isinstance(renderable, Text):
+        console.print(_with_urls(renderable, console), **kwargs)
+        return
+    start = len(console.file.getvalue())
+    console.print(renderable, **kwargs)
+    for line in _link_lines(console.file.getvalue()[start:]):
+        console.print(line, soft_wrap=True)
+
+
+def _with_urls(text: Any, console: Any) -> Any:
+    """``text`` (a Text) with each link's URL after it, in brackets."""
+    def url_of(style: Any) -> str | None:
+        return console.get_style(style, default="none").link if style else None
+
+    links: list[list[Any]] = []  # [start, end, URL], a link's pieces joined
+    spans: list[tuple[int, int, str | None]] = [(0, len(text), url_of(text.style))]
+    spans += [(span.start, span.end, url_of(span.style)) for span in text.spans]
+    for start, end, url in sorted(spans, key=lambda span: span[0]):
+        if not url:
+            continue
+        if links and links[-1][2] == url and start <= links[-1][1]:
+            links[-1][1] = max(links[-1][1], end)
+        else:
+            links.append([start, end, url])
+    plain = text.plain
+    links = [link for link in links if not _shown_once(plain[link[0]:link[1]].strip(), link[2])]
+    if not links:
         return text
-    # Each line as wide as before, where its padding allows.
-    lines = text.split("\n")
-    for index, columns in _per_line(text, added).items():
-        line = lines[index]
-        padding = len(line) - len(line.rstrip(" "))
-        lines[index] = line[: len(line) - min(columns, padding)]
-    return "\n".join(lines)
+    pieces = text.divide(link[1] for link in links)
+    shown = text.blank_copy()
+    for piece, link in zip(pieces, [*links, None], strict=True):
+        shown.append_text(piece)
+        if link is not None:
+            shown.append(" (")
+            shown.append(link[2], style="markdown.link_url")
+            shown.append(")")
+    return shown
+
+
+def _link_lines(ansi: str) -> list[Any]:
+    """The links in Rich's output ``ansi``, a Text each: its text, then its
+    URL in brackets, in the styles of a markdown link; once each."""
+    from rich.text import Text
+
+    lines: list[Any] = []
+    seen: set[tuple[str, str]] = set()
+    for parts in _links(ansi, list(_LINK.finditer(ansi))):
+        url = parts[0].group(2)
+        # A link Rich wrapped is one piece per line: a space between them.
+        text = parts[0].group(3)
+        for before, part in pairwise(parts):
+            text += (" " if "\n" in ansi[before.end():part.start()] else "") + part.group(3)
+        text = " ".join(_COLOR_CODE.sub("", text).split())
+        if not url or (text, url) in seen:
+            continue
+        seen.add((text, url))
+        if _shown_once(text, url):
+            lines.append(Text(url, style="markdown.link_url"))
+        else:
+            lines.append(Text.assemble((text, "markdown.link"), " (", (url, "markdown.link_url"), ")"))
+    return lines
 
 
 def _links(ansi: str, matches: list[re.Match[str]]) -> list[list[re.Match[str]]]:
@@ -112,25 +150,16 @@ def _beside(ansi: str, first: re.Match[str], second: re.Match[str]) -> bool:
     )
 
 
-def _per_line(text: str, added: list[tuple[int, int]]) -> dict[int, int]:
-    """The columns put in each line of ``text``: by line index."""
-    per_line: dict[int, int] = {}
-    for offset, length in added:
-        index = text.count("\n", 0, offset)
-        per_line[index] = per_line.get(index, 0) + length
-    return per_line
-
-
 def _is_rich_renderable(obj: Any) -> bool:
     """Check if an object is a Rich renderable."""
     return hasattr(obj, '__rich_console__') or hasattr(obj, '__rich__')
 
 
 def _rich_to_ansi(renderable: Any, theme: Any = None, width: int | None = None) -> str:
-    """Convert a Rich renderable to an ANSI-formatted string, as printing
-    it to a console ``width`` columns wide would (None: the terminal's, as
-    Rich finds it): text wraps, and a Panel or Table spans the width.
-    """
+    """Convert a Rich renderable (or a markup string) to an ANSI-formatted
+    string, as printing it to a console ``width`` columns wide would (None:
+    the terminal's, as Rich finds it): text wraps, and a Panel or Table
+    spans the width. Links show their URLs (see _print_linked)."""
     try:
         from io import StringIO
 
@@ -139,7 +168,9 @@ def _rich_to_ansi(renderable: Any, theme: Any = None, width: int | None = None) 
         console = Console(
             file=file, force_terminal=True, legacy_windows=False, theme=theme, width=width
         )
-        console.print(renderable)
+        if isinstance(renderable, str):
+            renderable = console.render_str(renderable)
+        _print_linked(console, renderable)
         return _ansi_safe(file.getvalue())
     except ImportError:
         return _ansi_safe(str(renderable))
@@ -153,7 +184,7 @@ def _renderable_to_ansi(renderable: Any, theme: Any = None, width: int | None = 
     newline that ends it, a space before the next streamed word) and none
     is added. Other renderables (Panel, Table) are laid out ``width``
     columns wide (None: the terminal's, as Rich finds it), ending with
-    their last line's newline.
+    their last line's newline. Links show their URLs (see _print_linked).
 
     NO_COLOR is intentionally ignored here. The contract of this helper, and
     of the public APIs that build on it (a box's append_rich/set_line_rich),
@@ -185,7 +216,7 @@ def _renderable_to_ansi(renderable: Any, theme: Any = None, width: int | None = 
             # Rich 14.3, text wider than the console lost a space that ended
             # it, and words streamed a piece at a time ran together.
             console.width = max(console.width, renderable.cell_len + 1)
-        console.print(renderable, end="", highlight=False, soft_wrap=is_text)
+        _print_linked(console, renderable, end="", highlight=False, soft_wrap=is_text)
         return _ansi_safe(f.getvalue())
     except ImportError:
         return _ansi_safe(str(renderable))
@@ -203,6 +234,7 @@ def _get_markdown_cls() -> Any:
     Raises:
         ImportError: If Rich is not installed.
     """
+    from markdown_it.token import Token
     from rich.console import Console, ConsoleOptions, RenderResult
     from rich.markdown import Heading, Markdown
     from rich.text import Text
@@ -224,8 +256,58 @@ def _get_markdown_cls() -> Any:
                     yield Text('')
                 yield text
 
+    def styled(tag: str, tokens: list[Token]) -> list[Token]:
+        """``tokens`` in the style markdown.<tag>, as Rich styles an inline
+        tag (its token types its own: "link_open" is Rich's hyperlink)."""
+        return [Token(f"styled_{tag}_open", tag, 1), *tokens, Token(f"styled_{tag}_close", tag, -1)]
+
+    def text(content: str) -> Token:
+        return Token("text", "", 0, content=content)
+
+    def plain(tokens: list[Token]) -> str:
+        return "".join(
+            " " if token.type == "softbreak" else token.content
+            for token in tokens
+            if token.type in ("text", "code_inline", "softbreak")
+        ).strip()
+
+    def link(tokens: list[Token], url: str) -> list[Token]:
+        """A link showing ``tokens``: them, then " (URL)"; or the URL alone."""
+        if _shown_once(plain(tokens), url):
+            return styled("link_url", tokens or [text(url)])
+        return [*styled("link", tokens), text(" ("), *styled("link_url", [text(url)]), text(")")]
+
+    def links_shown(tokens: list[Token]) -> list[Token]:
+        """A paragraph's (or a cell's) tokens with each link as its text and
+        URL (see link()), and an image as a link to it, "🌆 " first as Rich
+        shows one (inside a link, its text alone): Rich lays the URL out
+        with the text, within the width."""
+        shown: list[Token] = []
+        opened: list[tuple[str, int]] = []  # an open link's URL, where its text starts
+        for token in tokens:
+            if token.type == "link_open":
+                opened.append((str(token.attrs.get("href", "")), len(shown)))
+            elif token.type == "link_close" and opened:
+                url, start = opened.pop()
+                shown[start:] = link(shown[start:], url)
+            elif token.type == "image":
+                alt = text(plain(token.children or []))
+                url = str(token.attrs.get("src", ""))
+                shown += [text("🌆 "), *([alt] if opened else link([alt], url))]
+            else:
+                shown.append(token)
+        return shown
+
     class _LeftAlignedMarkdown(Markdown):
         elements = {**Markdown.elements, 'heading_open': SimpleHeading}
+        # The styles of a link's text and its URL (see links_shown()).
+        inlines = Markdown.inlines | {"link", "link_url"}
+
+        def __init__(self, markup: str, **kwargs: Any) -> None:
+            super().__init__(markup, **kwargs)
+            for token in self.parsed:
+                if token.type == "inline" and token.children:
+                    token.children = links_shown(token.children)
 
     return _LeftAlignedMarkdown
 
@@ -235,7 +317,7 @@ def _markdown_to_ansi(
 ) -> str:
     """Convert markdown to ANSI-formatted string using Rich, laid out
     ``width`` columns wide (None: the terminal's, as Rich finds it). A link
-    shows its text, then its URL (see _ansi_safe)."""
+    shows its text, then its URL in brackets, laid out with the text."""
     try:
         from io import StringIO
 

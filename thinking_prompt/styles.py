@@ -215,8 +215,8 @@ class ThinkingPromptStyles:
     markdown_code_block: str = ""
     markdown_item_bullet: str = "bold"
     markdown_item_number: str = "bold"
-    markdown_link: str = ""
-    markdown_link_url: str = "underline"
+    markdown_link: str = ""  # A link's text
+    markdown_link_url: str = "underline"  # A link's URL, in brackets after its text
     markdown_hr: str = "dim"
     markdown_block_quote: str = "italic"
 

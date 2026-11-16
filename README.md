@@ -534,11 +534,15 @@ the session shows a hint in the status bar (`Busy — press Ctrl+C to
 cancel`), it still reads your text; setting a status replaces the hint.
 
 A link, in markdown or Rich's `[link=…]` markup, shows its text and then
-its URL, `the docs (https://…)`, whole on its line for the terminal to open
-(a link whose text is its URL shows it once): a terminal hyperlink (OSC 8)
-hides the URL where the terminal doesn't support them. Rich output, markdown
-and code reach the terminal with no escapes but colors, so text in them (a
-model's answer) can't set the window title or the clipboard.
+its URL, `the docs (https://…)`, laid out with the text: a URL that doesn't
+fit at the end of a line moves whole to the next, for the terminal to open
+(one longer than a line is folded). A link whose text is its URL shows it
+once. A Panel's or a Table's links are listed under it, a line each. (A
+terminal hyperlink, OSC 8, would hide the URL where the terminal doesn't
+support them.) The `markdown_link` style is a link's text, and
+`markdown_link_url` its URL. Rich output, markdown and code reach the
+terminal with no escapes but colors, so text in them (a model's answer)
+can't set the window title or the clipboard.
 
 The session sometimes puts a hint in the status bar in place of your
 status: `Busy — press Ctrl+C to cancel` when Enter (or Ctrl+D) is pressed

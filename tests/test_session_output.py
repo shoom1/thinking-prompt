@@ -269,11 +269,25 @@ class TestBackgroundsEndWithTheirLine:
         assert "note" in raw and not self._bg_across_a_newline(raw), repr(raw)
 
 
-class TestEscapesInRichOutput:
-    """Rich writes a link as an OSC 8 hyperlink, which prompt_toolkit's ANSI
-    parser doesn't know (it printed "8;id=…;URL" as text); and prompt_toolkit
-    writes what's between \x01 and \x02 to the terminal raw, so text (a
-    model's answer) could set the window title or the clipboard."""
+def _session_at(columns: int) -> ThinkingPromptSession:
+    """A session (keeping its console output) on a terminal ``columns`` wide."""
+    with create_app_session(output=_ShortOutput(24, columns=columns)):
+        return _session()
+
+
+def _style_of(fragments: Any, text: str) -> str:
+    """The style of the first character of ``text`` in ``fragments`` (one
+    character each, as an ANSI parse gives them)."""
+    fragments = to_formatted_text(fragments)
+    return fragments[fragment_list_to_text(fragments).index(text)][0]
+
+
+class TestLinks:
+    """A link shows its text, then its URL in brackets, `the docs (URL)`,
+    laid out by Rich within the width. Rich writes a link as an OSC 8
+    hyperlink, which prompt_toolkit's ANSI parser doesn't know (it printed
+    "8;id=…;URL" as text), and which hides the URL where the terminal
+    doesn't support them."""
 
     def test_a_markdown_link_shows_its_text_and_url(self):
         pytest.importorskip("rich")
@@ -302,10 +316,26 @@ class TestEscapesInRichOutput:
         raw = _terminal(lambda s: s.add_rich("[link=https://e.com]site[/link] here"))
         assert "site (https://e.com) here" in _shown(raw)
 
-    def test_a_link_whose_text_is_its_url_shows_it_once(self):
+    @pytest.mark.parametrize("source, url", [
+        ("Docs: <https://example.com/x>", "https://example.com/x"),
+        ("Docs: [https://example.com/x](https://example.com/x)", "https://example.com/x"),
+        ("Mail <me@example.com>", "me@example.com"),
+    ], ids=["autolink", "text is the URL", "email"])
+    def test_a_link_whose_text_is_its_url_shows_it_once(self, source, url):
         pytest.importorskip("rich")
-        raw = _terminal(lambda s: s.add_response("Docs: <https://example.com/x>", markdown=True))
-        assert _shown(raw).count("https://example.com/x") == 1
+        raw = _terminal(lambda s: s.add_response(source, markdown=True))
+        assert _shown(raw).count(url) == 1
+
+    def test_a_link_with_no_text_shows_its_url(self):
+        """It showed nothing."""
+        pytest.importorskip("rich")
+        raw = _terminal(lambda s: s.add_response("See [](https://e.com/empty) here.", markdown=True))
+        assert "See https://e.com/empty here." in _shown(raw)
+
+    def test_an_image_shows_its_text_and_url(self):
+        pytest.importorskip("rich")
+        raw = _terminal(lambda s: s.add_response("![a chart](https://e.com/c.png)", markdown=True))
+        assert "a chart (https://e.com/c.png)" in _shown(raw)
 
     def test_a_links_formatted_text_keeps_its_format(self):
         pytest.importorskip("rich")
@@ -313,13 +343,77 @@ class TestEscapesInRichOutput:
         assert "the docs (https://e.com) now." in _shown(raw)
         assert re.search(r"\x1b\[[0-9;]*1[0-9;]*mthe", raw)  # "the" bold
 
-    def test_a_long_url_isnt_broken_by_a_newline(self):
-        """The terminal finds a URL on its line: one cut by a newline opens
-        a wrong page."""
+    def test_markdown_link_styles_the_text_and_markdown_link_url_the_url(self):
+        """markdown_link styled nothing, and markdown_link_url the text."""
         pytest.importorskip("rich")
-        url = "https://example.com/" + "a" * 100
-        raw = _terminal(lambda s: s.add_response(f"See [the docs]({url}) for more.", markdown=True))
+        from thinking_prompt import ThinkingPromptStyles
+
+        session = _session(theme=ThinkingPromptStyles(markdown_link="bold", markdown_link_url="italic"))
+        session.add_response("See [the docs](https://e.com/d) now.", markdown=True)
+        (printed,) = session._display.kept
+        text, url = _style_of(printed, "the docs"), _style_of(printed, "https://e.com/d")
+        assert "bold" in text and "italic" not in text
+        assert "italic" in url and "bold" not in url
+
+    @pytest.mark.parametrize("source", [
+        "A paragraph long enough to wrap, with [a link to the docs](https://example.com/docs/page) in it and more words after.",
+        "> A quote with [a link](https://example.com/quoted/page) near the end of a line of text here.",
+        "[one](https://example.com/one) [two](https://example.com/two) [three](https://example.com/three)",
+        "- an item with [a short link](https://example.com/short) in it, wrapping onto a second line",
+        "| Name | Link |\n|------|------|\n| docs | [here](https://example.com/table-docs) |",
+    ], ids=["paragraph", "quote", "links on one line", "list item", "table"])
+    def test_markdown_with_links_stays_within_the_width(self, source):
+        """The URL was put in after Rich laid the text out, so lines ran
+        past the width and the terminal broke them mid-word."""
+        pytest.importorskip("rich")
+        session = _session_at(40)
+        session.add_response(source, markdown=True)
+        (printed,) = echoed(session._display)
+        assert max(len(line) for line in printed.splitlines()) <= 40, printed
+
+    def test_a_url_that_fits_a_line_isnt_broken_by_a_newline(self):
+        """The terminal finds a URL on its line: one cut by a newline opens
+        a wrong page. (One longer than a line Rich folds.)"""
+        pytest.importorskip("rich")
+        url = "https://example.com/" + "a" * 50
+        raw = _terminal(lambda s: s.add_response(f"See the long sentence before [the docs]({url}) for more.", markdown=True))
         assert url in _shown(raw)
+
+    def test_rich_text_with_a_link_stays_within_the_width(self):
+        pytest.importorskip("rich")
+        session = _session_at(40)
+        session.add_rich("Some words before [link=https://example.com/a/long/page]the link[/link] and after it")
+        (printed,) = echoed(session._display)
+        assert max(len(line) for line in printed.splitlines()) <= 40, printed
+        assert "the link (https://example.com/a/long/page)" in " ".join(printed.split())
+
+    def test_a_panels_links_are_listed_under_it(self):
+        """Its right border was pushed out of line."""
+        pytest.importorskip("rich")
+        from rich.panel import Panel
+
+        session = _session_at(40)
+        session.add_rich(Panel("See [link=https://e.com/docs]the docs[/link] and [link=https://e.com]https://e.com[/link]."))
+        (printed,) = echoed(session._display)
+        lines = printed.splitlines()
+        assert {len(line) for line in lines[:3]} == {40}, printed  # the panel
+        assert "See the docs and https://e.com." in lines[1]
+        assert lines[3:] == ["the docs (https://e.com/docs)", "https://e.com"]
+
+    def test_a_boxs_rich_text_keeps_no_escapes(self):
+        pytest.importorskip("rich")
+        session = _session()
+        box = session.start_thinking()
+        box.append_rich(f"[link=https://e.com]site[/link] {_INJECTED}\n")
+        assert "\x1b]" not in box.text and "\x01" not in box.text
+        assert "site (https://e.com)" in _shown(box.text)
+
+
+class TestEscapesInRichOutput:
+    """prompt_toolkit writes what's between \x01 and \x02 to the terminal
+    raw, so text (a model's answer) could set the window title or the
+    clipboard."""
+
 
     @pytest.mark.parametrize("path", ["markdown", "rich", "code"])
     @pytest.mark.parametrize("injected", [_INJECTED, "\x9d0;pwned\x07"], ids=["marked", "C1"])
@@ -336,37 +430,24 @@ class TestEscapesInRichOutput:
             raw = _terminal(lambda s: s.add_code(f"x = '{text}'"))
         assert "\x1b]0;" not in raw and "\x01" not in raw and "\x9d" not in raw
 
-    def test_a_boxs_rich_text_keeps_no_escapes(self):
-        pytest.importorskip("rich")
-        session = _session()
-        box = session.start_thinking()
-        box.append_rich(f"[link=https://e.com]site[/link] {_INJECTED}\n")
-        assert "\x1b]" not in box.text and "\x01" not in box.text
-        assert "site (https://e.com)" in box.text
-
 
 class TestRichWidth:
     """Rich lays its output out at the width of the session's terminal,
     which needn't be the process's (here there's none: Rich alone would
     take 80 columns)."""
 
-    @staticmethod
-    def _session_at(columns: int) -> ThinkingPromptSession:
-        with create_app_session(output=_ShortOutput(24, columns=columns)):
-            return _session()
-
     def test_add_rich_lays_a_panel_out_at_the_terminal_width(self):
         pytest.importorskip("rich")
         from rich.panel import Panel
 
-        session = self._session_at(40)
+        session = _session_at(40)
         session.add_rich(Panel("boxed"))
         (printed,) = echoed(session._display)
         assert {len(line) for line in printed.splitlines()} == {40}
 
     def test_markdown_wraps_at_the_terminal_width(self):
         pytest.importorskip("rich")
-        session = self._session_at(40)
+        session = _session_at(40)
         session.add_response(" ".join(["word"] * 30), markdown=True)
         (printed,) = echoed(session._display)
         assert max(len(line) for line in printed.splitlines()) <= 40
@@ -376,7 +457,7 @@ class TestRichWidth:
         pytest.importorskip("rich")
         from rich.panel import Panel
 
-        session = self._session_at(40)
+        session = _session_at(40)
         box = session.start_thinking()
         box.append_rich(Panel("boxed"))
         lines = fragment_list_to_text(to_formatted_text(ANSI(box.text))).splitlines()
