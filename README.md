@@ -1053,6 +1053,7 @@ removed:
 | `theme="auto"` | Drop it: the default follows the terminal |
 | `styles.to_rich_theme_dict()` | Drop it: the session's Rich output uses its theme already |
 | `rich_to_ansi(renderable)` | Drop it: a box's `append_rich()` and `set_line_rich()`, and the session's `add_rich()`, take Rich markup and renderables |
+| `box.append_rich(x, theme=rich_theme)`, `box.set_line_rich(i, x, theme=rich_theme)` | Drop `theme=`: a box's Rich writes use the session's theme, as `add_rich()` does; style the renderable itself (`Text(x, style="green")`, `[green]…[/green]`) |
 | `ThinkingPromptSession(editing_mode=...)` | Drop it: the keys are prompt_toolkit's default (Emacs) ones, which the dialogs and fields are built for |
 | Ctrl+C at an idle prompt exits | Ctrl+C never exits (it clears the line): Ctrl+D exits, or your own `/exit` command |
 | Ctrl+D while a handler runs: exits | Stop the handler with Ctrl+C first: Ctrl+D exits at an idle prompt |

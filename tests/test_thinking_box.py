@@ -290,13 +290,17 @@ class TestRich:
         box.append_rich("[markdown.h1]x[/markdown.h1]")
         assert "\x1b[31m" in box.text
 
-    def test_an_explicit_theme_wins(self):
-        pytest.importorskip("rich")
-        from rich.theme import Theme
-
+    @pytest.mark.parametrize("write", [
+        lambda box: box.append_rich("x", theme="dark"),
+        lambda box: box.set_line_rich(0, "x", theme="dark"),
+    ], ids=["append_rich", "set_line_rich"])
+    def test_a_rich_write_takes_no_theme(self, write):
+        """theme= was a Rich Theme, where everywhere else a theme is a name
+        or a ThinkingPromptStyles: theme="dark" raised from inside Rich."""
         box = make_manager().create_box()
-        box.append_rich("[accent]x[/accent]", theme=Theme({"accent": "green"}))
-        assert "\x1b[32m" in box.text
+        with pytest.raises(TypeError, match="theme"):
+            write(box)
+        assert box.text == ""
 
 
 class TestSessionBoxes:
