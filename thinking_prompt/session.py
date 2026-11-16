@@ -53,7 +53,7 @@ from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.output import ColorDepth, Output
 from prompt_toolkit.styles import BaseStyle, DynamicStyle, Style, merge_styles
 
-from ._text import format_exception_detail
+from ._text import checked_fragments, format_exception_detail
 from .app_info import AppInfo
 from .display import Display
 from .frames import POLL_INTERVAL, FrameScheduler
@@ -72,6 +72,7 @@ from .types import (
     check_input_while_busy,
     check_key,
     check_placement,
+    check_text,
 )
 
 logger = logging.getLogger(__name__)
@@ -86,38 +87,10 @@ _QUERY_MARK: contextvars.ContextVar[object | None] = contextvars.ContextVar(
 _HandlerT = TypeVar("_HandlerT", bound="InputHandler")
 _T = TypeVar("_T")
 
-_FORMATTED_TEXT = "a str, or formatted text: (style, text) pairs, such as a FormattedText, or HTML or ANSI"
-
-
-def _response_fragments(content: object) -> FormattedText:
-    """``content`` as a FormattedText, or ValueError: checked before anything
-    keeps it, since a bad fragment kept in the transcript fails every
-    repaint after it."""
-    if isinstance(content, (HTML, ANSI)):
-        content = to_formatted_text(content)
-    if isinstance(content, (list, tuple)):
-        for fragment in content:
-            if not (
-                isinstance(fragment, tuple)
-                and len(fragment) in (2, 3)
-                and isinstance(fragment[0], str)
-                and isinstance(fragment[1], str)
-            ):
-                raise ValueError(
-                    f"add_response() takes {_FORMATTED_TEXT}; got the fragment {fragment!r}"
-                )
-            try:
-                # As prompt_toolkit reads a fragment's style when it prints
-                # it: class names (looked up, here in no rules), then colors
-                # and attributes.
-                Style([]).get_attrs_for_style_str(fragment[0])
-            except (ValueError, AssertionError) as exc:
-                raise ValueError(
-                    f"add_response() takes {_FORMATTED_TEXT}; the fragment "
-                    f"{fragment!r} has a style prompt_toolkit can't use: {exc}"
-                ) from None
-        return FormattedText(content)
-    raise ValueError(f"add_response() takes {_FORMATTED_TEXT}; got {content!r}")
+def _note(content: object, takes: str) -> str | FormattedText:
+    """A system, error, warning or success line's content: a str, or
+    formatted text checked (see checked_fragments)."""
+    return content if isinstance(content, str) else checked_fragments(content, takes)
 
 
 # Reverse video on what shows the cursor in a list or a dialog, for 1-bit
@@ -303,6 +276,7 @@ class ThinkingPromptSession:
 
         self._message = message
         self._app_info = app_info
+        check_text("thinking_title", thinking_title)
         self._thinking_title = thinking_title
         check_placement(dialog_placement, name="dialog_placement")
         self._dialog_placement: Placement = dialog_placement
@@ -935,6 +909,7 @@ class ThinkingPromptSession:
             box.append("Done!\\n")
             box.finish()
         """
+        check_text("title", title, optional=True)
         check_flag("border", border, optional=True)
         # 0: the title line only; 1: the newest row, no hint.
         check_count("max_lines", max_lines, 0, optional=True)
@@ -1181,7 +1156,7 @@ class ThinkingPromptSession:
                 raise ValueError(f"add_response(markdown=True) takes a str, got {content!r}")
             # As a FormattedText: prompt_toolkit's print shows a plain list
             # as its repr.
-            self._display.formatted(_response_fragments(content))
+            self._display.formatted(checked_fragments(content, "add_response() takes"))
             return
 
         # Handle markdown
@@ -1192,57 +1167,81 @@ class ThinkingPromptSession:
         # Plain text
         self._display.response(content)
 
-    def add_system(self, content: str) -> None:
+    def add_system(self, content: str | Sequence[OneStyleAndTextTuple] | HTML | ANSI) -> None:
         """
         Print a system message: a note from the app rather than an answer
         (e.g. "Connecting..."), in the system style.
 
         Args:
-            content: The message.
+            content: The message: a str, or formatted text ((style, text)
+                pairs, such as a FormattedText, or HTML or ANSI), shown in
+                its own style over the system style.
+
+        Raises:
+            ValueError: If content is neither a str nor formatted text.
+                Nothing is printed or kept then.
 
         Example:
             session.add_system("Connecting to server...")
         """
-        self._display.system(content)
+        self._display.system(_note(content, "add_system() takes"))
 
-    def add_error(self, content: str) -> None:
+    def add_error(self, content: str | Sequence[OneStyleAndTextTuple] | HTML | ANSI) -> None:
         """
         Add an error message with [ERROR] prefix.
 
         Args:
-            content: The error message content.
+            content: The message: a str, or formatted text ((style, text)
+                pairs, such as a FormattedText, or HTML or ANSI), shown in
+                its own style over the error style.
+
+        Raises:
+            ValueError: If content is neither a str nor formatted text.
+                Nothing is printed or kept then.
 
         Example:
             session.add_error("Failed to connect to server")
             # Displays: [ERROR] Failed to connect to server
         """
-        self._display.error(content)
+        self._display.error(_note(content, "add_error() takes"))
 
-    def add_warning(self, content: str) -> None:
+    def add_warning(self, content: str | Sequence[OneStyleAndTextTuple] | HTML | ANSI) -> None:
         """
         Add a warning message with [WARN] prefix.
 
         Args:
-            content: The warning message content.
+            content: The message: a str, or formatted text ((style, text)
+                pairs, such as a FormattedText, or HTML or ANSI), shown in
+                its own style over the warning style.
+
+        Raises:
+            ValueError: If content is neither a str nor formatted text.
+                Nothing is printed or kept then.
 
         Example:
             session.add_warning("Rate limit approaching")
             # Displays: [WARN] Rate limit approaching
         """
-        self._display.warning(content)
+        self._display.warning(_note(content, "add_warning() takes"))
 
-    def add_success(self, content: str) -> None:
+    def add_success(self, content: str | Sequence[OneStyleAndTextTuple] | HTML | ANSI) -> None:
         """
         Add a success message with [OK] prefix.
 
         Args:
-            content: The success message content.
+            content: The message: a str, or formatted text ((style, text)
+                pairs, such as a FormattedText, or HTML or ANSI), shown in
+                its own style over the success style.
+
+        Raises:
+            ValueError: If content is neither a str nor formatted text.
+                Nothing is printed or kept then.
 
         Example:
             session.add_success("Operation completed")
             # Displays: [OK] Operation completed
         """
-        self._display.success(content)
+        self._display.success(_note(content, "add_success() takes"))
 
     def add_code(self, code: str, language: str = "python") -> None:
         """

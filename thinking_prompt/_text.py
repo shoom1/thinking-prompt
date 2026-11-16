@@ -7,7 +7,9 @@ from __future__ import annotations
 import re
 from itertools import groupby
 
+from prompt_toolkit.formatted_text import FormattedText, to_formatted_text
 from prompt_toolkit.formatted_text.base import OneStyleAndTextTuple
+from prompt_toolkit.styles import Style
 from prompt_toolkit.utils import get_cwidth
 
 
@@ -49,6 +51,39 @@ def cut(text: str, columns: int) -> str:
             break
         kept += char
     return kept.rstrip() + "…"
+
+
+FORMATTED_TEXT = "a str, or formatted text: (style, text) pairs, such as a FormattedText, or HTML or ANSI"
+
+
+def checked_fragments(content: object, takes: str) -> FormattedText:
+    """``content``, formatted text, as a FormattedText; anything else raises
+    ValueError, its message led by ``takes`` ("add_response() takes").
+    Checked before anything keeps it: a bad fragment kept in the transcript,
+    or in a dialog, fails every redraw after it."""
+    if hasattr(content, "__pt_formatted_text__") and not isinstance(content, list):
+        content = to_formatted_text(content)
+    if isinstance(content, (list, tuple)):
+        for fragment in content:
+            if not (
+                isinstance(fragment, tuple)
+                and len(fragment) in (2, 3)
+                and isinstance(fragment[0], str)
+                and isinstance(fragment[1], str)
+            ):
+                raise ValueError(f"{takes} {FORMATTED_TEXT}; got the fragment {fragment!r}")
+            try:
+                # As prompt_toolkit reads a fragment's style when it prints
+                # it: class names (looked up, here in no rules), then colors
+                # and attributes.
+                Style([]).get_attrs_for_style_str(fragment[0])
+            except (ValueError, AssertionError) as exc:
+                raise ValueError(
+                    f"{takes} {FORMATTED_TEXT}; the fragment {fragment!r} has a "
+                    f"style prompt_toolkit can't use: {exc}"
+                ) from None
+        return FormattedText(content)
+    raise ValueError(f"{takes} {FORMATTED_TEXT}; got {content!r}")
 
 
 def styled_lines(style: str, text: str) -> list[OneStyleAndTextTuple]:

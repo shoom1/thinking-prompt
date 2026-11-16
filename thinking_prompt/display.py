@@ -165,6 +165,19 @@ class Display:
         self._transcript.append(style, text)
         self._print_to_console(FormattedText(styled_lines(style, text)))
 
+    def _output_note(self, style: str, prefix: str, content: str | FormattedText) -> None:
+        """Output a line in ``style`` after ``prefix`` ("[ERROR] "): a str,
+        or formatted text in its own style over ``style``."""
+        if isinstance(content, str):
+            self._output_styled(style, f"{prefix}{content}\n")
+            return
+        fragments = styled_lines(style, prefix)
+        for fragment in content:
+            fragments.extend(styled_lines(f"{style} {fragment[0]}" if fragment[0] else style, fragment[1]))
+        fragments.append(("", "\n"))
+        self._transcript.append_formatted(fragments)
+        self._print_to_console(FormattedText(fragments))
+
     def _output_ansi(self, content: str) -> None:
         """Output baked ANSI string to console and transcript.
 
@@ -242,41 +255,41 @@ class Display:
         """
         self._output_styled("class:transcript.assistant-message", f"{content}\n")
 
-    def system(self, content: str) -> None:
+    def system(self, content: str | FormattedText) -> None:
         """
         Output system message to console and transcript.
 
         Args:
             content: The system message content.
         """
-        self._output_styled("class:transcript.system", f"{content}\n")
+        self._output_note("class:transcript.system", "", content)
 
-    def error(self, content: str) -> None:
+    def error(self, content: str | FormattedText) -> None:
         """
         Output error message with [ERROR] prefix.
 
         Args:
             content: The error message content.
         """
-        self._output_styled("class:transcript.error", f"[ERROR] {content}\n")
+        self._output_note("class:transcript.error", "[ERROR] ", content)
 
-    def warning(self, content: str) -> None:
+    def warning(self, content: str | FormattedText) -> None:
         """
         Output warning message with [WARN] prefix.
 
         Args:
             content: The warning message content.
         """
-        self._output_styled("class:transcript.warning", f"[WARN] {content}\n")
+        self._output_note("class:transcript.warning", "[WARN] ", content)
 
-    def success(self, content: str) -> None:
+    def success(self, content: str | FormattedText) -> None:
         """
         Output success message with [OK] prefix.
 
         Args:
             content: The success message content.
         """
-        self._output_styled("class:transcript.success", f"[OK] {content}\n")
+        self._output_note("class:transcript.success", "[OK] ", content)
 
     def markdown(self, content: str) -> None:
         """

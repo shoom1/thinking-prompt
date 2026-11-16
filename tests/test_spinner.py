@@ -30,6 +30,17 @@ class TestSpinner:
         with pytest.raises(dataclasses.FrozenInstanceError):
             Spinner(("a", "b")).interval = 1.0  # type: ignore[misc]
 
+    @pytest.mark.parametrize(
+        "frames",
+        ["abc", ("a", 1), {"a", "b"}, (f for f in ("a", "b")), 5],
+        ids=["str", "not a str", "set", "generator", "int"],
+    )
+    def test_frames_are_a_list_or_tuple_of_strs(self, frames):
+        """A str was taken as its letters, a set's order changes from run to
+        run, and a frame that wasn't a str failed at the first draw."""
+        with pytest.raises(ValueError, match="frames must be a sequence of str"):
+            Spinner(frames)
+
     def test_no_frames_raises_and_points_at_none(self):
         with pytest.raises(ValueError, match="spinner=None"):
             Spinner(())

@@ -8,7 +8,7 @@ import threading
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
-from .types import check_flag
+from .types import check_flag, check_text
 
 if TYPE_CHECKING:
     import asyncio
@@ -243,7 +243,12 @@ class ThinkingBox:
         return self._header.text if self._header is not None else ""
 
     def set_title(self, text: str) -> None:
-        """Set the title on the box's header line (thread-safe)."""
+        """Set the title on the box's header line (thread-safe).
+
+        Raises:
+            ValueError: If ``text`` isn't a str ("" for none).
+        """
+        check_text("title", text)
         if self._finished:
             self._warn_finished("set_title")
             return

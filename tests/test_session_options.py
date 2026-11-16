@@ -5,6 +5,7 @@ import dataclasses
 import re
 
 import pytest
+from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.keys import Keys
 
 from tests.helpers import echoed, keep_console, transcript_texts
@@ -136,6 +137,28 @@ class TestOptionChecks:
         message = rf"^{name} must be True or False \(or None\), got 'no'$"
         with pytest.raises(ValueError, match=message):
             async with session.thinking(**{name: "no"}):
+                pytest.fail("the block ran")
+        assert not session.is_thinking
+
+    @pytest.mark.parametrize("title", [None, 5, HTML("<b>x</b>")], ids=["None", "int", "HTML"])
+    def test_thinking_title_is_a_str(self, title):
+        """HTML showed its repr in every box's header; None cleared it."""
+        message = rf"^thinking_title must be a str, got {re.escape(repr(title))}$"
+        with pytest.raises(ValueError, match=message):
+            ThinkingPromptSession(thinking_title=title)
+
+    @pytest.mark.parametrize("title", [5, HTML("<b>x</b>")], ids=["int", "HTML"])
+    def test_a_boxs_title_is_a_str_or_none(self, title):
+        session = ThinkingPromptSession()
+        message = rf"^title must be a str \(or None\), got {re.escape(repr(title))}$"
+        with pytest.raises(ValueError, match=message):
+            session.start_thinking(title=title)
+        assert not session.is_thinking
+
+    async def test_thinkings_title_is_checked_before_the_block(self):
+        session = ThinkingPromptSession()
+        with pytest.raises(ValueError, match=r"^title must be a str \(or None\), got 5$"):
+            async with session.thinking(title=5):  # type: ignore[arg-type]
                 pytest.fail("the block ran")
         assert not session.is_thinking
 

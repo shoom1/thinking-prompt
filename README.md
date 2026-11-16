@@ -531,6 +531,10 @@ session.add_error("Connection failed")
 session.add_system("Connecting to server...")
 ```
 
+The four status messages take what `add_response()` takes, a str or
+formatted text: `add_error(HTML("<b>disk</b> full"))` shows in the error
+style with "disk" bold. For an exception, `add_error(str(exc))`.
+
 `session.status_text` reads back what you set, a Rich renderable too. While
 the session shows a hint in the status bar (`Busy — press Ctrl+C to
 cancel`), it still reads your text; setting a status replaces the hint.
@@ -869,7 +873,8 @@ session = ThinkingPromptSession(
 ```
 
 A `Spinner` is its frames and the seconds each is shown:
-`Spinner(("◐", "◓", "◑", "◒"), interval=0.15)`. One frame makes a static mark.
+`Spinner(("◐", "◓", "◑", "◒"), interval=0.15)`. The frames are a list or a
+tuple of strs; one frame (`("●",)`) makes a static mark.
 
 **Upgrading from 0.3:** full screen (Ctrl+E with
 `AppInfo(fullscreen_enabled=True)`) was removed: drop `fullscreen_enabled=`
@@ -1019,6 +1024,9 @@ removed:
 | A flag passed by position: `box.finish(False)` (0.4's `add_to_history`), `set_theme(theme, True)` | By name: `box.finish(echo=...)`, `set_theme(theme, repaint=True)` |
 | A flag given as `0`/`1` or a str (`thinking_echo="no"` turned echo on) | `True` or `False`: anything else raises `ValueError` |
 | A dialog `title` that isn't a str (`HTML(...)` showed in a box, not inline), `title=None`, `ButtonConfig(style=None)` | A str (`""` for none): anything else raises `ValueError` |
+| `add_error()`, `add_warning()`, `add_success()` given something that isn't text (`add_error(exc)`, or `HTML(...)`, which printed its repr) | A str or formatted text (`add_error(str(exc))`): anything else raises `ValueError` |
+| A box title that isn't a str (`thinking_title=`, `title=`, `set_title()`): `set_title(None)` cleared it | A str (`""` for none; `title=None` still means the session's `thinking_title`): anything else raises `ValueError` |
+| `Spinner("abc")` (three frames), or frames that aren't strs | A list or tuple of strs (`("|",)` for one frame): anything else raises `ValueError` |
 | A dataclass field passed by position, past a form field's `key` and `label`, a button's `text` and a spinner's `frames`: `TextField("name", "Name", "Shown to others")`, `ButtonConfig("OK", "ok")`, `Spinner(frames, 0.2)`, `AppInfo("MyApp")` | By name: `description=...`, `result=...`, `interval=...`, `name=...`; every field of `AppInfo` and `ThinkingPromptStyles` |
 | `box.get_content()` | `box.text` |
 | `session.set_status(x)` | `session.status_text = x` (a Rich renderable too) |
