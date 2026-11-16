@@ -70,7 +70,9 @@ from .fields import (
     ChoiceField,
     Field,
     _check_align_values,
-    _check_once,
+    _check_default,
+    _checked_defaults,
+    _checked_options,
     _Form,
 )
 from .rows import RowControl
@@ -107,6 +109,10 @@ class ButtonConfig:
     handler: Callable[[], None] | None = None
 
     def __post_init__(self) -> None:
+        for name in ("text", "style"):
+            value = getattr(self, name)
+            if not isinstance(value, str):
+                raise ValueError(f"ButtonConfig {name} must be a str, got {value!r}")
         if self.handler is not None and self.result is not None:
             raise ValueError(
                 "ButtonConfig takes a result or a handler, not both: a handler "
@@ -147,10 +153,10 @@ class Dialog:
     override them per instance, subclasses override them as class attributes.
 
     Attributes:
-        title: Title, shown in the box's frame or as the first inline row
-            (default: none).
-        body: Text (str, HTML, ANSI, FormattedText), shown in a Label, or
-            any prompt_toolkit container.
+        title: Title (a str), shown in the box's frame or as the first
+            inline row (default: none).
+        body: Text (str, HTML, ANSI, FormattedText, or a callable returning
+            one), shown in a Label, or any prompt_toolkit container.
         buttons: ButtonConfigs (default: none). A dialog needs something to
             focus: at least one button, fields, or a focusable body (e.g. a
             TextArea, closed with Escape).
@@ -261,6 +267,9 @@ class Dialog:
         for name, value in passed.items():
             if not isinstance(value, _NotPassed):
                 setattr(self, name, value)
+        if not isinstance(self.title, str):
+            raise ValueError(f"Dialog title must be a str, got {self.title!r}")
+        _check_body(self.body)
         check_count("max_height", self.max_height, 1, optional=True)
         if not (
             self.width is None
@@ -498,9 +507,7 @@ def _button_dialog(
     max_height: int | None = None,
 ) -> Dialog:
     """One button per option, returning its text; Escape returns None."""
-    if not options:
-        raise ValueError("button_dialog() needs at least one option")
-    _check_once("button_dialog()", options)
+    options = _checked_options("button_dialog()", options)
     return Dialog(
         title,
         text,
@@ -522,12 +529,11 @@ def _choice_dialog(
 
     Box: a choice list field with OK / Cancel: Enter on an option returns
     it, and OK returns the pick. Inline: one numbered action per option.
-    Either way the cursor starts on ``default`` (the first option if it
-    isn't one).
+    Either way the cursor starts on ``default`` (the first option without
+    one).
     """
-    if not options:
-        raise ValueError("choice_dialog() needs at least one option")
-    _check_once("choice_dialog()", options)
+    options = _checked_options("choice_dialog()", options)
+    _check_default("choice_dialog()", default, options)
     if placement == "inline":
         return Dialog(
             title,
@@ -541,7 +547,7 @@ def _choice_dialog(
     dialog = Dialog(
         title,
         text,
-        fields=[ChoiceField("choice", "", options=list(options), default=default)],
+        fields=[ChoiceField("choice", "", options=options, default=default)],
         placement="box",
         max_height=max_height,
     )
@@ -563,19 +569,12 @@ def _checklist_dialog(
 ) -> Dialog:
     """Check any number of options, one per line: OK returns the checked ones
     (in option order), Cancel and Escape None."""
-    if not options:
-        raise ValueError("checklist_dialog() needs at least one option")
-    _check_once("checklist_dialog()", options)
-    if default is None or isinstance(default, str):
-        # A str would be taken letter by letter, none of them an option.
-        raise ValueError(
-            f"checklist_dialog() default must be a sequence of options "
-            f"(() for none), got {default!r}"
-        )
+    options = _checked_options("checklist_dialog()", options)
+    default = _checked_defaults("checklist_dialog()", default, options)
     dialog = Dialog(
         title,
         text,
-        fields=[ChecklistField("checked", "", options=list(options), default=tuple(default))],
+        fields=[ChecklistField("checked", "", options=options, default=default)],
         placement=placement,
         max_height=max_height,
     )
@@ -585,6 +584,23 @@ def _checklist_dialog(
         ButtonConfig("Cancel"),
     ]
     return dialog
+
+
+def _check_body(body: object) -> None:
+    """A dialog's body is text (formatted text, or a callable returning
+    it) or a prompt_toolkit container: anything else failed each redraw."""
+    if (
+        body is None
+        or isinstance(body, (str, list))
+        or callable(body)
+        or hasattr(body, "__pt_formatted_text__")
+        or is_container(body)
+    ):
+        return
+    raise ValueError(
+        "Dialog body must be text (str, HTML, ANSI, FormattedText) or a "
+        f"prompt_toolkit container, got {body!r}"
+    )
 
 
 def _nothing_to_focus(dialog: Dialog) -> str:

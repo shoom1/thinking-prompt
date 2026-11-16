@@ -13,6 +13,7 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
+from prompt_toolkit.formatted_text import ANSI, HTML, FormattedText
 from prompt_toolkit.layout import HSplit, Window
 from prompt_toolkit.widgets import Label
 
@@ -52,6 +53,13 @@ def _click(dialog: Any, index: int) -> Any:
 # =============================================================================
 
 class TestButtonConfig:
+    @pytest.mark.parametrize("name", ["text", "style"])
+    def test_its_text_and_style_are_strs(self, name):
+        """A label that isn't a str failed when the dialog was shown."""
+        kwargs: dict[str, Any] = {"text": "OK", name: 5}
+        with pytest.raises(ValueError, match=rf"^ButtonConfig {name} must be a str, got 5$"):
+            ButtonConfig(**kwargs)
+
     """Tests for ButtonConfig dataclass."""
 
     def test_button_config_defaults_and_values(self):
@@ -135,7 +143,7 @@ class TestBuiltinDialogs:
         assert d.escape_result is None
 
     def test_checklist_ok_returns_the_checked_options_cancel_none(self):
-        d = _checklist_dialog("Tools", "Pick any", ["a", "b", "c"], default=["c", "a", "z"])
+        d = _checklist_dialog("Tools", "Pick any", ["a", "b", "c"], default=["c", "a"])
         assert [b.text for b in d.get_buttons()] == ["OK", "Cancel"]
         assert self._results(d) == [["a", "c"], None]
         assert d.escape_result is None
@@ -147,7 +155,7 @@ class TestBuiltinDialogs:
     @pytest.mark.parametrize("default", ["search", None], ids=["a str", "None"])
     def test_checklist_default_is_a_sequence_of_options(self, default):
         """A str would be taken letter by letter, none of them an option."""
-        with pytest.raises(ValueError, match=r"checklist_dialog\(\) default must be a sequence of options"):
+        with pytest.raises(ValueError, match=r"checklist_dialog\(\): default must be a sequence of options"):
             _checklist_dialog("Tools", "Pick any", ["search", "code"], default=default)
 
     def test_buttons_need_options(self):
@@ -166,6 +174,44 @@ class TestBuiltinDialogs:
         with pytest.raises(ValueError, match=rf"^{re.escape(call)}: option 'a' is listed twice"):
             build(["a", "b", "a"])
 
+    HELPERS = [
+        (lambda options: _button_dialog("T", "B", options), "button_dialog()"),
+        (lambda options: _choice_dialog("T", "B", options), "choice_dialog()"),
+        (lambda options: _choice_dialog("T", "B", options, placement="inline"), "choice_dialog()"),
+        (lambda options: _checklist_dialog("T", "B", options), "checklist_dialog()"),
+        (lambda options: _checklist_dialog("T", "B", options, placement="inline"), "checklist_dialog()"),
+    ]
+    HELPER_IDS = ["button", "choice box", "choice inline", "checklist box", "checklist inline"]
+
+    @pytest.mark.parametrize("build,call", HELPERS, ids=HELPER_IDS)
+    def test_an_option_that_isnt_a_str_is_refused_naming_the_call(self, build, call):
+        """choice_dialog("Port", "Pick", [8080, 8081]) opened, then raised
+        TypeError at every redraw: no key got out."""
+        with pytest.raises(ValueError, match=rf"^{re.escape(call)}: options must be str, got 8080"):
+            build([8080, 8081])
+
+    @pytest.mark.parametrize("build,call", HELPERS, ids=HELPER_IDS)
+    def test_options_given_as_one_str_are_refused_naming_the_call(self, build, call):
+        with pytest.raises(ValueError, match=rf"^{re.escape(call)}: options must be a sequence of str, got 'ab'"):
+            build("ab")
+
+    @pytest.mark.parametrize("placement", ["box", "inline"])
+    def test_a_choice_default_that_isnt_an_option_is_refused(self, placement):
+        with pytest.raises(ValueError, match=r"^choice_dialog\(\): default 'Blue' isn't one of its options"):
+            _choice_dialog("T", "B", ["Light", "Dark"], default="Blue", placement=placement)
+
+    @pytest.mark.parametrize("placement", ["box", "inline"])
+    def test_a_checklist_default_that_isnt_an_option_is_refused(self, placement):
+        with pytest.raises(ValueError, match=r"^checklist_dialog\(\): default 'c' isn't one of its options"):
+            _checklist_dialog("T", "B", ["a", "b"], default=["c"], placement=placement)
+
+    def test_options_from_an_iterator_are_all_kept(self):
+        """The duplicate check used them up: button_dialog() built no buttons."""
+        d = _button_dialog("T", "B", (option for option in ["a", "b"]))
+        assert [button.text for button in d.buttons] == ["a", "b"]
+        d = _checklist_dialog("T", "B", (option for option in ["a", "b"]))
+        assert d.fields[0].options == ("a", "b")
+
     def test_box_dropdown_is_a_choice_list_starting_on_the_default(self):
         d = _choice_dialog("Theme", "Select:", ["Light", "Dark", "System"], default="Dark")
         d._placement = "box"
@@ -174,9 +220,8 @@ class TestBuiltinDialogs:
         assert isinstance(control.item, ChoiceField) and control.item.label == ""
         assert start is control._group.rows[1].window
 
-    @pytest.mark.parametrize("default", [None, "Blue"])
-    def test_box_dropdown_without_a_valid_default_starts_on_the_first_option(self, default):
-        d = _choice_dialog("Theme", "Select:", ["Light", "Dark"], default=default)
+    def test_box_dropdown_without_a_default_starts_on_the_first_option(self):
+        d = _choice_dialog("Theme", "Select:", ["Light", "Dark"])
         d._placement = "box"
         _, start = d._content()
         (control,) = d._form.controls
@@ -353,6 +398,31 @@ class TestDialogEdgeCases:
 class TestDialog:
     """Dialog is concrete: built from arguments or subclassed. Its class
     attributes are the only defaults."""
+
+    def test_a_title_that_isnt_a_str_is_refused(self):
+        """Dialog(title=5) opened, then raised TypeError at every redraw."""
+        with pytest.raises(ValueError, match=r"^Dialog title must be a str, got 5$"):
+            Dialog(5, "B", [ButtonConfig("OK")])  # type: ignore[arg-type]
+
+    def test_a_subclasss_title_is_checked_too(self):
+        class Bad(Dialog):
+            title = 5  # type: ignore[assignment]
+
+        with pytest.raises(ValueError, match=r"^Dialog title must be a str, got 5$"):
+            Bad()
+
+    @pytest.mark.parametrize("body", [5, 1.5, object()], ids=["int", "float", "object"])
+    def test_a_body_that_isnt_text_or_a_container_is_refused(self, body):
+        with pytest.raises(ValueError, match=r"^Dialog body must be text \(str, HTML, ANSI, FormattedText\) or a prompt_toolkit container, got "):
+            Dialog("T", body, [ButtonConfig("OK")])
+
+    @pytest.mark.parametrize("body", [
+        "", "text", HTML("<b>x</b>"), ANSI("x"), FormattedText([("", "x")]), [("", "x")],
+        lambda: "x", None, Label("x"), HSplit([Window()]),
+    ], ids=["empty", "str", "HTML", "ANSI", "FormattedText", "pairs", "callable", "None",
+            "widget", "container"])
+    def test_text_and_containers_are_bodies(self, body):
+        Dialog("T", body, [ButtonConfig("OK")])
 
     def test_defaults_come_from_class_attributes(self):
         d = Dialog()

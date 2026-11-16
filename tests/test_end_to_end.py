@@ -4170,34 +4170,6 @@ class TestDialogFields:
 
             await run_with(session, handler, script)
 
-    @pytest.mark.parametrize("key", [DOWN, TAB], ids=["down", "tab"])
-    async def test_a_list_with_no_options_is_skipped(self, key):
-        dialog = Dialog(
-            "T",
-            fields=[
-                SelectField("s", "Size", options=["a", "b"]),
-                RadioField("r", "Mode", options=[]),
-                CheckboxField("c", "Cache"),
-            ],
-            placement="box",
-        )
-        dialog.buttons = [ButtonConfig("OK", handler=lambda: dialog.set_result(dialog.values))]
-        results: list[Any] = []
-
-        async def handler(text: str) -> None:
-            results.append(await session.show_dialog(dialog))
-
-        with piped_session() as (session, inp):
-
-            async def script(run: asyncio.Task[None]) -> None:
-                inp.send_text("go" + ENTER)
-                await wait_until(lambda: dialog_rendered(session))
-                inp.send_text(key + " ")             # past the empty list: check Cache
-                inp.send_text(TAB + ENTER)           # OK
-                await wait_until(lambda: results == [{"s": None, "r": None, "c": True}])
-
-            await run_with(session, handler, script)
-
     async def test_fields_without_buttons_escape_with_none_keeping_the_edits(self):
         dialog = Dialog("T", fields=[CheckboxField("on", "On")], placement="inline")
         results: list[Any] = []

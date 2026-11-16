@@ -794,9 +794,13 @@ Every field takes `key`, `label`, `description` and `default`. A check,
 radio or choice list with no label and no description shows just its options.
 A field keeps its `options` (and a checklist its `default`, a sequence of
 options: `()` for none) as a tuple of its own, so changing the list you
-passed doesn't change the field. An option listed twice raises
-`ValueError`, in a field and in `button_dialog()`, `choice_dialog()` and
-`checklist_dialog()`.
+passed doesn't change the field. Options are strs, at least one, each
+listed once, and a default is one of them (or `None`): anything else raises
+`ValueError` when the field is made, and so do a `key`, `label` or
+`description` that isn't a str. `button_dialog()`, `choice_dialog()` and
+`checklist_dialog()` check their options and default the same way, as
+`Dialog` its `title` (a str) and `body` (text or a container), and
+`ButtonConfig` its `text`.
 
 **Keys:** in a box, ↑↓ move a row at a time and Tab / Shift+Tab a field at a
 time (Tab on to the buttons after the last field, Shift+Tab from the buttons
@@ -995,6 +999,7 @@ removed:
 | `TextField(edit_width=N)` | `width=N` |
 | `Dialog(width=0)`, `Dialog(width=-1)` (or a subclass's `width`) | `width=None` (fit the content), `width="full"` |
 | A field's `options`: the list you passed | A tuple of the field's own (`list(field.options)` for a list) |
+| Options that aren't strs (`SelectField(..., options=[1, 2, 3])` returned the int), no options, or a default that isn't an option (`values=` too) | Strs (`[str(n) for n in ...]`, and `int()` the value back), at least one, and a default among them or `None`: the rest raise `ValueError` |
 | `session.layout` | `session.app.layout` |
 | `session.default_buffer` | `session.app.layout.get_buffer_by_name(DEFAULT_BUFFER)` (prompt_toolkit's, `from prompt_toolkit.enums import DEFAULT_BUFFER`) |
 | `StreamingContent`, `ThinkingHeader` | Drop them: write with a box's methods; the header comes from `thinking_title`, `spinner` and `spinner_position` |

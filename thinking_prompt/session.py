@@ -1875,6 +1875,8 @@ class ThinkingPromptSession:
                 another event loop than the session's.
             EOFError: If the session stops while the dialog is open (see
                 show_dialog()).
+            ValueError: If ``title`` or a button's text isn't a str, or
+                ``text`` isn't text.
 
         Example:
             if await session.yes_no_dialog("Confirm", "Delete this file?"):
@@ -1912,6 +1914,8 @@ class ThinkingPromptSession:
                 another event loop than the session's.
             EOFError: If the session stops while the dialog is open (see
                 show_dialog()).
+            ValueError: If ``title`` or ``ok_text`` isn't a str, or ``text``
+                isn't text.
 
         Example:
             await session.message_dialog("Info", "Operation completed.")
@@ -1935,7 +1939,7 @@ class ThinkingPromptSession:
         Args:
             title: Dialog title.
             text: Dialog body text.
-            options: The options, each a button.
+            options: The options (str), each a button.
             placement: "box" or "inline"; None (default) uses the session's
                 dialog_placement.
             max_height: The most rows the dialog takes; what doesn't fit
@@ -1951,7 +1955,9 @@ class ThinkingPromptSession:
                 another event loop than the session's.
             EOFError: If the session stops while the dialog is open (see
                 show_dialog()).
-            ValueError: If ``options`` is empty, or an option is listed twice.
+            ValueError: If ``options`` is empty, isn't a sequence of str,
+                or lists an option twice, or ``title`` isn't a str or
+                ``text`` isn't text.
 
         Example:
             action = await session.button_dialog(
@@ -1983,7 +1989,7 @@ class ThinkingPromptSession:
         Args:
             title: Dialog title.
             text: Dialog body text.
-            options: List of options to choose from.
+            options: The options (str) to choose from.
             default: The option selected, with the cursor on it, when the
                 dialog opens (optional; the first option otherwise).
             placement: "box" or "inline"; None (default) uses the session's
@@ -2001,7 +2007,9 @@ class ThinkingPromptSession:
                 another event loop than the session's.
             EOFError: If the session stops while the dialog is open (see
                 show_dialog()).
-            ValueError: If ``options`` is empty, or an option is listed twice.
+            ValueError: If ``options`` is empty, isn't a sequence of str,
+                or lists an option twice, ``default`` isn't one of them,
+                ``title`` isn't a str or ``text`` isn't text.
 
         Example:
             theme = await session.choice_dialog(
@@ -2031,8 +2039,8 @@ class ThinkingPromptSession:
         Args:
             title: Dialog title.
             text: Text above the options ("" for none).
-            options: The options to check.
-            default: Options checked at first (others are ignored).
+            options: The options (str) to check.
+            default: Options checked at first.
             placement: "box" or "inline"; None (default) uses the session's
                 dialog_placement.
             max_height: The most rows the dialog takes; what doesn't fit
@@ -2048,8 +2056,10 @@ class ThinkingPromptSession:
                 another event loop than the session's.
             EOFError: If the session stops while the dialog is open (see
                 show_dialog()).
-            ValueError: If ``options`` is empty, an option is listed twice,
-                or ``default`` is a str or None rather than a sequence.
+            ValueError: If ``options`` is empty, isn't a sequence of str,
+                or lists an option twice, ``default`` isn't a sequence of
+                them (a str or None), ``title`` isn't a str or ``text``
+                isn't text.
 
         Example:
             tools = await session.checklist_dialog(
