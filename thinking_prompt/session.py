@@ -53,7 +53,7 @@ from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.output import ColorDepth, Output
 from prompt_toolkit.styles import BaseStyle, DynamicStyle, Style, merge_styles
 
-from ._text import checked_fragments, format_exception_detail
+from ._text import checked_fragments, drawn_text, format_exception_detail
 from .app_info import AppInfo
 from .display import Display
 from .frames import POLL_INTERVAL, FrameScheduler
@@ -631,13 +631,13 @@ class ThinkingPromptSession:
         """``text``, or a callable's result if it's text: "" when it isn't,
         or when the callable raises (logged once per callable and
         ``name``), since either raised at every redraw."""
+        if isinstance(text, tuple):
+            # Pairs, checked when set: prompt_toolkit draws only a list.
+            return FormattedText(text)
         if not callable(text):
             return text
         try:
-            result = text()
-            if result is None or isinstance(result, str):
-                return result
-            return checked_fragments(result, f"a callable {name} must return")
+            return drawn_text(text(), f"a callable {name} must return")
         except Exception:
             if self._failed_texts.get(name) is not text:
                 self._failed_texts[name] = text

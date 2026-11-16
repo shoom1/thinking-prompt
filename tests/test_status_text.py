@@ -3,6 +3,8 @@ The status bar: session.status_text, and the kinds of text it shows.
 """
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from prompt_toolkit.formatted_text import ANSI, HTML, FormattedText
@@ -251,5 +253,42 @@ class TestCallablesThatDontReturnText:
                 errors = [r for r in caplog.records if r.levelno >= logging.ERROR]
                 # One line per callable: the status, the prompt and the box.
                 assert len(errors) == 3, [r.getMessage() for r in errors]
+
+            await run_with(session, lambda text: None, script)
+
+
+def _three_jobs_kinds() -> list[Any]:
+    from prompt_toolkit.formatted_text import Template, merge_formatted_text
+
+    return [
+        (("bold", "3 jobs"), ("", " | idle")),
+        lambda: merge_formatted_text([HTML("<b>3 jobs</b>"), " | idle"]),
+        lambda: Template("{} | idle").format(HTML("<b>3 jobs</b>")),
+        lambda: lambda: "3 jobs | idle",
+    ]
+
+
+_THREE_JOBS_IDS = ["tuple of pairs", "merge_formatted_text", "Template", "callable returning a callable"]
+
+
+class TestTextOfEveryKindIsDrawn:
+    """A tuple of pairs passed the check and then raised at every redraw;
+    a callable returning a callable (merge_formatted_text(),
+    Template.format()), which prompt_toolkit calls again, drew nothing."""
+
+    @pytest.mark.parametrize("name", ["status_text", "message"])
+    @pytest.mark.parametrize("index", range(4), ids=_THREE_JOBS_IDS)
+    async def test_it_is_drawn(self, name, index):
+        import asyncio
+
+        from tests.test_end_to_end import piped_session, run_with, screen_lines, wait_until
+
+        value = _three_jobs_kinds()[index]
+        with piped_session(rows=12) as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                setattr(session, name, value)
+                await wait_until(lambda: any("3 jobs | idle" in line for line in screen_lines(session)))
+                assert run.done() is False
 
             await run_with(session, lambda text: None, script)
