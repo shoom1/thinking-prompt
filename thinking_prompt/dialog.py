@@ -129,6 +129,10 @@ class ButtonConfig:
                 "ButtonConfig takes a result or a handler, not both: a handler "
                 "decides the result itself (dialog.set_result(...))."
             )
+        if self.handler is not None and not callable(self.handler):
+            raise TypeError(
+                f"ButtonConfig {self.text!r}: handler must be a function (or None), got {self.handler!r}"
+            )
         if inspect.iscoroutinefunction(self.handler):
             raise TypeError(
                 "ButtonConfig handler must be a regular function, not async: "
@@ -302,14 +306,7 @@ class Dialog:
             raise TypeError(
                 f"Dialog values must be a mapping of field keys to values (or None), got {values!r}"
             )
-        check_count("max_height", self.max_height, 1, optional=True)
-        if not (
-            self.width is None
-            or self.width == "full"
-            or (isinstance(self.width, int) and not isinstance(self.width, bool) and self.width >= 1)
-        ):
-            raise ValueError(f'width must be at least 1, "full" or None, got {self.width!r}')
-        _check_align_values(self.align_values)
+        _check_sizes(self)
         # Not an attribute: one named values would hide the values property.
         self._start_values = values
         # One control per field, holding its value (values) until the next
@@ -489,6 +486,7 @@ class Dialog:
         fields start afresh, from ``values=`` or their defaults."""
         _check_shown(self.title, self.body, self.escapable)
         _check_parts(self.fields, self.buttons)
+        _check_sizes(self)
         self._manager = manager
         self._placement = placement
         self._form = self._new_form()
@@ -630,6 +628,21 @@ def _check_shown(title: object, body: object, escapable: object) -> None:
         raise ValueError(f"Dialog title must be a str, got {title!r}")
     _check_body(body)
     check_flag("Dialog escapable", escapable)
+
+
+def _check_sizes(dialog: Dialog) -> None:
+    """A dialog's max_height is an int of at least 1 or None, its width one
+    too or "full", and align_values one it takes: checked when it's made
+    and again when it's shown (one set after failed at every redraw)."""
+    check_count("max_height", dialog.max_height, 1, optional=True)
+    width = dialog.width
+    if not (
+        width is None
+        or width == "full"
+        or (isinstance(width, int) and not isinstance(width, bool) and width >= 1)
+    ):
+        raise ValueError(f'width must be at least 1, "full" or None, got {width!r}')
+    _check_align_values(dialog.align_values)
 
 
 def _check_parts(fields: object, buttons: object) -> None:

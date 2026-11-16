@@ -97,6 +97,13 @@ class TestButtonConfig:
         with pytest.raises(ValueError, match="result or a handler, not both"):
             ButtonConfig(text="OK", result=1, handler=lambda: None)
 
+    @pytest.mark.parametrize("handler", [5, "go"], ids=["int", "str"])
+    def test_a_handler_is_callable(self, handler):
+        """Taken, a click showed "Dialog button error: TypeError"."""
+        message = rf"^ButtonConfig 'Go': handler must be a function \(or None\), got {re.escape(repr(handler))}$"
+        with pytest.raises(TypeError, match=message):
+            ButtonConfig("Go", handler=handler)
+
     def test_async_handler_raises_at_construction(self):
         async def fn() -> None:
             pass
@@ -812,6 +819,25 @@ class TestDialogParts:
         fields.append(TextField("b", "B"))
         dialog._prepare(MagicMock())
         assert list(dialog.values) == ["a", "b"]
+
+
+class TestSizesSetLater:
+    """A size set after the dialog is made is checked when it's shown, as
+    one passed is when it's made: max_height="3" locked the screen at
+    every redraw, and width=-5 was taken."""
+
+    @pytest.mark.parametrize("name,value,message", [
+        ("max_height", "3", r"^max_height must be an int \(or None\), got '3'$"),
+        ("max_height", 0, r"^max_height must be at least 1 \(or None\), got 0$"),
+        ("width", "wide", r'^width must be at least 1, "full" or None, got \'wide\'$'),
+        ("width", -5, r'^width must be at least 1, "full" or None, got -5$'),
+        ("align_values", "left", r"^align_values must be "),
+    ], ids=["max_height str", "max_height 0", "width str", "width -5", "align_values"])
+    def test_it_is_checked_when_shown(self, name, value, message):
+        dialog = Dialog("T", "B", [ButtonConfig("OK")])
+        setattr(dialog, name, value)
+        with pytest.raises(ValueError, match=message):
+            dialog._prepare(MagicMock())
 
 
 class TestMaxHeight:
