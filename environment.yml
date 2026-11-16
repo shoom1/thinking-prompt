@@ -9,8 +9,8 @@ dependencies:
       - prompt_toolkit>=3.0.36
       - rich>=13.2,<16
       - pygments>=2.15.0
-      - pytest>=7.0
-      - pytest-asyncio>=0.21
+      - pytest>=8.2
+      - pytest-asyncio>=1.1
       - pytest-cov>=4.0
       - mypy>=1.0
       - ruff>=0.1.0
