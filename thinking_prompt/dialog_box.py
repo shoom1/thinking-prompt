@@ -32,7 +32,7 @@ from prompt_toolkit.layout import (
 )
 from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.layout.layout import walk
-from prompt_toolkit.utils import get_cwidth, to_str
+from prompt_toolkit.utils import get_cwidth
 from prompt_toolkit.widgets import Box, Button, Frame, Label
 from prompt_toolkit.widgets import Dialog as _DialogWidget
 
@@ -198,9 +198,11 @@ class _Button(Button):
     12 columns at least), but no wider than the room it's given (fit()),
     its label then cut with "…"; the label centred by its columns. (3.0.36
     centred it by its characters, so wide characters overflowed it.)
-    ``style`` (a ButtonConfig's) goes after the button's own style, on
-    its window and on its label and arrows, whose classes the theme's
-    button rule paints."""
+    ``style`` (a ButtonConfig's) colors the button in both states, on its
+    window and on its label and arrows (whose classes the theme's button
+    rule paints), and focus swaps those colors (reverse video): the
+    theme's focused colors would sit under the style's (a red label on
+    the accent blue), or behind a style's background, hiding focus."""
 
     def __init__(self, text: str, handler: Callable[[], None], style: str = "") -> None:
         # The width its label needs; ``width`` is what it's drawn at.
@@ -209,8 +211,11 @@ class _Button(Button):
         self.window.width = lambda: self.width
         self._style = style
         if style:
-            own = self.window.style
-            self.window.style = lambda: f"{to_str(own)} {style}"
+            self.window.style = lambda: f"class:button {style}{self._focus()}"
+
+    def _focus(self) -> str:
+        """What a styled button adds to its style while it has focus."""
+        return " reverse" if get_app().layout.has_focus(self) else ""
 
     def fit(self, columns: int) -> None:
         """Draw it at most ``columns`` wide (12 at least)."""
@@ -229,8 +234,9 @@ class _Button(Button):
         if len(fragments) == 4 and "button.text" in fragments[2][0]:
             fragments[2] = cast(OneStyleAndTextTuple, (fragments[2][0], label, *fragments[2][2:]))
         if self._style:
+            style = f"{self._style}{self._focus()}"
             fragments = [
-                cast(OneStyleAndTextTuple, (f"{f[0]} {self._style}", *f[1:])) if f[1] else f
+                cast(OneStyleAndTextTuple, (f"{f[0]} {style}", *f[1:])) if f[1] else f
                 for f in fragments
             ]
         return fragments

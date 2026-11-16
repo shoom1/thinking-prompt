@@ -854,7 +854,9 @@ text with a style prompt_toolkit can't use, such as an ANSI color over
 255, raises `ValueError` as in `add_response()`), and `ButtonConfig` its
 `text` and `style`. A button's `style` is a prompt_toolkit style string
 (`"fg:ansired bold"`, not Rich's `"bright_red"`): one prompt_toolkit can't
-use raises `ValueError` when the button is made. A `Dialog` subclass's own
+use raises `ValueError` when the button is made. It colors the button in
+every theme, focused or not, and focus swaps its colors (reverse video):
+a focused `fg:ansired` Delete is a red bar, as in the terminal theme. A `Dialog` subclass's own
 `title`, `body` and `buttons` (class attributes, or properties), and
 attributes set after a dialog is made, are checked when it's shown; a
 subclass's own `fields` when it's made too, since the form is built from
@@ -957,7 +959,8 @@ terminal's own color, in dialogs and menus too. A selection (the current
 completion, a dropdown's pick) shows `color_accent` on `color_bg_selected`,
 and the focused button `color_accent_button` behind its label (white or
 black, whichever reads better on it); with those empty, both show in
-reverse video. Derivation happens at render time, so
+reverse video. A button with its own `ButtonConfig` style keeps its colors
+when focused, swapped. Derivation happens at render time, so
 tweaking a built-in theme works too:
 
 ```python
