@@ -264,11 +264,12 @@ class ThinkingPromptSession:
                 takes the newest queued line back to edit.
 
         Raises:
+            TypeError: If spinner isn't a Spinner or None, app_info an
+                AppInfo or None, or theme a str or a ThinkingPromptStyles.
             ValueError: If an option is out of range or of the wrong kind:
                 thinking_max_lines isn't an int of at least 0,
                 transcript_limit one of at least 0 (or None), or
-                completions_menu_height one of at least 1; spinner isn't a
-                Spinner or None; spinner_position isn't 'before' or
+                completions_menu_height one of at least 1; spinner_position isn't 'before' or
                 'after', dialog_placement 'box' or 'inline', or
                 input_while_busy 'refuse' or 'queue'; a flag
                 (thinking_echo, thinking_border, echo_input,
@@ -294,7 +295,9 @@ class ThinkingPromptSession:
         check_count("completions_menu_height", completions_menu_height, 1)
         check_choice("spinner_position", spinner_position, ("before", "after"))
         if spinner is not None and not isinstance(spinner, Spinner):
-            raise ValueError(f"spinner must be a Spinner or None, got {spinner!r}")
+            raise TypeError(f"spinner must be a Spinner or None, got {spinner!r}")
+        if app_info is not None and not isinstance(app_info, AppInfo):
+            raise TypeError(f"app_info must be an AppInfo or None, got {app_info!r}")
 
         _check_shown_text("message", message)
         _check_shown_text("status_text", status_text, rich=True)
@@ -826,6 +829,7 @@ class ThinkingPromptSession:
                 still repaints fully.
 
         Raises:
+            TypeError: If theme is neither a str nor a ThinkingPromptStyles.
             ValueError: For unknown theme names, repaint that isn't True or
                 False, or a field that isn't a style the session can use
                 (named; see ThinkingPromptStyles). The session keeps the

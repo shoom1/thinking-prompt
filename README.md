@@ -165,11 +165,13 @@ Every argument after `message` is keyword-only. Keys and the thinking
 header are under [Session Options](#session-options). Options are checked
 when they're passed (the session's here, a box's in `start_thinking()`, a
 field's or a dialog's when it's made): one of the wrong kind (a count
-that isn't an int, a flag that isn't `True` or `False`, a `spinner` that
-isn't a `Spinner`), out of range, or not one of its choices raises
-`ValueError`. An argument that isn't the kind of object it must be (a
-`Dialog` for `show_dialog()`, a dialog's fields and `ButtonConfig`s, a
-mapping for `values=`, a coroutine for `query()`) raises `TypeError`.
+that isn't an int, a flag that isn't `True` or `False`, text that isn't a
+str), out of range, or not one of its choices raises `ValueError`. An
+argument that isn't the kind of object it must be (a `Dialog` for
+`show_dialog()`, a dialog's fields and `ButtonConfig`s, a mapping for
+`values=`, a `Spinner`, an `AppInfo`, a theme name or
+`ThinkingPromptStyles`, a coroutine for `query()`, a function for a
+handler or a callback) raises `TypeError`.
 Options and a spinner's frames are a list or a tuple of strs: a set (its
 order changes from run to run) or a generator raises `ValueError`.
 
@@ -199,8 +201,9 @@ To show text you already hold, pass a content callback instead. The box
 re-reads it while it's drawn (every 0.1 s). You can read such a box
 (`box.text` is what it shows), but writing to it raises `TypeError`. The
 callback returns a str: one that returns anything else, or raises, shows
-nothing, and is logged once (so is a callable `message` or `status_text`
-that doesn't return text):
+nothing, and its error is logged when it's first drawn, not at every
+redraw (so is a callable `message` or `status_text` that doesn't return
+text):
 
 ```python
 status = {"line": "starting"}
@@ -1047,7 +1050,7 @@ removed:
 | A flag passed by position: `box.finish(False)` (0.4's `add_to_history`), `set_theme(theme, True)` | By name: `box.finish(echo=...)`, `set_theme(theme, repaint=True)` |
 | A flag given as `0`/`1` or a str (`thinking_echo="no"` turned echo on) | `True` or `False`: anything else raises `ValueError` |
 | A dialog `title` that isn't a str (`HTML(...)` showed in a box, not inline), `title=None`, `ButtonConfig(style=None)` | A str (`""` for none): anything else raises `ValueError` |
-| `add_error()`, `add_warning()`, `add_success()` given something that isn't text (`add_error(exc)`, or `HTML(...)`, which printed its repr) | A str or formatted text (`add_error(str(exc))`): anything else raises `ValueError` |
+| `add_error()`, `add_warning()`, `add_success()` given something that isn't text: `add_error(exc)` printed `str(exc)` (`HTML(...)`, which printed its repr, is now shown formatted) | A str or formatted text (`add_error(str(exc))`): anything else raises `ValueError` |
 | A box title that isn't a str (`thinking_title=`, `title=`, `set_title()`): `set_title(None)` cleared it | A str (`""` for none; `title=None` still means the session's `thinking_title`): anything else raises `ValueError` |
 | `Spinner("abc")` (three frames), or frames that aren't strs | A list or tuple of strs (`("|",)` for one frame): anything else raises `ValueError` |
 | A dataclass field passed by position, past a form field's `key` and `label`, a button's `text` and a spinner's `frames`: `TextField("name", "Name", "Shown to others")`, `ButtonConfig("OK", "ok")`, `Spinner(frames, 0.2)`, `AppInfo("MyApp")` | By name: `description=...`, `result=...`, `interval=...`, `name=...`; every field of `AppInfo` and `ThinkingPromptStyles` |

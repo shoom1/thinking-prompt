@@ -102,12 +102,28 @@ class TestOptionChecks:
         ({"completions_menu_height": -1}, r"completions_menu_height must be at least 1, got -1"),
         ({"completions_menu_height": 2.5}, r"completions_menu_height must be an int, got 2\.5"),
         ({"spinner_position": "left"}, r"spinner_position must be 'before' or 'after', got 'left'"),
-        ({"spinner": ("a", "b")}, r"spinner must be a Spinner or None, got \('a', 'b'\)"),
     ], ids=["max lines 1.5", "max lines True", "transcript -1", "transcript 2.5",
-            "menu 0", "menu -1", "menu 2.5", "spinner position", "spinner"])
+            "menu 0", "menu -1", "menu 2.5", "spinner position"])
     def test_a_bad_value_is_refused(self, kwargs, message):
         with pytest.raises(ValueError, match=message):
             ThinkingPromptSession(**kwargs)
+
+    @pytest.mark.parametrize("kwargs,message", [
+        ({"spinner": ("a", "b")}, r"^spinner must be a Spinner or None, got \('a', 'b'\)$"),
+        ({"app_info": "MyApp"}, r"^app_info must be an AppInfo or None, got 'MyApp'$"),
+        ({"theme": 5}, r"^theme must be a theme name or a ThinkingPromptStyles, got 5$"),
+    ], ids=["spinner", "app_info", "theme"])
+    def test_an_object_of_the_wrong_kind_raises_type_error(self, kwargs, message):
+        """As a dialog's ButtonConfigs and fields do: spinner=5 raised
+        ValueError, app_info="MyApp" failed when the app started, and
+        theme=5 said "Unknown theme"."""
+        with pytest.raises(TypeError, match=message):
+            ThinkingPromptSession(**kwargs)
+
+    def test_set_theme_takes_a_name_or_a_theme(self):
+        session = ThinkingPromptSession()
+        with pytest.raises(TypeError, match=r"^theme must be a theme name or a ThinkingPromptStyles, got 5$"):
+            session.set_theme(5)  # type: ignore[arg-type]
 
     @pytest.mark.parametrize("name", [
         "thinking_echo", "thinking_border", "echo_input", "enable_status_bar", "complete_while_typing",

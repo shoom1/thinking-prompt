@@ -611,12 +611,15 @@ def resolve_theme(theme: str | ThinkingPromptStyles) -> ThinkingPromptStyles:
     fields checked.
 
     Raises:
+        TypeError: If ``theme`` is neither a str nor a ThinkingPromptStyles.
         ValueError: For unknown theme names, or a field that isn't a style
             the session can use (named).
     """
     if isinstance(theme, ThinkingPromptStyles):
         _check_fields(theme)
         return theme
+    if not isinstance(theme, str):
+        raise TypeError(f"theme must be a theme name or a ThinkingPromptStyles, got {theme!r}")
     try:
         return THEMES[theme]()
     except KeyError:
