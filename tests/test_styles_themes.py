@@ -262,6 +262,17 @@ class TestSelectionStyles:
         assert attrs.bgcolor == s.color_accent_button.lstrip("#")
         assert attrs.color == "ffffff" and attrs.bold
 
+    @pytest.mark.parametrize("accent, label", [("#aa0000", "#ffffff"), ("#ffd700", "#000000")])
+    @pytest.mark.parametrize("theme", ["dark", "light"])
+    def test_the_focused_label_is_white_or_black_whichever_reads_on_the_accent(self, theme, accent, label):
+        """light() set its own focused button, so a color_accent_button
+        override didn't reach it."""
+        import dataclasses
+
+        styles = dataclasses.replace(resolve_theme(theme), color_accent_button=accent)
+        words = styles.to_style_dict()["button.focused"].split()
+        assert f"bg:{accent}" in words and f"fg:{label}" in words
+
     def test_a_button_token_colors_the_focused_button(self):
         words = ThinkingPromptStyles(color_accent_button="#0066cc").to_style_dict()["button.focused"].split()
         assert "bg:#0066cc" in words and "reverse" not in words

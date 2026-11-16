@@ -338,11 +338,55 @@ class TestLinks:
         raw = _terminal(lambda s: s.add_response(source, markdown=True))
         assert _shown(raw).count(url) == 1
 
-    def test_a_link_with_no_text_shows_its_url(self):
+    @pytest.mark.parametrize("source", [
+        "See [](https://e.com/empty) here.",
+        "See [ ](https://e.com/empty) here.",
+        "See ![](https://e.com/empty) here.",
+    ], ids=["link", "link with a space", "image"])
+    def test_a_link_with_no_text_shows_its_url(self, source):
         """It showed nothing."""
         pytest.importorskip("rich")
-        raw = _terminal(lambda s: s.add_response("See [](https://e.com/empty) here.", markdown=True))
-        assert "See https://e.com/empty here." in _shown(raw)
+        raw = _terminal(lambda s: s.add_response(source, markdown=True))
+        assert "https://e.com/empty here." in _shown(raw)
+
+    def test_rich_markup_with_no_link_text_shows_its_url(self):
+        pytest.importorskip("rich")
+        raw = _terminal(lambda s: s.add_rich("See [link=https://e.com/empty] [/link] here."))
+        assert "https://e.com/empty" in _shown(raw)
+
+    def test_a_markdown_tables_links_are_listed_under_it(self):
+        """Rich cuts a cell's word longer than its column with "…", as a
+        URL always is."""
+        pytest.importorskip("rich")
+        urls = [
+            "https://www.python-httpx.org/async/",
+            "https://rich.readthedocs.io/en/stable/introduction.html",
+            "https://docs.python.org/3/library/asyncio.html",
+        ]
+        source = (
+            "| Library | What it does | Docs |\n|---|---|---|\n"
+            f"| httpx | An async HTTP client with HTTP/2 | [docs]({urls[0]}) |\n"
+            f"| rich | Rich text and beautiful formatting | [rich docs]({urls[1]}) |\n"
+            f"| asyncio | The standard event loop | [asyncio]({urls[2]}) |\n"
+        )
+        session = _session_at(80)
+        session.add_response(source, markdown=True)
+        (printed,) = echoed(session._display)
+        lines = printed.splitlines()
+        assert max(len(line) for line in lines) <= 80, printed
+        for url in urls:
+            assert any(url in line for line in lines), (url, printed)
+
+    def test_rich_text_link_text_takes_markdown_link(self):
+        pytest.importorskip("rich")
+        from thinking_prompt import ThinkingPromptStyles
+
+        session = _session(theme=ThinkingPromptStyles(markdown_link="bold", markdown_link_url="italic"))
+        session.add_rich("See [link=https://e.com/d]the docs[/link] now.")
+        (printed,) = session._display.kept
+        text, url = _style_of(printed, "the docs"), _style_of(printed, "https://e.com/d")
+        assert "bold" in text and "italic" not in text
+        assert "italic" in url
 
     def test_an_image_shows_its_text_and_url(self):
         pytest.importorskip("rich")
@@ -383,6 +427,16 @@ class TestLinks:
         (printed,) = echoed(session._display)
         assert max(len(line) for line in printed.splitlines()) <= 40, printed
 
+    def test_a_heading_with_a_link_is_underlined_once(self):
+        """The rule was as long as the heading's text, its URL now in it:
+        wider than the line, it wrapped into a second rule."""
+        pytest.importorskip("rich")
+        session = _session_at(80)
+        session.add_response("# Getting started with the [Anthropic SDK](https://docs.anthropic.com/en/api/client-sdks)", markdown=True)
+        (printed,) = echoed(session._display)
+        rules = [line for line in printed.splitlines() if line.strip() and not line.strip(" ─")]
+        assert len(rules) == 1, printed
+
     def test_a_url_that_fits_a_line_isnt_broken_by_a_newline(self):
         """The terminal finds a URL on its line: one cut by a newline opens
         a wrong page. (One longer than a line Rich folds.)"""
@@ -411,6 +465,42 @@ class TestLinks:
         assert {len(line) for line in lines[:3]} == {40}, printed  # the panel
         assert "See the docs and https://e.com." in lines[1]
         assert lines[3:] == ["the docs (https://e.com/docs)", "https://e.com"]
+
+    def test_a_panels_two_links_to_one_url_are_listed_apart(self):
+        """Rich gives both the same link id: they were listed as one,
+        "firstsecond (URL)"."""
+        pytest.importorskip("rich")
+        from rich.panel import Panel
+
+        session = _session_at(60)
+        session.add_rich(Panel("[link=https://e.com/u]first[/link] and [link=https://e.com/u]second[/link]"))
+        (printed,) = echoed(session._display)
+        assert printed.splitlines()[3:] == ["first (https://e.com/u)", "second (https://e.com/u)"]
+
+    def test_a_listed_url_moves_whole_to_the_next_line(self):
+        """The lines under a Panel were left to the terminal to wrap: it
+        broke the URL."""
+        pytest.importorskip("rich")
+        from rich.panel import Panel
+
+        url = "https://example.com/docs/install"
+        session = _session_at(40)
+        session.add_rich(Panel(f"[link={url}]a link text that is long enough to wrap[/link]"))
+        (printed,) = echoed(session._display)
+        lines = printed.splitlines()
+        assert max(len(line) for line in lines) <= 40, printed
+        assert any(url in line for line in lines), printed
+
+    def test_a_boxs_streamed_rich_text_keeps_the_space_after_a_link(self):
+        """Before Rich 14.3, text wider than its console lost the space
+        that ends it: the console was widened to the text before its URL
+        went in."""
+        pytest.importorskip("rich")
+        session = _session_at(40)
+        box = session.start_thinking()
+        box.append_rich("[link=https://example.com/docs/a-fairly-long-page-name]the guide[/link] ")
+        box.append_rich("next")
+        assert _shown(box.text).endswith(") next")
 
     def test_a_boxs_rich_text_keeps_no_escapes(self):
         pytest.importorskip("rich")
@@ -451,6 +541,14 @@ _BAD_CODES = {
     "background over 255": "\x1b[48;2;0;0;300m",
     "superscript digit": "\x1b[²m",
     "circled digit": "\x1b[①m",
+    # The parser drops an ESC and the character after it: here the second
+    # ESC, so what follows isn't a sequence; and the code after a dropped
+    # one mustn't meet the ESC before it.
+    "ESC before a cursor move": "\x1b\x1b[K[38;2;300;0;0m",
+    "ESC before a C1 CSI": "\x1b\x9b\x1b[38;2;256;0;0m",
+    "ESC before a bad digit": "\x1b\x1b[²m[²m",
+    # int() refuses a string of more than 4,300 digits.
+    "5,000 digits": "\x1b[" + "1" * 5000 + "m",
 }
 
 
@@ -484,6 +582,20 @@ class TestMalformedColorCodes:
         pytest.importorskip("pygments")
         raw = _terminal(lambda s: _add(s, path, "a\x1b[9999Cb"))
         assert "a" + " " * 10 not in _shown(raw)
+
+    def test_an_ansi_box_takes_a_long_sequence_a_character_at_a_time(self):
+        """Each piece made it look again at the whole sequence so far: 20,000
+        digits took seconds. One that long is no sequence: it's dropped."""
+        import time
+
+        from thinking_prompt.thinking_control import _AnsiStream
+
+        stream = _AnsiStream()
+        start = time.perf_counter()
+        for char in "\x1b[" + "1" * 20000 + "mtext":
+            stream.feed(char)
+        assert time.perf_counter() - start < 1.0
+        assert len(stream._cut) <= 256
 
     @pytest.mark.parametrize("cut", [False, True], ids=["whole", "streamed in two"])
     @pytest.mark.parametrize("code", _BAD_CODES.values(), ids=_BAD_CODES.keys())

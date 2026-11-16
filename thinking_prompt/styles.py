@@ -5,6 +5,7 @@ Provides ThinkingPromptStyles dataclass for clean style customization.
 """
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -25,6 +26,23 @@ def _bg(color: str) -> str:
 def _style_str(*parts: str) -> str:
     """Join non-empty style parts with single spaces."""
     return " ".join(p for p in parts if p)
+
+
+def _readable_on(background: str) -> str:
+    """White or black, whichever reads better on ``background`` (a "#rrggbb"
+    color: the higher contrast ratio, as WCAG reckons it); "" for a color
+    that isn't one (a name: the terminal's palette)."""
+    if not re.fullmatch(r"#[0-9a-fA-F]{6}", background):
+        return ""
+
+    def linear(channel: str) -> float:
+        value = int(channel, 16) / 255
+        return value / 12.92 if value <= 0.04045 else ((value + 0.055) / 1.055) ** 2.4
+
+    red, green, blue = (linear(background[i:i + 2]) for i in (1, 3, 5))
+    luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue
+    # Contrast with white, (1 + 0.05) / (L + 0.05), against black's, (L + 0.05) / 0.05.
+    return "#ffffff" if (luminance + 0.05) ** 2 <= 1.05 * 0.05 else "#000000"
 
 
 def _own(rule: str, *, fg: bool = False, bg: bool = False, noreverse: bool = False) -> str:
@@ -168,7 +186,7 @@ class ThinkingPromptStyles:
     dialog_border: str = ""  # Defaults to color_text_muted
     dialog_shadow: str = ""
     dialog_button: str = ""  # Defaults to color_text on color_bg_button
-    dialog_button_focused: str = ""  # Defaults to color_text_bright on color_accent_button bold; bold reverse without one
+    dialog_button_focused: str = ""  # Defaults to white or black, whichever reads better, on color_accent_button, bold; bold reverse without one
     dialog_choice: str = ""  # Inline action rows. Defaults to color_text
     dialog_choice_selected: str = ""  # Highlighted action row, and a ChoiceField's pick. Defaults to color_accent bold
     dialog_hint: str = ""  # Inline dialog key hint. Defaults to color_text_muted italic
@@ -282,8 +300,6 @@ class ThinkingPromptStyles:
             color_bg_button="#d1d5db",
             color_bg_selected="#cbd5e1",
             color_shadow="#9ca3af",
-            # White on the accent: color_text_bright, black, is about 3.8:1.
-            dialog_button_focused="bg:#0066cc fg:#ffffff bold",
             code_theme="default",
         )
 
@@ -356,7 +372,11 @@ class ThinkingPromptStyles:
             "dialog_border": _fg(self.color_text_muted),
             "dialog_button": _style_str(_bg(self.color_bg_button), _fg(self.color_text)),
             "dialog_button_focused": (
-                _style_str(_bg(self.color_accent_button), _fg(self.color_text_bright), "bold")
+                _style_str(
+                    _bg(self.color_accent_button),
+                    _fg(_readable_on(self.color_accent_button) or self.color_text_bright),
+                    "bold",
+                )
                 if self.color_accent_button else "bold reverse"
             ),
             "dialog_choice": _fg(self.color_text),

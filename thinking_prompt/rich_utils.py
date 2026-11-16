@@ -24,9 +24,6 @@ _LINK = re.compile(
 _COLOR_CODE = re.compile(r"\x1b\[[0-9;]*m")
 # Any other OSC sequence: text can bring one (a window title, the clipboard).
 _OSC = re.compile(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
-# An escape that doesn't start a color code: what's left of another
-# sequence (one cut short, an OSC prompt_toolkit doesn't know).
-_STRAY_ESCAPE = re.compile(r"\x1b(?!\[[0-9;]*m)")
 # prompt_toolkit's ANSI() writes the text between \x01 and \x02 to the
 # terminal raw; C1 controls (U+0080-U+009F) are escapes of their own
 # (U+009D starts an OSC, U+009B a color code).
@@ -43,14 +40,14 @@ def _ansi_safe(text: str) -> str:
     rest of one as text ("8;id=…;URL"). Its URL is shown as text where it
     was made (see _print_linked)."""
     text = _LINK.sub(lambda link: link.group(3), text.translate(_RAW_MARKS))
-    fixed, cut = fixed_sequences(_OSC.sub("", text), colors_only=True)
-    return _STRAY_ESCAPE.sub("", fixed + cut)
+    # A sequence cut short at the end the parser would never finish.
+    return fixed_sequences(_OSC.sub("", text), colors_only=True)[0]
 
 
-def _shown_once(text: str, url: str) -> bool:
-    """True if a link showing ``text`` shows its URL already, or nothing:
-    its URL is shown alone ("x@y" shows "mailto:x@y")."""
-    return not text or text in (url, url.split(":", 1)[-1])
+def _is_url(text: str, url: str) -> bool:
+    """True if a link showing ``text`` shows its URL already ("x@y" shows
+    "mailto:x@y"): the URL isn't shown again."""
+    return text in (url, url.split(":", 1)[-1])
 
 
 def _print_linked(console: Any, renderable: Any, **kwargs: Any) -> None:
@@ -67,11 +64,13 @@ def _print_linked(console: Any, renderable: Any, **kwargs: Any) -> None:
     start = len(console.file.getvalue())
     console.print(renderable, **kwargs)
     for line in _link_lines(console.file.getvalue()[start:]):
-        console.print(line, soft_wrap=True)
+        console.print(line)
 
 
 def _with_urls(text: Any, console: Any) -> Any:
-    """``text`` (a Text) with each link's URL after it, in brackets."""
+    """``text`` (a Text) with each link's URL after it, in brackets (a link
+    with no text shows its URL, one whose text is its URL nothing more),
+    the link's text in markdown.link, the URL in markdown.link_url."""
     def url_of(style: Any) -> str | None:
         return console.get_style(style, default="none").link if style else None
 
@@ -85,19 +84,27 @@ def _with_urls(text: Any, console: Any) -> Any:
             links[-1][1] = max(links[-1][1], end)
         else:
             links.append([start, end, url])
-    plain = text.plain
-    links = [link for link in links if not _shown_once(plain[link[0]:link[1]].strip(), link[2])]
     if not links:
         return text
+    text = text.copy()
+    plain = text.plain
+    # Each link's URL to show after its text, and whether in brackets.
+    added: list[tuple[str, bool] | None] = []
+    for start, end, url in links:
+        shown = plain[start:end].strip()
+        is_url = _is_url(shown, url)
+        text.stylize("markdown.link_url" if is_url else "markdown.link", start, end)
+        added.append(None if is_url else (url, bool(shown)))
     pieces = text.divide(link[1] for link in links)
-    shown = text.blank_copy()
-    for piece, link in zip(pieces, [*links, None], strict=True):
-        shown.append_text(piece)
-        if link is not None:
-            shown.append(" (")
-            shown.append(link[2], style="markdown.link_url")
-            shown.append(")")
-    return shown
+    with_urls = text.blank_copy()
+    for piece, after in zip(pieces, [*added, None], strict=True):
+        with_urls.append_text(piece)
+        if after is not None:
+            url, bracketed = after
+            with_urls.append(" (" if bracketed else "")
+            with_urls.append(url, style="markdown.link_url")
+            with_urls.append(")" if bracketed else "")
+    return with_urls
 
 
 def _link_lines(ansi: str) -> list[Any]:
@@ -117,7 +124,7 @@ def _link_lines(ansi: str) -> list[Any]:
         if not url or (text, url) in seen:
             continue
         seen.add((text, url))
-        if _shown_once(text, url):
+        if not text or _is_url(text, url):
             lines.append(Text(url, style="markdown.link_url"))
         else:
             lines.append(Text.assemble((text, "markdown.link"), " (", (url, "markdown.link_url"), ")"))
@@ -128,7 +135,9 @@ def _links(ansi: str, matches: list[re.Match[str]]) -> list[list[re.Match[str]]]
     """The hyperlink pieces in ``ansi`` grouped by link: pieces side by side
     (only color codes between) with the same URL (Rich gives a link's
     differently styled pieces ids of their own), and pieces with the same
-    id and URL (a link Rich wrapped)."""
+    id and URL on the lines after (a link Rich wrapped: only spaces and
+    borders between). Rich gives links from the same markup one id: the
+    same id and URL further on is another link."""
     links: list[list[re.Match[str]]] = []
     by_id: dict[tuple[str, str], int] = {}
     previous: tuple[re.Match[str], int] | None = None  # the last piece, its link
@@ -136,7 +145,7 @@ def _links(ansi: str, matches: list[re.Match[str]]) -> list[list[re.Match[str]]]
         key = (match.group(1), match.group(2))
         if previous is not None and _beside(ansi, previous[0], match):
             index = previous[1]
-        elif match.group(1) and key in by_id:
+        elif match.group(1) and key in by_id and _wrapped(ansi, links[by_id[key]][-1], match):
             index = by_id[key]
         else:
             index = len(links)
@@ -152,6 +161,15 @@ def _beside(ansi: str, first: re.Match[str], second: re.Match[str]) -> bool:
     URL, with only color codes between them."""
     return first.group(2) == second.group(2) and not _COLOR_CODE.sub(
         "", ansi[first.end():second.start()]
+    )
+
+
+def _wrapped(ansi: str, first: re.Match[str], second: re.Match[str]) -> bool:
+    """True if hyperlink piece ``second`` could go on from ``first`` on a
+    later line: between them, a line's end and only spaces and borders."""
+    between = _COLOR_CODE.sub("", ansi[first.end():second.start()])
+    return "\n" in between and all(
+        char.isspace() or char == "|" or "\u2500" <= char <= "\u259f" for char in between
     )
 
 
@@ -215,13 +233,15 @@ def _renderable_to_ansi(renderable: Any, theme: Any = None, width: int | None = 
         )
         if isinstance(renderable, str):
             renderable = console.render_str(renderable, highlight=False)
-        is_text = isinstance(renderable, Text)
-        if is_text:
+        if isinstance(renderable, Text):
+            renderable = _with_urls(renderable, console)
             # Unwrapped, so any width that holds it all is the same: before
             # Rich 14.3, text wider than the console lost a space that ended
             # it, and words streamed a piece at a time ran together.
             console.width = max(console.width, renderable.cell_len + 1)
-        _print_linked(console, renderable, end="", highlight=False, soft_wrap=is_text)
+            console.print(renderable, end="", highlight=False, soft_wrap=True)
+        else:
+            _print_linked(console, renderable, end="", highlight=False)
         return _ansi_safe(f.getvalue())
     except ImportError:
         return _ansi_safe(str(renderable))
@@ -255,7 +275,10 @@ def _get_markdown_cls() -> Any:
 
             if self.tag == 'h1':
                 yield text
-                yield Text('─' * len(text.plain), style='markdown.h1.border')
+                # As wide as its widest line: a link's URL can wrap it.
+                lines = text.wrap(console, options.max_width)
+                width = max((line.cell_len for line in lines), default=0)
+                yield Text('─' * width, style='markdown.h1.border')
             else:
                 if self.tag == 'h2':
                     yield Text('')
@@ -277,16 +300,23 @@ def _get_markdown_cls() -> Any:
         ).strip()
 
     def link(tokens: list[Token], url: str) -> list[Token]:
-        """A link showing ``tokens``: them, then " (URL)"; or the URL alone."""
-        if _shown_once(plain(tokens), url):
-            return styled("link_url", tokens or [text(url)])
+        """A link showing ``tokens``: them, then " (URL)"; the URL alone if
+        they show nothing or are the URL."""
+        shown = plain(tokens)
+        if not shown:
+            return styled("link_url", [text(url)])
+        if _is_url(shown, url):
+            return styled("link_url", tokens)
         return [*styled("link", tokens), text(" ("), *styled("link_url", [text(url)]), text(")")]
 
-    def links_shown(tokens: list[Token]) -> list[Token]:
-        """A paragraph's (or a cell's) tokens with each link as its text and
-        URL (see link()), and an image as a link to it, "🌆 " first as Rich
-        shows one (inside a link, its text alone): Rich lays the URL out
-        with the text, within the width."""
+    def links_shown(tokens: list[Token], listed: list[tuple[str, str]] | None) -> list[Token]:
+        """A paragraph's tokens with each link as its text and URL (see
+        link()), and an image as a link to it, "🌆 " first as Rich shows
+        one (inside a link, its text alone): Rich lays the URL out with the
+        text, within the width. ``listed``: a table cell's, where Rich cuts
+        a word longer than the column with "…": each link shows its text
+        alone and goes in ``listed`` (its text and URL), for under the
+        table."""
         shown: list[Token] = []
         opened: list[tuple[str, int]] = []  # an open link's URL, where its text starts
         for token in tokens:
@@ -294,14 +324,35 @@ def _get_markdown_cls() -> Any:
                 opened.append((str(token.attrs.get("href", "")), len(shown)))
             elif token.type == "link_close" and opened:
                 url, start = opened.pop()
-                shown[start:] = link(shown[start:], url)
+                if listed is None:
+                    shown[start:] = link(shown[start:], url)
+                else:
+                    listed.append((plain(shown[start:]), url))
+                    shown[start:] = styled("link", shown[start:])
             elif token.type == "image":
-                alt = text(plain(token.children or []))
+                alt = plain(token.children or [])
                 url = str(token.attrs.get("src", ""))
-                shown += [text("🌆 "), *([alt] if opened else link([alt], url))]
+                shown.append(text("🌆 "))
+                if opened:
+                    shown.append(text(alt))
+                elif listed is not None:
+                    listed.append((alt, url))
+                    shown += styled("link", [text(alt)])
+                else:
+                    shown += link([text(alt)], url)
             else:
                 shown.append(token)
         return shown
+
+    def listing(listed: list[tuple[str, str]]) -> list[Token]:
+        """A paragraph of ``listed``'s links (see link()), a line each."""
+        children: list[Token] = []
+        for shown, url in dict.fromkeys(listed):
+            if children:
+                children.append(Token("hardbreak", "br", 0))
+            children += link([text(shown)], url)
+        inline = Token("inline", "", 0, children=children)
+        return [Token("paragraph_open", "p", 1), inline, Token("paragraph_close", "p", -1)]
 
     class _LeftAlignedMarkdown(Markdown):
         elements = {**Markdown.elements, 'heading_open': SimpleHeading}
@@ -310,9 +361,18 @@ def _get_markdown_cls() -> Any:
 
         def __init__(self, markup: str, **kwargs: Any) -> None:
             super().__init__(markup, **kwargs)
+            parsed: list[Token] = []
+            listed: list[tuple[str, str]] | None = None  # in a table: its links
             for token in self.parsed:
+                if token.type == "table_open":
+                    listed = []
                 if token.type == "inline" and token.children:
-                    token.children = links_shown(token.children)
+                    token.children = links_shown(token.children, listed)
+                parsed.append(token)
+                if token.type == "table_close":
+                    parsed += listing(listed) if listed else []
+                    listed = None
+            self.parsed = parsed
 
     return _LeftAlignedMarkdown
 

@@ -536,13 +536,15 @@ the session shows a hint in the status bar (`Busy — press Ctrl+C to
 cancel`), it still reads your text; setting a status replaces the hint.
 
 A link, in markdown or Rich's `[link=…]` markup, shows its text and then
-its URL, `the docs (https://…)`, laid out with the text: a URL that doesn't
-fit at the end of a line moves whole to the next, for the terminal to open
-(one longer than a line is folded). A link whose text is its URL shows it
-once. A Panel's or a Table's links are listed under it, a line each. (A
-terminal hyperlink, OSC 8, would hide the URL where the terminal doesn't
-support them.) The `markdown_link` style is a link's text, and
-`markdown_link_url` its URL. Rich output, markdown and code reach the
+its URL, `the docs (https://…)`. In the transcript, Rich lays it out with
+the text: a URL that doesn't fit at the end of a line moves whole to the
+next, for the terminal to open (one longer than a line is folded); a box
+wraps it at its edge, as it does any text. A link whose text is its URL
+shows it once, and one with no text its URL. A markdown table's links, and
+a Rich Panel's or Table's, are listed under it, a line each, since a cell
+cuts a long word. (A terminal hyperlink, OSC 8, would hide the URL where
+the terminal doesn't support them.) The `markdown_link` style is a link's
+text, and `markdown_link_url` its URL. Rich output, markdown and code reach the
 terminal with no escapes but colors, and plain text with no control
 characters but newlines and tabs, so text in them (a model's answer) can't
 set the window title or the clipboard.
@@ -922,8 +924,9 @@ too). All element styles derive from the `color_*` tokens, so overriding
 tokens restyles the whole UI consistently. An empty token (`""`) is the
 terminal's own color, in dialogs and menus too. A selection (the current
 completion, a dropdown's pick) shows `color_accent` on `color_bg_selected`,
-and the focused button `color_accent_button` behind it; with those empty,
-both show in reverse video. Derivation happens at render time, so
+and the focused button `color_accent_button` behind its label (white or
+black, whichever reads better on it); with those empty, both show in
+reverse video. Derivation happens at render time, so
 tweaking a built-in theme works too:
 
 ```python
