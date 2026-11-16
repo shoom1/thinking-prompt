@@ -183,6 +183,17 @@ class TestAddResponse:
         (entry,) = _entries(session)
         assert entry.fragments == [*_FRAGMENTS, ("", "\n")]
 
+    def test_a_markdown_table_is_drawn_as_a_table(self):
+        """Before Rich 13.4 a table printed as one line of pipes: the
+        extras ask for 13.4.1 (13.4.0's markdown needs typing_extensions,
+        which it doesn't ask for on Python 3.9 and later)."""
+        pytest.importorskip("rich")
+        session = _session()
+        session.add_response("| Name | Size |\n|------|------|\n| docs | 12 |", markdown=True)
+        (printed,) = echoed(session._display)
+        assert "|" not in printed and "---" not in printed
+        assert re.search(r"Name\s+Size", printed) and re.search(r"docs\s+12", printed)
+
     def test_markdown_is_printed_rendered_and_kept_as_its_source(self):
         pytest.importorskip("rich")
         source = "# Title\n\n- one\n- two"
