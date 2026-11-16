@@ -543,8 +543,9 @@ once. A Panel's or a Table's links are listed under it, a line each. (A
 terminal hyperlink, OSC 8, would hide the URL where the terminal doesn't
 support them.) The `markdown_link` style is a link's text, and
 `markdown_link_url` its URL. Rich output, markdown and code reach the
-terminal with no escapes but colors, so text in them (a model's answer)
-can't set the window title or the clipboard.
+terminal with no escapes but colors, and plain text with no control
+characters but newlines and tabs, so text in them (a model's answer) can't
+set the window title or the clipboard.
 
 The session sometimes puts a hint in the status bar in place of your
 status: `Busy — press Ctrl+C to cancel` when Enter (or Ctrl+D) is pressed
