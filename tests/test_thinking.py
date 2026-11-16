@@ -550,6 +550,16 @@ class TestParsedOnce:
             state["text"] = text[:cut]
             self._assert_shows_whole_parse(control, state["text"], "ansi")
 
+    @pytest.mark.parametrize("code", ["\x1b[38;2;300;0;0m", "\x1b[1²m\x02", "\x1b\x1b[K"])
+    def test_zero_width_text_streamed_in_pieces_shows_what_a_whole_parse_shows(self, code: str):
+        """The parser writes what's between \\x01 and \\x02 as it is: a
+        sequence there isn't one, cut by the stream or not."""
+        text = f"a\x01{code}\x1b]8;;https://e.com\x1b\\\x02b\x1b[31mred\n"
+        state, control = self._streamed("ansi")
+        for cut in range(1, len(text) + 1):
+            state["text"] = text[:cut]
+            self._assert_shows_whole_parse(control, state["text"], "ansi")
+
     @pytest.mark.parametrize("escape", _OTHER_ESCAPES)
     def test_lines_after_another_escape_show_what_a_whole_parse_shows(self, escape: str):
         """An escape other than a color code can swallow a newline, so the

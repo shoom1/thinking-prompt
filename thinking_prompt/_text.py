@@ -77,6 +77,10 @@ _ANY_PARAMETERS = re.compile(r"[\x20-\x3f]*")
 # A sequence longer than this, cut short at the text's end, is none: it's
 # dropped, so a box doesn't hold it, and read it again, piece by piece.
 _LONGEST_CUT = 256
+# Zero-width text the text's end leaves open is held as a sequence cut
+# short is (the parser shows it only once it's closed); past this long,
+# it's passed on.
+_LONGEST_ZERO_WIDTH = 4096
 
 
 def _parameters_end(text: str, start: int, pattern: re.Pattern[str]) -> int:
@@ -106,7 +110,8 @@ def _color_code(parameters: str) -> str:
 def fixed_sequences(text: str, *, colors_only: bool = False) -> tuple[str, str]:
     """``text`` read as prompt_toolkit's ANSI parser reads it, each control
     sequence made safe for the parser, and what the text cuts short at its
-    end (a sequence, or ESC alone), which the next text goes on.
+    end (a sequence, ESC alone, zero-width text not yet closed), which the
+    next text goes on.
 
     The parser raised on a digit that isn't ASCII (int("²")), so a
     sequence with one is dropped; a color code's numbers are at most 255.
@@ -123,6 +128,8 @@ def fixed_sequences(text: str, *, colors_only: bool = False) -> tuple[str, str]:
         char = text[start]
         if char == "\x01":
             close = text.find("\x02", start)
+            if close < 0 and len(text) - start <= _LONGEST_ZERO_WIDTH:
+                return "".join(pieces), text[start:]
             pos = len(text) if close < 0 else close + 1
             pieces.append(text[start:pos])
             continue
