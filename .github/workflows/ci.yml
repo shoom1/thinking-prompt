@@ -98,7 +98,7 @@ jobs:
       - name: Install package with the lowest supported dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]" "prompt_toolkit==3.0.36" "rich==13.4.1" "pygments==2.15.0"
+          pip install -e ".[dev]" "prompt_toolkit==3.0.36" "rich==13.7.0" "pygments==2.15.0"
           python -c "import importlib.metadata as m; print({d: m.version(d) for d in ('prompt_toolkit', 'rich', 'pygments')})"
 
       - name: Run pytest

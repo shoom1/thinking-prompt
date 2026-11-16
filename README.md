@@ -40,7 +40,8 @@ form fields on a prompt that stays inline, in the terminal's scrollback.
 pip install thinking-prompt
 ```
 
-For markdown and code highlighting support:
+For markdown and code highlighting support (Rich 13.7 or later, and
+Pygments):
 ```bash
 pip install "thinking-prompt[all]"
 ```
@@ -523,7 +524,7 @@ empty box raises `IndexError`.
 # Plain text response
 session.add_response("Hello, world!")
 
-# Markdown (requires rich)
+# Markdown (requires Rich 13.7 or later: the rich extra)
 session.add_response("# Title\n- Item 1\n- Item 2", markdown=True)
 
 # Syntax-highlighted code (requires pygments)

@@ -231,15 +231,40 @@ class TestAddResponse:
         assert entry.fragments == [*_FRAGMENTS, ("", "\n")]
 
     def test_a_markdown_table_is_drawn_as_a_table(self):
-        """Before Rich 13.4 a table printed as one line of pipes: the
-        extras ask for 13.4.1 (13.4.0's markdown needs typing_extensions,
-        which it doesn't ask for on Python 3.9 and later)."""
+        """Before Rich 13.4 a table printed as one line of pipes."""
         pytest.importorskip("rich")
         session = _session()
         session.add_response("| Name | Size |\n|------|------|\n| docs | 12 |", markdown=True)
         (printed,) = echoed(session._display)
         assert "|" not in printed and "---" not in printed
         assert re.search(r"Name\s+Size", printed) and re.search(r"docs\s+12", printed)
+
+    def test_a_markdown_table_cell_keeps_all_its_pieces(self):
+        """Before Rich 13.5 a cell kept only its last inline piece:
+        `**bold** text` showed " text"."""
+        pytest.importorskip("rich")
+        session = _session()
+        session.add_response(
+            "| name | notes |\n|---|---|\n"
+            "| **bold** text | see [the docs](https://u.example) now |\n| `code` here | plain |",
+            markdown=True,
+        )
+        (printed,) = echoed(session._display)
+        assert re.search(r"bold text\s+see the docs now", printed), printed
+        assert re.search(r"code here\s+plain", printed), printed
+
+    def test_a_folded_word_beside_wide_characters_keeps_its_text(self):
+        """Before Rich 13.7 a word folded on a line holding CJK lost
+        characters: with a link's URL inline, a CJK sentence lost its end."""
+        pytest.importorskip("rich")
+        session = _session_at(80)
+        sentence = (
+            "请参阅[官方文档](https://docs.python.org/3/library/asyncio-task.html#asyncio.wait_for)"
+            "了解更多信息，这个函数在超时的时候会取消任务并抛出异常，所以你需要小心处理。"
+        )
+        session.add_response(sentence, markdown=True)
+        (printed,) = echoed(session._display)
+        assert "所以你需要小心处理。" in printed.replace("\n", "").replace(" ", "")
 
     def test_markdown_is_printed_rendered_and_kept_as_its_source(self):
         pytest.importorskip("rich")

@@ -1,7 +1,7 @@
 prompt_toolkit>=3.0.36
 
 # Optional
-rich>=13.4.1,<16
+rich>=13.7.0,<16
 pygments>=2.15.0
 
 # Development

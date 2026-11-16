@@ -7,7 +7,7 @@ dependencies:
   - pip
   - pip:
       - prompt_toolkit>=3.0.36
-      - rich>=13.4.1,<16
+      - rich>=13.7.0,<16
       - pygments>=2.15.0
       - pytest>=8.2
       - pytest-asyncio>=1.1
