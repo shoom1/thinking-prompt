@@ -42,11 +42,11 @@ pip install thinking-prompt
 
 For markdown and code highlighting support:
 ```bash
-pip install thinking-prompt[all]
+pip install "thinking-prompt[all]"
 ```
 
-Requires Python 3.10–3.14. CI runs the tests on Linux, macOS and Windows;
-the UI is tested by hand in macOS terminals.
+Requires Python 3.10 or later; tested on 3.10–3.14. CI runs the tests on
+Linux, macOS and Windows; the UI is tested by hand in macOS terminals.
 
 ## Quick Start
 
@@ -104,6 +104,8 @@ history = []
 
 @session.on_input
 async def handle(text: str):
+    if not text.strip():
+        return
     turn = {"role": "user", "content": text}
     async with session.thinking(title="Thinking") as box:
         async with client.messages.stream(
