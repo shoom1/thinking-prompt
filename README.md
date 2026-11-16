@@ -224,8 +224,8 @@ normal finish:
   runs, and the tasks they start) gets its line when the query ends, and
   only if the query ends cancelled (Ctrl+C, the app stopping): a cancel
   the query catches, a tool's time limit (`asyncio.timeout()`,
-  `wait_for()`) say, or another task cancelling a job the query started,
-  says nothing.
+  `wait_for()`) say, or another task cancelling a job the query started
+  and waits for, says nothing.
 - **The handler raises**: the content, then the `[ERROR] Handler error: ...`
   line. A query's error is raised by `query()`, after the content.
 - **Left open** by a task that returns (a handler, a query, a background
@@ -280,7 +280,7 @@ async with session:                        # the app runs until the block ends
 ```
 
 `prompt_async()` raises `EOFError` on Ctrl+D at an idle prompt, after
-`exit()`, and when stdin closes (stdin from `/dev/null`, say); the block
+`exit()`, and when stdin closes (its terminal closing, say); the block
 then ends normally, as `run_async()` does. Stdin closing stops the app at
 once, as `exit()` from outside the query does: a query still running is
 cancelled, and queued lines are dropped. The session reads a terminal, not
@@ -1052,6 +1052,7 @@ removed:
 
 | 0.4 | 0.5 |
 |---|---|
+| Python 3.9 | Python 3.10 or later |
 | `ThinkingPromptSession(max_thinking_height=N)` | `thinking_max_lines=N` |
 | `ThinkingPromptSession(echo_thinking=...)` | `thinking_echo=...` |
 | `ThinkingPromptSession(history_limit=N)` | `transcript_limit=N` |
