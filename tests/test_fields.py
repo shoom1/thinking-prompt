@@ -176,15 +176,24 @@ class TestFieldClasses:
     def test_a_starting_value_that_isnt_an_option_is_refused(self):
         """values= gives a field its default for the dialog."""
         field = SelectField("k", "L", options=["a", "b"])
-        with pytest.raises(ValueError, match=r"SelectField 'k': default 'c' isn't one of its options"):
+        message = r"^SelectField 'k': default 'c' isn't one of its options \(given by values=\)$"
+        with pytest.raises(ValueError, match=message):
             Dialog("T", fields=[field], values={"k": "c"})
+
+    async def test_values_are_checked_again_when_shown(self):
+        """values= is read again at each show: a config changed since."""
+        config = {"k": "a"}
+        dialog = Dialog("T", fields=[SelectField("k", "L", options=["a", "b"])], values=config)
+        config["k"] = "c"
+        with pytest.raises(ValueError, match=r"default 'c' isn't one of its options \(given by values=\)$"):
+            dialog._prepare(MagicMock())
 
     @pytest.mark.parametrize("make,message", [
         (lambda: CheckboxField("k", "L", default="no"), "CheckboxField 'k': default must be True or False, got 'no'"),
         (lambda: CheckboxField("k", "L", default=1), "CheckboxField 'k': default must be True or False, got 1"),
         (lambda: TextField("k", "L", password="no"), "TextField 'k': password must be True or False, got 'no'"),
         (lambda: Dialog("T", fields=[CheckboxField("k", "L")], values={"k": "yes"}),
-         "CheckboxField 'k': default must be True or False, got 'yes'"),
+         "CheckboxField 'k': default must be True or False, got 'yes' (given by values=)"),
     ], ids=["checkbox no", "checkbox 1", "password", "values="])
     def test_a_flag_is_true_or_false(self, make, message):
         """CheckboxField(default="no") started checked."""

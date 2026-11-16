@@ -413,14 +413,41 @@ class TestDialog:
         with pytest.raises(ValueError, match=r"^Dialog escapable must be True or False, got 'no'$"):
             Dialog("T", "B", [ButtonConfig("OK")], escapable="no")  # type: ignore[arg-type]
 
-    def test_a_subclasss_title_is_checked_too(self):
+    async def test_a_subclasss_title_is_checked_when_shown(self):
+        """A class attribute (or a property) is read when the dialog is shown:
+        a subclass sets what a property reads after Dialog.__init__."""
+
         class Bad(Dialog):
             title = 5  # type: ignore[assignment]
 
+        dialog = Bad()
         with pytest.raises(ValueError, match=r"^Dialog title must be a str, got 5$"):
-            Bad()
+            dialog._prepare(MagicMock())
 
-    @pytest.mark.parametrize("body", [5, 1.5, object()], ids=["int", "float", "object"])
+    async def test_a_subclass_makes_its_title_and_body_from_its_own_attributes(self):
+        """Read in Dialog.__init__, the properties raised AttributeError."""
+
+        class Edit(Dialog):
+            def __init__(self, name: str) -> None:
+                super().__init__(buttons=[ButtonConfig("OK")])
+                self.name = name
+
+            @property  # type: ignore[override]
+            def title(self) -> str:
+                return f"Edit {self.name}"
+
+            @property  # type: ignore[override]
+            def body(self) -> str:
+                return f"Editing {self.name}"
+
+        dialog = Edit("notes")
+        dialog._prepare(MagicMock())
+        assert (dialog.title, dialog.body) == ("Edit notes", "Editing notes")
+
+    @pytest.mark.parametrize(
+        "body", [5, 1.5, object(), ["a", "b"], [Label("x")]],
+        ids=["int", "float", "object", "list of strs", "list of widgets"],
+    )
     def test_a_body_that_isnt_text_or_a_container_is_refused(self, body):
         with pytest.raises(ValueError, match=r"^Dialog body must be text \(str, HTML, ANSI, FormattedText\) or a prompt_toolkit container, got "):
             Dialog("T", body, [ButtonConfig("OK")])

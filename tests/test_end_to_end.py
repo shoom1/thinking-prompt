@@ -638,6 +638,83 @@ class TestBoxLifecycle:
 
             await run_with(session, handler, script)
 
+    @staticmethod
+    async def _lone_block_timeout(session: ThinkingPromptSession, how: str) -> None:
+        """A query's only box, under a time limit it catches: in its own task
+        ("self": it cancels itself, as asyncio.timeout() does, or wait_for()
+        on 3.12+), or wait_for()'s, whose task is the query's before 3.12."""
+
+        async def tool() -> None:
+            async with session.thinking(title="Tool") as box:
+                box.append("tool running\n")
+                if how == "self":
+                    me = asyncio.current_task()
+                    assert me is not None
+                    asyncio.get_running_loop().call_soon(me.cancel)
+                await asyncio.sleep(3600)
+
+        if how == "self":
+            try:
+                await tool()
+            except asyncio.CancelledError:
+                me = asyncio.current_task()
+                if me is not None and hasattr(me, "uncancel"):  # 3.11+
+                    me.uncancel()
+        else:
+            with suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(tool(), 0.05)
+        session.add_response("final answer")
+
+    @pytest.mark.parametrize("how", ["self", "wait_for"])
+    async def test_a_time_limit_a_query_catches_on_its_only_box_says_nothing(self, how):
+        """Said at once for the query's own task (wait_for() on 3.12+), and
+        not for wait_for()'s task before 3.12: one rule for both now."""
+
+        async def handler(text: str) -> None:
+            await self._lone_block_timeout(session, how)
+
+        with piped_session() as (session, inp):
+
+            def answered() -> bool:
+                return any("final answer" in text for text in transcript_texts(session._display))
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await wait_until(lambda: answered() and waiting_for_input(session))
+                transcript = transcript_texts(session._display)
+                assert "Operation cancelled...\n" not in transcript, transcript
+
+            await run_with(session, handler, script)
+
+    async def test_the_app_stopping_ends_a_query_and_its_awaited_task_under_one_line(self):
+        """The query's own box said its line, then the task's box, ending
+        after it, owed another."""
+        opened = asyncio.Event()
+
+        async def tool() -> None:
+            session.start_thinking(title="Tool").append("tool running\n")
+            opened.set()
+            await asyncio.sleep(3600)
+
+        async def handler(text: str) -> None:
+            async with session.thinking(title="Agent") as outer:
+                outer.append("planning\n")
+                await asyncio.create_task(tool())
+
+        with piped_session() as (session, inp):
+
+            async def script(run: asyncio.Task[None]) -> None:
+                inp.send_text("go" + ENTER)
+                await asyncio.wait_for(opened.wait(), 2)
+                session.exit()
+                await asyncio.wait_for(run, 2)
+                await asyncio.sleep(0.05)  # the task's done callbacks
+                transcript = transcript_texts(session._display)
+                assert transcript.count("Operation cancelled...\n") == 1, transcript
+                assert transcript[-1] == "Operation cancelled...\n"
+
+            await run_with(session, handler, script)
+
     async def test_the_app_stopping_ends_a_querys_sub_task_boxes_under_one_line(self):
         """Each sub-task box the stop ended said a line of its own."""
         opened = asyncio.Event()

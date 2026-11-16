@@ -192,7 +192,11 @@ class Dialog:
     an earlier show left, cancelled edits too, is gone. The mapping is read
     when the dialog is created and again each time it's shown, so a dialog
     kept for reuse with ``values=config`` starts from the config as it is
-    then.
+    then; each value is checked as the field's default is.
+
+    The arguments are checked when the dialog is created; a subclass's own
+    ``title``, ``body`` and ``escapable`` (class attributes, or properties
+    reading what its ``__init__`` sets) when it's shown.
 
     Example:
         # Built with arguments
@@ -268,10 +272,14 @@ class Dialog:
         for name, value in passed.items():
             if not isinstance(value, _NotPassed):
                 setattr(self, name, value)
-        if not isinstance(self.title, str):
-            raise ValueError(f"Dialog title must be a str, got {self.title!r}")
-        _check_body(self.body)
-        check_flag("Dialog escapable", self.escapable)
+        # What's passed is checked now; a subclass's own (a class attribute,
+        # or a property reading what its __init__ sets after this one) when
+        # it's shown (_prepare).
+        _check_shown(
+            self.title if not isinstance(title, _NotPassed) else "",
+            self.body if not isinstance(body, _NotPassed) else "",
+            self.escapable if not isinstance(escapable, _NotPassed) else True,
+        )
         check_count("max_height", self.max_height, 1, optional=True)
         if not (
             self.width is None
@@ -321,7 +329,7 @@ class Dialog:
         (when the mapping has its key), else at its default."""
         start = self._start_values or {}
         return _Form([
-            replace(field, default=start[field.key])
+            _started(field, start[field.key])
             if isinstance(field, Field) and field.key in start else field
             for field in self.fields
         ])
@@ -463,6 +471,7 @@ class Dialog:
     def _prepare(self, manager: DialogManager, placement: Placement = "box") -> asyncio.Future:
         """Prepare the dialog for showing (called by DialogManager): the
         fields start afresh, from ``values=`` or their defaults."""
+        _check_shown(self.title, self.body, self.escapable)
         self._manager = manager
         self._placement = placement
         self._form = self._new_form()
@@ -588,15 +597,38 @@ def _checklist_dialog(
     return dialog
 
 
+def _started(field: Field, value: object) -> Field:
+    """``field`` starting at ``value``, from a dialog's ``values=``: checked
+    as its default is."""
+    try:
+        return replace(field, default=value)
+    except ValueError as exc:
+        raise ValueError(f"{exc} (given by values=)") from None
+
+
+def _check_shown(title: object, body: object, escapable: object) -> None:
+    """A dialog's title is a str, its body text or a container, and
+    escapable a flag: anything else failed each redraw, or did nothing."""
+    if not isinstance(title, str):
+        raise ValueError(f"Dialog title must be a str, got {title!r}")
+    _check_body(body)
+    check_flag("Dialog escapable", escapable)
+
+
 def _check_body(body: object) -> None:
     """A dialog's body is text (formatted text, or a callable returning
     it) or a prompt_toolkit container: anything else failed each redraw."""
     if (
         body is None
-        or isinstance(body, (str, list))
+        or isinstance(body, str)
         or callable(body)
         or hasattr(body, "__pt_formatted_text__")
         or is_container(body)
+    ):
+        return
+    # A list of (style, text) pairs (a handler may follow the text).
+    if isinstance(body, list) and all(
+        isinstance(pair, tuple) and len(pair) in (2, 3) for pair in body
     ):
         return
     raise ValueError(
@@ -798,7 +830,9 @@ class DialogManager:
                 with it instead: the app stopping cancels the query.
             TypeError: If ``dialog`` isn't a Dialog.
             ValueError: If the dialog has nothing focusable (e.g. no buttons
-                and a text body), or its placement isn't 'box' or 'inline'.
+                and a text body), its placement isn't 'box' or 'inline', a
+                subclass's own title, body or escapable isn't one it takes,
+                or a value ``values=`` gives a field isn't one it takes.
 
         Whatever the dialog raises while being built or opened, the
         manager is left closed, so later dialogs can still be shown.

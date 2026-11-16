@@ -207,7 +207,12 @@ normal finish:
 
 - **Cancelled** (Ctrl+C, or the task that opened it is cancelled): the
   content, then one `Operation cancelled...` line after all the boxes that
-  the cancel ended.
+  the cancel ended. A box of the running query (a handler, what `query()`
+  runs, and the tasks they start) gets its line when the query ends, and
+  only if the query ends cancelled (Ctrl+C, the app stopping): a cancel
+  the query catches, a tool's time limit (`asyncio.timeout()`,
+  `wait_for()`) say, or another task cancelling a job the query started,
+  says nothing.
 - **The handler raises**: the content, then the `[ERROR] Handler error: ...`
   line. A query's error is raised by `query()`, after the content.
 - **Left open** by a task that returns (a handler, a query, a background
@@ -254,7 +259,7 @@ async with session:                        # the app runs until the block ends
     while True:
         try:
             text = await session.prompt_async()
-        except EOFError:                       # Ctrl+D, or the input ended
+        except EOFError:                       # Ctrl+D, exit(), or the input ended
             break
         if text.strip() in ("/exit", "/quit"):
             break
@@ -263,7 +268,9 @@ async with session:                        # the app runs until the block ends
 
 `prompt_async()` raises `EOFError` on Ctrl+D at an idle prompt, after
 `exit()`, and when the input ends (input piped in runs out, or stdin is
-`/dev/null`); the block then ends normally, as `run_async()` does.
+`/dev/null`); the block then ends normally, as `run_async()` does. The
+input ending stops the app at once, as `exit()` from outside the query
+does: a query still running is cancelled, and queued lines are dropped.
 
 `query()` runs one input's work as the query Ctrl+C cancels. Boxes it
 leaves open end with it. It returns the coroutine's result, or `None`
@@ -810,7 +817,9 @@ listed once, and a default is one of them (or `None`): anything else raises
 `description` that isn't a str. `button_dialog()`, `choice_dialog()` and
 `checklist_dialog()` check their options and default the same way, as
 `Dialog` its `title` (a str) and `body` (text or a container), and
-`ButtonConfig` its `text`.
+`ButtonConfig` its `text` and `style` (strs). A `Dialog` subclass's own
+`title` and `body` (class attributes, or properties) are checked when
+it's shown.
 
 **Keys:** in a box, ↑↓ move a row at a time and Tab / Shift+Tab a field at a
 time (Tab on to the buttons after the last field, Shift+Tab from the buttons
@@ -998,6 +1007,7 @@ removed:
 | `add_to_history=` on `finish()` or `thinking()` | Drop it: `echo` alone decides (printed and kept for repaints, or neither) |
 | A flag passed by position: `box.finish(False)` (0.4's `add_to_history`), `set_theme(theme, True)` | By name: `box.finish(echo=...)`, `set_theme(theme, repaint=True)` |
 | A flag given as `0`/`1` or a str (`thinking_echo="no"` turned echo on) | `True` or `False`: anything else raises `ValueError` |
+| A dialog `title` that isn't a str (`HTML(...)` showed in a box, not inline), `title=None`, `ButtonConfig(style=None)` | A str (`""` for none): anything else raises `ValueError` |
 | A dataclass field passed by position, past a form field's `key` and `label`, a button's `text` and a spinner's `frames`: `TextField("name", "Name", "Shown to others")`, `ButtonConfig("OK", "ok")`, `Spinner(frames, 0.2)`, `AppInfo("MyApp")` | By name: `description=...`, `result=...`, `interval=...`, `name=...`; every field of `AppInfo` and `ThinkingPromptStyles` |
 | `box.get_content()` | `box.text` |
 | `session.set_status(x)` | `session.status_text = x` (a Rich renderable too) |

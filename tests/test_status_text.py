@@ -135,6 +135,20 @@ class TestSessionStatusText:
         assert isinstance(shown, ANSI)
         assert "Rich status" in shown.value
 
+    def test_a_rich_renderable_passed_to_the_session(self):
+        """It was drawn as is: every redraw raised."""
+        pytest.importorskip("rich")
+        from rich.text import Text
+
+        from thinking_prompt import ThinkingPromptSession
+
+        text = Text("Rich status")
+        session = ThinkingPromptSession(status_text=text)
+        assert session.status_text is text
+        shown = session._status_now()
+        assert isinstance(shown, ANSI)
+        assert "Rich status" in shown.value
+
     def test_a_hint_is_shown_but_not_read(self, session):
         """While the session's hint shows, status_text is still the app's."""
         session._show_hint(session._BUSY_STATUS)

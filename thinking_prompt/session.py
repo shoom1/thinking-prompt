@@ -77,7 +77,7 @@ from .types import (
 logger = logging.getLogger(__name__)
 
 # Set in the foreground query's context, so the tasks it starts (wait_for()
-# before 3.12, gather(), create_task()) inherit it: see _in_query_sub_task.
+# before 3.12, gather(), create_task()) inherit it: see _in_query.
 _QUERY_MARK: contextvars.ContextVar[object | None] = contextvars.ContextVar(
     "thinking_prompt_query", default=None
 )
@@ -237,7 +237,8 @@ class ThinkingPromptSession:
             complete_while_typing: Show completions automatically while typing.
             completions_menu_height: Maximum height of completions dropdown menu.
             enable_status_bar: Whether to show status bar.
-            status_text: Text to display in status bar.
+            status_text: Text to display in status bar: plain or formatted
+                text, or a Rich renderable (see the status_text property).
             expand_key: Expands/collapses thinking boxes.
                 Default: "c-t" (Ctrl+T).
             thinking_max_lines: The rows a box shows collapsed, below its title,
@@ -249,7 +250,7 @@ class ThinkingPromptSession:
                 ("── ⠋ Thinking ───") or is just the spinner and the title
                 ("⠋ Thinking"), unless the box says. Default: True.
             spinner: The thinking header's spinner: a preset such as
-                ``Spinner.LINE``, your own ``Spinner(frames, interval)``,
+                ``Spinner.LINE``, your own ``Spinner(frames, interval=...)``,
                 or None for none. Default: ``Spinner.DOTS``.
             spinner_position: The spinner "before" (default) or "after" the
                 title.
@@ -380,8 +381,9 @@ class ThinkingPromptSession:
         # unwinding, and the session doesn't cancel it again.
         self._query_cancelled: bool = False
         # What the foreground query's context holds in _QUERY_MARK, and
-        # whether a cancel ended boxes in a task it started: "Operation
-        # cancelled..." waits for the query (see _announce_task_cancel).
+        # whether a cancel ended boxes in it (its task or one it started):
+        # "Operation cancelled..." waits for the query (see
+        # _announce_task_cancel).
         self._query_mark: object | None = None
         self._query_cancel_owed: bool = False
         # The foreground query called exit(): the app stops when it ends
@@ -423,6 +425,9 @@ class ThinkingPromptSession:
         # Create components
         self._default_buffer = self._create_default_buffer()
         self.app = self._create_application()
+        if _is_rich_renderable(status_text):
+            # Drawn as ANSI, as the status_text setter draws one.
+            self._status_text = self._display.to_ansi(status_text)
 
     def _get_prompt_string(self) -> str:
         """Get the prompt's visible text (any AnyFormattedText form, e.g.
@@ -969,33 +974,26 @@ class ThinkingPromptSession:
         if task.cancelled():
             self._announce_task_cancel(task, bool(ended) or owed)
 
-    def _in_query_sub_task(self, task: asyncio.Task[Any] | None) -> bool:
-        """True for a task the foreground query started, or one those
-        started (they inherit its context), not the query itself, until the
-        query's cleanup (the query may have just ended: a sub-task's done
-        callbacks can run before the cleanup). Read in the task's context:
-        in it, or in a done callback it added."""
+    def _in_query(self, task: asyncio.Task[Any] | None) -> bool:
+        """True for the foreground query's task, and the tasks it started or
+        those started (they inherit its context), until the query's cleanup
+        (a sub-task's done callbacks can run after the query has ended,
+        before its cleanup). Read in the task's context: in it, or in a
+        done callback it added."""
         mark = self._query_mark
-        return (
-            mark is not None
-            and task is not None
-            and task is not self._foreground
-            and _QUERY_MARK.get() is mark
-        )
+        return mark is not None and task is not None and _QUERY_MARK.get() is mark
 
     def _announce_task_cancel(self, task: asyncio.Task[Any] | None, ended: bool) -> None:
         """Say "Operation cancelled..." after the boxes a cancel of ``task``
-        ended. In a task the running query started, the line waits for the
-        query: a time limit the query catches cancels that task, not the
-        query (wait_for() runs its coroutine in a task of its own before
-        3.12, gather() always). The query's cleanup says it if the query
-        ends cancelled."""
-        if ended and self._in_query_sub_task(task):
+        ended. In the running query, its own task or one it started, the
+        line waits for the query: a time limit the query catches cancels a
+        block (in its own task with asyncio.timeout(), and with wait_for()
+        on 3.12+; in a task of its own with wait_for() before 3.12, and
+        gather()), not the query. The query's cleanup says it, once, if the
+        query ends cancelled."""
+        if ended and self._in_query(task):
             self._query_cancel_owed = True
             return
-        if ended and task is not None and task is self._foreground:
-            # The query's own line follows its sub-tasks' boxes too.
-            self._query_cancel_owed = False
         self._announce_cancel(ended)
 
     def _announce_cancel(self, ended: bool) -> None:
@@ -1326,8 +1324,8 @@ class ThinkingPromptSession:
         anywhere else (another task, a dialog's button, a key binding), it
         stops the app now, cancelling a running query.
 
-        From a thread it's handed to the session's event loop, and stops
-        the app there. Open boxes are handled as on any exit (see
+        From a thread (one the running query waits on too) it's handed to
+        the session's event loop, and stops the app there at once. Open boxes are handled as on any exit (see
         run_async()). Calling it again from the query, or once the app is
         stopping or has stopped, does nothing.
 
@@ -1413,8 +1411,9 @@ class ThinkingPromptSession:
         """Run the session until the block ends: print the welcome, then
         start the Application. Inputs are read with prompt_async(), and
         query() runs one input's work. The input ending (a closed stdin)
-        stops the app as Ctrl+D does: prompt_async() raises EOFError, and
-        the block ends normally.
+        stops the app at once, as exit() from outside the query does: a
+        running query is cancelled, queued lines are dropped,
+        prompt_async() raises EOFError, and the block ends normally.
 
         Raises:
             RuntimeError: If the session is already running.
@@ -1464,8 +1463,8 @@ class ThinkingPromptSession:
             self._frames.cancel()
             self._resizes.cancel()
         error = None if run.cancelled() else run.exception()
-        # The input ending (a closed stdin) stops the app as Ctrl+D does:
-        # prompt_async() has raised EOFError for it already.
+        # The input ending (a closed stdin) stops the app: prompt_async()
+        # has raised EOFError for it already.
         if error is not None and not isinstance(error, EOFError) and exc_info[1] is None:
             raise error
 
@@ -1818,7 +1817,7 @@ class ThinkingPromptSession:
         owed = owner is not None and owner in self._cancel_owed
         if owner is not None:
             self._cancel_owed.discard(owner)
-        # The foreground query's: a cancel ended boxes in tasks it started.
+        # The foreground query's: a cancel ended boxes in it.
         owed = owed or (owner is self._foreground and self._query_cancel_owed)
         if cancelled:
             self._announce_cancel(bool(ended) or owed)
@@ -2180,8 +2179,11 @@ class ThinkingPromptSession:
                 already cancelled isn't cancelled again, so a dialog in its
                 cleanup gets EOFError.
             TypeError: If ``dialog`` isn't a Dialog.
-            ValueError: If the dialog has nothing to focus, or its
-                placement isn't 'box' or 'inline'.
+            ValueError: If the dialog has nothing to focus, its placement
+                isn't 'box' or 'inline', a subclass's own title, body or
+                escapable isn't one it takes, or a value its ``values=``
+                gives a field (read again at each show) isn't one the
+                field takes.
 
         Example (built with arguments):
             from thinking_prompt import ButtonConfig, Dialog
