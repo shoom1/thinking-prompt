@@ -344,7 +344,8 @@ idle prompt costs no CPU:
 ### Threads
 
 The session runs on its asyncio event loop, and its calls belong there,
-with one exception: a box's writes work from any thread. A worker thread
+with two exceptions: a box's writes work from any thread, and so does
+`session.exit()` (it stops the app on the loop). A worker thread
 can stream into a box the loop opened (`append`, `set_line`, `clear`,
 `append_rich`, `set_line_rich`, `set_title`) and read it (`text`,
 `len(box)`, `is_finished`). Opening and finishing boxes, the `add_*`

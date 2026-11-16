@@ -1285,9 +1285,10 @@ class ThinkingPromptSession:
         anywhere else (another task, a dialog's button, a key binding), it
         stops the app now, cancelling a running query.
 
-        Open boxes are handled as on any exit (see run_async()). Calling it
-        again from the query, or once the app is stopping or has stopped,
-        does nothing.
+        From a thread it's handed to the session's event loop, and stops
+        the app there. Open boxes are handled as on any exit (see
+        run_async()). Calling it again from the query, or once the app is
+        stopping or has stopped, does nothing.
 
         Example:
             @session.on_input
@@ -1300,10 +1301,16 @@ class ThinkingPromptSession:
         """
         if not self.app.is_running:
             return
+        run = self._app_run
         try:
-            caller = asyncio.current_task()
+            running = asyncio.get_running_loop()
         except RuntimeError:  # no event loop in this thread
-            caller = None
+            running = None
+        if run is not None and running is not run.get_loop():
+            # From a thread: the app stops on its own loop.
+            run.get_loop().call_soon_threadsafe(self.exit)
+            return
+        caller = asyncio.current_task() if running is not None else None
         if caller is not None and caller is self._foreground:
             self._exit_after_query = True
             # No more input: a task already waiting for some is told so.

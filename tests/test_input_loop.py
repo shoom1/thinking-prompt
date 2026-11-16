@@ -9,7 +9,7 @@ import logging
 import threading
 from collections.abc import Awaitable
 from contextlib import suppress
-from typing import Callable
+from typing import Any, Callable
 
 import pytest
 
@@ -206,6 +206,31 @@ class TestPromptAsync:
 
             await run_loop(session, body, script)
         assert raised == ["eof", "eof"]
+
+    async def test_exit_from_a_thread_stops_the_app_on_its_loop(self):
+        """exit() from a thread called app.exit() there, off the event loop:
+        under asyncio's debug mode that raised RuntimeError in the thread
+        and the app never stopped; else it stopped at the next size poll."""
+        threads: list[int] = []
+        with piped_session() as (session, inp):
+            app_exit = session.app.exit
+
+            def exit_spy(*args: Any, **kwargs: Any) -> Any:
+                threads.append(threading.get_ident())
+                return app_exit(*args, **kwargs)
+
+            session.app.exit = exit_spy  # type: ignore[method-assign]
+
+            async def body() -> None:
+                with suppress(EOFError):
+                    await session.prompt_async()
+
+            async def script(run: asyncio.Task[None]) -> None:
+                await asyncio.to_thread(session.exit)
+                await finished(run)
+
+            await run_loop(session, body, script)
+        assert threads == [threading.get_ident()]
 
     async def test_input_closing_ends_the_block_as_ctrl_d_does(self):
         """A closed input (a pipe that ran out, stdin from /dev/null) woke
