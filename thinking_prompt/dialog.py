@@ -195,8 +195,12 @@ class Dialog:
     then; each value is checked as the field's default is.
 
     The arguments are checked when the dialog is created; a subclass's own
-    ``title``, ``body`` and ``escapable`` (class attributes, or properties
-    reading what its ``__init__`` sets) when it's shown.
+    ``title``, ``body``, ``escapable``, ``fields`` and ``buttons`` (class
+    attributes, or properties reading what its ``__init__`` sets), and
+    attributes set after it's made, when it's shown. ``fields`` and
+    ``buttons`` must be sequences (a list or a tuple) of fields and of
+    ButtonConfigs, and ``values`` a mapping, else TypeError; a value of the
+    right kind that isn't one an option takes raises ValueError.
 
     Example:
         # Built with arguments
@@ -280,6 +284,14 @@ class Dialog:
             self.body if not isinstance(body, _NotPassed) else "",
             self.escapable if not isinstance(escapable, _NotPassed) else True,
         )
+        _check_parts(
+            self.fields if not isinstance(fields, _NotPassed) else (),
+            self.buttons if not isinstance(buttons, _NotPassed) else (),
+        )
+        if values is not None and not isinstance(values, Mapping):
+            raise TypeError(
+                f"Dialog values must be a mapping of field keys to values (or None), got {values!r}"
+            )
         check_count("max_height", self.max_height, 1, optional=True)
         if not (
             self.width is None
@@ -419,13 +431,7 @@ class Dialog:
         with a hint wherever it's shown.
         """
         configs = self.get_buttons()
-        for cfg in configs:
-            if not isinstance(cfg, ButtonConfig):
-                raise TypeError(
-                    "get_buttons() must return ButtonConfig items; got "
-                    f"{type(cfg).__name__}. Use ButtonConfig(label, "
-                    "handler=...) instead of (label, handler)."
-                )
+        _check_button_items(configs, "get_buttons() must return")
         return configs
 
     def _accept_choice(self) -> None:
@@ -472,6 +478,7 @@ class Dialog:
         """Prepare the dialog for showing (called by DialogManager): the
         fields start afresh, from ``values=`` or their defaults."""
         _check_shown(self.title, self.body, self.escapable)
+        _check_parts(self.fields, self.buttons)
         self._manager = manager
         self._placement = placement
         self._form = self._new_form()
@@ -613,6 +620,28 @@ def _check_shown(title: object, body: object, escapable: object) -> None:
         raise ValueError(f"Dialog title must be a str, got {title!r}")
     _check_body(body)
     check_flag("Dialog escapable", escapable)
+
+
+def _check_parts(fields: object, buttons: object) -> None:
+    """A dialog's fields and buttons are sequences (of fields: _Form checks
+    each's class; of ButtonConfigs): TypeError naming the part. A generator
+    of fields was used up by the first form, and showed an empty one."""
+    if isinstance(fields, str) or not isinstance(fields, Sequence):
+        raise TypeError(f"Dialog fields must be a sequence of fields, got {fields!r}")
+    if isinstance(buttons, str) or not isinstance(buttons, Sequence):
+        raise TypeError(f"Dialog buttons must be a sequence of ButtonConfig, got {buttons!r}")
+    _check_button_items(buttons, "Dialog buttons must be")
+
+
+def _check_button_items(buttons: Sequence[object], lead: str) -> None:
+    """Each of ``buttons`` is a ButtonConfig: TypeError led by ``lead``, with
+    a hint for a dialog built for 0.3."""
+    for cfg in buttons:
+        if not isinstance(cfg, ButtonConfig):
+            raise TypeError(
+                f"{lead} ButtonConfig items; got {type(cfg).__name__}. Use "
+                "ButtonConfig(label, handler=...) instead of (label, handler)."
+            )
 
 
 def _check_body(body: object) -> None:
@@ -828,7 +857,8 @@ class DialogManager:
                 opened from a background task). A dialog the running query
                 awaits, itself or through the tasks it awaits, is cancelled
                 with it instead: the app stopping cancels the query.
-            TypeError: If ``dialog`` isn't a Dialog.
+            TypeError: If ``dialog`` isn't a Dialog, or its fields or
+                buttons aren't a sequence of fields or of ButtonConfigs.
             ValueError: If the dialog has nothing focusable (e.g. no buttons
                 and a text body), its placement isn't 'box' or 'inline', a
                 subclass's own title, body or escapable isn't one it takes,

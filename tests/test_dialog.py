@@ -28,7 +28,7 @@ from thinking_prompt.dialog import (
     _yes_no_dialog,
 )
 from thinking_prompt.dialog_inline import build_inline
-from thinking_prompt.fields import ChoiceField
+from thinking_prompt.fields import ChoiceField, TextField
 
 _STILL_OPEN = object()  # _click() result when the click didn't close the dialog
 
@@ -209,12 +209,12 @@ class TestBuiltinDialogs:
         with pytest.raises(ValueError, match=r"^checklist_dialog\(\): default 'c' isn't one of its options"):
             _checklist_dialog("T", "B", ["a", "b"], default=["c"], placement=placement)
 
-    def test_options_from_an_iterator_are_all_kept(self):
-        """The duplicate check used them up: button_dialog() built no buttons."""
-        d = _button_dialog("T", "B", (option for option in ["a", "b"]))
-        assert [button.text for button in d.buttons] == ["a", "b"]
-        d = _checklist_dialog("T", "B", (option for option in ["a", "b"]))
-        assert d.fields[0].options == ("a", "b")
+    @pytest.mark.parametrize("build,call", HELPERS, ids=HELPER_IDS)
+    @pytest.mark.parametrize("options", [{"a", "b"}, (o for o in ["a", "b"])], ids=["set", "generator"])
+    def test_options_that_arent_a_sequence_are_refused_naming_the_call(self, build, call, options):
+        """A set's order changes from run to run."""
+        with pytest.raises(ValueError, match=rf"^{re.escape(call)}: options must be a sequence of str, got "):
+            build(options)
 
     def test_box_dropdown_is_a_choice_list_starting_on_the_default(self):
         d = _choice_dialog("Theme", "Select:", ["Light", "Dark", "System"], default="Dark")
@@ -734,6 +734,56 @@ class TestPlacement:
             )
         assert running_session._dialogs._current_dialog is None
         assert running_session._dialogs.inline_view is None
+
+
+class TestDialogParts:
+    """A dialog's fields, buttons and values= are checked when it's made,
+    and again when it's shown (they can be set after): the wrong kind of
+    object raises TypeError naming the part. It was Python's own TypeError,
+    one at show, or nothing: values=[("k", 1)] was ignored, and a generator
+    of fields showed an empty form."""
+
+    @pytest.mark.parametrize("kwargs,message", [
+        ({"fields": None}, r"^Dialog fields must be a sequence of fields, got None$"),
+        ({"fields": TextField("a", "A")}, r"^Dialog fields must be a sequence of fields, got TextField\("),
+        ({"fields": (f for f in [TextField("a", "A")])}, r"^Dialog fields must be a sequence of fields, got <generator"),
+        ({"fields": [("a", "b")]}, r"^Dialog fields must be TextField, .*; got tuple$"),
+        ({"buttons": None}, r"^Dialog buttons must be a sequence of ButtonConfig, got None$"),
+        ({"buttons": ButtonConfig("OK")}, r"^Dialog buttons must be a sequence of ButtonConfig, got ButtonConfig\("),
+        ({"buttons": [("OK", print)]}, r"^Dialog buttons must be ButtonConfig items; got tuple\. Use ButtonConfig"),
+        ({"values": 5}, r"^Dialog values must be a mapping of field keys to values \(or None\), got 5$"),
+        ({"values": "ab"}, r"^Dialog values must be a mapping of field keys to values \(or None\), got 'ab'$"),
+        ({"values": [("a", "x")]}, r"^Dialog values must be a mapping .*, got \[\('a', 'x'\)\]$"),
+    ], ids=["fields None", "one field", "fields generator", "fields of tuples", "buttons None",
+            "one button", "tuple buttons", "values int", "values str", "values pairs"])
+    def test_the_wrong_kind_of_part_raises_type_error(self, kwargs, message):
+        with pytest.raises(TypeError, match=message):
+            Dialog("T", **kwargs)
+
+    @pytest.mark.parametrize("name,value,message", [
+        ("fields", None, r"^Dialog fields must be a sequence of fields, got None$"),
+        ("buttons", [("OK", print)], r"^Dialog buttons must be ButtonConfig items; got tuple"),
+    ], ids=["fields", "buttons"])
+    def test_a_part_set_later_is_checked_when_shown(self, name, value, message):
+        dialog = Dialog("T", "B", [ButtonConfig("OK")])
+        setattr(dialog, name, value)
+        with pytest.raises(TypeError, match=message):
+            dialog._prepare(MagicMock())
+
+    def test_a_subclass_part_is_checked_when_shown(self):
+        class Old(Dialog):
+            buttons = [("OK", print)]
+
+        with pytest.raises(TypeError, match=r"^Dialog buttons must be ButtonConfig items; got tuple"):
+            Old()._prepare(MagicMock())
+
+    async def test_a_list_of_parts_is_read_again_at_each_show(self):
+        """Fields are read when the dialog is created and each time it's shown."""
+        fields = [TextField("a", "A")]
+        dialog = Dialog("T", fields=fields)
+        fields.append(TextField("b", "B"))
+        dialog._prepare(MagicMock())
+        assert list(dialog.values) == ["a", "b"]
 
 
 class TestMaxHeight:

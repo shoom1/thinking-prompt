@@ -167,7 +167,11 @@ when they're passed (the session's here, a box's in `start_thinking()`, a
 field's or a dialog's when it's made): one of the wrong kind (a count
 that isn't an int, a flag that isn't `True` or `False`, a `spinner` that
 isn't a `Spinner`), out of range, or not one of its choices raises
-`ValueError`.
+`ValueError`. An argument that isn't the kind of object it must be (a
+`Dialog` for `show_dialog()`, a dialog's fields and `ButtonConfig`s, a
+mapping for `values=`, a coroutine for `query()`) raises `TypeError`.
+Options and a spinner's frames are a list or a tuple of strs: a set (its
+order changes from run to run) or a generator raises `ValueError`.
 
 ### Thinking API
 
@@ -1044,7 +1048,9 @@ removed:
 | `TextField(edit_width=N)` | `width=N` |
 | `Dialog(width=0)`, `Dialog(width=-1)` (or a subclass's `width`) | `width=None` (fit the content), `width="full"` |
 | A field's `options`: the list you passed | A tuple of the field's own (`list(field.options)` for a list) |
-| Options that aren't strs (`SelectField(..., options=[1, 2, 3])` returned the int), no options, or a default that isn't an option (`values=` too) | Strs (`[str(n) for n in ...]`, and `int()` the value back), at least one, and a default among them or `None`: the rest raise `ValueError` |
+| Options that aren't strs (`SelectField(..., options=[1, 2, 3])` returned the int), no options, an option listed twice, or a default that isn't an option (`values=` too) | Strs (`[str(n) for n in ...]`, and `int()` the value back), at least one, each once, and a default among them or `None`: the rest raise `ValueError` |
+| Options, or a checklist's default, as a set or a generator | A list or a tuple (`sorted(options)` for a set): the rest raise `ValueError` |
+| A dialog's `fields` or `buttons` that aren't a list or tuple of fields or `ButtonConfig`s, or `values=` that isn't a mapping (`values=[("k", 1)]` was ignored) | Raise `TypeError` when the dialog is made, or when it's shown for one set after |
 | `session.layout` | `session.app.layout` |
 | `session.default_buffer` | `session.app.layout.get_buffer_by_name(DEFAULT_BUFFER)` (prompt_toolkit's, `from prompt_toolkit.enums import DEFAULT_BUFFER`) |
 | `StreamingContent`, `ThinkingHeader` | Drop them: write with a box's methods; the header comes from `thinking_title`, `spinner` and `spinner_position` |

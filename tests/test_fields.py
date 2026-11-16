@@ -152,6 +152,19 @@ class TestFieldClasses:
             cls("k", "L", options="abc")
 
     @pytest.mark.parametrize("cls", OPTION_FIELDS, ids=lambda cls: cls.__name__)
+    @pytest.mark.parametrize(
+        "options", [{"a", "b"}, {"a": 1, "b": 2}, (o for o in ["a", "b"])], ids=["set", "dict", "generator"]
+    )
+    def test_options_that_arent_a_sequence_are_refused(self, cls, options):
+        """A set's order changed from run to run, so its rows did."""
+        with pytest.raises(ValueError, match=rf"{cls.__name__} 'k': options must be a sequence of str, got "):
+            cls("k", "L", options=options)
+
+    def test_a_checklist_default_that_isnt_a_sequence_is_refused(self):
+        with pytest.raises(ValueError, match=r"ChecklistField 'k': default must be a sequence of options"):
+            ChecklistField("k", "L", options=["a", "b"], default={"a"})
+
+    @pytest.mark.parametrize("cls", OPTION_FIELDS, ids=lambda cls: cls.__name__)
     def test_no_options_are_refused(self, cls):
         with pytest.raises(ValueError, match=rf"{cls.__name__} 'k' needs at least one option"):
             cls("k", "L")

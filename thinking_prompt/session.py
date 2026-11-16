@@ -2181,7 +2181,9 @@ class ThinkingPromptSession:
                 the session stopping cancels the query. A query Ctrl+C
                 already cancelled isn't cancelled again, so a dialog in its
                 cleanup gets EOFError.
-            TypeError: If ``dialog`` isn't a Dialog.
+            TypeError: If ``dialog`` isn't a Dialog, or its fields or
+                buttons, set after it was made or a subclass's own, aren't
+                a sequence of fields or of ButtonConfigs.
             ValueError: If the dialog has nothing to focus, its placement
                 isn't 'box' or 'inline', a subclass's own title, body or
                 escapable isn't one it takes, or a value its ``values=``

@@ -182,11 +182,11 @@ def _own_options(item: Field, options: object, single: bool = True) -> tuple[str
 
 
 def _checked_options(owner: str, options: object) -> tuple[str, ...]:
-    """``options`` as a tuple: a sequence (any iterable but a str) of at
-    least one str, each once (two rows of one option would be checked
-    together, and its value returned twice). Raise ValueError naming
-    ``owner``."""
-    if isinstance(options, str) or not isinstance(options, Iterable):
+    """``options`` as a tuple: a sequence (a list or a tuple, not a str, a
+    set or an iterator: a set's order changes from run to run) of at least
+    one str, each once (two rows of one option would be checked together,
+    and its value returned twice). Raise ValueError naming ``owner``."""
+    if isinstance(options, str) or not isinstance(options, Sequence):
         raise ValueError(f"{owner}: options must be a sequence of str, got {options!r}")
     kept = tuple(options)
     if not kept:
@@ -210,7 +210,7 @@ def _check_default(owner: str, default: object, options: tuple[str, ...]) -> Non
 def _checked_defaults(owner: str, default: object, options: tuple[str, ...]) -> tuple[str, ...]:
     """A checklist's default as a tuple: a sequence of ``options`` (a str
     would be taken letter by letter)."""
-    if isinstance(default, str) or not isinstance(default, Iterable):
+    if isinstance(default, str) or not isinstance(default, Sequence):
         raise ValueError(
             f"{owner}: default must be a sequence of options (() for none), got {default!r}"
         )
