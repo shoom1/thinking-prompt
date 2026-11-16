@@ -21,7 +21,7 @@ from prompt_toolkit.layout.controls import FormattedTextControl, UIContent
 from prompt_toolkit.layout.screen import Char
 from prompt_toolkit.output.vt100 import BG_ANSI_COLORS, FG_ANSI_COLORS
 
-from ._text import coalesce
+from ._text import coalesce, fixed_sequences
 from .types import ContentCallback, ContentFormat, Overflow
 
 logger = logging.getLogger(__name__)
@@ -126,16 +126,20 @@ class _AnsiStream:
 
     It feeds prompt_toolkit's own parser, the coroutine ANSI() feeds a
     character at a time (ANSI._parse_corot, the same from 3.0.36 on), and
-    takes the fragments it makes as it goes.
+    takes the fragments it makes as it goes. Each control sequence is made
+    safe for it first (see fixed_sequences): a sequence cut short waits
+    for the text that ends it.
     """
 
     def __init__(self) -> None:
         self._ansi = ANSI("")
         self._parser = self._ansi._parse_corot()
         self._parser.send(None)  # type: ignore[arg-type]
+        self._cut = ""  # a control sequence the text so far cut short
 
     def feed(self, text: str) -> StyleAndTextTuples:
         """Parse ``text``: the fragments it makes, a character each."""
+        text, self._cut = fixed_sequences(self._cut + text)
         send = self._parser.send
         for char in text:
             send(char)
@@ -168,7 +172,8 @@ _HEX_COLOR_RE = re.compile(r"#[0-9a-f]{6}")
 def _code_for(style: str) -> str | None:
     """A color code that sets ``style``, a style an ANSI parse makes
     ("ansigreen bg:#102030 bold"), where no style is in force; None when
-    no code does (as for "#12c0000", which a true color over 255 makes)."""
+    no code does (a true color over 255 made "#12c0000", before a box's
+    codes were made safe: see fixed_sequences)."""
     params = []
     for name in style.split():
         background = name.startswith("bg:")

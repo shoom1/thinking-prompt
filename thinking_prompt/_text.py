@@ -4,6 +4,7 @@ dialogs (internal).
 """
 from __future__ import annotations
 
+import re
 from itertools import groupby
 
 from prompt_toolkit.formatted_text.base import OneStyleAndTextTuple
@@ -61,3 +62,42 @@ def styled_lines(style: str, text: str) -> list[OneStyleAndTextTuple]:
         if piece:
             fragments.append((style, piece))
     return fragments
+
+
+# What starts a control sequence for prompt_toolkit's ANSI parser.
+_CSI_START = re.compile(r"\x1b\[|\x9b")
+
+
+def fixed_sequences(text: str, *, colors_only: bool = False) -> tuple[str, str]:
+    """``text`` with each control sequence, as prompt_toolkit's ANSI parser
+    reads one (ESC [ or U+009B, then digits and ";", then one character),
+    made safe for it, and the sequence cut short at its end, if any (ESC
+    alone too), which the next text goes on. The parser raised on a digit
+    that isn't ASCII (int("²")), so such a sequence is dropped; and a
+    color code's numbers are at most 255 (a component over makes a color,
+    "#12c0000", that raises at print). ``colors_only``: every other
+    sequence (a cursor move) is dropped too."""
+    pieces: list[str] = []
+    pos = 0
+    while (start := _CSI_START.search(text, pos)) is not None:
+        end = start.end()
+        while end < len(text) and (text[end].isdigit() or text[end] == ";"):
+            end += 1
+        if end == len(text):
+            break
+        pieces.append(text[pos:start.start()])
+        params, final, pos = text[start.end():end], text[end], end + 1
+        if not params.replace(";", "").isascii():
+            continue
+        if final == "m":
+            numbers = (str(min(int(n), 255)) if n else "" for n in params.split(";"))
+            pieces.append(f"\x1b[{';'.join(numbers)}m")
+        elif not colors_only:
+            pieces.append(text[start.start():pos])
+    rest = text[pos:]
+    cut = _CSI_START.search(rest)
+    if cut is None and rest.endswith("\x1b"):
+        cut = re.search("\x1b$", rest)
+    if cut is None:
+        return "".join(pieces) + rest, ""
+    return "".join(pieces) + rest[:cut.start()], rest[cut.start():]

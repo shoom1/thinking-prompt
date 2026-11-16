@@ -443,12 +443,15 @@ class TestOverflowHead:
 
 def _whole_lines(text: str, content_format: str) -> list[Any]:
     """The lines a box shows for ``text``, as parsing the whole text at
-    once makes them (the trailing blank lines dropped)."""
+    once makes them (the trailing blank lines dropped), its control
+    sequences made safe first as a box makes them."""
     from prompt_toolkit.formatted_text import ANSI, fragment_list_to_text, to_formatted_text
     from prompt_toolkit.formatted_text.utils import split_lines
 
+    from thinking_prompt._text import fixed_sequences
+
     if content_format == "ansi":
-        fragments = to_formatted_text(ANSI(text))
+        fragments = to_formatted_text(ANSI("".join(fixed_sequences(text))))
     else:
         fragments = to_formatted_text([("class:thinking-box", text)])
     lines = [list(line) for line in split_lines(fragments)]
@@ -629,9 +632,17 @@ class TestParsedOnce:
         assert code_again is not None
         assert style_after(code_again) == style
 
-    def test_a_style_no_code_sets_shows_what_a_whole_parse_shows(self):
-        """A true color over 255 gives a color name ("#12c0000") no code
-        sets, so the lines after it are parsed whole."""
+    def test_a_style_no_code_sets_shows_what_a_whole_parse_shows(self, monkeypatch):
+        """Where no code sets the style in force at a line's end, the lines
+        after it are parsed whole. (A true color over 255 made one,
+        "#12c0000", before a box's codes were made safe; the fallback stays
+        for a style a parse might make that has no code.)"""
+        from thinking_prompt import thinking_control
+
+        code_for = thinking_control._code_for
+        monkeypatch.setattr(
+            thinking_control, "_code_for", lambda style: None if "#ff0000" in style else code_for(style)
+        )
         state, control = self._streamed("ansi")
         for text in (
             "\x1b[38;2;300;0;0mred\n",

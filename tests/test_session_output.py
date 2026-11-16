@@ -148,8 +148,13 @@ class TestAddResponse:
             [("bold",)],
             [("bold", 1)],
             [("a", "text")],
+            ANSI("\x1b[38;2;300;0;0mX"),
+            HTML('<style fg="nope">x</style>'),
         ],
-        ids=["int", "None", "callable", "strings", "short pair", "text not a str", "bad style"],
+        ids=[
+            "int", "None", "callable", "strings", "short pair", "text not a str", "bad style",
+            "ANSI color over 255", "HTML bad color",
+        ],
     )
     def test_something_that_isnt_text_is_refused_and_not_kept(self, content):
         """Kept, a bad fragment would fail every repaint after it."""
@@ -158,6 +163,13 @@ class TestAddResponse:
             session.add_response(content)
         assert _entries(session) == []
         assert session._display.kept == []
+
+    def test_a_fragment_can_name_style_classes(self):
+        """The check read a class name as a color and refused it."""
+        session = _session()
+        session.add_response([("class:transcript.system bold", "note")])
+        (entry,) = _entries(session)
+        assert entry.fragments == [("class:transcript.system bold", "note"), ("", "\n")]
 
     def test_markdown_takes_a_str(self):
         session = _session()
@@ -429,6 +441,68 @@ class TestEscapesInRichOutput:
         else:
             raw = _terminal(lambda s: s.add_code(f"x = '{text}'"))
         assert "\x1b]0;" not in raw and "\x01" not in raw and "\x9d" not in raw
+
+
+# Color codes prompt_toolkit's parser raised on, at print and at every
+# repaint after (the entry is kept): a component over 255 (the color
+# "#12c0000"), a digit that isn't ASCII (int("²")).
+_BAD_CODES = {
+    "color over 255": "\x1b[38;2;300;0;0m",
+    "background over 255": "\x1b[48;2;0;0;300m",
+    "superscript digit": "\x1b[²m",
+    "circled digit": "\x1b[①m",
+}
+
+
+def _add(session: ThinkingPromptSession, path: str, text: str) -> None:
+    """Print ``text`` as markdown, Rich markup or code."""
+    if path == "markdown":
+        session.add_response(text, markdown=True)
+    elif path == "rich":
+        session.add_rich(text)
+    else:
+        session.add_code(f"x = '{text}'")
+
+
+class TestMalformedColorCodes:
+    @pytest.mark.parametrize("path", ["markdown", "rich", "code"])
+    @pytest.mark.parametrize("code", _BAD_CODES.values(), ids=_BAD_CODES.keys())
+    def test_text_with_one_prints_and_repaints(self, path: str, code: str):
+        pytest.importorskip("rich")
+        pytest.importorskip("pygments")
+
+        def print_and_repaint(session: ThinkingPromptSession) -> None:
+            _add(session, path, f"before {code}inside\x1b[0m after")
+            session._display.print_now(session.app.output, session._display.printed_contents())
+
+        assert _shown(_terminal(print_and_repaint)).count("after") == 2
+
+    @pytest.mark.parametrize("path", ["markdown", "rich", "code"])
+    def test_a_cursor_move_isnt_spaces(self, path: str):
+        """\x1b[9999C made 9,999 spaces."""
+        pytest.importorskip("rich")
+        pytest.importorskip("pygments")
+        raw = _terminal(lambda s: _add(s, path, "a\x1b[9999Cb"))
+        assert "a" + " " * 10 not in _shown(raw)
+
+    @pytest.mark.parametrize("cut", [False, True], ids=["whole", "streamed in two"])
+    @pytest.mark.parametrize("code", _BAD_CODES.values(), ids=_BAD_CODES.keys())
+    def test_an_ansi_box_draws_one(self, code: str, cut: bool):
+        """It raised at every frame."""
+        from prompt_toolkit.styles import Style
+
+        from thinking_prompt.thinking_control import ThinkingBoxControl
+
+        text = f"before {code}inside\x1b[0m after\n"
+        content = [text[: text.index(code) + 4] if cut else text]
+        control = ThinkingBoxControl(lambda: content[0], max_collapsed_lines=5, content_format="ansi")
+        control.create_content(80, 5)
+        content[0] = text
+        drawn = control.create_content(80, 5)
+        fragments = [fragment for i in range(drawn.line_count) for fragment in drawn.get_line(i)]
+        for style, *_ in fragments:
+            Style([]).get_attrs_for_style_str(style)  # raises for a color it can't use
+        assert "inside after" in fragment_list_to_text(fragments)
 
 
 class TestRichWidth:

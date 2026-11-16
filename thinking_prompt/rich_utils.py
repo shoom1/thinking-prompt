@@ -13,6 +13,8 @@ from functools import lru_cache
 from itertools import pairwise
 from typing import Any
 
+from ._text import fixed_sequences
+
 # A hyperlink as Rich writes one (OSC 8): ESC ] 8 ; params ; URL ST, its
 # text, ESC ] 8 ; ; ST, where ST is BEL or ESC \. A link Rich splits (styles
 # in its text, a wrap) is one per piece, the same params (its id) on each.
@@ -22,8 +24,9 @@ _LINK = re.compile(
 _COLOR_CODE = re.compile(r"\x1b\[[0-9;]*m")
 # Any other OSC sequence: text can bring one (a window title, the clipboard).
 _OSC = re.compile(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
-# An escape that doesn't start a color code: what's left of one cut short.
-_STRAY_ESCAPE = re.compile(r"\x1b(?!\[)")
+# An escape that doesn't start a color code: what's left of another
+# sequence (one cut short, an OSC prompt_toolkit doesn't know).
+_STRAY_ESCAPE = re.compile(r"\x1b(?!\[[0-9;]*m)")
 # prompt_toolkit's ANSI() writes the text between \x01 and \x02 to the
 # terminal raw; C1 controls (U+0080-U+009F) are escapes of their own
 # (U+009D starts an OSC, U+009B a color code).
@@ -34,12 +37,14 @@ def _ansi_safe(text: str) -> str:
     """Rich's or Pygments' output, for prompt_toolkit's ANSI(): with no
     \x01, \x02 or C1 control (text between \x01 and \x02 would reach the
     terminal raw, so a model's answer could set the window title or the
-    clipboard), and no escapes but color codes. A hyperlink is left as its
+    clipboard), and no escapes but color codes, each one prompt_toolkit's
+    parser can take (see fixed_sequences). A hyperlink is left as its
     text: prompt_toolkit's parser knows only color codes, and printed the
     rest of one as text ("8;id=…;URL"). Its URL is shown as text where it
     was made (see _print_linked)."""
     text = _LINK.sub(lambda link: link.group(3), text.translate(_RAW_MARKS))
-    return _STRAY_ESCAPE.sub("", _OSC.sub("", text))
+    fixed, cut = fixed_sequences(_OSC.sub("", text), colors_only=True)
+    return _STRAY_ESCAPE.sub("", fixed + cut)
 
 
 def _shown_once(text: str, url: str) -> bool:
