@@ -46,8 +46,19 @@ def _ansi_safe(text: str) -> str:
 
 def _is_url(text: str, url: str) -> bool:
     """True if a link showing ``text`` shows its URL already ("x@y" shows
-    "mailto:x@y"): the URL isn't shown again."""
-    return text in (url, url.split(":", 1)[-1])
+    "mailto:x@y", and an autolink markdown-it's decoding of the URL it
+    encoded): the URL isn't shown again."""
+    return text in (url, url.split(":", 1)[-1], _decoded(url))
+
+
+def _decoded(url: str) -> str:
+    """``url`` as markdown-it shows an autolink's: percent escapes and
+    punycode decoded ("…/%E6%97%A5" is "…/日")."""
+    try:
+        from markdown_it.common.normalize_url import normalizeLinkText
+    except ImportError:
+        return url
+    return normalizeLinkText(url)
 
 
 def _print_linked(console: Any, renderable: Any, **kwargs: Any) -> None:
@@ -306,6 +317,9 @@ def _get_markdown_cls() -> Any:
         if not shown:
             return styled("link_url", [text(url)])
         if _is_url(shown, url):
+            # An escaped space decoded would split the URL for the terminal.
+            if shown != url and any(char.isspace() for char in shown):
+                return styled("link_url", [text(url)])
             return styled("link_url", tokens)
         return [*styled("link", tokens), text(" ("), *styled("link_url", [text(url)]), text(")")]
 

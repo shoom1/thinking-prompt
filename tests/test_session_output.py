@@ -421,6 +421,21 @@ class TestLinks:
         raw = _terminal(lambda s: s.add_response(source, markdown=True))
         assert _shown(raw).count(url) == 1
 
+    @pytest.mark.parametrize("source, shown, gone", [
+        ("<https://ja.wikipedia.org/wiki/日本>", "https://ja.wikipedia.org/wiki/日本", "%E6%97%A5"),
+        ("<https://münchen.de/straße>", "https://münchen.de/straße", "xn--"),
+        ("<https://example.com/a%20b>", "https://example.com/a%20b", "a b"),
+    ], ids=["non-ASCII path", "non-ASCII host", "an escaped space"])
+    def test_an_autolink_markdown_it_rewrites_shows_its_url_once(self, source, shown, gone):
+        """markdown-it encodes the URL it links to and decodes the text it
+        shows, so they differed and the URL showed twice: `…/日本
+        (…/%E6%97%A5%E6%9C%AC)`. Shown once, as written, but an escaped
+        space stays escaped: decoded, the terminal can't open it whole."""
+        pytest.importorskip("rich")
+        printed = _shown(_terminal(lambda s: s.add_response(f"See {source} now.", markdown=True)))
+        assert f"See {shown} now." in printed, printed
+        assert gone not in printed
+
     @pytest.mark.parametrize("source", [
         "See [](https://e.com/empty) here.",
         "See [ ](https://e.com/empty) here.",
